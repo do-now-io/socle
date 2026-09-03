@@ -1,0 +1,19 @@
+---
+# yamllint configuration for the Socle repository.
+# Kept close to defaults; deviations are documented inline.
+extends: default
+
+ignore:
+  - .git/
+
+rules:
+  # Manifests with long image references or URLs need some headroom.
+  line-length:
+    max: 140
+  # GitHub Actions uses "on:" as a mapping key, which the default
+  # truthy rule flags as a boolean.
+  truthy:
+    check-keys: false
+  document-start: disable
+  comments:
+    min-spaces-from-content: 1

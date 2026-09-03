@@ -1,0 +1,188 @@
+---
+# Level 1 of the Socle test pyramid: fast static checks.
+# Runs on every pull request, forks included — no secrets, read-only token.
+# OpenTofu, Helm and Kubernetes manifest checks activate automatically
+# once the corresponding sources land in the repository.
+# Every job writes what it did to the run summary (Checks tab).
+name: PR static checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  yamllint:
+    name: yamllint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run yamllint
+        run: |
+          python3 -m pip install --user yamllint==1.37.1
+          python3 -m yamllint --strict .
+          {
+            echo "### yamllint ✅"
+            echo "All YAML files pass in strict mode ($(git ls-files '*.yaml' '*.yml' | wc -l | tr -d ' ') files checked)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: reviewdog/action-actionlint@d290e336d5a743810aef4404f757dc862276d2ae # v1.73.4
+        with:
+          fail_level: error
+      - name: Summary
+        run: |
+          {
+            echo "### actionlint ✅"
+            echo "All GitHub Actions workflows pass."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  opentofu:
+    name: OpenTofu fmt, validate, tflint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Detect OpenTofu sources
+        id: detect
+        run: |
+          if compgen -G "opentofu/*/*.tf" > /dev/null; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### OpenTofu ⏭️"
+              echo "No sources under \`opentofu/\` yet — checks are dormant."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        if: steps.detect.outputs.found == 'true'
+      - name: tofu fmt
+        if: steps.detect.outputs.found == 'true'
+        run: tofu fmt -check -diff -recursive opentofu/
+      - name: tofu validate (every root module)
+        if: steps.detect.outputs.found == 'true'
+        run: |
+          {
+            echo "### OpenTofu ✅"
+            echo "| Root module | fmt | validate |"
+            echo "|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for dir in opentofu/*/; do
+            echo "==> ${dir}"
+            (cd "${dir}" && tofu init -backend=false -input=false > /dev/null && tofu validate)
+            echo "| \`${dir}\` | ✅ | ✅ |" >> "$GITHUB_STEP_SUMMARY"
+          done
+      - uses: terraform-linters/setup-tflint@6e1e0642c0289bd619021bf6b34e3c08ed1e005a # v6.3.0
+        if: steps.detect.outputs.found == 'true'
+      - name: tflint (every root module)
+        if: steps.detect.outputs.found == 'true'
+        run: |
+          for dir in opentofu/*/; do
+            echo "==> ${dir}"
+            (cd "${dir}" && tflint --init > /dev/null && tflint --format compact)
+            echo "tflint \`${dir}\` ✅" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+  manifests:
+    name: kubeconform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Detect Kubernetes manifests
+        id: detect
+        run: |
+          if [ -d oci ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### kubeconform ⏭️"
+              echo "No manifests under \`oci/\` yet — checks are dormant."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Validate manifests with kubeconform
+        if: steps.detect.outputs.found == 'true'
+        run: |
+          docker run --rm -v "${PWD}:/work" -w /work ghcr.io/yannh/kubeconform:v0.7.0 \
+            -strict -summary \
+            -schema-location default \
+            -schema-location \
+            'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceVersion}}.json' \
+            oci/ | tee kubeconform.out
+          {
+            echo "### kubeconform ✅"
+            echo '```'
+            tail -1 kubeconform.out
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # One scan, one gate. On same-repo PRs and pushes to main the SARIF is
+  # uploaded and GitHub's native "Code scanning results / Trivy" check is
+  # THE gate (with inline annotations on the diff). Fork PRs can never get
+  # security-events: write, so for them this job itself gates on
+  # HIGH/CRITICAL instead.
+  iac-security:
+    name: Trivy IaC security scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    env:
+      CAN_UPLOAD: >-
+        ${{ github.event_name == 'push' ||
+        github.event.pull_request.head.repo.full_name == github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Trivy misconfiguration scan (SARIF)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          format: sarif
+          output: trivy-results.sarif
+          exit-code: '0'
+      - name: Upload SARIF to code scanning
+        if: env.CAN_UPLOAD == 'true'
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          sarif_file: trivy-results.sarif
+      - name: Gate on HIGH/CRITICAL (fork PRs only — no code scanning there)
+        if: env.CAN_UPLOAD != 'true'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          format: table
+          exit-code: '1'
+          severity: HIGH,CRITICAL
+      - name: Summary
+        run: |
+          {
+            echo "### Trivy IaC scan"
+            if [ "${CAN_UPLOAD}" = "true" ]; then
+              echo "SARIF uploaded — the gate is the native \"Code scanning results / Trivy\" check (inline annotations on the diff)."
+            else
+              echo "Fork PR: no code scanning available — this job gated on HIGH/CRITICAL directly. ✅"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
