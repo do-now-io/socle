@@ -1,0 +1,106 @@
+---
+# Integration tests: apply every OpenTofu root module against a local
+# cloud emulator (https://floci.io) — no real cloud account, no secrets,
+# fork-friendly. A green apply proves the module converges end to end.
+#
+# Emulator coverage: AWS (floci), GCP (floci-gcp), Azure (floci-az).
+# Scaleway has no emulator yet — its apply runs offline, which is only
+# meaningful while the module holds no resources.
+name: Integration tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  opentofu-apply:
+    name: tofu apply (${{ matrix.cloud }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cloud: aws
+            emulator: floci/floci:1.5.34
+            port: "4566"
+            health_path: /_localstack/health
+          - cloud: gcp
+            emulator: floci/floci-gcp:0.8.0
+            port: "4588"
+            health_path: /_floci-gcp/health
+          - cloud: azure
+            emulator: floci/floci-az:0.10.0
+            port: "4577"
+            health_path: /_floci/health
+          - cloud: scaleway
+            emulator: ""
+            port: ""
+            health_path: ""
+    env:
+      # The aws provider natively honors AWS_ENDPOINT_URL and sends every
+      # API call to the emulator instead of real AWS. The google and
+      # azurerm equivalents (custom endpoints / metadata_host) will be
+      # wired in the modules' test fixtures when their first real
+      # resources land.
+      AWS_ENDPOINT_URL: http://localhost:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_REGION: eu-west-1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+      - name: Start floci emulator
+        if: matrix.emulator != ''
+        run: |
+          docker run -d --name floci \
+            -p "${{ matrix.port }}:${{ matrix.port }}" \
+            -e FLOCI_SERVICES_EKS_MOCK=true \
+            "${{ matrix.emulator }}"
+      - name: Wait for the emulator to be healthy
+        if: matrix.emulator != ''
+        run: |
+          for _ in $(seq 1 30); do
+            for scheme in http https; do
+              if curl -fsk "${scheme}://localhost:${{ matrix.port }}${{ matrix.health_path }}" > /dev/null 2>&1; then
+                echo "emulator ready (${scheme})"
+                exit 0
+              fi
+            done
+            sleep 2
+          done
+          echo "::error::emulator never became healthy"
+          docker logs floci
+          exit 1
+      - name: Smoke-test the emulated AWS control plane
+        if: matrix.cloud == 'aws'
+        run: aws sts get-caller-identity --endpoint-url "$AWS_ENDPOINT_URL"
+      - name: tofu apply
+        working-directory: opentofu/${{ matrix.cloud }}
+        run: |
+          tofu init -input=false
+          tofu plan -input=false -out=tf.plan
+          tofu apply -input=false -auto-approve tf.plan
+          tofu destroy -input=false -auto-approve
+      - name: Summary
+        run: |
+          {
+            echo "### tofu apply (${{ matrix.cloud }})"
+            if [ -n "${{ matrix.emulator }}" ]; then
+              echo "Applied and destroyed against \`${{ matrix.emulator }}\` — no real cloud touched. ✅"
+            else
+              echo "⚠️ No emulator exists for this cloud yet — the apply ran offline,"
+              echo "which only proves module validity while it holds no resources."
+              echo "A disposable project (or floci Scaleway support) is needed once"
+              echo "real resources land."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
