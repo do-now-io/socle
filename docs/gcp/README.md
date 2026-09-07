@@ -31,11 +31,16 @@ and migrating.
 
 ### Assumptions
 
+The reference estate is the one the other cloud sprints price, so that
+the four comparisons stack: **a 20 vCPU production cluster, plus staging
+and dev — three environments.**
+
 ```
 Priced        2026-09, us-central1, list price, no committed-use discount
 Month         730 hours
 Reference app 2 replicas x (250 mCPU + 512 MiB) = 0.5 vCPU + 1 GiB requested
-Platform      Socle's own components, estimated at 2 vCPU + 4 GiB
+Estate        prod 20 vCPU / 40 GiB, staging 8 / 16, dev 4 / 8 requested
+              (the 1:2 CPU:memory ratio comes from the reference app)
 
 Autopilot     $0.0445 / vCPU-hour        -> $32.49 / vCPU-month
               $0.0049225 / GiB-hour      -> $3.59 / GiB-month
@@ -45,31 +50,35 @@ Standard      e2 custom nodes, 8 vCPU / 16 GiB, matched to the 1:2
               13.3 GiB are allocatable after GKE's own reservations
 ```
 
-The Standard column assumes **perfect bin-packing** — every node filled
-to its allocatable ceiling, no headroom, no per-environment pools, no
-spare capacity for upgrades. That is the most favourable assumption
-available to Standard, and it is deliberate: an argument for Autopilot
-that only holds against a badly run Standard cluster is not an argument.
+The 20 vCPU and the three environments come from the shared sprint
+scenario; the staging and dev sizes are this page's own reading of it.
+Memory binds throughout — the node shape offers 1.68 GiB per vCPU and the
+workload wants 2 — so every node count below is driven by memory.
 
 ### Cost per month
 
-| Deployed | Requests | Autopilot | Standard, best case |
+| | Requests | Autopilot | Standard, best case |
 | --- | --- | --- | --- |
-| Nothing at all | — | **$73** | **$73** (zero nodes, runs nothing) |
-| Platform, no apps | 2 vCPU / 4 GiB | **$152** | **$234** (1 node) |
-| Platform + 10 apps | 7 vCPU / 14 GiB | **$350** | **$395** (2 nodes) |
-| Platform + 100 apps | 52 vCPU / 104 GiB | **$2,136** | **$1,361** (8 nodes) |
+| Production | 20 vCPU / 40 GiB | **$866** | **$717** (4 nodes) |
+| Staging | 8 vCPU / 16 GiB | **$390** | **$395** (2 nodes) |
+| Dev | 4 vCPU / 8 GiB | **$232** | **$234** (1 node) |
+| **Estate** | 32 vCPU / 64 GiB | **$1,488** | **$1,346** |
+
+Standard's column assumes **perfect bin-packing** — every node filled to
+its allocatable ceiling, no headroom, no spare capacity for upgrades.
+That is the most favourable assumption available to it, and it is
+deliberate: an argument for Autopilot that only holds against a badly run
+Standard cluster is not an argument.
 
 ### Reading it
 
-**An idle Autopilot cluster is nearly free.** With no Pods, you pay the
-$73 management fee and nothing else. A Standard cluster cannot idle: it
-needs at least one running node to run anything, so its floor is the fee
-plus a node. This is why dev and preview clusters favour Autopilot
-strongly.
-
-**The crossover is around a dozen apps.** Below it Autopilot is cheaper;
-above it, a perfectly packed Standard cluster wins, by 36% at 100 apps.
+**Standard's floor is 10% cheaper across the estate** — and all of that
+advantage is in production. Staging and dev land within $5 of Autopilot,
+because at small scale a node is a chunky unit: dev needs 8 GiB and the
+smallest sensible node hands it 13.3. Autopilot has no such granularity,
+which is why small and short-lived clusters favour it. An idle Autopilot
+cluster costs the $73 management fee and nothing more; a Standard cluster
+cannot idle below one running node.
 
 Two smaller effects, both excluded above: ephemeral storage adds under 1%
 on Autopilot, and Autopilot enforces a minimum request of 250 mCPU /
@@ -79,22 +88,25 @@ regardless, which makes Autopilot a poor fit for that shape of workload.
 
 ### The Standard column is a floor, not a forecast
 
-Eight nodes for 100 apps means every node runs at 98% of its allocatable
-memory. No real cluster runs there. A rolling update needs room for surge
-Pods, HPA needs room to scale into, and a node upgrade needs somewhere to
-drain to. Putting that back, at 100 apps:
+No real cluster runs at its allocatable ceiling. A rolling update needs
+room for surge Pods, HPA needs room to scale into, and a node upgrade
+needs somewhere to drain to. Putting that back, across the estate:
 
-| Standard at 100 apps | Nodes | Utilisation | Cost | vs Autopilot |
+| Standard estate | Nodes | Utilisation | Cost | vs Autopilot |
 | --- | --- | --- | --- | --- |
-| Perfect packing | 8 | 98% | $1,361 | 36% cheaper |
-| 25% headroom, zones balanced | 12 | 65% | $2,005 | 6% cheaper |
-| ...and survives losing one zone | 18 | 43% | $2,971 | 39% dearer |
+| Perfect packing | 7 | 69% | $1,346 | 10% cheaper |
+| 25% headroom, prod zone-balanced | 9 | 53% | $1,668 | 12% dearer |
+| ...and prod survives losing a zone | 12 | 40% | $2,151 | 45% dearer |
 
-**Parity is at 61% node utilisation.** Above it Standard is cheaper on
-compute; below it Autopilot is. The entire decision lives inside that
-band — and where a cluster actually sits in it is not a fact about GKE.
-It is a fact about how much attention someone pays to bin-packing, every
-quarter, in every environment.
+**Parity is at 61% packing efficiency.** Above it Standard is cheaper on
+compute; below it Autopilot is. That number is worth remembering because
+it does not depend on the size of the estate: Autopilot costs $19.84 per
+GiB of requests per month at this workload's CPU:memory ratio, a node
+offers allocatable memory at $12.11 per GiB, and the ratio of the two is
+61% at any scale. The entire decision lives inside that band — and where
+a cluster sits in it is not a fact about GKE. It is a fact about how much
+attention someone pays to bin-packing, every quarter, in every
+environment.
 
 The third row deserves the most attention. Pre-buying idle node capacity
 to absorb a zone failure is what makes a regional Standard cluster
@@ -122,7 +134,7 @@ called "utilisation" and only one of them moves this decision:
 
 Both sit well below 61%, which inverts the table above: at the packing
 fleets actually average, Autopilot is roughly 30–65% cheaper than
-Standard rather than dearer. The zone-resilient row (43%) lands in that
+Standard rather than dearer. The zone-resilient row (40%) lands in that
 same band by an unrelated route.
 
 Treat the exact percentages with suspicion. They come from vendors
@@ -134,10 +146,11 @@ to 61%.
 
 ## Why Autopilot anyway
 
-At the 65% packing a well-run cluster reaches, the premium at 100 apps is
-about **$130/month**. At the packing fleets average, there is no premium —
-Autopilot is cheaper. Standard is clearly cheaper only at the perfectly
-packed floor. What the premium buys, where there is one:
+The premium exists only against a perfectly packed estate, where it is
+**$142/month**. Add the headroom a real cluster needs and it disappears:
+Autopilot comes out **$180/month cheaper**, and $663 cheaper again once
+production is sized to survive a zone loss. What the premium buys, in the
+one case where there is one:
 
 ### What one Kubernetes upgrade costs
 
@@ -207,13 +220,13 @@ re-shaping pools as workloads change — sit on top of this figure.
   halve how well either half is tested.
 
 Put together, the two quantified halves land in the same place. The
-compute premium is around $130/month at good packing and negative at
-average packing; the upgrade work alone is $95–350/month. Standard wins
-on cost only where someone holds every cluster above 61% utilisation
-*and* absorbs the rollout work for free — and if that is genuinely
-cheaper for you, Standard is the correct choice and Socle is the wrong
-tool. That is a real position, not a rhetorical one. It just is not the
-position this project is built around.
+compute premium is $142/month against a perfect estate and negative
+against a realistic one; the upgrade work alone is $95–350/month.
+Standard wins on cost only where someone holds every cluster above 61%
+packing efficiency *and* absorbs the rollout work for free — and if that
+is genuinely cheaper for you, Standard is the correct choice and Socle is
+the wrong tool. That is a real position, not a rhetorical one. It just is
+not the position this project is built around.
 
 ## What you give up
 
@@ -224,7 +237,12 @@ position this project is built around.
 - Container-Optimized OS only. No Ubuntu or Windows node pools.
 - Automatic upgrades. You choose the maintenance window, not whether.
 
-Socle's own components need none of these.
+Socle's catalog is built to need none of these — that is a design
+constraint on the catalog, not a claim verified against a running
+cluster. The catalog does not exist yet at pre-0.1.0; when it lands, its
+Autopilot compatibility is part of its own acceptance, and any component
+that turns out to need node access is a problem for that component, not
+grounds for reopening this decision.
 
 ## Revisit this if
 
