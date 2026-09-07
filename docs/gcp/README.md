@@ -1,338 +1,154 @@
-# Socle on Google Cloud (GKE)
+# GKE cluster mode: Autopilot vs Standard
 
-How to prepare a Google Cloud project for Socle and install the GKE
-foundations module.
+## Decision
 
-> **Status: pre-0.1.0.** The `opentofu/gcp` root module is still a
-> placeholder, so the commands in [Part 2](#part-2--installation) are not
-> runnable yet. Part 1 is stable and worth reading now: the decisions it
-> asks you to make are create-time and expensive to reverse. Variable
-> names in Part 2 describe the module's intended interface and may change
-> before 0.1.0.
+**Socle provisions GKE Autopilot clusters. Standard is not offered.**
 
----
+The `opentofu/gcp` module has no cluster mode option. If you need Standard
+— a CNI other than GKE Dataplane V2, node-level access, privileged Pods,
+a node OS other than Container-Optimized OS — Socle is not the right
+foundation for that cluster, and the module will not pretend otherwise.
 
-## Part 1 — Prerequisites
+This page exists because the decision is not free: **Autopilot costs more
+in raw compute than a well-packed Standard cluster.** The numbers below
+are the ones that led to the choice anyway.
 
-### The one decision that constrains everything else
+## The two modes
 
-GKE runs a cluster in one of two modes, and **the mode cannot be changed
-after the cluster is created**. Switching later means creating a second
-cluster and migrating workloads to it. Everything else in this guide is
-adjustable; this is not.
+|  | Autopilot | Standard |
+| --- | --- | --- |
+| Nodes | Google provisions and operates them | You own them |
+| Billing | Pod resource requests | Node capacity, used or idle |
+| Node upgrades, patching, repair | Google | You, or automated by you |
+| CNI | Dataplane V2, enforced | Your choice |
+| Node access | None | Full |
+| Hardening defaults | Workload Identity, Shielded nodes, network policy all on | Off unless you enable them |
 
-- **Autopilot** — Google provisions and operates the nodes. You submit
-  Pods; you do not manage node pools, node OS, or node upgrades. Billing
-  follows the resources your Pods request.
-- **Standard + NAP** — you own the node layer. [Node
-  auto-provisioning][nap] (NAP) automates most of the node pool
-  lifecycle, but the configuration, limits, hardening and monitoring of
-  that layer stay yours. Billing follows the nodes, running or idle.
+Mode is fixed at creation. Changing it means building a second cluster
+and migrating.
 
-**Socle recommends Autopilot** and ships it as the module default. Pick
-Standard + NAP only if you land on it through the questions below.
+## What it costs
 
-### Decision tree
+### Assumptions
 
-```mermaid
-flowchart TD
-    A([Start]) --> B{Do any workloads need<br/>node-level access?<br/>SSH, hostPath, host network}
-    B -- Yes --> S[Standard + NAP]
-    B -- No --> C{Do you require a CNI other than<br/>GKE Dataplane V2?}
-    C -- Yes --> S
-    C -- No --> D{Do you need privileged Pods<br/>that no Autopilot allowlist covers?}
-    D -- Yes --> S
-    D -- No --> E{Do you need node OS images<br/>other than Container-Optimized OS?}
-    E -- Yes --> S
-    E -- No --> F([Autopilot — recommended])
+```
+Priced        2026-09, us-central1, list price, no committed-use discount
+Month         730 hours
+Reference app 2 replicas x (250 mCPU + 512 MiB) = 0.5 vCPU + 1 GiB requested
+Platform      Socle's own components, estimated at 2 vCPU + 4 GiB
+
+Autopilot     $0.0445 / vCPU-hour        -> $32.49 / vCPU-month
+              $0.0049225 / GiB-hour      -> $3.59 / GiB-month
+Cluster fee   $0.10 / hour               -> $73.00 / month   (both modes)
+Standard      e2 custom nodes, 8 vCPU / 16 GiB, matched to the 1:2
+              workload ratio: $161 / node-month, of which 7.91 vCPU and
+              13.3 GiB are allocatable after GKE's own reservations
 ```
 
-Four "no" answers is the common case. Each "yes" is a real constraint, not
-a preference — verify it against a current requirement before it sends you
-down the Standard path, because the node layer it hands you is permanent
-operational work.
+The Standard column assumes **perfect bin-packing** — every node filled
+to its allocatable ceiling, no headroom, no per-environment pools, no
+spare capacity for upgrades. That is the most favourable assumption
+available to Standard, and it is deliberate: an argument for Autopilot
+that only holds against a badly run Standard cluster is not an argument.
 
-### Questions and answers
+### Cost per month
 
-**Q1. What actually stops us from using Autopilot?**
+| Deployed | Requests | Autopilot | Standard, best case |
+| --- | --- | --- | --- |
+| Nothing at all | — | **$73** | **$73** (zero nodes, runs nothing) |
+| Platform, no apps | 2 vCPU / 4 GiB | **$152** | **$234** (1 node) |
+| Platform + 10 apps | 7 vCPU / 14 GiB | **$350** | **$395** (2 nodes) |
+| Platform + 100 apps | 52 vCPU / 104 GiB | **$2,136** | **$1,361** (8 nodes) |
 
-Autopilot constrains the cluster in exchange for operating it. The
-restrictions that end up mattering in practice:
+### Reading it
 
-| Restriction | What it blocks |
-| --- | --- |
-| No node access | SSH to nodes, node-level agents, custom kernel modules |
-| GKE Dataplane V2 enforced | Calico, Flannel, self-managed Cilium, custom eBPF programs |
-| Network policy always enforced | Running with policy enforcement disabled |
-| Privileged Pods restricted | Privileged containers, host namespaces, writable `hostPath` |
-| Container-Optimized OS only | Ubuntu or Windows Server node pools |
-| Mandatory auto-upgrade | Pinning a cluster version indefinitely (timing is still yours — see Q3) |
+**An idle Autopilot cluster is nearly free.** With no Pods, you pay the
+$73 management fee and nothing else. A Standard cluster cannot idle: it
+needs at least one running node to run anything, so its floor is the fee
+plus a node. This is why dev and preview clusters favour Autopilot
+strongly.
 
-Several observability and security vendors ship Autopilot-compatible
-deployments through Google's [partner allowlists][partners], so "our
-agent needs privileges" is worth checking against that list before it
-becomes a blocker. Socle's own components — Flux, Crossplane, the catalog
-modules — require no privileged access and run on Autopilot as-is.
+**The crossover is around a dozen apps.** Below it Autopilot is cheaper;
+above it, a perfectly packed Standard cluster wins, reaching **$775/month
+(57%) cheaper at 100 apps.**
 
-**Q2. Regional or zonal control plane?**
+**The premium equals running Standard at ~60% node utilisation.** At 100
+apps, Standard costs the same as Autopilot once its nodes sit at about
+60% memory utilisation rather than 98%. Above 60% packing, Standard is
+cheaper on compute. Below it, Autopilot is. That single number is the
+honest form of the cost comparison, and it is the one worth arguing with.
 
-Regional. It replicates the control plane across zones in the region and
-survives a zone outage; a zonal cluster does not. Zonal is defensible for
-a throwaway sandbox and nothing else. This is a create-time choice too.
+Two smaller effects, both excluded above: ephemeral storage adds under 1%
+on Autopilot, and Autopilot enforces a minimum request of 250 mCPU /
+512 MiB per Pod. The reference app sits exactly on that floor, so nothing
+is rounded up — but a cluster of many very small Pods pays the floor
+regardless, which makes Autopilot a poor fit for that shape of workload.
 
-**Q3. Which release channel?**
+## Why Autopilot anyway
 
-Every Socle cluster is enrolled in a release channel, which means
-upgrades arrive automatically. You control *when*, not *whether*:
+The compute delta at 100 apps is **$775/month**. What it buys:
 
-- **Regular** — the default, and the right answer for production.
-- **Rapid** — new minor versions early; use it for a canary cluster, not
-  for production.
-- **Stable** — the slowest promotion. Choose it only if you have a
-  written change-freeze obligation.
+- **No node layer to operate.** No pool sizing, no autoscaler tuning, no
+  node OS patch cadence, no drain-and-replace during upgrades, no
+  node-pressure alerting. Node auto-provisioning automates the mechanics
+  of this on Standard; it does not remove the judgement, and the
+  judgement is what costs time.
+- **Hardened defaults, not hardening projects.** Workload Identity,
+  Shielded nodes, network policy enforcement and Pod-level restrictions
+  are on and not optional. On Standard each is a task, and each is a task
+  that gets skipped.
+- **Utilisation you do not have to defend.** The 60% figure above is a
+  standing obligation: Standard is cheaper only while someone keeps it
+  packed, every quarter, across every environment.
+- **One shape of cluster.** Socle ships one GCP foundation, tested one
+  way. A mode switch would double the surface the module must support and
+  halve how well either half is tested.
 
-Set a [maintenance window][maintenance] that matches your low-traffic
-hours, and maintenance exclusions around known freeze periods. Plan to
-stay on a supported version: letting a cluster fall out of standard
-support is both a security exposure and, eventually, a billing event.
+If $775/month is cheaper for you than the engineering time above, Standard
+is the correct choice and Socle is the wrong tool. That is a real
+position, not a rhetorical one — it just is not the position this project
+is built around.
 
-**Q4. Public or private control plane?**
+## What you give up
 
-Private is the default Socle assumes. It requires you to decide how your
-CI runners and operators reach the API server — authorized networks, a
-bastion, Cloud VPN/Interconnect, or Connect Gateway. Decide this before
-the apply, because a private cluster you cannot reach from CI blocks the
-Flux bootstrap.
+- Dataplane V2 only. No Calico, no self-managed Cilium, no custom eBPF.
+- No SSH to nodes, no host namespaces, no writable `hostPath`.
+- No privileged Pods outside Google's [partner allowlists][partners] —
+  check your observability vendor against that list before adopting.
+- Container-Optimized OS only. No Ubuntu or Windows node pools.
+- Automatic upgrades. You choose the maintenance window, not whether.
 
-**Q5. Who owns the IP plan?**
+Socle's own components need none of these.
 
-The module can create its own VPC, or attach to one you already run. If
-you bring your own, you must supply a subnet plus two secondary ranges —
-one for Pods, one for Services — and they must be large enough for the
-cluster's eventual scale. Pod range sizing is effectively permanent, so
-size it for growth rather than for today's node count. Confirm the ranges
-do not overlap anything reachable over VPN or peering.
+## Revisit this if
 
-**Q6. Where does OpenTofu state live?**
+- Node utilisation across a fleet is consistently above 60% and measured,
+  not assumed.
+- Autopilot's per-Pod rates or the minimum request floor change
+  materially.
+- Running Autopilot compute classes on Standard clusters matures enough
+  to offer both billing models from one cluster shape.
 
-In a GCS bucket **in your own project**, with object versioning enabled.
-Socle does not host state for you. Create the bucket before the first
-apply; it is the one resource that cannot be managed by the module that
-depends on it.
+## Sources
 
-**Q7. Which identity runs the apply?**
-
-A dedicated service account (or a Workload Identity Federation binding
-for your CI, which is preferable to a downloaded key). It needs, at
-project scope:
-
-- `roles/container.admin`
-- `roles/compute.networkAdmin`
-- `roles/iam.serviceAccountAdmin`
-- `roles/iam.serviceAccountUser`
-- `roles/resourcemanager.projectIamAdmin`
-- `roles/storage.admin` on the state bucket only
-
-Grant them for the apply and treat them as privileged. If your
-organization requires narrower roles, start here and tighten after a
-successful apply — the plan output tells you what is genuinely used.
-
-### Checklist — every installation
-
-- [ ] A Google Cloud project with billing enabled
-- [ ] Required APIs enabled (Part 2, step 1)
-- [ ] GCS bucket for OpenTofu state, object versioning on
-- [ ] Provisioning identity with the roles from Q7
-- [ ] Cluster mode decided (Q1) — create-time, irreversible
-- [ ] Region chosen, regional control plane (Q2)
-- [ ] Release channel and maintenance window decided (Q3)
-- [ ] Control plane access path decided (Q4)
-- [ ] IP plan confirmed, no overlap with peered networks (Q5)
-- [ ] Quota headroom checked for the region: in-use IP addresses, CPUs,
-      SSD, and any accelerator you intend to schedule
-- [ ] `tofu` >= 1.8 and `kubectl` available to whoever or whatever runs
-      the apply
-
-### Additional checklist — Standard + NAP only
-
-Everything below is work that Autopilot would have absorbed. It is the
-real cost of the Standard path, and it does not end at install time.
-
-- [ ] **NAP resource limits set.** Node auto-provisioning refuses to
-      provision without cluster-wide maximums for CPU, memory and each
-      accelerator type. These caps are your only guardrail against a
-      runaway scale-up.
-- [ ] **Node shape defined** — machine series, boot disk type and size,
-      Spot vs on-demand, and which of these NAP is allowed to choose.
-- [ ] **CNI chosen explicitly.** Dataplane V2 is recommended: it keeps
-      network behaviour aligned with Autopilot clusters and with Socle's
-      other supported clouds. Choosing otherwise is a divergence you own.
-- [ ] **Network policy enforcement enabled.** It is not on by default in
-      Standard.
-- [ ] **Workload Identity enabled.** Not a default in Standard, and
-      Socle's Crossplane providers and catalog modules assume it.
-- [ ] **Node hardening enabled** — Shielded GKE nodes, secure boot,
-      integrity monitoring.
-- [ ] **Auto-repair and auto-upgrade enabled on every pool**, including
-      pools NAP creates later.
-- [ ] **Node OS and patch responsibility recorded.** Container-Optimized
-      OS is the recommended image; whoever owns the cluster owns its
-      patch cadence.
-- [ ] **Pod density sized.** Max Pods per node interacts with the Pod
-      secondary range from Q5 — get these consistent or you will run out
-      of Pod IPs before you run out of CPU.
-- [ ] **Node-level monitoring and alerting in place** — node pressure
-      conditions, disk exhaustion, unschedulable Pods, NAP scale-up
-      failures. Nothing else will tell you the node layer is unhealthy.
-- [ ] **Quota headroom for every machine family NAP may pick**, not just
-      the one you expect it to use.
-- [ ] **DaemonSet contract reviewed.** Any node taints or labels you
-      introduce must be tolerated by the DaemonSets Socle's catalog
-      installs.
-
-If this list looks like a standing operational commitment, that is
-because it is one. That is the trade-off the decision tree is trying to
-make visible.
-
----
-
-## Part 2 — Installation
-
-> Not runnable yet — see the status note at the top of this page.
-
-### 1. Enable the required APIs
-
-```bash
-gcloud config set project YOUR_PROJECT_ID
-
-gcloud services enable \
-  container.googleapis.com \
-  compute.googleapis.com \
-  iam.googleapis.com \
-  iamcredentials.googleapis.com \
-  cloudresourcemanager.googleapis.com \
-  serviceusage.googleapis.com
-```
-
-### 2. Create the state bucket
-
-```bash
-gcloud storage buckets create gs://YOUR_STATE_BUCKET \
-  --location=YOUR_REGION \
-  --uniform-bucket-level-access
-
-gcloud storage buckets update gs://YOUR_STATE_BUCKET --versioning
-```
-
-### 3. Configure the module
-
-Create a working directory that consumes `opentofu/gcp` and pins a
-released version. Autopilot is the default, so a minimal Autopilot
-configuration sets very little:
-
-```hcl
-terraform {
-  backend "gcs" {
-    bucket = "YOUR_STATE_BUCKET"
-    prefix = "socle/gcp/prod"
-  }
-}
-
-module "socle" {
-  source = "github.com/do-now-io/socle//opentofu/gcp?ref=vX.Y.Z"
-
-  project_id   = "YOUR_PROJECT_ID"
-  region       = "YOUR_REGION"
-  cluster_name = "prod"
-
-  # cluster_mode defaults to "autopilot"
-
-  release_channel    = "REGULAR"
-  maintenance_window = "2026-01-01T02:00:00Z/PT4H"
-}
-```
-
-Standard + NAP is opt-in, and the extra surface is the point:
-
-```hcl
-module "socle" {
-  source = "github.com/do-now-io/socle//opentofu/gcp?ref=vX.Y.Z"
-
-  project_id   = "YOUR_PROJECT_ID"
-  region       = "YOUR_REGION"
-  cluster_name = "prod"
-
-  cluster_mode = "standard"
-
-  node_auto_provisioning = {
-    enabled        = true
-    max_cpu        = 128
-    max_memory_gb  = 512
-    machine_series = ["E2", "N2"]
-    disk_type      = "pd-balanced"
-    disk_size_gb   = 100
-  }
-
-  release_channel    = "REGULAR"
-  maintenance_window = "2026-01-01T02:00:00Z/PT4H"
-}
-```
-
-Work through the Standard + NAP checklist above before you apply this
-variant.
-
-### 4. Apply
-
-```bash
-tofu init
-tofu plan -out=tf.plan
-tofu apply tf.plan
-```
-
-Review the plan. On a fresh project the module creates the network, the
-cluster, the identities Socle needs, and the Flux bootstrap.
-
-### 5. Verify the bootstrap
-
-```bash
-gcloud container clusters get-credentials prod --region YOUR_REGION
-
-kubectl get pods -n flux-system
-kubectl get kustomizations -A
-```
-
-Flux then pulls the signed Socle OCI artifact and reconciles the catalog
-in dependency order. Reconciliation is the source of truth for what is
-installed — a green `kustomization` is the signal to look for, not a
-successful `tofu apply`.
-
-### 6. Upgrade
-
-Bump the artifact tag your cluster pins, in Git. Flux verifies the
-signature and reconciles the change. The foundations module is versioned
-separately: bump its `ref`, re-plan, and read the diff before applying —
-node and network changes can be disruptive in ways a catalog bump is not.
-
----
-
-## Reference
-
-- [GKE modes of operation][modes]
+- [GKE pricing][pricing] — Autopilot Pod rates, cluster management fee,
+  free tier
+- [Compute Engine VM pricing][vm-pricing] — e2 rates for the Standard
+  column
 - [Autopilot and Standard feature comparison][comparison]
-- [Node auto-provisioning][nap]
+- [Autopilot resource requests and limits][requests] — minimums and
+  ratios
 - [GKE Dataplane V2][dpv2]
 - [Autopilot partner workloads][partners]
-- [Release channels][channels]
-- [Maintenance windows and exclusions][maintenance]
 
-GKE changes quickly, and the constraints above are the ones that were
-accurate when this page was written. Confirm anything load-bearing
-against the current documentation before you commit to it.
+Rates were read in September 2026 for us-central1 and will drift. The
+ratio between the two modes moves far less than the absolute numbers, and
+the ratio is what this page is really about — but re-price before quoting
+anything.
 
-[modes]: https://cloud.google.com/kubernetes-engine/docs/concepts/choose-cluster-mode
+[pricing]: https://cloud.google.com/kubernetes-engine/pricing
+[vm-pricing]: https://cloud.google.com/compute/vm-instance-pricing
 [comparison]: https://cloud.google.com/kubernetes-engine/docs/resources/autopilot-standard-feature-comparison
-[nap]: https://cloud.google.com/kubernetes-engine/docs/concepts/node-auto-provisioning
+[requests]: https://cloud.google.com/kubernetes-engine/docs/concepts/autopilot-resource-requests
 [dpv2]: https://cloud.google.com/kubernetes-engine/docs/concepts/dataplane-v2
 [partners]: https://cloud.google.com/kubernetes-engine/docs/resources/autopilot-partners
-[channels]: https://cloud.google.com/kubernetes-engine/docs/concepts/release-channels
-[maintenance]: https://cloud.google.com/kubernetes-engine/docs/concepts/maintenance-windows-and-exclusions
