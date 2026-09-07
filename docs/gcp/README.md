@@ -139,11 +139,62 @@ about **$130/month**. At the packing fleets average, there is no premium —
 Autopilot is cheaper. Standard is clearly cheaper only at the perfectly
 packed floor. What the premium buys, where there is one:
 
-- **No node layer to operate.** No pool sizing, no autoscaler tuning, no
-  node OS patch cadence, no drain-and-replace during upgrades, no
-  node-pressure alerting. Node auto-provisioning automates the mechanics
-  of this on Standard; it does not remove the judgement, and the
-  judgement is what costs time.
+### What one Kubernetes upgrade costs
+
+Upgrades are not optional and not rare. Kubernetes ships a minor version
+roughly every three months, and GKE gives each one **14 months of
+standard support** — so staying supported means two to three upgrades a
+year, per cluster, forever.
+
+Start with what Autopilot does *not* save you, because the honest version
+of this argument is smaller than the marketing one. **Node auto-upgrade
+is enabled by default on Standard**, so the mechanics roll on their own
+in both modes. These stay yours either way:
+
+- reading the release notes and the removed-API list
+- scanning workloads for deprecated API usage
+- keeping PodDisruptionBudgets correct
+- making applications survive eviction and rescheduling
+- validating the estate after each rollout
+
+What Standard adds on top is the **node rollout and its failure modes**.
+A node pool upgrade drains nodes one at a time and can take *up to a few
+hours* per pool. GKE honours PDBs and graceful termination for up to one
+hour per node, then force-deletes the Pods anyway — so a conservative PDB
+does not prevent disruption, it just converts a fast rollout into a slow
+one that still ends in a forced eviction. Someone owns that, per pool,
+per environment.
+
+A model for one minor version across three environments. These are
+estimates, not measurements — substitute your own and the shape holds:
+
+| | Standard | Autopilot |
+| --- | --- | --- |
+| Review, scanning, validation (above) | 4–8 h | 4–8 h |
+| Rollout planning: strategy, order, windows, PDB review | 1–2 h | — |
+| Attending three node rollouts | 3–9 h | — |
+| Failure tail: stuck drains, blocked PDBs, forced evictions — amortised over upgrades that go wrong | 1–3 h | — |
+| **Total** | **9–22 h** | **4–8 h** |
+
+Call the difference **5–14 hours per upgrade**, so **15–42 hours a year**
+at three upgrades. At a loaded $75–100/hour that is **$95–350/month** —
+the same order as the entire compute premium, and frequently larger.
+
+**The resource cost, by contrast, is nothing.** Surge upgrades add one
+node for the length of a rollout: a few node-hours, under a dollar. Even
+a blue-green upgrade, which temporarily doubles a pool, costs ten dollars
+or so per pass. The resources an upgrade genuinely needs are the standing
+headroom that lets drained Pods land somewhere — and that is already
+priced in the packing table above, not an extra line.
+
+So the answer to "what does an upgrade cost" is: **almost no money and a
+day or two of an engineer's attention, two or three times a year, per
+estate.** Upgrades are also the *easiest* node-layer task to automate.
+The ones that resist automation — capacity incidents, autoscaler tuning,
+re-shaping pools as workloads change — sit on top of this figure.
+
+### And the rest
+
 - **Hardened defaults, not hardening projects.** Workload Identity,
   Shielded nodes, network policy enforcement and Pod-level restrictions
   are on and not optional. On Standard each is a task, and each is a task
@@ -155,11 +206,14 @@ packed floor. What the premium buys, where there is one:
   way. A mode switch would double the surface the module must support and
   halve how well either half is tested.
 
-If holding every cluster above 61% utilisation, every quarter, in every
-environment, is cheaper for you than that premium, Standard is the
-correct choice and Socle is the wrong tool. That is a real position, not
-a rhetorical one — it just is not the position this project is built
-around.
+Put together, the two quantified halves land in the same place. The
+compute premium is around $130/month at good packing and negative at
+average packing; the upgrade work alone is $95–350/month. Standard wins
+on cost only where someone holds every cluster above 61% utilisation
+*and* absorbs the rollout work for free — and if that is genuinely
+cheaper for you, Standard is the correct choice and Socle is the wrong
+tool. That is a real position, not a rhetorical one. It just is not the
+position this project is built around.
 
 ## What you give up
 
@@ -190,6 +244,9 @@ Socle's own components need none of these.
 - [Autopilot and Standard feature comparison][comparison]
 - [Autopilot resource requests and limits][requests] — minimums and
   ratios
+- [Standard cluster upgrades][upgrades] and [GKE versioning and
+  support][versioning] — surge and blue-green mechanics, PDB handling,
+  the 14-month support window
 - [GKE Dataplane V2][dpv2]
 - [Autopilot partner workloads][partners]
 - [Cast AI Kubernetes cost benchmark][castai-benchmark] and [resource
@@ -205,6 +262,8 @@ anything.
 [vm-pricing]: https://cloud.google.com/compute/vm-instance-pricing
 [comparison]: https://cloud.google.com/kubernetes-engine/docs/resources/autopilot-standard-feature-comparison
 [requests]: https://cloud.google.com/kubernetes-engine/docs/concepts/autopilot-resource-requests
+[upgrades]: https://cloud.google.com/kubernetes-engine/docs/concepts/cluster-upgrades
+[versioning]: https://cloud.google.com/kubernetes-engine/versioning
 [dpv2]: https://cloud.google.com/kubernetes-engine/docs/concepts/dataplane-v2
 [partners]: https://cloud.google.com/kubernetes-engine/docs/resources/autopilot-partners
 [castai-benchmark]: https://cast.ai/reports/kubernetes-cost-benchmark/
