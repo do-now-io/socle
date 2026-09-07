@@ -105,12 +105,39 @@ yours to pay for.
 Committed-use discounts and Spot capacity cut both columns and roughly
 preserve the ratio. They are not an argument for either mode.
 
+### Where real clusters sit in that band
+
+Below 61%, on the available evidence. Two different ratios both get
+called "utilisation" and only one of them moves this decision:
+
+- **Usage against requests.** Apps use roughly 8–10% of the CPU and
+  20–23% of the memory they ask for. This is the widely cited number and
+  it is **irrelevant here: Autopilot bills requests, not usage.**
+  Over-requesting costs the same in both modes. It is a rightsizing
+  problem, and it inflates both columns equally.
+- **Requests against node capacity.** The bin-packing ratio, and the one
+  that sets the parity point. Fleet reports put the memory gap between
+  provisioned and requested at 57% in one generation and 79% in the next
+  — packing efficiency somewhere between 20% and 45%.
+
+Both sit well below 61%, which inverts the table above: at the packing
+fleets actually average, Autopilot is roughly 30–65% cheaper than
+Standard rather than dearer. The zone-resilient row (43%) lands in that
+same band by an unrelated route.
+
+Treat the exact percentages with suspicion. They come from vendors
+selling the fix, and a CPU gap that moves from 40% to 69% in a year
+suggests unstable methodology more than a real collapse. The direction is
+consistent across all of them, and the direction is the load-bearing
+part: nobody's average cluster is packed to 98%, and most are not packed
+to 61%.
+
 ## Why Autopilot anyway
 
-At realistic packing the premium at 100 apps is about **$130/month**, and
-it inverts — Autopilot becomes 28% cheaper — once the cluster is sized to
-survive a zone loss. Only the perfectly packed floor makes Standard
-clearly cheaper. What the premium buys:
+At the 65% packing a well-run cluster reaches, the premium at 100 apps is
+about **$130/month**. At the packing fleets average, there is no premium —
+Autopilot is cheaper. Standard is clearly cheaper only at the perfectly
+packed floor. What the premium buys, where there is one:
 
 - **No node layer to operate.** No pool sizing, no autoscaler tuning, no
   node OS patch cadence, no drain-and-replace during upgrades, no
@@ -165,6 +192,9 @@ Socle's own components need none of these.
   ratios
 - [GKE Dataplane V2][dpv2]
 - [Autopilot partner workloads][partners]
+- [Cast AI Kubernetes cost benchmark][castai-benchmark] and [resource
+  optimization report][castai-report] — the utilisation figures. Vendor
+  research; read the caveat above.
 
 Rates were read in September 2026 for us-central1 and will drift. The
 ratio between the two modes moves far less than the absolute numbers, and
@@ -177,3 +207,5 @@ anything.
 [requests]: https://cloud.google.com/kubernetes-engine/docs/concepts/autopilot-resource-requests
 [dpv2]: https://cloud.google.com/kubernetes-engine/docs/concepts/dataplane-v2
 [partners]: https://cloud.google.com/kubernetes-engine/docs/resources/autopilot-partners
+[castai-benchmark]: https://cast.ai/reports/kubernetes-cost-benchmark/
+[castai-report]: https://cast.ai/blog/2026-state-of-kubernetes-resource-optimization-cpu-at-8-memory-at-20-and-getting-worse/
