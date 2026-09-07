@@ -69,14 +69,7 @@ plus a node. This is why dev and preview clusters favour Autopilot
 strongly.
 
 **The crossover is around a dozen apps.** Below it Autopilot is cheaper;
-above it, a perfectly packed Standard cluster wins, reaching **$775/month
-(57%) cheaper at 100 apps.**
-
-**The premium equals running Standard at ~60% node utilisation.** At 100
-apps, Standard costs the same as Autopilot once its nodes sit at about
-60% memory utilisation rather than 98%. Above 60% packing, Standard is
-cheaper on compute. Below it, Autopilot is. That single number is the
-honest form of the cost comparison, and it is the one worth arguing with.
+above it, a perfectly packed Standard cluster wins, by 36% at 100 apps.
 
 Two smaller effects, both excluded above: ephemeral storage adds under 1%
 on Autopilot, and Autopilot enforces a minimum request of 250 mCPU /
@@ -84,9 +77,40 @@ on Autopilot, and Autopilot enforces a minimum request of 250 mCPU /
 is rounded up — but a cluster of many very small Pods pays the floor
 regardless, which makes Autopilot a poor fit for that shape of workload.
 
+### The Standard column is a floor, not a forecast
+
+Eight nodes for 100 apps means every node runs at 98% of its allocatable
+memory. No real cluster runs there. A rolling update needs room for surge
+Pods, HPA needs room to scale into, and a node upgrade needs somewhere to
+drain to. Putting that back, at 100 apps:
+
+| Standard at 100 apps | Nodes | Utilisation | Cost | vs Autopilot |
+| --- | --- | --- | --- | --- |
+| Perfect packing | 8 | 98% | $1,361 | 36% cheaper |
+| 25% headroom, zones balanced | 12 | 65% | $2,005 | 6% cheaper |
+| ...and survives losing one zone | 18 | 43% | $2,971 | 39% dearer |
+
+**Parity is at 61% node utilisation.** Above it Standard is cheaper on
+compute; below it Autopilot is. The entire decision lives inside that
+band — and where a cluster actually sits in it is not a fact about GKE.
+It is a fact about how much attention someone pays to bin-packing, every
+quarter, in every environment.
+
+The third row deserves the most attention. Pre-buying idle node capacity
+to absorb a zone failure is what makes a regional Standard cluster
+actually regional; skip it and a zone outage becomes a capacity outage.
+Autopilot has no equivalent line item, because unused capacity is not
+yours to pay for.
+
+Committed-use discounts and Spot capacity cut both columns and roughly
+preserve the ratio. They are not an argument for either mode.
+
 ## Why Autopilot anyway
 
-The compute delta at 100 apps is **$775/month**. What it buys:
+At realistic packing the premium at 100 apps is about **$130/month**, and
+it inverts — Autopilot becomes 28% cheaper — once the cluster is sized to
+survive a zone loss. Only the perfectly packed floor makes Standard
+clearly cheaper. What the premium buys:
 
 - **No node layer to operate.** No pool sizing, no autoscaler tuning, no
   node OS patch cadence, no drain-and-replace during upgrades, no
@@ -97,17 +121,18 @@ The compute delta at 100 apps is **$775/month**. What it buys:
   Shielded nodes, network policy enforcement and Pod-level restrictions
   are on and not optional. On Standard each is a task, and each is a task
   that gets skipped.
-- **Utilisation you do not have to defend.** The 60% figure above is a
+- **Utilisation you do not have to defend.** The 61% figure above is a
   standing obligation: Standard is cheaper only while someone keeps it
   packed, every quarter, across every environment.
 - **One shape of cluster.** Socle ships one GCP foundation, tested one
   way. A mode switch would double the surface the module must support and
   halve how well either half is tested.
 
-If $775/month is cheaper for you than the engineering time above, Standard
-is the correct choice and Socle is the wrong tool. That is a real
-position, not a rhetorical one — it just is not the position this project
-is built around.
+If holding every cluster above 61% utilisation, every quarter, in every
+environment, is cheaper for you than that premium, Standard is the
+correct choice and Socle is the wrong tool. That is a real position, not
+a rhetorical one — it just is not the position this project is built
+around.
 
 ## What you give up
 
@@ -122,7 +147,7 @@ Socle's own components need none of these.
 
 ## Revisit this if
 
-- Node utilisation across a fleet is consistently above 60% and measured,
+- Node utilisation across a fleet is consistently above 61% and measured,
   not assumed.
 - Autopilot's per-Pod rates or the minimum request floor change
   materially.
