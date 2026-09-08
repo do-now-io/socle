@@ -37,7 +37,7 @@ Every default traces back to a research document. The short version:
 
 | Decision | Position | Traces to |
 | --- | --- | --- |
-| Autopilot, no cluster mode option | enforced | [cluster mode](../../docs/gcp/README.md) |
+| Autopilot, no cluster mode option | enforced | [cluster mode](../../docs/gcp/cluster-mode.md) |
 | Regular release channel; Extended rejected | default | [managed scope](../../docs/gcp/managed-scope.md) |
 | Maintenance window required, no default | required | [managed scope](../../docs/gcp/managed-scope.md) |
 | Only free metric components enabled | default | [managed scope](../../docs/gcp/managed-scope.md) |

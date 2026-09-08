@@ -1,4 +1,4 @@
-# The cluster — docs/gcp/README.md (Autopilot only) and
+# The cluster — docs/gcp/cluster-mode.md (Autopilot only) and
 # docs/gcp/managed-scope.md (channel, maintenance, add-ons, identity).
 #
 # Autopilot is not a variable. A cluster mode is fixed at creation, supporting
@@ -19,7 +19,7 @@
 # A node service account (GCP-0050) cannot be set on Autopilot at all —
 # Google owns the nodes. There is no node_config to put one in.
 #
-# All three are argued in docs/gcp/network-security.md and docs/gcp/README.md.
+# All three are argued in docs/gcp/network-security.md and docs/gcp/cluster-mode.md.
 #trivy:ignore:AVD-GCP-0061
 #trivy:ignore:AVD-GCP-0056
 #trivy:ignore:AVD-GCP-0050
