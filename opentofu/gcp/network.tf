@@ -53,11 +53,12 @@ resource "google_compute_subnetwork" "socle" {
 # of proxies from this subnetwork, so a second cluster in the same region must
 # not try to create it again.
 #
-# trivy:ignore:AVD-GCP-0075 a REGIONAL_MANAGED_PROXY subnetwork holds Google's
-# load balancer proxies, not workloads: it has nothing that reaches a Google
-# API, and the flags that would satisfy this check do not apply to it.
-# trivy:ignore:AVD-GCP-0076 same reason — no workload, no flows of ours.
-# trivy:ignore:AVD-GCP-0029 same reason.
+# It holds Google's load balancer proxies and nothing of ours, so Private
+# Google Access (GCP-0075) has no workload to serve and flow logs (GCP-0076,
+# GCP-0029) have no flows of ours to record.
+#trivy:ignore:AVD-GCP-0075
+#trivy:ignore:AVD-GCP-0076
+#trivy:ignore:AVD-GCP-0029
 resource "google_compute_subnetwork" "proxy_only" {
   count = var.create_proxy_only_subnet ? 1 : 0
 

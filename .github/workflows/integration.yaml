@@ -7,10 +7,11 @@
 # Scaleway has no emulator yet — its apply runs offline, which is only
 # meaningful while the module holds no resources.
 #
-# A cloud whose module has real resources applies a fixture under
+# A cloud whose module has real resources runs a fixture under
 # opentofu/<cloud>/tests/emulator, which wires the provider to the emulator
-# and supplies the inputs. Where an emulator covers only part of a module's
-# API surface, the fixture says so and this workflow prints the gap.
+# and supplies the inputs. Each leg declares whether it can apply or only
+# plan, and why — a leg that cannot apply prints the reason on every run
+# rather than implying convergence it never proved.
 name: Integration tests
 
 on:
@@ -37,29 +38,38 @@ jobs:
             emulator: floci/floci:1.5.34
             port: "4566"
             health_path: /_localstack/health
-            apply_dir: opentofu/aws
-            coverage: ""
+            work_dir: opentofu/aws
+            mode: apply
+            caveat: ""
           - cloud: gcp
             emulator: floci/floci-gcp:0.8.0
             port: "4588"
             health_path: /_floci-gcp/health
-            apply_dir: opentofu/gcp/tests/emulator
-            coverage: >-
-              GKE, IAM and Pub/Sub only — floci-gcp emulates no Compute Engine
-              API, so the VPC, subnetworks, Cloud Router and Cloud NAT are
-              covered by `tofu test` at plan level and never applied.
+            work_dir: opentofu/gcp/tests/emulator
+            mode: plan
+            caveat: >-
+              Two blockers, neither in the module. floci-gcp emulates no
+              Compute Engine API, so the VPC, subnetworks, router and NAT
+              have nowhere to be created. And the google provider segfaults
+              reading back the emulator's cluster: it dereferences
+              `cluster.LegacyAbac.Enabled` unguarded
+              (resource_container_cluster.go:3556 in v8.1.0) and floci-gcp
+              omits that field. Convergence is therefore unproven for GCP —
+              only that the module plans coherently against a live API.
           - cloud: azure
             emulator: floci/floci-az:0.10.0
             port: "4577"
             health_path: /_floci/health
-            apply_dir: opentofu/azure
-            coverage: ""
+            work_dir: opentofu/azure
+            mode: apply
+            caveat: ""
           - cloud: scaleway
             emulator: ""
             port: ""
             health_path: ""
-            apply_dir: opentofu/scaleway
-            coverage: ""
+            work_dir: opentofu/scaleway
+            mode: apply
+            caveat: ""
     env:
       # The aws provider natively honors AWS_ENDPOINT_URL and sends every
       # API call to the emulator instead of real AWS. The google provider
@@ -100,16 +110,15 @@ jobs:
       - name: Smoke-test the emulated AWS control plane
         if: matrix.cloud == 'aws'
         run: aws sts get-caller-identity --endpoint-url "$AWS_ENDPOINT_URL"
-      - name: tofu apply
-        working-directory: ${{ matrix.apply_dir }}
-        env:
-          # TEMPORARY: the google provider crashes against floci-gcp and a
-          # crash says nothing without the plugin's own log. Remove once the
-          # cause is understood.
-          TF_LOG_PROVIDER: ${{ matrix.cloud == 'gcp' && 'DEBUG' || '' }}
+      - name: tofu ${{ matrix.mode }}
+        working-directory: ${{ matrix.work_dir }}
         run: |
           tofu init -input=false
           tofu plan -input=false -out=tf.plan
+          if [ "${{ matrix.mode }}" = "plan" ]; then
+            echo "plan-only leg: see the caveat in the run summary"
+            exit 0
+          fi
           tofu apply -input=false -auto-approve tf.plan
           # A second plan must be empty: exit code 0 means no drift, 2 means
           # the module is not idempotent.

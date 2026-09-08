@@ -6,12 +6,23 @@
 # default the socle relies on — Workload Identity Federation, Dataplane V2,
 # Shielded nodes, network policy — is enforced rather than requested.
 
-# trivy:ignore:AVD-GCP-0061 master authorized networks govern the IP endpoints
-# this cluster does not expose: control_plane_endpoints_config disables them
-# and the boundary is IAM plus VPC Service Controls.
-# trivy:ignore:AVD-GCP-0056 network policy is always on under Dataplane V2,
-# which Autopilot enforces; the network_policy block is rejected outright on an
-# Autopilot cluster. Both are argued in docs/gcp/network-security.md.
+# Three scanner findings are answered here rather than argued in a review.
+#
+# Master authorized networks (GCP-0061) govern the IP endpoints this cluster
+# does not expose: control_plane_endpoints_config disables them, and the
+# boundary is IAM plus VPC Service Controls.
+#
+# Network policy (GCP-0056) is always on under Dataplane V2, which Autopilot
+# enforces; the network_policy block is rejected outright on an Autopilot
+# cluster.
+#
+# A node service account (GCP-0050) cannot be set on Autopilot at all —
+# Google owns the nodes. There is no node_config to put one in.
+#
+# All three are argued in docs/gcp/network-security.md and docs/gcp/README.md.
+#trivy:ignore:AVD-GCP-0061
+#trivy:ignore:AVD-GCP-0056
+#trivy:ignore:AVD-GCP-0050
 resource "google_container_cluster" "socle" {
   project  = var.project_id
   name     = var.cluster_name

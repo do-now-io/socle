@@ -82,13 +82,17 @@ Nothing breaks without that step — the cost data simply never arrives.
 tofu test          # 32 runs: every validation, and the defaults
 ```
 
-Integration goes further: CI applies
-[`tests/emulator`](tests/emulator) against the floci-gcp emulator, then
-re-plans for idempotency and destroys. That covers the cluster, the
-identities and the topic. It does **not** cover the VPC, the subnetworks, the
-router or Cloud NAT, because floci-gcp emulates no Compute Engine API — those
-are exercised at plan level only, and the workflow summary says so on every
-run.
+Integration goes as far as it currently can: CI plans
+[`tests/emulator`](tests/emulator) against the floci-gcp emulator, which
+proves the module produces a coherent plan against a live API — and stops
+short of proving it converges, for two reasons that live outside this module.
+floci-gcp emulates no Compute Engine API, so the VPC, subnetworks, router and
+NAT have nowhere to be created. And the google provider segfaults reading back
+the emulator's cluster: it dereferences `cluster.LegacyAbac.Enabled` without a
+nil check (`resource_container_cluster.go:3556` in v8.1.0) and floci-gcp omits
+that field. Either an upstream nil guard or a fuller emulator response turns
+that leg back into an apply; the workflow prints the caveat on every run in
+the meantime.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements

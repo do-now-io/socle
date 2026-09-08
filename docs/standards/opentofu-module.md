@@ -123,10 +123,21 @@ Two levels, and the second one already exists.
       *Verify:* review step — one failing-input case per validation.
 - [ ] **Integration level: an ephemeral apply against a cloud
       emulator.** Plan-only is not enough — it does not prove the module
-      converges. `integration.yaml` already runs
-      `init → plan → apply → destroy` against floci emulators for AWS,
-      GCP and Azure.
-      *Verify:* the `Integration tests` workflow is green.
+      converges. `integration.yaml` runs
+      `init → plan → apply → destroy` against floci emulators, and each
+      leg declares whether it can apply or only plan.
+      *Verify:* the `Integration tests` workflow is green **and** the leg
+      says `apply`.
+- [ ] **GCP is plan-only today, and the reason is not ours to fix.**
+      floci-gcp emulates no Compute Engine API, so the network resources
+      have nowhere to be created; and the google provider segfaults
+      reading back the emulator's cluster, dereferencing
+      `cluster.LegacyAbac.Enabled` unguarded
+      (`resource_container_cluster.go:3556` in v8.1.0) where floci-gcp
+      omits the field. Either an upstream nil guard or a fuller emulator
+      response unblocks it. Until then GCP convergence is unproven.
+      *Verify:* review step — the exception stays visible in the workflow
+      summary, and this item is closed by flipping that leg to `apply`.
 - [ ] **Scaleway's gap is recorded, not silently tolerated.** No
       emulator exists, so its apply currently runs offline, which proves
       only that the module is valid while it holds no resources. Either
