@@ -121,13 +121,6 @@ us-central1 list price, read 8 September 2026. Re-price before quoting.
 Absent by decision: the Extended channel, any Workload Identity toggle,
 Auto-Monitoring, accelerated patching.
 
-## Known gaps
-
-- The ~300 samples/s target is not a measurement — the catalog does not exist
-  yet, so this is the least certain number here.
-- Velero's node-agent limit on Autopilot is read from documentation, not
-  tested, and the backup decision rests on it.
-
 ## Sources
 
 Read 8 September 2026. [Release channels][channels] ·

@@ -112,15 +112,6 @@ Absent by decision: any CNI or datapath variable, authorized networks, a
 Services secondary range, Auto IPAM, and any Gateway or NetworkPolicy object —
 the module stops at the proxy-only subnet a Gateway needs.
 
-## Known gaps
-
-- How Dataplane V2 flow metrics are billed is not documented; it changes
-  nothing while the observability tools are off.
-- The Cloud NAT figure assumes a node count we do not control, since Autopilot
-  provisions nodes and NAT is billed per VM below 32 VMs.
-- Leaving the DNS endpoint open is deliberate: a closed control plane makes
-  the pipeline and Flux depend on private connectivity we do not build.
-
 ## Sources
 
 Read 8 September 2026. [Dataplane V2][dpv2] · [FQDN network policies][fqdn] ·
