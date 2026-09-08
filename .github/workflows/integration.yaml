@@ -6,6 +6,11 @@
 # Emulator coverage: AWS (floci), GCP (floci-gcp), Azure (floci-az).
 # Scaleway has no emulator yet — its apply runs offline, which is only
 # meaningful while the module holds no resources.
+#
+# A cloud whose module has real resources applies a fixture under
+# opentofu/<cloud>/tests/emulator, which wires the provider to the emulator
+# and supplies the inputs. Where an emulator covers only part of a module's
+# API surface, the fixture says so and this workflow prints the gap.
 name: Integration tests
 
 on:
@@ -32,24 +37,35 @@ jobs:
             emulator: floci/floci:1.5.34
             port: "4566"
             health_path: /_localstack/health
+            apply_dir: opentofu/aws
+            coverage: ""
           - cloud: gcp
             emulator: floci/floci-gcp:0.8.0
             port: "4588"
             health_path: /_floci-gcp/health
+            apply_dir: opentofu/gcp/tests/emulator
+            coverage: >-
+              GKE, IAM and Pub/Sub only — floci-gcp emulates no Compute Engine
+              API, so the VPC, subnetworks, Cloud Router and Cloud NAT are
+              covered by `tofu test` at plan level and never applied.
           - cloud: azure
             emulator: floci/floci-az:0.10.0
             port: "4577"
             health_path: /_floci/health
+            apply_dir: opentofu/azure
+            coverage: ""
           - cloud: scaleway
             emulator: ""
             port: ""
             health_path: ""
+            apply_dir: opentofu/scaleway
+            coverage: ""
     env:
       # The aws provider natively honors AWS_ENDPOINT_URL and sends every
-      # API call to the emulator instead of real AWS. The google and
-      # azurerm equivalents (custom endpoints / metadata_host) will be
-      # wired in the modules' test fixtures when their first real
-      # resources land.
+      # API call to the emulator instead of real AWS. The google provider
+      # has no such convention, so its per-service custom endpoints are
+      # wired inside opentofu/gcp/tests/emulator. The azurerm equivalent
+      # (metadata_host) lands with the first real Azure resources.
       AWS_ENDPOINT_URL: http://localhost:4566
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
@@ -85,18 +101,26 @@ jobs:
         if: matrix.cloud == 'aws'
         run: aws sts get-caller-identity --endpoint-url "$AWS_ENDPOINT_URL"
       - name: tofu apply
-        working-directory: opentofu/${{ matrix.cloud }}
+        working-directory: ${{ matrix.apply_dir }}
         run: |
           tofu init -input=false
           tofu plan -input=false -out=tf.plan
           tofu apply -input=false -auto-approve tf.plan
+          # A second plan must be empty: exit code 0 means no drift, 2 means
+          # the module is not idempotent.
+          tofu plan -input=false -detailed-exitcode
           tofu destroy -input=false -auto-approve
       - name: Summary
         run: |
           {
             echo "### tofu apply (${{ matrix.cloud }})"
             if [ -n "${{ matrix.emulator }}" ]; then
-              echo "Applied and destroyed against \`${{ matrix.emulator }}\` — no real cloud touched. ✅"
+              echo "Applied \`${{ matrix.apply_dir }}\` against \`${{ matrix.emulator }}\`,"
+              echo "re-planned for idempotency and destroyed — no real cloud touched. ✅"
+              if [ -n "${{ matrix.coverage }}" ]; then
+                echo ""
+                echo "⚠️ Partial coverage: ${{ matrix.coverage }}"
+              fi
             else
               echo "⚠️ No emulator exists for this cloud yet — the apply ran offline,"
               echo "which only proves module validity while it holds no resources."

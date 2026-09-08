@@ -89,6 +89,16 @@ jobs:
             (cd "${dir}" && tofu init -backend=false -input=false > /dev/null && tofu validate)
             echo "| \`${dir}\` | ✅ | ✅ |" >> "$GITHUB_STEP_SUMMARY"
           done
+      - name: tofu test (every root module that has tests)
+        if: steps.detect.outputs.found == 'true'
+        run: |
+          for dir in opentofu/*/; do
+            if compgen -G "${dir}tests/*.tftest.hcl" > /dev/null; then
+              echo "==> ${dir}"
+              (cd "${dir}" && tofu test)
+              echo "tofu test \`${dir}\` ✅" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
       - uses: terraform-linters/setup-tflint@6e1e0642c0289bd619021bf6b34e3c08ed1e005a # v6.3.0
         if: steps.detect.outputs.found == 'true'
       - name: tflint (every root module)
