@@ -127,13 +127,18 @@ jobs:
       - name: Summary
         run: |
           {
-            echo "### tofu apply (${{ matrix.cloud }})"
+            echo "### tofu ${{ matrix.mode }} (${{ matrix.cloud }})"
             if [ -n "${{ matrix.emulator }}" ]; then
-              echo "Applied \`${{ matrix.apply_dir }}\` against \`${{ matrix.emulator }}\`,"
-              echo "re-planned for idempotency and destroyed — no real cloud touched. ✅"
-              if [ -n "${{ matrix.coverage }}" ]; then
+              if [ "${{ matrix.mode }}" = "apply" ]; then
+                echo "Applied \`${{ matrix.work_dir }}\` against \`${{ matrix.emulator }}\`,"
+                echo "re-planned for idempotency and destroyed — no real cloud touched. ✅"
+              else
+                echo "Planned \`${{ matrix.work_dir }}\` against \`${{ matrix.emulator }}\`."
+                echo "⚠️ **This leg does not apply, so convergence is unproven.**"
+              fi
+              if [ -n "${{ matrix.caveat }}" ]; then
                 echo ""
-                echo "⚠️ Partial coverage: ${{ matrix.coverage }}"
+                echo "${{ matrix.caveat }}"
               fi
             else
               echo "⚠️ No emulator exists for this cloud yet — the apply ran offline,"
