@@ -52,7 +52,7 @@ Three clusters — prod 20 vCPU / 40 GiB of Pod requests, staging 8 / 16, dev
 | Network | +$96 |
 | **Total** | **~$1,836** |
 
-us-central1 list price, read September 2026. Re-price before quoting.
+us-central1 list price, read September 2026.
 
 ## No module can do these
 
