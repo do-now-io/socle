@@ -55,8 +55,7 @@ catalog, not a fact verified against a running cluster.
 
 ## Sources
 
-Read September 2026. Autopilot rates are not published per region, so these
-are us-central1; re-price before quoting.
+Read September 2026. Autopilot rates are not published per region, so these are us-central1.
 
 [GKE pricing][pricing] · [Autopilot and Standard comparison][comparison] ·
 [cluster upgrades][upgrades] · [versioning and support][versioning] ·

@@ -103,7 +103,7 @@ Reference estate, baseline **$1,488/month**.
 | *Backup for GKE instead of Velero* | +$297 | +20% |
 | *Prometheus unfiltered* | +$426 | +29% |
 
-us-central1 list price, read 8 September 2026. Re-price before quoting.
+us-central1 list price, read 8 September 2026.
 
 ## Module specification
 

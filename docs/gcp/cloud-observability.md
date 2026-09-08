@@ -13,7 +13,7 @@ central observability cluster. In-cluster metrics: see
 | Cloud Monitoring alert policies | Refused — becomes billable |
 | Cost attribution | Detailed usage cost export to BigQuery |
 | GKE cost allocation | On, from day one |
-| FOCUS export | The target, once it leaves Preview |
+| FOCUS export | Refused — still Preview |
 | Quota metrics | In the standard perimeter |
 | Recommender | Monthly report, not a signal |
 
@@ -65,7 +65,7 @@ GKE cost allocation on.**
   links the billing account. The one breach of "single apply, no out-of-band
   step".
 - FOCUS would give one schema across four clouds and Google absorbs its
-  storage, but it is Preview: target, not default.
+  storage, but it is Preview.
 
 ## Service coverage
 
@@ -91,7 +91,7 @@ GKE cost allocation on.**
 | *Same perimeter at 60 s* | +$17 |
 | *Cluster metrics through the API by mistake* | +$438 |
 
-us-central1 list price, read 8 September 2026. Re-price before quoting.
+us-central1 list price, read 8 September 2026.
 
 ## Module specification
 

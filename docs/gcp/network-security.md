@@ -93,7 +93,7 @@ Reference estate, baseline **$1,488/month**.
 | *In-cluster Envoy instead* | +$294 |
 
 The Gateway controller, Dataplane V2 and the DNS endpoint carry no charge.
-us-central1 list price, read 8 September 2026. Re-price before quoting.
+us-central1 list price, read 8 September 2026.
 
 ## Module specification
 
