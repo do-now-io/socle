@@ -132,11 +132,10 @@ Two levels, and the second one already exists.
       floci-gcp emulates no Compute Engine API, so the network resources
       have nowhere to be created; and the google provider segfaults
       reading back the emulator's cluster, dereferencing the cluster's
-      legacy ABAC field unguarded where the emulator omits it. Either an
-      upstream nil guard or a fuller emulator response unblocks it. Until
-      then GCP convergence is unproven.
+      legacy ABAC field unguarded where the emulator omits it. GCP
+      convergence is therefore unproven.
       *Verify:* review step — the exception stays visible in the workflow
-      summary, and this item is closed by flipping that leg to `apply`.
+      summary.
 - [ ] **Scaleway's gap is recorded, not silently tolerated.** No
       emulator exists, so its apply currently runs offline, which proves
       only that the module is valid while it holds no resources. Either

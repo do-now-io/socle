@@ -82,16 +82,17 @@ Nothing breaks without that step — the cost data simply never arrives.
 tofu test          # 32 runs: every validation, and the defaults
 ```
 
-Integration goes as far as it currently can: CI plans
-[`tests/emulator`](tests/emulator) against the floci-gcp emulator, which
-proves the module produces a coherent plan against a live API — and stops
-short of proving it converges, for two reasons that live outside this module.
-The emulator implements no Compute Engine API, so the VPC, subnetworks, router
-and NAT have nowhere to be created. And the google provider segfaults reading
-back the emulator's cluster: it dereferences the cluster's legacy ABAC field
-without a nil check, and the emulator omits that field. Either an upstream nil
-guard or a fuller emulator response turns that leg back into an apply; the
-workflow prints the caveat on every run in the meantime.
+Integration: CI plans [`tests/emulator`](tests/emulator) against the floci-gcp
+emulator. That proves the module plans coherently against a live API, and does
+not prove it converges — two reasons, both outside this module:
+
+- The emulator implements no Compute Engine API, so the VPC, subnetworks,
+  router and NAT have nowhere to be created.
+- The google provider segfaults reading back the emulator's cluster: it
+  dereferences the cluster's legacy ABAC field without a nil check, and the
+  emulator omits that field.
+
+The workflow prints that caveat on every run.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements

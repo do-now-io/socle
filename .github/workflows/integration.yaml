@@ -53,8 +53,8 @@ jobs:
               have nowhere to be created. And the google provider segfaults
               reading back the emulator's cluster: it dereferences the
               cluster's legacy ABAC field unguarded and the emulator omits
-              it. Convergence is therefore unproven for GCP — only that the
-              module plans coherently against a live API.
+              it. Convergence is unproven for GCP — only that the module
+              plans coherently against a live API.
           - cloud: azure
             emulator: floci/floci-az:0.10.0
             port: "4577"
