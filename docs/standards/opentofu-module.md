@@ -124,12 +124,3 @@ contributor's path, and the emulator apply already covers convergence.
       for no module.** A module carrying a lock constrains its consumers.
       *Verify:* `git ls-files '*/.terraform.lock.hcl'` lists only paths under
       `examples/`.
-
-## Known gaps
-
-- The skeleton and reusable CI configuration do not exist, so "the template
-  itself passes the checklist" cannot be met.
-- Naming consistency and default appropriateness are review steps, not
-  commands — honest review rather than fake automation.
-- Nothing here checks that a module's decisions match its cloud's research
-  document.

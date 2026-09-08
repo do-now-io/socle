@@ -107,15 +107,6 @@ owes it:
 Absent by decision: alert policies, dashboards, uptime checks, metrics
 scopes — catalog objects, so four clouds share one definition.
 
-## Known gaps
-
-- Which side pays the read charge is undocumented. Immaterial at $3/month,
-  decisive across many projects; `time_series_billed_for_queries_count`
-  answers it.
-- The 800-series perimeter is an estimate; the per-series unit cost is the
-  reliable part.
-- Reconcile one real month before the invoice figure becomes contractual.
-
 ## Sources
 
 Read 8 September 2026. [Observability pricing][obs-pricing] (read API,
