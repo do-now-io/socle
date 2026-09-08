@@ -174,9 +174,9 @@ variable "create_nat" {
 }
 
 variable "subnet_flow_logs_enabled" {
-  description = "Enable VPC flow logs on the cluster subnetwork. Off by default: vended network logs are billed at $0.25/GiB and no research has sized the volume."
+  description = "Enable VPC flow logs on the cluster subnetwork, at half sampling over ten-minute windows. Vended network logs are billed at $0.25/GiB, which is a dollar or so a month at that sampling for a socle cluster."
   type        = bool
-  default     = false
+  default     = true
 }
 
 # ---------------------------------------------------------------------------

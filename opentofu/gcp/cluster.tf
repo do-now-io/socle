@@ -6,6 +6,12 @@
 # default the socle relies on — Workload Identity Federation, Dataplane V2,
 # Shielded nodes, network policy — is enforced rather than requested.
 
+# trivy:ignore:AVD-GCP-0061 master authorized networks govern the IP endpoints
+# this cluster does not expose: control_plane_endpoints_config disables them
+# and the boundary is IAM plus VPC Service Controls.
+# trivy:ignore:AVD-GCP-0056 network policy is always on under Dataplane V2,
+# which Autopilot enforces; the network_policy block is rejected outright on an
+# Autopilot cluster. Both are argued in docs/gcp/network-security.md.
 resource "google_container_cluster" "socle" {
   project  = var.project_id
   name     = var.cluster_name
@@ -38,10 +44,6 @@ resource "google_container_cluster" "socle" {
   # The DNS-based endpoint is the access path: a stable FQDN, authorised by
   # IAM, reachable wherever Google Cloud APIs are. IP endpoints are off, and
   # with them the authorized-networks maintenance problem.
-  #
-  # trivy:ignore:AVD-GCP-0061 master authorized networks govern the IP
-  # endpoints this cluster does not expose; the boundary is IAM plus VPC
-  # Service Controls. See docs/gcp/network-security.md.
   control_plane_endpoints_config {
     dns_endpoint_config {
       allow_external_traffic = var.control_plane_dns_allow_external_traffic
@@ -63,10 +65,6 @@ resource "google_container_cluster" "socle" {
   # Shielded nodes, Dataplane V2 and network policy are enforced by Autopilot
   # and conflict with being set explicitly, which is why no variable and no
   # attribute for them appears here.
-  #
-  # trivy:ignore:AVD-GCP-0056 network policy is always on under Dataplane V2,
-  # which Autopilot enforces; the network_policy block is rejected on an
-  # Autopilot cluster. See docs/gcp/network-security.md.
 
   # Who gets upgraded when. The window is required, and its day of the week is
   # what orders a dev/staging/prod ring inside one release channel.

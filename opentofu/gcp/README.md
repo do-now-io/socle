@@ -163,7 +163,7 @@ No modules.
 | <a name="input_pod_range_name"></a> [pod\_range\_name](#input\_pod\_range\_name) | Name of the secondary range that carries Pod addresses. Defaults to <cluster\_name>-pods, which is what the module creates; set it when attaching to a subnetwork someone else owns. | `string` | `null` | no |
 | <a name="input_proxy_only_range_cidr"></a> [proxy\_only\_range\_cidr](#input\_proxy\_only\_range\_cidr) | Range of the REGIONAL\_MANAGED\_PROXY subnetwork. Regional Application Load Balancers, and therefore Gateways, cannot exist without it. | `string` | `"10.8.0.0/23"` | no |
 | <a name="input_release_channel"></a> [release\_channel](#input\_release\_channel) | GKE release channel. REGULAR is Google's recommendation and the estate-wide default; RAPID is outside the GKE SLA and belongs in pre-production only. | `string` | `"REGULAR"` | no |
-| <a name="input_subnet_flow_logs_enabled"></a> [subnet\_flow\_logs\_enabled](#input\_subnet\_flow\_logs\_enabled) | Enable VPC flow logs on the cluster subnetwork. Off by default: vended network logs are billed at $0.25/GiB and no research has sized the volume. | `bool` | `false` | no |
+| <a name="input_subnet_flow_logs_enabled"></a> [subnet\_flow\_logs\_enabled](#input\_subnet\_flow\_logs\_enabled) | Enable VPC flow logs on the cluster subnetwork, at half sampling over ten-minute windows. Vended network logs are billed at $0.25/GiB, which is a dollar or so a month at that sampling for a socle cluster. | `bool` | `true` | no |
 | <a name="input_subnetwork_name"></a> [subnetwork\_name](#input\_subnetwork\_name) | Name of an existing subnetwork in var.region to place the cluster in. Required when create\_subnetwork is false, ignored otherwise. | `string` | `null` | no |
 
 ## Outputs

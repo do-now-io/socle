@@ -102,6 +102,11 @@ jobs:
         run: aws sts get-caller-identity --endpoint-url "$AWS_ENDPOINT_URL"
       - name: tofu apply
         working-directory: ${{ matrix.apply_dir }}
+        env:
+          # TEMPORARY: the google provider crashes against floci-gcp and a
+          # crash says nothing without the plugin's own log. Remove once the
+          # cause is understood.
+          TF_LOG_PROVIDER: ${{ matrix.cloud == 'gcp' && 'DEBUG' || '' }}
         run: |
           tofu init -input=false
           tofu plan -input=false -out=tf.plan

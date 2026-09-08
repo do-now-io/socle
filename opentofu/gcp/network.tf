@@ -34,8 +34,10 @@ resource "google_compute_subnetwork" "socle" {
     ip_cidr_range = var.pod_range_cidr
   }
 
-  # Off by default: vended network logs are billed per GiB and nothing has
-  # sized the volume for a socle cluster.
+  # On by default. Vended network logs are billed at $0.25/GiB, and at
+  # half sampling over ten-minute windows a socle cluster produces single
+  # digits of GiB a month — a dollar or so for the only record of who talked
+  # to whom. Turn it off where that record is not wanted.
   dynamic "log_config" {
     for_each = var.subnet_flow_logs_enabled ? [1] : []
 
@@ -50,6 +52,12 @@ resource "google_compute_subnetwork" "socle" {
 # Every regional Envoy-based load balancer in a region and VPC shares one pool
 # of proxies from this subnetwork, so a second cluster in the same region must
 # not try to create it again.
+#
+# trivy:ignore:AVD-GCP-0075 a REGIONAL_MANAGED_PROXY subnetwork holds Google's
+# load balancer proxies, not workloads: it has nothing that reaches a Google
+# API, and the flags that would satisfy this check do not apply to it.
+# trivy:ignore:AVD-GCP-0076 same reason — no workload, no flows of ours.
+# trivy:ignore:AVD-GCP-0029 same reason.
 resource "google_compute_subnetwork" "proxy_only" {
   count = var.create_proxy_only_subnet ? 1 : 0
 

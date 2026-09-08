@@ -1,8 +1,15 @@
 # One failing-input case per validation block. A validation nobody tested is a
 # validation nobody knows works.
 #
-# These runs never reach a provider: variable validation happens before the
-# plan graph, so `tofu test` here needs no credentials and no network.
+# A static access token keeps these runs credential-free: variable validation
+# fires before the plan graph, but the provider still has to be configurable,
+# and without this it goes looking for application default credentials.
+
+provider "google" {
+  project      = "socle-test-project"
+  region       = "europe-west1"
+  access_token = "offline-fixture-token"
+}
 
 variables {
   project_id   = "socle-test-project"
