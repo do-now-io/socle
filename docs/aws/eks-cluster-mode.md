@@ -1,6 +1,6 @@
 # EKS cluster mode: Auto Mode vs Standard + self-hosted Karpenter
 
-Socle is a multi-cloud Kubernetes factory, run as managed infrastructure for ~40 client companies. This document covers one decision: how AWS clusters get their compute provisioned.
+Socle is a multi-cloud Kubernetes factory. This document covers one decision: how AWS clusters get their compute provisioned.
 
 ## Decision: EKS Standard + self-hosted Karpenter. No Auto Mode option.
 
