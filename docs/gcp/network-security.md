@@ -1,16 +1,17 @@
 # GKE base networking and security
 
-Dataplane, exposure, control plane access and the reference network, on an
-Autopilot cluster — see [cluster mode](cluster-mode.md).
+Dataplane, exposure, control plane access, reference network — see
+[cluster mode](cluster-mode.md).
 
 | Question | Position |
 | --- | --- |
 | CNI | Dataplane V2, enforced by Autopilot |
 | Self-managed Cilium | Refused — impossible on Autopilot |
 | Network policy | Plain Kubernetes NetworkPolicy, always on |
-| FQDN and L7 policies | Refused as a default — GKE-specific and still alpha |
+| FQDN and L7 policies | Refused as a default — GKE-specific, still alpha |
+| Hubble relay and UI | Catalog option — Pod requests we pay for |
 | Exposure | Gateway API, Google's controller |
-| In-cluster gateway (Envoy, Cilium) | Refused — 5× the cost, ours to operate |
+| In-cluster gateway | Refused — 5× the cost, ours to operate |
 | Nodes | Private |
 | Control plane access | DNS-based endpoint, IP endpoints off |
 | Authorized networks | Refused — the DNS endpoint replaces them |
@@ -20,34 +21,32 @@ Autopilot cluster — see [cluster mode](cluster-mode.md).
 
 ## Dataplane V2
 
-No decision to make: Autopilot enables it and cannot be changed, and a
-self-managed Cilium needs privileged DaemonSets and custom eBPF, both blocked.
+Nothing to decide: Autopilot enables it and blocks what a self-managed Cilium
+needs (privileged DaemonSets, custom eBPF).
 
-We get an eBPF dataplane, **Kubernetes NetworkPolicy always on** with nothing
-to install, built-in policy logging, and Hubble. We lose, against a
-self-managed Cilium on the other clouds: L7 policy rules at scale, cluster
-mesh, egress gateway, BGP, Tetragon, and **inter-node transparent encryption,
-which is not supported on Autopilot at all**. FQDN policies exist but through a
-GKE-specific alpha CRD.
+**What we get:** eBPF dataplane, Kubernetes NetworkPolicy always on with
+nothing to install, built-in policy logging, Hubble.
 
-**The consequence is for the catalog:** plain Kubernetes NetworkPolicy is the
-only policy surface that exists identically on four clouds, so that is what
-catalog modules express. Hubble's relay and UI stay a catalog option — on
-Autopilot they are Pod requests we pay for.
+**What we lose** against a self-managed Cilium on the other clouds:
 
-## Exposure: Gateway API
+- L7 policy rules at scale, cluster mesh, egress gateway, BGP, Tetragon.
+- Inter-node transparent encryption — not supported on Autopilot at all.
+- FQDN policies only through a GKE-specific alpha CRD.
 
-**Decision: Gateway API with Google's own controller, for simplicity.** It is
-managed, free, and provisions Google's load balancers, so there is no data
-plane of ours to run, scale or patch. Ingress is refused for new exposure.
+**Consequence for the catalog:** plain Kubernetes NetworkPolicy is the only
+policy surface identical on four clouds, so that is what catalog modules
+express.
 
-Routing objects are portable across clouds; anything beyond routing — health
-checks, WAF, session affinity — goes through Google-specific policy resources,
-so that layer is per-cloud.
+## Exposure
 
-The alternative, an in-cluster Envoy for byte-identical behaviour everywhere,
-costs ~$98/month per cluster against $18 for a managed load balancer, and
-would be ours to operate.
+**Decision: Gateway API with Google's controller, for simplicity.**
+
+- Managed and free: no data plane of ours to run, scale or patch.
+- Routing objects are portable; health checks, WAF and session affinity go
+  through Google-specific policy resources, so that layer is per-cloud.
+- Ingress is refused for new exposure.
+- Rejected alternative — in-cluster Envoy for identical behaviour everywhere:
+  ~$98/month per cluster against $18 for a managed load balancer.
 
 ## Control plane and nodes
 
@@ -55,43 +54,39 @@ would be ours to operate.
 Egress through Cloud NAT, Private Google Access on.
 
 **The control plane is reached through its DNS-based endpoint**, which Google
-now recommends: a stable FQDN, authorised by IAM, reachable wherever Google
-Cloud APIs are. IP endpoints are off, and authorized networks are absent
-rather than defaulted — they only apply to the IP endpoints we disable, and
-they would have to be rewritten every time a subnet or a CI runner address
-changes.
+recommends: a stable FQDN, authorised by IAM.
 
-The trade-off, stated plainly: the control plane is then reachable from the
-internet with IAM as the only gate. Clients who need a network boundary get
-VPC Service Controls, which is an organisation-level perimeter and therefore
-not a module variable.
+- IP endpoints off; authorized networks absent rather than defaulted — they
+  only apply to those endpoints, and would need rewriting every time a subnet
+  or CI runner address changes.
+- Accepted risk: the control plane is reachable from the internet with IAM as
+  the only gate. Clients needing a network boundary get VPC Service Controls,
+  which is organisation-level and therefore not a module variable.
 
 ## Reference network
 
-One custom-mode VPC, one subnetwork per cluster in the cluster's region.
+One custom-mode VPC, one subnetwork per cluster in its region, regional
+clusters, Cloud NAT per region.
 
 | Range | Size | Why |
 | --- | --- | --- |
 | Nodes (primary) | `/24` | Autopilot node counts are small |
-| Pods (secondary) | `/17` | 32 Pods per node on Autopilot, so `/26` each: 512 nodes |
+| Pods (secondary) | `/17` | 32 Pods per node, so `/26` each: 512 nodes |
 | Services | none | GKE manages its own range |
-| Proxy-only subnet | `/23` | Required before any regional Gateway exists; `/26` is the minimum |
-| Control plane `/28` | none | The DNS endpoint removes it |
+| Proxy-only subnet | `/23` | No regional Gateway without it; `/26` is the minimum |
+| Control plane | none | The DNS endpoint removes it |
 
-Regional clusters, Cloud NAT per region. Auto IPAM would remove the Pod range
-question entirely but is still Preview, and a default has to be GA.
-
-Shared VPC and one project per environment are deliberately left to a
-project-layout decision — the latter is what actually isolates the Workload
-Identity principals flagged in [managed scope](managed-scope.md).
+Left to a project-layout decision: Shared VPC, and one project per
+environment — the latter is what isolates the principals flagged in
+[managed scope](managed-scope.md).
 
 ## Cost impact
 
-Reference estate of three clusters, baseline **$1,488/month**.
+Reference estate, baseline **$1,488/month**.
 
 | | Per month |
 | --- | --- |
-| Three regional load balancers, one forwarding rule each | +$55 |
+| Three regional load balancers | +$55 |
 | Three Cloud NAT gateways | +$23 |
 | Data processing, load balancer and NAT | +$19 |
 | **Total** | **+$96 (+6.5%)** |
@@ -115,27 +110,25 @@ us-central1 list price, read 8 September 2026. Re-price before quoting.
 
 Absent by decision: any CNI or datapath variable, authorized networks, a
 Services secondary range, Auto IPAM, and any Gateway or NetworkPolicy object —
-exposure and policy are catalog concerns, and the module stops at the
-proxy-only subnet a Gateway needs.
+the module stops at the proxy-only subnet a Gateway needs.
 
 ## Known gaps
 
-- **How Dataplane V2 flow metrics are billed is not documented.** It changes
-  nothing while the observability tools are off by default.
-- **The Cloud NAT figure assumes a node count we do not control**, since
-  Autopilot provisions nodes and NAT is billed per VM-hour below 32 VMs.
-- **Leaving the DNS endpoint open is a deliberate risk**, accepted because a
-  closed control plane makes the pipeline and Flux depend on private
-  connectivity we do not build.
+- How Dataplane V2 flow metrics are billed is not documented; it changes
+  nothing while the observability tools are off.
+- The Cloud NAT figure assumes a node count we do not control, since Autopilot
+  provisions nodes and NAT is billed per VM below 32 VMs.
+- Leaving the DNS endpoint open is deliberate: a closed control plane makes
+  the pipeline and Flux depend on private connectivity we do not build.
 
 ## Sources
 
-Read 8 September 2026. [Dataplane V2][dpv2] · [FQDN network
-policies][fqdn] · [inter-node transparent encryption][encryption] ·
-[Gateway API][gwapi] · [network isolation][isolation] · [VPC-native
-clusters][alias] · [best practices for GKE networking][net-bp] ·
-[proxy-only subnets][proxy] · [auto IPAM][auto-ipam] · [VPC network
-pricing][net-pricing] · [Cloud NAT pricing][nat-pricing].
+Read 8 September 2026. [Dataplane V2][dpv2] · [FQDN network policies][fqdn] ·
+[inter-node transparent encryption][encryption] · [Gateway API][gwapi] ·
+[network isolation][isolation] · [VPC-native clusters][alias] ·
+[networking best practices][net-bp] · [proxy-only subnets][proxy] ·
+[auto IPAM][auto-ipam] · [VPC network pricing][net-pricing] ·
+[Cloud NAT pricing][nat-pricing].
 
 [dpv2]: https://cloud.google.com/kubernetes-engine/docs/concepts/dataplane-v2
 [fqdn]: https://cloud.google.com/kubernetes-engine/docs/how-to/fqdn-network-policies
