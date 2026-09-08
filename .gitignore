@@ -1,0 +1,23 @@
+# Local assistant configuration
+CLAUDE.md
+
+# OpenTofu / Terraform working files. Provider caches and state never belong
+# in the repository.
+.terraform/
+.terraform.tfstate.lock.info
+*.tfstate
+*.tfstate.*
+*.tfplan
+tf.plan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# A module must not carry a lock file — it would constrain its consumers.
+# Test fixtures are throwaway root modules, so they need none either. The
+# examples' locks are committed, which is why they are not matched here.
+/opentofu/*/.terraform.lock.hcl
+/opentofu/*/tests/*/.terraform.lock.hcl
