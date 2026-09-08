@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   opentofu-apply:
-    name: tofu apply (${{ matrix.cloud }})
+    name: tofu ${{ matrix.mode }} (${{ matrix.cloud }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
