@@ -48,14 +48,13 @@ jobs:
             work_dir: opentofu/gcp/tests/emulator
             mode: plan
             caveat: >-
-              Two blockers, neither in the module. floci-gcp emulates no
+              Two blockers, neither in the module. The emulator implements no
               Compute Engine API, so the VPC, subnetworks, router and NAT
               have nowhere to be created. And the google provider segfaults
-              reading back the emulator's cluster: it dereferences
-              `cluster.LegacyAbac.Enabled` unguarded
-              (resource_container_cluster.go:3556 in v8.1.0) and floci-gcp
-              omits that field. Convergence is therefore unproven for GCP —
-              only that the module plans coherently against a live API.
+              reading back the emulator's cluster: it dereferences the
+              cluster's legacy ABAC field unguarded and the emulator omits
+              it. Convergence is therefore unproven for GCP — only that the
+              module plans coherently against a live API.
           - cloud: azure
             emulator: floci/floci-az:0.10.0
             port: "4577"

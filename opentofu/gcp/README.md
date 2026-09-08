@@ -6,7 +6,7 @@ needs, then steps away.
 
 ```hcl
 module "socle" {
-  source = "oci://<registry>/<repo>//opentofu/gcp?tag=v0.1.0"
+  source = "oci://<registry>/<repo>//opentofu/gcp?tag=<version>"
 
   project_id   = "my-project"
   region       = "europe-west1"
@@ -86,13 +86,12 @@ Integration goes as far as it currently can: CI plans
 [`tests/emulator`](tests/emulator) against the floci-gcp emulator, which
 proves the module produces a coherent plan against a live API — and stops
 short of proving it converges, for two reasons that live outside this module.
-floci-gcp emulates no Compute Engine API, so the VPC, subnetworks, router and
-NAT have nowhere to be created. And the google provider segfaults reading back
-the emulator's cluster: it dereferences `cluster.LegacyAbac.Enabled` without a
-nil check (`resource_container_cluster.go:3556` in v8.1.0) and floci-gcp omits
-that field. Either an upstream nil guard or a fuller emulator response turns
-that leg back into an apply; the workflow prints the caveat on every run in
-the meantime.
+The emulator implements no Compute Engine API, so the VPC, subnetworks, router
+and NAT have nowhere to be created. And the google provider segfaults reading
+back the emulator's cluster: it dereferences the cluster's legacy ABAC field
+without a nil check, and the emulator omits that field. Either an upstream nil
+guard or a fuller emulator response turns that leg back into an apply; the
+workflow prints the caveat on every run in the meantime.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
