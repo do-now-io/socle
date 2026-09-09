@@ -10,7 +10,7 @@ Arbitration rule: reliable provider ops at a reasonable surcharge → delegated.
 | ------------------- | ------------------- | --------------------------------- | ------------------------------------------------------------------------ |
 | VPC CNI            | **Refused**        | Factory (neutralisation)         | Replaced by Cilium; Cilium's documented pattern, not the bootstrap flag |
 | kube-proxy         | **Refused**        | Factory (neutralisation)         | Replaced by Cilium `kubeProxyReplacement`                               |
-| CoreDNS            | **Delegated**      | AWS packages / factory triggers  | NodeLocal DNSCache via `configuration_values` if needed                |
+| CoreDNS            | **Delegated**      | AWS packages / factory triggers  | —                                                                       |
 | EBS CSI            | **Delegated**      | AWS packages / factory triggers  | Identity via `aws_eks_addon`'s own `pod_identity_association`           |
 | EFS CSI            | **Catalog option** | AWS packages / factory triggers  | RWX only; node component may need a separate association               |
 | Pod Identity Agent | **Delegated**      | AWS packages / factory triggers  | Prerequisite for all workload identity                                 |
@@ -22,8 +22,6 @@ Arbitration rule: reliable provider ops at a reasonable surcharge → delegated.
 - AWS never auto-updates an add-on — the trigger is always ours, so versions are pinned in the module, never resolved via `most_recent`.
 
 **Decision.** VPC CNI / kube-proxy excluded via Cilium's documented delete-and-taint pattern.
-
-**Decision.** NodeLocal DNSCache, if ever needed, goes through the add-on's `configurationValues` — never a Flux patch, never a CoreDNS migration to the socle.
 
 ## 2. Identity: Pod Identity or IRSA?
 
