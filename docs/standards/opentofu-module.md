@@ -110,17 +110,3 @@ contributor's path, and the emulator apply already covers convergence.
       *Verify:* review step — the example lists them.
 - [ ] **Idempotent.** A second plan is empty.
       *Verify:* `tofu plan -detailed-exitcode` after the apply.
-
-## 7. Provider and OpenTofu compatibility
-
-- [ ] **`required_version` has a floor that reflects what the module needs.**
-      OCI distribution sets it.
-      *Verify:* `grep required_version opentofu/*/versions.tf`
-- [ ] **Provider constraints are bounded ranges.** These are child modules:
-      an open floor lets a provider major break every consumer, an exact pin
-      makes the module impossible to compose.
-      *Verify:* review step — both bounds on every entry.
-- [ ] **`.terraform.lock.hcl` committed for every `examples/` directory, and
-      for no module.** A module carrying a lock constrains its consumers.
-      *Verify:* `git ls-files '*/.terraform.lock.hcl'` lists only paths under
-      `examples/`.
