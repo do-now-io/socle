@@ -28,7 +28,9 @@ concurrency:
 
 jobs:
   opentofu-apply:
-    name: tofu ${{ matrix.mode }} (${{ matrix.cloud }})
+    # Deliberately claims neither plan nor apply: the check name stays stable
+    # for branch protection, and the step name below says which one ran.
+    name: integration (${{ matrix.cloud }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
