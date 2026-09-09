@@ -10,221 +10,117 @@ verifiable by a command or a named review step.**
 ## 1. Structure
 
 - [ ] **One flat root module per cloud**, at `opentofu/<cloud>/`. Network,
-      cluster and identities live in the same module. No internal
-      submodule tree, and no separately consumable network/cluster/IAM
-      modules — the deliverable is one empty-shell cluster, and splitting
-      it multiplies the combinations that have to be tested without
-      serving a use case anyone asked for.
-      *Verify:* `ls opentofu/*/` shows `.tf` files and no `modules/`
-      directory.
-- [ ] **Standard file layout.** `main.tf`, `variables.tf`, `outputs.tf`,
-      `versions.tf`. Resources may be split into topic files
-      (`network.tf`, `cluster.tf`, `iam.tf`) but never into a submodule.
-      *Verify:* review step — the four required files exist.
-- [ ] **`examples/` holds at least one minimal deployable example** that a
-      consumer can copy and apply against an empty project.
+      cluster and identities together; no submodule tree.
+      *Verify:* `ls opentofu/*/` shows `.tf` files and no `modules/`.
+- [ ] **Standard layout:** `main.tf`, `variables.tf`, `outputs.tf`,
+      `versions.tf`, plus optional topic files.
+      *Verify:* review step.
+- [ ] **`examples/` holds a minimal deployable example.**
       *Verify:* `test -d opentofu/<cloud>/examples/minimal`
-- [ ] **`tests/` holds the module's own tests.** See section 5.
+- [ ] **`tests/` holds the module's tests.**
       *Verify:* `test -d opentofu/<cloud>/tests`
 
 ## 2. Interface
 
-- [ ] **Every variable is typed.** No bare `any` unless the value is
-      genuinely opaque, and then with a comment saying why.
-      *Verify:* review step — no `type = any` without justification.
-- [ ] **Constraints are enforced by `validation` blocks, not by
-      documentation.** Anything with a known-good set of values rejects
-      the rest at plan time.
-      *Verify:* a `tofu test` case asserts the rejection (section 5).
-- [ ] **Recommended positions are module defaults.** A consumer who sets
-      nothing gets the recommended configuration.
-      *Verify:* review step — the minimal example sets only what is
-      genuinely per-consumer (project, region, name).
-- [ ] **Decisions with no good default have no default.** Where forcing a
-      choice is the point — a maintenance window, for instance — the
-      variable is required. A silent default means nobody decided.
+- [ ] **Every variable is typed**, no bare `any` without a comment saying why.
+      *Verify:* review step.
+- [ ] **Constraints live in `validation` blocks, not documentation.**
+      *Verify:* a `tofu test` case asserts the rejection.
+- [ ] **Recommended positions are the defaults.** Setting nothing gives the
+      recommended configuration.
+      *Verify:* review step — the example sets only what is per-consumer.
+- [ ] **Decisions with no good default have no default.** A silent default
+      means nobody decided.
       *Verify:* review step against the cloud's research document.
-- [ ] **Options we would never recommend are absent, not exposed.** An
-      option in the interface is an option we support and test.
+- [ ] **Options we would not recommend are absent, not exposed.**
       *Verify:* review step against the cloud's research document.
-- [ ] **Naming is consistent across all four clouds.** Same concept, same
-      variable name; cloud-specific names only for cloud-specific
-      concepts.
-      *Verify:* review step — diff the variable names across
-      `opentofu/*/variables.tf`.
-- [ ] **Outputs expose everything needed to bootstrap the Flux-pulled
-      socle**: cluster endpoint, cluster CA, OIDC issuer URL, the
-      workload identity binding, and the identity the in-cluster
-      Crossplane provider assumes.
-      *Verify:* `tofu output` on the minimal example lists all of them.
-- [ ] **No output leaks a secret.** Anything sensitive is marked
-      `sensitive = true`, and long-lived credentials are not outputs at
-      all.
-      *Verify:* review step, plus the secret scan in section 4.
+- [ ] **Naming is consistent across clouds.**
+      *Verify:* diff the variable names across `opentofu/*/variables.tf`.
+- [ ] **Outputs cover the socle bootstrap:** cluster endpoint, CA, OIDC
+      issuer, workload identity binding, and the in-cluster provider's
+      identity.
+      *Verify:* `tofu output` on the example lists all of them.
 
-## 3. Quality
+## 3. Quality and security
 
-- [ ] **`tofu fmt` is clean.**
-      *Verify:* `tofu fmt -check -diff -recursive opentofu/` — already
-      gated in `pr-static.yaml`.
-- [ ] **`tofu validate` passes on every root module.**
-      *Verify:* already gated in `pr-static.yaml`.
-- [ ] **TFLint passes with a per-cloud ruleset.** Each module carries a
-      `.tflint.hcl` enabling that cloud's provider plugin; the generic
-      ruleset alone catches almost nothing cloud-specific.
-      *Verify:* `test -f opentofu/<cloud>/.tflint.hcl`, and TFLint is
-      already gated in `pr-static.yaml`.
+- [ ] **`tofu fmt` and `tofu validate` are clean on every root module.**
+      *Verify:* gated in `pr-static.yaml`.
+- [ ] **TFLint passes with the cloud's provider plugin.** The generic ruleset
+      alone catches almost nothing.
+      *Verify:* `test -f opentofu/<cloud>/.tflint.hcl`, gated in CI.
 - [ ] **Generated documentation is committed and current.**
       *Verify:* `terraform-docs markdown . --output-check` exits clean.
-- [ ] **pre-commit runs fmt, validate, TFLint and terraform-docs
-      locally**, so CI is a safety net rather than the first feedback.
-      *Verify:* `pre-commit run --all-files` exits clean.
+- [ ] **No HIGH or CRITICAL Trivy finding**, and every ignored check carries
+      its reason in the code.
+      *Verify:* gated in `pr-static.yaml`.
+- [ ] **No secret committed, no credential accepted as a variable.** Modules
+      authenticate through ambient credentials or workload identity
+      federation.
+      *Verify:* `trivy fs --scanners secret .`, plus a review of the variable
+      list.
 
-## 4. Security
+## 4. Tests
 
-- [ ] **Trivy misconfiguration scan reports no HIGH or CRITICAL finding.**
-      *Verify:* already gated in `pr-static.yaml` (SARIF to code
-      scanning; fork PRs gate on HIGH/CRITICAL directly).
-- [ ] **No secret is committed, in any form** — no keys, no tokens, no
-      example values that look real.
-      *Verify:* `trivy fs --scanners secret .` reports nothing.
-- [ ] **No credential is accepted as a variable.** Modules authenticate
-      through the provider's ambient credentials or workload identity
-      federation, never a passed-in key.
-      *Verify:* review step — no variable named or typed as a
-      credential.
-- [ ] **Every billable resource carries the standard label set** —
-      owner, environment, and the socle version that created it — so
-      that cost can be attributed and orphans can be found.
-      *Verify:* review step; the label block is part of the skeleton.
-
-## 5. Tests
-
-Two levels, and the second one already exists.
-
-- [ ] **Unit level: `tofu test`.** Native, no extra toolchain, no Go
-      dependency for contributors. It covers what static checks cannot:
-      that `validation` blocks actually reject bad input, that defaults
-      resolve to the recommended configuration, and that conditional
-      logic produces the intended plan.
+- [ ] **Unit: `tofu test`.** Native, no Go in a contributor's path. Covers
+      what static checks cannot — validations rejecting bad input, defaults
+      resolving to the recommended configuration, conditional logic planning
+      as intended.
       *Verify:* `tofu test` passes in `opentofu/<cloud>/`.
-- [ ] **Every `validation` block has a test that trips it.** A validation
-      nobody tested is a validation nobody knows works.
+- [ ] **Every `validation` block has a test that trips it.**
       *Verify:* review step — one failing-input case per validation.
-- [ ] **Integration level: an ephemeral apply against a cloud
-      emulator.** Plan-only is not enough — it does not prove the module
-      converges. `integration.yaml` runs
-      `init → plan → apply → destroy` against floci emulators, and each
-      leg declares whether it can apply or only plan.
-      *Verify:* the `Integration tests` workflow is green **and** the leg
-      says `apply`.
-- [ ] **GCP is plan-only today, and the reason is not ours to fix.**
-      floci-gcp emulates no Compute Engine API, so the network resources
-      have nowhere to be created; and the google provider segfaults
-      reading back the emulator's cluster, dereferencing the cluster's
-      legacy ABAC field unguarded where the emulator omits it. GCP
-      convergence is therefore unproven.
-      *Verify:* review step — the exception stays visible in the workflow
-      summary.
-- [ ] **Scaleway's gap is recorded, not silently tolerated.** No
-      emulator exists, so its apply currently runs offline, which proves
-      only that the module is valid while it holds no resources. Either
-      a disposable project or emulator support is needed before the
-      Scaleway module can claim this item.
-      *Verify:* review step — this is a known exception, and it must
-      stay visible in the workflow summary.
+- [ ] **Integration: an ephemeral apply against an emulator.** Plan-only does
+      not prove convergence. Each leg of `integration.yaml` declares whether
+      it applies or only plans.
+      *Verify:* the workflow is green **and** the leg says `apply`.
+- [ ] **Legs that cannot apply say why, in the run summary.** Scaleway has no
+      emulator; GCP's has no Compute Engine API and crashes the google
+      provider on cluster read-back. Recorded exceptions, not silent ones.
+      *Verify:* review step — the caveat shows on every run.
 
-Terratest was considered and rejected: it buys more expressive
-post-apply assertions at the cost of putting Go in the path of every
-contributor, and the emulator apply already covers convergence.
+Terratest was rejected: more expressive assertions, at the cost of Go in every
+contributor's path, and the emulator apply already covers convergence.
 
-## 6. Versioning and distribution
+## 5. Versioning and distribution
 
 - [ ] **SemVer, and majors mean what they say.** Removing a variable,
-      renaming an output, or changing a default in a way that forces
-      replacement is a major.
+      renaming an output or forcing replacement is a major.
       *Verify:* review step at release time.
-- [ ] **Published as a cosign-signed OCI artifact**, the same way the
-      socle itself is distributed. OpenTofu has consumed `oci://` module
-      sources since 1.10:
-      `source = "oci://<registry>/<repo>//opentofu/gcp?tag=vX.Y.Z"`.
-      *Verify:* `tofu init` succeeds against the published artifact from
-      a clean cache.
-- [ ] **Consumers are told to pin by digest, and how to verify the
-      signature themselves.** This one needs stating plainly:
-      **OpenTofu does not verify OCI signatures.** It will happily pull
-      an unsigned or tampered artifact. Signing is therefore only worth
-      something if the consumer runs `cosign verify` — in CI, before
-      `init` — or enforces it through registry policy. A checklist item
-      that implied `oci://` gave us verified provenance would be selling
-      a guarantee that does not exist.
-      *Verify:* review step — the consumer documentation carries the
-      `cosign verify` step, not just the `source` line.
+- [ ] **Published as a cosign-signed OCI artifact.**
+      *Verify:* `tofu init` succeeds against the published artifact from a
+      clean cache.
+- [ ] **Consumers pin by digest and verify the signature themselves.**
+      **OpenTofu does not verify OCI signatures** — it will pull a tampered
+      artifact. Signing only counts if the consumer runs `cosign verify`
+      before `init`, or registry policy enforces it.
+      *Verify:* review step — the consumer documentation carries that step.
 - [ ] **Renovate keeps provider and action versions moving.**
-      *Verify:* `renovate.json` covers the module's dependency
-      manifests.
+      *Verify:* `renovate.json` covers the module's manifests.
 
-## 7. Compatibility with automation
+## 6. Compatibility with automation
 
-- [ ] **Remote state lives in the consumer's own account**, and the
-      module does not create or assume a backend.
-      *Verify:* review step — no `backend` block in the module; the
-      example documents one.
-- [ ] **A single `tofu apply` converges with no interactive input and no
-      out-of-band step.** No local scripts, no manual console click, no
-      `kubectl` in the middle.
-      *Verify:* the integration workflow already applies with
-      `-input=false -auto-approve`.
-- [ ] **Runnable by an isolated CI runner** holding only the roles the
-      apply needs.
-      *Verify:* review step — the consumer documentation lists those
-      roles.
-- [ ] **Idempotent.** A second apply plans no changes.
-      *Verify:* add `tofu plan -detailed-exitcode` after the integration
-      apply; exit code 0 means no drift, 2 means this item fails.
+- [ ] **Remote state lives in the consumer's account.** The module neither
+      creates nor assumes a backend.
+      *Verify:* review step — no `backend` block; the example documents one.
+- [ ] **A single `tofu apply` converges, with no interactive input and no
+      out-of-band step.** Where a cloud makes that impossible, the exception
+      is in the module README.
+      *Verify:* CI applies with `-input=false -auto-approve`.
+- [ ] **Runnable by an isolated CI runner** holding only the roles the apply
+      needs.
+      *Verify:* review step — the example lists them.
+- [ ] **Idempotent.** A second plan is empty.
+      *Verify:* `tofu plan -detailed-exitcode` after the apply.
 
-## 8. Provider and OpenTofu compatibility
+## 7. Provider and OpenTofu compatibility
 
-- [ ] **`required_version` has a floor that reflects what the module
-      actually needs.** OCI module distribution (section 6) requires
-      OpenTofu **1.10 or later**, so `>= 1.10` is the floor. The
-      existing modules declare `>= 1.8` and must be raised.
+- [ ] **`required_version` has a floor that reflects what the module needs.**
+      OCI distribution sets it.
       *Verify:* `grep required_version opentofu/*/versions.tf`
-- [ ] **Provider constraints are bounded ranges, not open floors.** These
-      modules are consumed through a `module` block, so they are child
-      modules: they must declare a range with an **upper bound**
-      (`>= 6.0, < 7.0`) and must not pin an exact version, which would
-      make them impossible to compose. The present `>= 6.0` is the
-      defect — it is unbounded, so a provider major release can break
-      every consumer without anything changing in this repo.
-      *Verify:* review step — every entry in `required_providers` has
-      both bounds.
-- [ ] **`.terraform.lock.hcl` is committed for every `examples/`
-      directory, and for no module.** Examples are root modules and
-      should be reproducible; the module itself must not carry a lock, or
-      it constrains its consumers.
-      *Verify:* `git ls-files '*/.terraform.lock.hcl'` lists only paths
-      under `examples/`.
-- [ ] **The support matrix is documented and tested.** The OpenTofu and
-      provider versions the module is tested against are stated, and CI
-      tests the floor, not only the latest.
-      *Verify:* review step — the matrix exists and the integration
-      workflow covers the declared floor.
-
----
-
-## Known gaps in this checklist
-
-Stated rather than left for a reviewer to discover:
-
-- **The skeleton and the reusable CI configuration do not exist yet.** The
-  ticket asks for all three, and the acceptance criterion "the template
-  itself passes the checklist" cannot be met until the skeleton is
-  written.
-- **Several items are review steps, not commands.** Naming consistency,
-  default appropriateness and label coverage resist automation. They are
-  honest review steps rather than fake automation, but they depend on a
-  reviewer applying them consistently.
-- **Nothing here checks that a module's decisions match its cloud's
-  research document.** That link is currently a review step pointing at
-  a document, which is weaker than it sounds.
+- [ ] **Provider constraints are bounded ranges.** These are child modules:
+      an open floor lets a provider major break every consumer, an exact pin
+      makes the module impossible to compose.
+      *Verify:* review step — both bounds on every entry.
+- [ ] **`.terraform.lock.hcl` committed for every `examples/` directory, and
+      for no module.** A module carrying a lock constrains its consumers.
+      *Verify:* `git ls-files '*/.terraform.lock.hcl'` lists only paths under
+      `examples/`.
