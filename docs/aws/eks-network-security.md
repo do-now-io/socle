@@ -8,8 +8,6 @@ Socle is a multi-cloud Kubernetes factory. [Analysis 1](eks-cluster-mode.md) and
 
 - EKS's IPv6 mode is IPv6-only pods (not dual-stack pods/services), irreversible at cluster creation, and AWS ties it specifically to VPC CNI in prefix-delegation mode — not documented as CNI-agnostic.
 - Cilium's ENI IPv6 IPAM mode is still beta (open since January 2022, cilium#18405), with an unresolved bug where Cilium cannot intercept IPv4 traffic over the `v4if0` interface EKS creates for IPv4 egress on IPv6 clusters (cilium#28409).
-- No documented case of Cilium as a full CNI replacement running with Karpenter in production on an EKS IPv6 cluster — existing write-ups use CNI chaining (Cilium alongside VPC CNI), a different topology than Socle's.
-- Revisit once Cilium's ENI IPv6 mode leaves beta and the `v4if0` issue is resolved.
 
 ## 2. Exposure: Gateway API
 
@@ -17,7 +15,7 @@ Socle is a multi-cloud Kubernetes factory. [Analysis 1](eks-cluster-mode.md) and
 
 - GA since v3.0.0 (January 2026), several point releases since — not experimental.
 - Same reasoning as Cilium and Velero elsewhere: at comparable capability, keep what's already installed rather than add an AWS-only dependency. VPC Lattice / `aws-application-networking-k8s` has no multi-cloud equivalent and nothing here forces it.
-- Two documented gaps, neither blocking default use: no `certificateRefs` for ACM (hostname-based discovery only — a risk only if several ACM certs match one hostname); a shared-Gateway health-check bug sends the target's IP as the Host header, breaking host-based health checks once multiple `HTTPRoute`s share one Gateway (aws-load-balancer-controller#4400) — fires only if/when the catalog builds a shared-LB pattern, which doesn't exist yet.
+- Two documented gaps, neither blocking default use: no `certificateRefs` for ACM (hostname-based discovery only — a risk only if several ACM certs match one hostname); a shared-Gateway health-check bug sends the target's IP as the Host header, breaking host-based health checks once multiple `HTTPRoute`s share one Gateway (aws-load-balancer-controller#4400) — fires only if/when the catalog builds a shared-LB pattern, which doesn't exist yet; re-check both before it does.
 
 **Decision.** ALB by default; NLB as a catalog option, not refused.
 
@@ -27,10 +25,12 @@ Socle is a multi-cloud Kubernetes factory. [Analysis 1](eks-cluster-mode.md) and
 
 Cost, one load balancer, 24/7, modest traffic (within 1 capacity unit), us-east-1 list price:
 
-| | Base (730h) | Capacity (1 unit) | Per month |
-| --- | --- | --- | --- |
-| ALB | $16.43 | $5.84 (1 LCU, $0.008/hr) | ≈ $22.27 |
-| NLB | $16.43 | $4.38 (1 NLCU, $0.006/hr) | ≈ $20.81 |
+
+|     | Base (730h) | Capacity (1 unit)         | Per month |
+| --- | ----------- | ------------------------- | --------- |
+| ALB | $16.43      | $5.84 (1 LCU, $0.008/hr)  | ≈ $22.27  |
+| NLB | $16.43      | $4.38 (1 NLCU, $0.006/hr) | ≈ $20.81  |
+
 
 The base rate is identical ($0.0225/hr either way) — at this scale the gap is noise (~$1.46/mo). It only opens up at high capacity-unit counts, where NLB's cheaper per-unit rate compounds, or once **WAF** enters the picture (ALB-only): $5/month per Web ACL + $1/rule + $0.60/million requests — at real traffic volume this can outweigh the load balancer's own cost, so it belongs in the client's estimate as its own line, not folded into "ALB costs a bit more." Pricing itself isn't really what decides ALB vs NLB here — feature fit does.
 
@@ -79,11 +79,4 @@ Read 8 September 2026.
 - [Enabling KMS secrets encryption](https://docs.aws.amazon.com/eks/latest/userguide/enable-kms.html) · [Adding KMS encryption to existing clusters](https://aws.amazon.com/about-aws/whats-new/2021/03/amazon-eks-supports-adding-kms-envelope-encryption-to-existing-clusters/)
 - [Cluster endpoint access control](https://docs.aws.amazon.com/eks/latest/userguide/config-cluster-endpoint.html) · [EKS VPC interface endpoints (PrivateLink)](https://docs.aws.amazon.com/eks/latest/userguide/vpc-interface-endpoints.html)
 - [VPC pricing](https://aws.amazon.com/vpc/pricing/) · [PrivateLink pricing](https://aws.amazon.com/privatelink/pricing/)
-
-## Unresolved
-
-- ALB/NLB pricing is list price, us-east-1 (the pricing page doesn't break out eu-west-3) — re-price before quoting a client, and note actual LCU/NLCU consumption depends on real traffic, not the "1 unit" assumption used here.
-- The `certificateRefs` gap and the #4400 health-check bug should be re-checked before the catalog ever implements a shared-Gateway (multi-`HTTPRoute`) pattern.
-- KMS-key-deletion failure mode stated from established behaviour, not re-confirmed against a current AWS doc this session.
-- GuardDuty pricing tiers and PrivateLink interface-endpoint rates pulled via automated fetch/search — worth a manual spot-check before quoting in a client-facing number.
 
