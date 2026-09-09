@@ -4,6 +4,7 @@ CLAUDE.md
 # OpenTofu / Terraform working files. Provider caches and state never belong
 # in the repository; lock files do, but only for the examples — a module that
 # carries a lock constrains its consumers.
+
 .terraform/
 .terraform.tfstate.lock.info
 *.tfstate

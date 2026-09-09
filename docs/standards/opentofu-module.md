@@ -1,21 +1,11 @@
 # OpenTofu module conformance checklist
 
-Every foundations module — `opentofu/aws`, `opentofu/gcp`,
-`opentofu/azure`, `opentofu/scaleway` — must pass this checklist before
-it is accepted. One standard, four clouds, so that a consumer who has
-adopted one can read the next without relearning anything.
+Every foundations module passes this before it is accepted. **Every item is
+verifiable by a command or a named review step.**
 
-**Every item below is verifiable by a command or a named review step.** An
-item that cannot be checked objectively does not belong here; if you find
-one, that is a defect in this document.
-
-> **Status: draft, unapproved.** Needs a maintainer's sign-off. Two
-> deliverables from the same ticket are still missing: the copyable
-> module skeleton, and the reusable CI configuration. The skeleton must
-> implement this checklist rather than precede it, which is why it comes
-> second.
-
----
+> **Status: draft, unapproved.** The copyable skeleton and the reusable CI
+> configuration are still missing; the skeleton has to implement this
+> checklist rather than precede it.
 
 ## 1. Structure
 
