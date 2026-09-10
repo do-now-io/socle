@@ -47,6 +47,12 @@ A client is billed for whichever one they actually provision, not both — so th
 
 ## 5. Reference network: VPC, subnets, NAT
 
+**Decision.** Every VPC gets at least one public and one private subnet per AZ — never a flat, all-public layout, even for a client whose workloads all end up in the public tier.
+
+- ISO 27001 (A.8.22, network segregation) and SOC 2 (the CC6 access-control criteria) both expect demonstrated network segmentation as a control. Neither names an exact subnet count, but a fully public VPC — no private zone at all — is a common finding against both during an audit, independent of whether anything sensitive currently runs in the would-be private tier.
+- Not optional: the module has no all-public escape hatch. The private subnet exists structurally, whether or not a given client's workloads use it.
+- This is also the precondition for everything else in this section — NAT Gateway and the endpoint choices below only mean something because nodes run in the private tier.
+
 **Decision.** Gateway endpoints (S3, DynamoDB) always on; Interface endpoints (ECR, STS, EC2, CloudWatch Logs) standard; NAT Gateway per AZ for what's left.
 
 - Gateway endpoints are strictly free — no hourly charge, no data processing fee. No reason not to have them.
@@ -74,4 +80,5 @@ Read 8 September 2026.
 - [Enabling KMS secrets encryption](https://docs.aws.amazon.com/eks/latest/userguide/enable-kms.html) · [Adding KMS encryption to existing clusters](https://aws.amazon.com/about-aws/whats-new/2021/03/amazon-eks-supports-adding-kms-envelope-encryption-to-existing-clusters/)
 - [Cluster endpoint access control](https://docs.aws.amazon.com/eks/latest/userguide/config-cluster-endpoint.html) · [EKS VPC interface endpoints (PrivateLink)](https://docs.aws.amazon.com/eks/latest/userguide/vpc-interface-endpoints.html)
 - [VPC pricing](https://aws.amazon.com/vpc/pricing/) · [PrivateLink pricing](https://aws.amazon.com/privatelink/pricing/)
+- [ISO 27001:2022 Annex A 8.22 — Segregation of networks](https://www.isms.online/iso-27001/annex-a-2022/8-22-segregation-of-networks-2022/) · [SOC 2 CC6 — Logical and physical access controls](https://secureframe.com/hub/soc-2/common-criteria)
 
