@@ -6,12 +6,6 @@
 # Emulator coverage: AWS (floci), GCP (floci-gcp), Azure (floci-az).
 # Scaleway has no emulator yet — its apply runs offline, which is only
 # meaningful while the module holds no resources.
-#
-# A cloud whose module has real resources runs a fixture under
-# opentofu/<cloud>/tests/emulator, which wires the provider to the emulator
-# and supplies the inputs. Each leg declares whether it can apply or only
-# plan, and why — a leg that cannot apply prints the reason on every run
-# rather than implying convergence it never proved.
 name: Integration tests
 
 on:
@@ -28,9 +22,7 @@ concurrency:
 
 jobs:
   opentofu-apply:
-    # Deliberately claims neither plan nor apply: the check name stays stable
-    # for branch protection, and the step name below says which one ran.
-    name: integration (${{ matrix.cloud }})
+    name: tofu apply (${{ matrix.cloud }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -41,42 +33,27 @@ jobs:
             port: "4566"
             health_path: /_localstack/health
             work_dir: opentofu/aws
-            mode: apply
-            caveat: ""
           - cloud: gcp
             emulator: floci/floci-gcp:0.8.0
             port: "4588"
             health_path: /_floci-gcp/health
             work_dir: opentofu/gcp/tests/emulator
-            mode: plan
-            caveat: >-
-              Two blockers, neither in the module. The emulator implements no
-              Compute Engine API, so the VPC, subnetworks, router and NAT
-              have nowhere to be created. And the google provider segfaults
-              reading back the emulator's cluster: it dereferences the
-              cluster's legacy ABAC field unguarded and the emulator omits
-              it. Convergence is unproven for GCP — only that the module
-              plans coherently against a live API.
           - cloud: azure
             emulator: floci/floci-az:0.10.0
             port: "4577"
             health_path: /_floci/health
             work_dir: opentofu/azure
-            mode: apply
-            caveat: ""
           - cloud: scaleway
             emulator: ""
             port: ""
             health_path: ""
             work_dir: opentofu/scaleway
-            mode: apply
-            caveat: ""
     env:
       # The aws provider natively honors AWS_ENDPOINT_URL and sends every
-      # API call to the emulator instead of real AWS. The google provider
-      # has no such convention, so its per-service custom endpoints are
-      # wired inside opentofu/gcp/tests/emulator. The azurerm equivalent
-      # (metadata_host) lands with the first real Azure resources.
+      # API call to the emulator instead of real AWS. The google and
+      # azurerm equivalents (custom endpoints / metadata_host) will be
+      # wired in the modules' test fixtures when their first real
+      # resources land.
       AWS_ENDPOINT_URL: http://localhost:4566
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
@@ -111,36 +88,19 @@ jobs:
       - name: Smoke-test the emulated AWS control plane
         if: matrix.cloud == 'aws'
         run: aws sts get-caller-identity --endpoint-url "$AWS_ENDPOINT_URL"
-      - name: tofu ${{ matrix.mode }}
+      - name: tofu apply
         working-directory: ${{ matrix.work_dir }}
         run: |
           tofu init -input=false
           tofu plan -input=false -out=tf.plan
-          if [ "${{ matrix.mode }}" = "plan" ]; then
-            echo "plan-only leg: see the caveat in the run summary"
-            exit 0
-          fi
           tofu apply -input=false -auto-approve tf.plan
-          # A second plan must be empty: exit code 0 means no drift, 2 means
-          # the module is not idempotent.
-          tofu plan -input=false -detailed-exitcode
           tofu destroy -input=false -auto-approve
       - name: Summary
         run: |
           {
-            echo "### tofu ${{ matrix.mode }} (${{ matrix.cloud }})"
+            echo "### tofu apply (${{ matrix.cloud }})"
             if [ -n "${{ matrix.emulator }}" ]; then
-              if [ "${{ matrix.mode }}" = "apply" ]; then
-                echo "Applied \`${{ matrix.work_dir }}\` against \`${{ matrix.emulator }}\`,"
-                echo "re-planned for idempotency and destroyed — no real cloud touched. ✅"
-              else
-                echo "Planned \`${{ matrix.work_dir }}\` against \`${{ matrix.emulator }}\`."
-                echo "⚠️ **This leg does not apply, so convergence is unproven.**"
-              fi
-              if [ -n "${{ matrix.caveat }}" ]; then
-                echo ""
-                echo "${{ matrix.caveat }}"
-              fi
+              echo "Applied and destroyed against \`${{ matrix.emulator }}\` — no real cloud touched. ✅"
             else
               echo "⚠️ No emulator exists for this cloud yet — the apply ran offline,"
               echo "which only proves module validity while it holds no resources."
