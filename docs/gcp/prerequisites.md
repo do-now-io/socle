@@ -5,7 +5,9 @@ socle foundations module. The module creates none of it.
 
 Each item can be done by hand in the Cloud Console — nothing is provided for
 that path — or from the command line. The commands for every item are
-gathered in [By command line](#by-command-line) at the end.
+gathered in [By command line](#by-command-line) at the end. The roles the
+apply itself needs are listed in
+[the minimal example](../../opentofu/gcp/examples/minimal/README.md).
 
 ## Account
 

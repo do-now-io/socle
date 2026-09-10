@@ -98,14 +98,14 @@ The workflow prints that caveat on every run.
 ## Requirements
 
 | Name | Version |
-| ---- | ------- |
+|------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.10 |
 | <a name="requirement_google"></a> [google](#requirement\_google) | >= 8.0, < 9.0 |
 
 ## Providers
 
 | Name | Version |
-| ---- | ------- |
+|------|---------|
 | <a name="provider_google"></a> [google](#provider\_google) | 8.1.0 |
 
 ## Modules
@@ -115,7 +115,7 @@ No modules.
 ## Resources
 
 | Name | Type |
-| ---- | ---- |
+|------|------|
 | [google_bigquery_dataset.billing_export](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/bigquery_dataset) | resource |
 | [google_compute_network.socle](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_network) | resource |
 | [google_compute_router.socle](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_router) | resource |
@@ -132,7 +132,7 @@ No modules.
 ## Inputs
 
 | Name | Description | Type | Default | Required |
-| ---- | ----------- | ---- | ------- | :------: |
+|------|-------------|------|---------|:--------:|
 | <a name="input_cluster_name"></a> [cluster\_name](#input\_cluster\_name) | Name of the GKE cluster. Also prefixes the network resources the module creates. | `string` | n/a | yes |
 | <a name="input_environment"></a> [environment](#input\_environment) | Environment this cluster serves. Stamped as a label, and the axis the upgrade ring order follows. | `string` | n/a | yes |
 | <a name="input_maintenance_window"></a> [maintenance\_window](#input\_maintenance\_window) | When GKE may touch this cluster. Required on purpose — a silent default<br/>would mean nobody decided when production gets upgraded, and the day of<br/>the week is what orders a dev/staging/prod ring.<br/><br/>start\_time and end\_time are RFC3339 timestamps whose difference is the<br/>window length; recurrence is an RFC5545 RRULE. At least 48 hours of<br/>maintenance availability must remain in any 92-day rolling window, and<br/>only contiguous blocks of four hours or more count. | <pre>object({<br/>    start_time = string<br/>    end_time   = string<br/>    recurrence = string<br/>  })</pre> | n/a | yes |
@@ -173,7 +173,7 @@ No modules.
 ## Outputs
 
 | Name | Description |
-| ---- | ----------- |
+|------|-------------|
 | <a name="output_billing_export_dataset"></a> [billing\_export\_dataset](#output\_billing\_export\_dataset) | Reference of the BigQuery dataset waiting for the detailed billing export. Null when none was requested. The billing account still has to be linked to it by hand. |
 | <a name="output_cluster_ca_certificate"></a> [cluster\_ca\_certificate](#output\_cluster\_ca\_certificate) | Base64-encoded cluster CA certificate, for building a kubeconfig. |
 | <a name="output_cluster_dns_endpoint"></a> [cluster\_dns\_endpoint](#output\_cluster\_dns\_endpoint) | The control plane's DNS endpoint — the access path the socle and its automation use. Stable for the life of the cluster and authorised by IAM. |

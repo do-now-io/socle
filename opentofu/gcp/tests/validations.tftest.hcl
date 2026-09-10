@@ -133,6 +133,48 @@ run "proxy_only_range_smaller_than_a_slash_26_is_rejected" {
   expect_failures = [var.proxy_only_range_cidr]
 }
 
+run "network_name_and_create_network_are_mutually_exclusive" {
+  command = plan
+
+  variables {
+    network_name = "an-existing-vpc"
+  }
+
+  expect_failures = [var.network_name]
+}
+
+run "subnetwork_name_is_required_without_create_subnetwork" {
+  command = plan
+
+  variables {
+    create_subnetwork = false
+    pod_range_name    = "someone-elses-pods"
+  }
+
+  expect_failures = [var.subnetwork_name]
+}
+
+run "pod_range_name_is_required_without_create_subnetwork" {
+  command = plan
+
+  variables {
+    create_subnetwork = false
+    subnetwork_name   = "an-existing-subnet"
+  }
+
+  expect_failures = [var.pod_range_name]
+}
+
+run "private_nodes_on_an_owned_subnetwork_cannot_go_without_nat" {
+  command = plan
+
+  variables {
+    create_nat = false
+  }
+
+  expect_failures = [var.create_nat]
+}
+
 # --- Upgrades --------------------------------------------------------------
 
 run "extended_channel_is_rejected_because_autopilot_forbids_it" {
