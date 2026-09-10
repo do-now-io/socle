@@ -1,0 +1,21 @@
+formatter: markdown
+
+# The resolved provider version is read from a lock file. A module carries
+# none on purpose, so that version is whatever the last init happened to
+# pick — it cannot be committed, and it is not the contract anyway. The
+# Requirements section keeps the constraint, which is.
+sections:
+  hide:
+    - providers
+output:
+  file: README.md
+  mode: inject
+sort:
+  enabled: true
+  by: required
+settings:
+  anchor: true
+  default: true
+  description: true
+  required: true
+  type: true
