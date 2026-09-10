@@ -57,10 +57,6 @@ simply never arrives.
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.10 |
 | <a name="requirement_google"></a> [google](#requirement\_google) | >= 8.0, < 9.0 |
 
-## Providers
-
-No providers.
-
 ## Modules
 
 | Name | Source | Version |

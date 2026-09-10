@@ -79,7 +79,7 @@ Nothing breaks without that step — the cost data simply never arrives.
 ## Tests
 
 ```bash
-tofu test          # 32 runs: every validation, and the defaults
+tofu test          # 36 runs: every validation, and the defaults
 ```
 
 Integration: CI plans [`tests/emulator`](tests/emulator) against the floci-gcp
@@ -101,12 +101,6 @@ The workflow prints that caveat on every run.
 |------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.10 |
 | <a name="requirement_google"></a> [google](#requirement\_google) | >= 8.0, < 9.0 |
-
-## Providers
-
-| Name | Version |
-|------|---------|
-| <a name="provider_google"></a> [google](#provider\_google) | 8.1.0 |
 
 ## Modules
 
