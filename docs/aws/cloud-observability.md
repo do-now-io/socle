@@ -22,7 +22,7 @@ Managed services around a cluster, cost data, and quota signals — read from a 
 - Native AWS service metrics are **free to ingest** — cost only appears on the read side. One exception: S3 **request metrics** (opt-in, per-prefix) are billed at the custom-metric rate — excluded from the standard perimeter for that reason.
 - Reading is billed **per metric requested** via `GetMetricData` — $0.01 per 1,000 metrics, batched up to 500 metrics/call.
 
-A perimeter of ~100 time series across the ten services below:
+A perimeter of ~100 time series across the nine services below:
 
 
 | Scrape interval | Per month |
@@ -50,7 +50,6 @@ The criterion for the standard perimeter, applied to every row below: **systemat
 | S3 (storage metrics)        | none                                  | Standard perimeter — request metrics are a catalog option, not default     |
 | SQS, SNS                    | none                                  | Standard perimeter — oldest-message age is the alert that matters          |
 | Lambda                      | none                                  | Standard perimeter                                                         |
-| DynamoDB                    | none                                  | Standard perimeter                                                         |
 | Load balancers, NAT Gateway | none                                  | Standard perimeter — NAT port-allocation errors are the alert that matters |
 | Quotas                      | none                                  | Standard perimeter                                                         |
 
@@ -84,7 +83,7 @@ The criterion for the standard perimeter, applied to every row below: **systemat
 
 ## Cost impact
 
-Reference perimeter: ~100 time series across the ten services above, 300s interval, list price.
+Reference perimeter: ~100 time series across the nine services above, 300s interval, list price.
 
 
 |                                                    | Per month             |

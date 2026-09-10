@@ -53,7 +53,7 @@ A client is billed for whichever one they actually provision, not both — so th
 - Not optional: the module has no all-public escape hatch. The private subnet exists structurally, whether or not a given client's workloads use it.
 - This is also the precondition for everything else in this section — NAT Gateway and the endpoint choices below only mean something because nodes run in the private tier.
 
-**Decision.** Gateway endpoints (S3, DynamoDB) always on; Interface endpoints (ECR, STS, EC2, CloudWatch Logs) standard; NAT Gateway per AZ for what's left.
+**Decision.** Gateway endpoint (S3) always on; Interface endpoints (ECR, STS, EC2, CloudWatch Logs) standard; NAT Gateway per AZ for what's left.
 
 - Gateway endpoints are strictly free — no hourly charge, no data processing fee. No reason not to have them.
 - Interface endpoints (ECR, STS, EC2, CloudWatch Logs) aren't chosen for savings — at the traffic volumes a cluster's own AWS-API calls realistically produce, the cost is low either way and the gap between routing that traffic via NAT or via an endpoint is a few dollars a month (table below). The reason to standardize on them is isolation: STS and EC2 calls (Pod Identity, Karpenter) are load-bearing for the cluster to function, and an endpoint keeps that traffic off the shared NAT path and off the public internet entirely, rather than competing with whatever else is using NAT.
