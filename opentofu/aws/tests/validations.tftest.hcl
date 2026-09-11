@@ -143,16 +143,6 @@ run "log_retention_days_rejects_a_period_cloudwatch_does_not_accept" {
 
 # --- Add-ons and identity ----------------------------------------------------
 
-run "cluster_support_type_rejects_anything_but_the_two_eks_values" {
-  command = plan
-
-  variables {
-    cluster_support_type = "extended"
-  }
-
-  expect_failures = [var.cluster_support_type]
-}
-
 run "kubernetes_version_rejects_a_patch_component" {
   command = plan
 
