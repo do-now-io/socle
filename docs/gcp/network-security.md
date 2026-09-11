@@ -70,11 +70,16 @@ clusters, Cloud NAT per region.
 
 | Range | Size | Why |
 | --- | --- | --- |
-| Nodes (primary) | `/24` | Autopilot node counts are small |
-| Pods (secondary) | `/17` | 32 Pods per node, so `/26` each: 512 nodes |
+| Nodes (primary) | `/22` | 1020 addresses, one per node plus the internal load balancers |
+| Pods (secondary) | `/16` | 32 Pods per node, so `/26` each: 1024 nodes |
 | Services | none | GKE manages its own range |
 | Proxy-only subnet | `/23` | No regional Gateway without it; `/26` is the minimum |
 | Control plane | none | The DNS endpoint removes it |
+
+The two are sized against different risks. A cluster's Pod range cannot be
+changed after creation, so it is sized for the estate we might grow into; the
+primary range can be widened in place with `gcloud compute networks subnets
+expand-ip-range`, so it only has to match the Pod range, not outlive a guess.
 
 Left to a project-layout decision: Shared VPC, and one project per
 environment — the latter is what isolates the principals flagged in
@@ -100,8 +105,8 @@ us-central1 list price, read 8 September 2026.
 | Variable | Default | Constraint |
 | --- | --- | --- |
 | `network_name` / `create_network` | existing VPC / `false` | exactly one of the two |
-| `node_range_cidr` | `"10.0.0.0/24"` | valid CIDR |
-| `pod_range_cidr` | `"10.4.0.0/17"` | `/17` or larger |
+| `node_range_cidr` | `"10.0.0.0/22"` | valid CIDR |
+| `pod_range_cidr` | `"10.4.0.0/16"` | `/17` or larger |
 | `proxy_only_range_cidr` | `"10.8.0.0/23"` | `/26` or larger |
 | `enable_private_nodes` | `true` | flips the Autopilot default |
 | `control_plane_ip_endpoints_enabled` | `false` | — |

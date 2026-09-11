@@ -2,7 +2,9 @@
 CLAUDE.md
 
 # OpenTofu / Terraform working files. Provider caches and state never belong
-# in the repository.
+# in the repository; lock files do, but only for the examples — a module that
+# carries a lock constrains its consumers.
+
 .terraform/
 .terraform.tfstate.lock.info
 *.tfstate
@@ -21,3 +23,7 @@ override.tf.json
 # examples' locks are committed, which is why they are not matched here.
 /opentofu/*/.terraform.lock.hcl
 /opentofu/*/tests/*/.terraform.lock.hcl
+
+# Live root configurations pointed at a real account. Backend blocks, tfvars
+# and anything else that belongs to one environment stay out of the module.
+/live/
