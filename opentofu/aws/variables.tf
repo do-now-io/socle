@@ -241,34 +241,6 @@ variable "force_update_version" {
   default     = false
 }
 
-variable "cluster_support_type" {
-  description = <<-EOT
-    What happens when this cluster's Kubernetes version reaches the end of
-    standard support, 14 months after its EKS release.
-
-    EXTENDED, the default here and AWS's own: nothing is upgraded. The cluster
-    enters extended support and the control plane goes from $0.10 to $0.60 an
-    hour — around +$365 a month — until it is moved back onto a supported
-    version. The socle pipelines keep deciding when that happens, which is the
-    whole point of owning the version ceiling.
-
-    STANDARD: AWS upgrades the cluster itself at the end of standard support,
-    on its own schedule, and no extended-support charge is ever possible. It
-    trades a silent bill for a control plane upgrade nobody here scheduled.
-
-    Not reversible under pressure: a cluster already in extended support cannot
-    be moved to STANDARD until it is upgraded onto a version still in standard
-    support.
-  EOT
-  type        = string
-  default     = "EXTENDED"
-
-  validation {
-    condition     = contains(["EXTENDED", "STANDARD"], var.cluster_support_type)
-    error_message = "cluster_support_type must be EXTENDED or STANDARD — the two values the EKS upgrade policy accepts."
-  }
-}
-
 # Pod Identity is the only workload-identity mechanism this module would use —
 # IRSA is absent, not toggled off: AWS's own recommendation, and its EC2-only
 # restriction matches Socle's EC2-only scope exactly. No association is created
