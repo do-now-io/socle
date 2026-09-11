@@ -71,6 +71,11 @@ such in the code rather than dressed up with a citation that doesn't exist:
   left unset, a cluster that falls out of standard support moves to the 6x
   control plane rate without anyone having decided that, and it cannot be
   moved back until it is upgraded.
+- **A customer-managed KMS key on both log groups** — CloudWatch Logs already
+  encrypts at rest with an AWS-owned key, so this buys custody rather than
+  encryption. It is worth one key because the control plane audit stream is
+  the record of who did what to the API server, and because the module already
+  spends the same dollar on the Secrets key for the same reason.
 - **`log_retention_days` default (90)** — arbitrary. What is not arbitrary is
   that the module creates both log groups itself: a group EKS or VPC flow
   logs create implicitly never expires, and nobody notices until the bill
@@ -166,6 +171,7 @@ No modules.
 | [aws_iam_role_policy_attachment.crossplane](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_iam_role_policy_attachment.ebs_csi](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_internet_gateway.socle](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/internet_gateway) | resource |
+| [aws_kms_key.logs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/kms_key) | resource |
 | [aws_kms_key.secrets](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/kms_key) | resource |
 | [aws_nat_gateway.socle](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/nat_gateway) | resource |
 | [aws_route_table.private](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route_table) | resource |
@@ -178,6 +184,7 @@ No modules.
 | [aws_vpc.socle](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc) | resource |
 | [aws_vpc_endpoint.interface](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_endpoint) | resource |
 | [aws_vpc_endpoint.s3](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_endpoint) | resource |
+| [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
 | [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/region) | data source |
 
 ## Inputs

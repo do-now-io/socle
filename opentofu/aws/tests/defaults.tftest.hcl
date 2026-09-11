@@ -1,9 +1,8 @@
 # A consumer who sets nothing gets the recommended configuration. These runs
 # assert that, and that the preconditions guarding incoherent inputs fire.
 #
-# Static credentials and skip_*_validation keep the plan offline: nothing
-# here refreshes state or reads an existing resource, so no API call is
-# made.
+# Static credentials, skip_*_validation and the override below keep the plan
+# offline: nothing here refreshes state or reads an existing resource.
 
 provider "aws" {
   region                      = "eu-west-3"
@@ -12,6 +11,17 @@ provider "aws" {
   skip_credentials_validation = true
   skip_requesting_account_id  = true
   skip_region_validation      = true
+}
+
+# data.aws_caller_identity is the one data source in this module that calls an
+# API: the log encryption key's policy names the account root, and a key policy
+# that omits it is unmanageable. Stubbed rather than reached, so these runs stay
+# credential-free. data.aws_region resolves from provider config and needs none.
+override_data {
+  target = data.aws_caller_identity.current
+  values = {
+    account_id = "000000000000"
+  }
 }
 
 variables {
@@ -122,6 +132,11 @@ run "defaults_are_the_recommended_position" {
   assert {
     condition     = length(aws_eks_cluster.socle.enabled_cluster_log_types) == 5
     error_message = "All five control plane log types must be on by default — audit and authenticator are the only record of who did what."
+  }
+
+  assert {
+    condition     = aws_kms_key.logs.enable_key_rotation == true
+    error_message = "The log encryption key must rotate: it outlives every log group it encrypts."
   }
 
   assert {
