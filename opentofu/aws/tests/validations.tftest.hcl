@@ -162,13 +162,3 @@ run "kubernetes_version_rejects_a_patch_component" {
 
   expect_failures = [var.kubernetes_version]
 }
-
-run "crossplane_policy_arns_must_be_iam_policy_arns" {
-  command = plan
-
-  variables {
-    crossplane_policy_arns = ["AmazonS3ReadOnlyAccess"]
-  }
-
-  expect_failures = [var.crossplane_policy_arns]
-}

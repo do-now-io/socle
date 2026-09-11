@@ -21,13 +21,3 @@ output "oidc_issuer_url" {
   description = "The cluster's OIDC issuer URL."
   value       = module.socle.oidc_issuer_url
 }
-
-output "crossplane_role_arn" {
-  description = "Identity the in-cluster Crossplane provider assumes."
-  value       = module.socle.crossplane_role_arn
-}
-
-output "crossplane_service_account_kubernetes_binding" {
-  description = "The Kubernetes service account bound to that identity."
-  value       = module.socle.crossplane_service_account_kubernetes_binding
-}
