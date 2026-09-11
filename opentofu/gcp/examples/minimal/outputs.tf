@@ -27,11 +27,6 @@ output "workload_identity_pool" {
   value       = module.socle.workload_identity_pool
 }
 
-output "crossplane_service_account_email" {
-  description = "Identity the in-cluster Crossplane provider assumes."
-  value       = module.socle.crossplane_service_account_email
-}
-
 output "upgrade_notifications_topic" {
   description = "Pub/Sub topic carrying GKE upgrade notifications."
   value       = module.socle.upgrade_notifications_topic

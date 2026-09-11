@@ -2,8 +2,7 @@
 # that CI proves the module converges — init, plan, apply, destroy — without a
 # cloud account or a secret.
 #
-# What this covers: the GKE cluster, the Crossplane service account and its
-# Workload Identity binding, the project role bindings, and the
+# What this covers: the GKE cluster, the project role bindings, and the
 # upgrade-notification topic.
 #
 # What it cannot cover: floci-gcp emulates no Compute Engine API, so the VPC,
@@ -61,7 +60,7 @@ module "socle" {
   }
 
   # Exercises the project IAM read-modify-write path.
-  crossplane_project_roles = ["roles/pubsub.publisher"]
+  observability_reader_members = ["serviceAccount:reader@socle-emulator.iam.gserviceaccount.com"]
 
   # The fixture destroys what it creates.
   deletion_protection = false
@@ -70,11 +69,6 @@ module "socle" {
 output "cluster_name" {
   description = "Proves the cluster came back from the emulator."
   value       = module.socle.cluster_name
-}
-
-output "crossplane_service_account_email" {
-  description = "Proves the identity the socle needs was created and bound."
-  value       = module.socle.crossplane_service_account_email
 }
 
 output "upgrade_notifications_topic" {

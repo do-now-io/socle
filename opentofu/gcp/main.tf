@@ -1,8 +1,8 @@
 # Socle foundations for Google Cloud.
 #
-# One flat root module: network, GKE cluster and identities. It provisions an
-# empty-shell Autopilot cluster and the identities the Flux-pulled socle needs,
-# then steps away. Everything above that — the catalog, the observability
+# One flat root module: network, GKE cluster and the project-level bindings
+# that go with it. It provisions an empty-shell Autopilot cluster, then steps
+# away. Everything above that — the catalog, the observability
 # stack, application infrastructure — arrives through the socle OCI artifact
 # and Crossplane.
 #
@@ -43,6 +43,4 @@ locals {
   # Derived, not configurable: Autopilot enforces Workload Identity Federation
   # and the pool name follows the project.
   workload_identity_pool = "${var.project_id}.svc.id.goog"
-
-  crossplane_workload_identity_member = "serviceAccount:${local.workload_identity_pool}[${var.crossplane_service_account_namespace}/${var.crossplane_service_account_name}]"
 }

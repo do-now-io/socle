@@ -2,8 +2,7 @@
 
 A socle foundation with everything left at its recommended position: an
 Autopilot cluster on the Regular release channel, private nodes, a DNS-based
-control plane endpoint, Cloud NAT, and the identity the in-cluster Crossplane
-provider assumes.
+control plane endpoint and Cloud NAT.
 
 ```bash
 tofu init
@@ -33,7 +32,6 @@ Federation, never a key — needs, on the target project:
 | --- | --- |
 | `roles/container.admin` | the GKE cluster |
 | `roles/compute.networkAdmin` | VPC, subnetworks, router and NAT |
-| `roles/iam.serviceAccountAdmin` | the Crossplane service account |
 | `roles/resourcemanager.projectIamAdmin` | binding roles to it |
 | `roles/pubsub.admin` | the upgrade-notification topic |
 | `roles/bigquery.admin` | only when `billing_export_dataset_id` is set |
@@ -84,7 +82,6 @@ No resources.
 | <a name="output_cluster_ca_certificate"></a> [cluster\_ca\_certificate](#output\_cluster\_ca\_certificate) | Base64-encoded cluster CA certificate. |
 | <a name="output_cluster_dns_endpoint"></a> [cluster\_dns\_endpoint](#output\_cluster\_dns\_endpoint) | Control plane DNS endpoint. |
 | <a name="output_cluster_name"></a> [cluster\_name](#output\_cluster\_name) | Name of the cluster. |
-| <a name="output_crossplane_service_account_email"></a> [crossplane\_service\_account\_email](#output\_crossplane\_service\_account\_email) | Identity the in-cluster Crossplane provider assumes. |
 | <a name="output_oidc_issuer_url"></a> [oidc\_issuer\_url](#output\_oidc\_issuer\_url) | The cluster's OIDC issuer URL. |
 | <a name="output_upgrade_notifications_topic"></a> [upgrade\_notifications\_topic](#output\_upgrade\_notifications\_topic) | Pub/Sub topic carrying GKE upgrade notifications. |
 | <a name="output_workload_identity_pool"></a> [workload\_identity\_pool](#output\_workload\_identity\_pool) | The Workload Identity Federation pool. |

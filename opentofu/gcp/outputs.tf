@@ -43,16 +43,6 @@ output "workload_identity_principal_prefix" {
   value       = "principal://iam.googleapis.com/projects/${var.project_id}/locations/global/workloadIdentityPools/${local.workload_identity_pool}/subject"
 }
 
-output "crossplane_service_account_email" {
-  description = "The identity the in-cluster Crossplane GCP provider assumes. Annotate the provider's Kubernetes service account with it: iam.gke.io/gcp-service-account."
-  value       = google_service_account.crossplane.email
-}
-
-output "crossplane_service_account_kubernetes_binding" {
-  description = "The Kubernetes service account bound to that identity, as namespace/name. Must match the socle's DeploymentRuntimeConfig."
-  value       = "${var.crossplane_service_account_namespace}/${var.crossplane_service_account_name}"
-}
-
 output "upgrade_notifications_topic" {
   description = "Pub/Sub topic carrying GKE upgrade and security bulletin notifications. Null when notifications are disabled."
   value       = var.enable_upgrade_notifications ? google_pubsub_topic.upgrade_notifications[0].id : null

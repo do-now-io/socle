@@ -46,7 +46,6 @@ Every default traces back to a research document. The short version:
 | Private nodes on, flipping Autopilot's default | default | [network & security](../../docs/gcp/network-security.md) |
 | DNS-based control plane endpoint, IP endpoints off | default | [network & security](../../docs/gcp/network-security.md) |
 | No Services secondary range — GKE manages it | enforced | [network & security](../../docs/gcp/network-security.md) |
-| Crossplane's Google service account created here | enforced | [managed scope](../../docs/gcp/managed-scope.md) |
 
 ## What is deliberately absent
 
@@ -79,7 +78,7 @@ Nothing breaks without that step — the cost data simply never arrives.
 ## Tests
 
 ```bash
-tofu test          # 36 runs: every validation, and the defaults
+tofu test          # 35 runs: every validation, and the defaults
 ```
 
 Integration: CI plans [`tests/emulator`](tests/emulator) against the floci-gcp
@@ -117,11 +116,8 @@ No modules.
 | [google_compute_subnetwork.proxy_only](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_subnetwork) | resource |
 | [google_compute_subnetwork.socle](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_subnetwork) | resource |
 | [google_container_cluster.socle](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/container_cluster) | resource |
-| [google_project_iam_member.crossplane](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/project_iam_member) | resource |
 | [google_project_iam_member.observability_reader](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/project_iam_member) | resource |
 | [google_pubsub_topic.upgrade_notifications](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/pubsub_topic) | resource |
-| [google_service_account.crossplane](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/service_account) | resource |
-| [google_service_account_iam_member.crossplane_workload_identity](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/service_account_iam_member) | resource |
 
 ## Inputs
 
@@ -144,9 +140,6 @@ No modules.
 | <a name="input_create_network"></a> [create\_network](#input\_create\_network) | Create the VPC instead of using an existing one. The common case is a network the consumer already owns. | `bool` | `false` | no |
 | <a name="input_create_proxy_only_subnet"></a> [create\_proxy\_only\_subnet](#input\_create\_proxy\_only\_subnet) | Create the proxy-only subnetwork. Set to false when another cluster in the same region and VPC already created it — the pool is shared. | `bool` | `true` | no |
 | <a name="input_create_subnetwork"></a> [create\_subnetwork](#input\_create\_subnetwork) | Create the cluster subnetwork. Set to false in a Shared VPC where the network team owns subnets, and supply subnetwork\_name and pod\_range\_name instead. | `bool` | `true` | no |
-| <a name="input_crossplane_project_roles"></a> [crossplane\_project\_roles](#input\_crossplane\_project\_roles) | Project roles granted to the identity the in-cluster Crossplane provider assumes. Empty by default: the catalog does not exist yet, and a list written today would be a guess. | `list(string)` | `[]` | no |
-| <a name="input_crossplane_service_account_name"></a> [crossplane\_service\_account\_name](#input\_crossplane\_service\_account\_name) | Name of the Crossplane GCP provider's Kubernetes service account. Must match the socle's DeploymentRuntimeConfig — the provider Pod's service account name is not stable across provider revisions unless it is pinned there. | `string` | `"provider-gcp"` | no |
-| <a name="input_crossplane_service_account_namespace"></a> [crossplane\_service\_account\_namespace](#input\_crossplane\_service\_account\_namespace) | Namespace of the Crossplane GCP provider's Kubernetes service account. | `string` | `"crossplane-system"` | no |
 | <a name="input_deletion_protection"></a> [deletion\_protection](#input\_deletion\_protection) | Refuse to destroy the cluster. On by default; test fixtures turn it off. | `bool` | `true` | no |
 | <a name="input_enable_private_nodes"></a> [enable\_private\_nodes](#input\_enable\_private\_nodes) | Nodes get no external address. Flips the Autopilot default, which is public. | `bool` | `true` | no |
 | <a name="input_enable_upgrade_notifications"></a> [enable\_upgrade\_notifications](#input\_enable\_upgrade\_notifications) | Create a Pub/Sub topic and publish cluster upgrade notifications to it, so automation can react instead of polling. | `bool` | `true` | no |
@@ -174,8 +167,6 @@ No modules.
 | <a name="output_cluster_endpoint"></a> [cluster\_endpoint](#output\_cluster\_endpoint) | IP endpoint of the control plane. Empty when IP endpoints are disabled, which is the default. |
 | <a name="output_cluster_location"></a> [cluster\_location](#output\_cluster\_location) | Region of the cluster. Regional by default; there is no zonal option. |
 | <a name="output_cluster_name"></a> [cluster\_name](#output\_cluster\_name) | Name of the GKE cluster. |
-| <a name="output_crossplane_service_account_email"></a> [crossplane\_service\_account\_email](#output\_crossplane\_service\_account\_email) | The identity the in-cluster Crossplane GCP provider assumes. Annotate the provider's Kubernetes service account with it: iam.gke.io/gcp-service-account. |
-| <a name="output_crossplane_service_account_kubernetes_binding"></a> [crossplane\_service\_account\_kubernetes\_binding](#output\_crossplane\_service\_account\_kubernetes\_binding) | The Kubernetes service account bound to that identity, as namespace/name. Must match the socle's DeploymentRuntimeConfig. |
 | <a name="output_labels"></a> [labels](#output\_labels) | The standard label set applied to every billable resource this module creates. |
 | <a name="output_network_name"></a> [network\_name](#output\_network\_name) | Name of the VPC the cluster is attached to, whether the module created it or not. |
 | <a name="output_oidc_issuer_url"></a> [oidc\_issuer\_url](#output\_oidc\_issuer\_url) | The cluster's OIDC issuer, for federating an external identity provider against this cluster. |

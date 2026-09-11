@@ -24,7 +24,6 @@ apply itself needs are listed in
 | `serviceusage.googleapis.com` | enabling the others |
 | `compute.googleapis.com` | VPC, subnetworks, router, Cloud NAT |
 | `container.googleapis.com` | the Autopilot cluster |
-| `iam.googleapis.com` | the Crossplane service account |
 | `pubsub.googleapis.com` | only when `enable_upgrade_notifications` is true (default) |
 | `bigquery.googleapis.com` | only when `billing_export_dataset_id` is set |
 
@@ -35,7 +34,6 @@ apply itself needs are listed in
 | `roles/serviceusage.serviceUsageAdmin` | enable the APIs above |
 | `roles/compute.networkAdmin` | network, subnetworks, router, NAT |
 | `roles/container.admin` | the cluster |
-| `roles/iam.serviceAccountAdmin` | the service account and its bindings |
 | `roles/resourcemanager.projectIamAdmin` | project-level role bindings |
 | `roles/storage.admin` | creating the state bucket — one-time; the apply principal itself needs only object access on that bucket |
 | `roles/pubsub.admin` | only with upgrade notifications |
@@ -173,7 +171,6 @@ gcloud services enable \
   serviceusage.googleapis.com \
   compute.googleapis.com \
   container.googleapis.com \
-  iam.googleapis.com \
   pubsub.googleapis.com \
   bigquery.googleapis.com \
   --project="$PROJECT_ID"
@@ -186,7 +183,6 @@ for ROLE in \
   roles/serviceusage.serviceUsageAdmin \
   roles/compute.networkAdmin \
   roles/container.admin \
-  roles/iam.serviceAccountAdmin \
   roles/resourcemanager.projectIamAdmin \
   roles/storage.admin \
   roles/pubsub.admin \

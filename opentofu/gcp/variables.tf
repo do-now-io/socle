@@ -401,33 +401,9 @@ variable "observability_reader_members" {
 # ---------------------------------------------------------------------------
 
 # Workload Identity Federation has no variable: Autopilot pre-configures it and
-# it cannot be disabled. The pool is exposed as an output.
-
-variable "crossplane_service_account_namespace" {
-  description = "Namespace of the Crossplane GCP provider's Kubernetes service account."
-  type        = string
-  default     = "crossplane-system"
-}
-
-variable "crossplane_service_account_name" {
-  description = "Name of the Crossplane GCP provider's Kubernetes service account. Must match the socle's DeploymentRuntimeConfig — the provider Pod's service account name is not stable across provider revisions unless it is pinned there."
-  type        = string
-  default     = "provider-gcp"
-}
-
-variable "crossplane_project_roles" {
-  description = "Project roles granted to the identity the in-cluster Crossplane provider assumes. Empty by default: the catalog does not exist yet, and a list written today would be a guess."
-  type        = list(string)
-  default     = []
-
-  validation {
-    condition = alltrue([
-      for r in var.crossplane_project_roles :
-      can(regex("^(roles/|projects/[^/]+/roles/|organizations/[0-9]+/roles/)", r))
-    ])
-    error_message = "Each role must be a role name such as roles/cloudsql.admin or a fully qualified custom role."
-  }
-}
+# it cannot be disabled. The pool is exposed as an output, and binding a
+# Kubernetes service account to a Google one belongs to the layer that owns
+# those objects.
 
 # ---------------------------------------------------------------------------
 # Lifecycle

@@ -352,15 +352,3 @@ run "observability_readers_must_be_qualified_principals" {
 
   expect_failures = [var.observability_reader_members]
 }
-
-# --- Identities ------------------------------------------------------------
-
-run "crossplane_roles_must_be_role_names" {
-  command = plan
-
-  variables {
-    crossplane_project_roles = ["cloudsql.admin"]
-  }
-
-  expect_failures = [var.crossplane_project_roles]
-}
