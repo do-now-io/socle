@@ -101,8 +101,8 @@ run "defaults_are_the_recommended_position" {
   }
 
   assert {
-    condition     = one(aws_eks_cluster.socle.upgrade_policy).support_type == "EXTENDED"
-    error_message = "Support type must be set explicitly, even to AWS's own default: leaving it unset is how a cluster ends up on the 6x rate without anyone choosing it."
+    condition     = one(aws_eks_cluster.socle.upgrade_policy).support_type == "STANDARD"
+    error_message = "Extended support must be impossible, not merely discouraged: AWS's own default is EXTENDED, and a cluster that enters it cannot leave until it is upgraded."
   }
 
   assert {

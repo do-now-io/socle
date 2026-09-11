@@ -48,7 +48,7 @@ Every default traces back to a research document. The short version:
 | Control plane logs (all five streams) and VPC flow logs on | default | [network & security](../../docs/aws/eks-network-security.md) |
 | Pod Identity exclusively, IRSA absent | enforced | [managed scope](../../docs/aws/eks-managed-scope.md) |
 | VPC CNI and kube-proxy refused — never installed at all (`bootstrap_self_managed_addons = false`) | enforced | [managed scope](../../docs/aws/eks-managed-scope.md) |
-| End of standard support: cluster stays put, socle pipelines decide when to upgrade (`EXTENDED`) | default | [managed scope](../../docs/aws/eks-managed-scope.md) |
+| End of standard support: AWS upgrades the cluster rather than billing extended support (`STANDARD`) | enforced | [managed scope](../../docs/aws/eks-managed-scope.md) |
 | CoreDNS, EBS CSI, EFS CSI and the Pod Identity Agent stay EKS-managed add-ons — installed by the factory, not here | absent | [managed scope](../../docs/aws/eks-managed-scope.md) |
 | Workload identities (Crossplane, EBS CSI) belong to the layer that installs their pods | absent | [managed scope](../../docs/aws/eks-managed-scope.md) |
 
@@ -62,11 +62,12 @@ such in the code rather than dressed up with a citation that doesn't exist:
 - **`access_config.authentication_mode = "API"`** — the aws-auth ConfigMap
   is legacy; the apply-time principal keeps default cluster-admin access,
   enough to bootstrap Flux.
-- **Setting `upgrade_policy.support_type` at all** — the value chosen is
-  AWS's own default, so this changes no behaviour. Writing it down does:
-  left unset, a cluster that falls out of standard support moves to the 6x
-  control plane rate without anyone having decided that, and it cannot be
-  moved back until it is upgraded.
+- **`upgrade_policy.support_type = "STANDARD"`, with no variable** — the
+  policy is that a cluster never enters extended support, so an option to
+  enter it is an option we would not recommend. AWS's own default is exactly
+  that option, and a cluster that takes it cannot leave until it is upgraded.
+  Hardcoding STANDARD makes the rule true rather than pious: if the socle
+  pipeline does its job, it never fires.
 - **A customer-managed KMS key on both log groups** — CloudWatch Logs already
   encrypts at rest with an AWS-owned key, so this buys custody rather than
   encryption. It is worth one key because the control plane audit stream is
@@ -115,7 +116,7 @@ and tested, so these are refusals:
 ## Tests
 
 ```bash
-tofu test          # 13 runs: every validation, and the defaults
+tofu test          # 12 runs: every validation, and the defaults
 ```
 
 `tests/emulator/` runs the module against the floci emulator in CI, no cloud
@@ -204,7 +205,6 @@ No modules.
 | <a name="input_owner"></a> [owner](#input\_owner) | Stamped on every billable resource so cost can be attributed and orphans can be found. | `string` | n/a | yes |
 | <a name="input_additional_tags"></a> [additional\_tags](#input\_additional\_tags) | Extra tags merged onto every resource this module creates, on top of owner/environment/socle-version. | `map(string)` | `{}` | no |
 | <a name="input_cluster_log_types"></a> [cluster\_log\_types](#input\_cluster\_log\_types) | Control plane log types shipped to CloudWatch Logs. All five by default:<br/>the audit and authenticator streams are the only record of who did what<br/>to the API server, which ISO 27001 A.8.15 and SOC 2 CC7 both expect, and<br/>the same argument that puts a private subnet tier in every VPC applies<br/>here. Trim the list to cut ingestion cost; an empty list turns control<br/>plane logging off entirely. | `list(string)` | <pre>[<br/>  "api",<br/>  "audit",<br/>  "authenticator",<br/>  "controllerManager",<br/>  "scheduler"<br/>]</pre> | no |
-| <a name="input_cluster_support_type"></a> [cluster\_support\_type](#input\_cluster\_support\_type) | What happens when this cluster's Kubernetes version reaches the end of<br/>standard support, 14 months after its EKS release.<br/><br/>EXTENDED, the default here and AWS's own: nothing is upgraded. The cluster<br/>enters extended support and the control plane goes from $0.10 to $0.60 an<br/>hour — around +$365 a month — until it is moved back onto a supported<br/>version. The socle pipelines keep deciding when that happens, which is the<br/>whole point of owning the version ceiling.<br/><br/>STANDARD: AWS upgrades the cluster itself at the end of standard support,<br/>on its own schedule, and no extended-support charge is ever possible. It<br/>trades a silent bill for a control plane upgrade nobody here scheduled.<br/><br/>Not reversible under pressure: a cluster already in extended support cannot<br/>be moved to STANDARD until it is upgraded onto a version still in standard<br/>support. | `string` | `"EXTENDED"` | no |
 | <a name="input_create_nat_gateway"></a> [create\_nat\_gateway](#input\_create\_nat\_gateway) | Create one NAT Gateway per AZ. One per AZ, never a single shared one, to<br/>avoid cross-AZ data transfer charges — not a toggle for disabling NAT<br/>outright, which the private-subnet decision above rules out. Exists<br/>only for the create\_vpc = false case, where the consumer's existing VPC<br/>already manages its own NAT. | `bool` | `true` | no |
 | <a name="input_create_vpc"></a> [create\_vpc](#input\_create\_vpc) | Create the VPC, or attach to one the consumer already manages. | `bool` | `true` | no |
 | <a name="input_force_update_version"></a> [force\_update\_version](#input\_force\_update\_version) | Force the control plane version update even if Upgrade Insights reports<br/>blocking findings. Default false: Upgrade Insights is a mandatory<br/>pre-check, never sufficient alone (it only sees the client's own<br/>removed-API usage, over a rolling 30-day audit-log window that both<br/>misses infrequent calls and over-reports fixed ones) — but AWS's own<br/>blocking of `update-cluster-version` on ERROR findings is currently<br/>rolled back, so this module does not assume AWS enforces the check<br/>either. | `bool` | `false` | no |

@@ -116,11 +116,14 @@ resource "aws_eks_cluster" "socle" {
   # currently rolled back.
   force_update_version = var.force_update_version
 
-  # What happens at the end of standard support. Left unset, AWS picks
-  # EXTENDED and a lapsed cluster quietly costs six times its control plane
-  # rate — see cluster_support_type.
+  # Not a variable. The version policy is "never enter extended support", so an
+  # option to enter it is an option we would not recommend — and AWS's own
+  # default is exactly that. STANDARD makes the rule true instead of pious:
+  # AWS upgrades the cluster at the end of standard support rather than
+  # billing six times the control plane rate for staying put. If the socle
+  # pipeline does its job this never fires; it is a floor, not a schedule.
   upgrade_policy {
-    support_type = var.cluster_support_type
+    support_type = "STANDARD"
   }
 
   vpc_config {
