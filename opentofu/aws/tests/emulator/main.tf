@@ -7,16 +7,17 @@
 # where CI's throwaway values live instead.
 #
 # The leg stops at the plan, and that is an emulator limit, not a module one.
-# Measured against the image the workflow pins:
+# Measured against the image the workflow pins: 37 of the module's 39 resources
+# apply and destroy cleanly — the VPC and everything in it, the cluster, both
+# log groups, the flow log, the KMS keys and the roles. Two do not:
 #
-# - EKS CreateAddon is not emulated at all — the request falls through to the
-#   S3 handler and comes back as an S3 XML error.
-# - Only five AWS-managed policies exist there, and
-#   service-role/AmazonEBSCSIDriverPolicy is not among them.
+# - aws_iam_role_policy_attachment.ebs_csi — the emulator ships five
+#   AWS-managed policies and AmazonEBSCSIDriverPolicy is not one of them.
+# - aws_eks_pod_identity_association.crossplane — its EKS mock does not
+#   implement the Pod Identity association API.
 #
-# Everything else applies clean: the VPC, subnets, NAT, endpoints, the cluster
-# itself, both log groups, the flow log and all three identities. Either an
-# upstream fix or a fuller emulator flips this leg back to apply.
+# Neither is reachable from the module: one needs a policy AWS publishes, the
+# other an API the mock lacks. A fuller emulator flips this leg back to apply.
 
 variable "endpoint" {
   description = "Base URL of the floci emulator."
@@ -57,10 +58,6 @@ module "socle" {
 
   kubernetes_version                   = "1.34"
   cluster_endpoint_public_access_cidrs = ["203.0.113.0/32"]
-
-  coredns_addon_version            = "v1.11.4-eksbuild.10"
-  ebs_csi_addon_version            = "v1.44.0-eksbuild.1"
-  pod_identity_agent_addon_version = "v1.3.4-eksbuild.1"
 
   # Exercises the policy-attachment loop, which is empty by default.
   crossplane_policy_arns = ["arn:aws:iam::aws:policy/ReadOnlyAccess"]
