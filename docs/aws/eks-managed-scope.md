@@ -40,23 +40,13 @@ Note: the OIDC issuer URL is still exposed as an output (checklist requirement) 
 
 **Decision.** Policy ceiling n-1, socle compatibility floor n-2, two decoupled Kargo pipelines (socle release / Kubernetes version), support-margin floor the client cannot lower.
 
-- No release channel on EKS (unlike GKE) — the version bump is 100% ours to trigger.
-- Standard support 14 months; extended +12 months at a $0.50/hr surcharge, 6x the $0.10 base rate.
+- **Clusters are kept up to date and never enter extended support.** Extended support bills the control plane at 6x the standard rate, and a cluster that has entered it cannot leave until it is upgraded anyway. The module makes this structural rather than aspirational: `upgrade_policy.support_type` is `STANDARD`, not a variable, so AWS upgrades a lapsed cluster instead of billing for it.
+- EKS has no release channel: every version bump is ours to trigger, which is why the policy above needs a floor under it.
 - ~3.5 versions in standard support at once (3 releases/yr over 14mo support): n-1 leaves ~10 months margin, n-2 ~6, n-3 ~2. n-2 is the widest range still fully in standard support; n-1 is the tightest safe ceiling.
 - Decoupled pipelines so a socle hotfix reaches a client frozen on Kubernetes version. Cost: we own the compatibility matrix — a bidirectional guard is mandatory, declared inside the socle artifact, read by both pipelines. Kubernetes' own skew policy forces control-plane-before-data-plane ordering on top.
 - Kargo's native gates don't fit: `verification` runs after promotion (too late), `freightCreationCriteria` is global (compatibility is per-cluster).
 - Client-declared maintenance windows/freezes are enforced by our own scheduler, not the AWS API — and not by Kargo either: `PromotionWindow` (cron rules, freeze) merged to `main` in July 2026 marked Enterprise-only, OSS excluded.
 - A Kargo Warehouse only discovers git/image/chart Freight — the target Kubernetes version has to ride an artifact, not a bare string.
-
-Cost, reference estate from Analysis 1 (1 prod + 2 UAT, list price, 8 September 2026):
-
-|                                  | Per month | Δ               |
-| -------------------------------- | --------- | --------------- |
-| Three clusters, standard support | $219      | —               |
-| One lapses into extended         | $584      | +$365 (+167%)   |
-| All three lapse                  | $1,314    | +$1,095 (+500%) |
-
-Against that analysis's EC2 estate (~$2,400 on-demand, ~$500 Spot): all three lapsing adds ~46% to an on-demand bill, more than triples a Spot one.
 
 ## 4. Upgrade Insights: reliable enough to automate?
 
@@ -67,11 +57,31 @@ Against that analysis's EC2 estate (~$2,400 on-demand, ~$500 Spot): all three la
 - AWS's own blocking of `update-cluster-version` on `ERROR` findings is currently rolled back — an apply proceeds regardless, so this check must run as an explicit pipeline step, not be trusted to fail on its own.
 - Override available as `force_update_version` on `aws_eks_cluster`, default `false`.
 
+## 5. Backup: Velero or AWS Backup?
+
+**Decision.** Velero. AWS Backup refused as the default — the same reasoning that puts Cilium on all four clouds rather than each cloud's own CNI.
+
+AWS Backup does cover EKS: AWS lists "Amazon EKS clusters and persistent storage backups" among its supported resource types, so this is a real comparison, not a category error.
+
+**The storage cancels out.** Both options snapshot the same EBS volumes at the same rate, so the volume footprint appears on both sides of the table and drops out — exactly as the control plane fee does in the Auto Mode comparison of [Analysis 1](eks-cluster-mode.md). What is left:
+
+| | Cost of its own | Covers |
+| --- | --- | --- |
+| **Velero** | none — open source, and the snapshots are the shared term | Cluster objects plus CSI volume snapshots |
+| AWS Backup | a one-time backup creation fee per namespace backed up | Same, plus vault lock, cross-account fan-in and Audit Manager |
+
+That per-namespace fee is **not published**: the pricing page states the charge exists and gives no figure, and no EKS example appears in it. It is also, after the simplification above, the entire cost difference between the two options — so it is the one number to obtain before pricing this for a client.
+
+- **One restore procedure across four clouds.** The decision does not hinge on that missing figure. A per-cloud backup service means a per-cloud runbook, a per-cloud failure mode and a per-cloud rehearsal; Socle's position is that one procedure everywhere is worth more than a marginally better managed service on one of them.
+- **Both of Velero's modes are available here.** EKS Standard places no restriction on privileged Pods or writable `hostPath`, so the node-agent runs alongside the CSI snapshot path. That second mode writes file-level backups to S3 in a format that is not tied to an EBS snapshot — a copy that can be restored somewhere other than the account and region it was taken in.
+- **Not this module's job.** Velero is a pod, and its S3 bucket and IAM role are provisioned with it. Both arrive through the socle OCI artifact, not through the foundations module.
+
 ## Sources
 
 Read 8 September 2026.
 
 - [Update an add-on](https://docs.aws.amazon.com/eks/latest/userguide/updating-an-add-on.html)
+- [What is AWS Backup](https://docs.aws.amazon.com/aws-backup/latest/devguide/whatisbackup.html) · [AWS Backup pricing](https://aws.amazon.com/backup/pricing/) · [Velero](https://velero.io/docs/latest/)
 - [CreateCluster](https://docs.aws.amazon.com/eks/latest/APIReference/API_CreateCluster.html) · [Cilium kube-proxy-free](https://docs.cilium.io/en/stable/network/kubernetes/kubeproxy-free/) · [Cilium EKS requirements](https://docs.cilium.io/en/stable/installation/requirements-eks/)
 - [Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html) · [LB controller install](https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/deploy/installation/) · [Karpenter getting started](https://karpenter.sh/docs/getting-started/getting-started-with-karpenter/) · [Upbound AWS Pod Identity](https://docs.upbound.io/manuals/packages/providers/aws-auth/aws-pod-identity/)
 - [EKS Kubernetes versions](https://docs.aws.amazon.com/eks/latest/userguide/kubernetes-versions.html) · [EKS pricing](https://aws.amazon.com/eks/pricing/) · [K8s release cadence](https://kubernetes.io/releases/release/)
