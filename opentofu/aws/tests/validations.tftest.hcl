@@ -1,10 +1,10 @@
 # One failing-input case per validation block. A validation nobody tested
 # is a validation nobody knows works.
 #
-# Static credentials and skip_*_validation keep these runs credential-free:
-# variable validation fires before the plan graph, but the provider still
-# has to be configurable, and without this it goes looking for real AWS
-# credentials.
+# Static credentials, skip_*_validation and the override below keep these runs
+# credential-free: variable validation fires before the plan graph, but the
+# provider still has to be configurable, and the plan still resolves data
+# sources.
 
 provider "aws" {
   region                      = "eu-west-3"
@@ -13,6 +13,17 @@ provider "aws" {
   skip_credentials_validation = true
   skip_requesting_account_id  = true
   skip_region_validation      = true
+}
+
+# data.aws_caller_identity is the one data source in this module that calls an
+# API: the log encryption key's policy names the account root, and a key policy
+# that omits it is unmanageable. Stubbed rather than reached, so these runs stay
+# credential-free. data.aws_region resolves from provider config and needs none.
+override_data {
+  target = data.aws_caller_identity.current
+  values = {
+    account_id = "000000000000"
+  }
 }
 
 variables {

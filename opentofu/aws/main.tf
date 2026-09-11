@@ -16,6 +16,10 @@
 # resources are actually created in, by construction.
 data "aws_region" "current" {}
 
+# Needed to scope the log encryption key's policy to this account's own log
+# groups rather than granting CloudWatch Logs the key outright.
+data "aws_caller_identity" "current" {}
+
 locals {
   # Stamped onto every billable resource so cost can be attributed and
   # orphans can be found. Bumped with the module's own tag.

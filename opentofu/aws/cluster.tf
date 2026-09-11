@@ -14,6 +14,59 @@
 resource "aws_cloudwatch_log_group" "cluster" {
   name              = "/aws/eks/${var.cluster_name}/cluster"
   retention_in_days = var.log_retention_days
+  kms_key_id        = aws_kms_key.logs.arn
+
+  tags = local.tags
+}
+
+# One key for both log groups this module creates — the control plane's, just
+# below, and the VPC flow logs' in network.tf. CloudWatch Logs already encrypts
+# at rest with an AWS-owned key; this moves custody of that key to the account
+# that owns the logs, which is what an audit trail of who-did-what to the API
+# server warrants. Same price as the Secrets key above it, for the same reason.
+#
+# AWS advises a key per log group; both of these belong to one cluster, so a
+# second key would split nothing — the blast radius of losing either is that
+# same cluster. The policy is AWS's own account-scoped form, narrowed to
+# log groups.
+resource "aws_kms_key" "logs" {
+  description         = "Encryption for ${var.cluster_name} log groups."
+  enable_key_rotation = true
+
+  # CloudWatch Logs cannot use a key it is not named in, and a key whose policy
+  # omits the account root is unmanageable — both statements are required.
+  # The condition narrows the grant to this account's log groups instead of
+  # every log group the service handles.
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "AccountRootKeepsControl"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid       = "CloudWatchLogsUsesTheKey"
+        Effect    = "Allow"
+        Principal = { Service = "logs.${data.aws_region.current.region}.amazonaws.com" }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:Describe*",
+        ]
+        Resource = "*"
+        Condition = {
+          ArnLike = {
+            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:log-group:*"
+          }
+        }
+      },
+    ]
+  })
 
   tags = local.tags
 }
