@@ -1,0 +1,91 @@
+# EKS managed scope: add-ons, upgrades, identity
+
+Socle is a multi-cloud Kubernetes factory. [Analysis 1](eks-cluster-mode.md) settled how AWS clusters get their compute provisioned: EKS Standard, self-hosted Karpenter, Cilium, no Auto Mode. This document covers who owns each data-plane component, how workloads get AWS permissions, and how clusters get upgraded without ever paying Extended Support.
+
+Arbitration rule: reliable provider ops at a reasonable surcharge → delegated. Cheap to industrialise → factory.
+
+## 1. Add-ons: EKS-managed or GitOps?
+
+| Component          | Position           | Who operates                     | Notes                                                                   |
+| ------------------- | ------------------- | --------------------------------- | ------------------------------------------------------------------------ |
+| VPC CNI            | **Refused**        | Never installed                  | `bootstrap_self_managed_addons = false` at creation; replaced by Cilium |
+| kube-proxy         | **Refused**        | Never installed                  | Same flag; replaced by Cilium `kubeProxyReplacement`                    |
+| CoreDNS            | **Delegated**      | AWS packages / factory triggers  | Cluster-internal resolution only; External-DNS (record publishing, cross-cloud) is separate |
+| EBS CSI            | **Delegated**      | AWS packages / factory triggers  | Identity via `aws_eks_addon`'s own `pod_identity_association`           |
+| EFS CSI            | **Catalog option** | AWS packages / factory triggers  | RWX only; node component may need a separate association               |
+| Pod Identity Agent | **Delegated**      | AWS packages / factory triggers  | Prerequisite for all workload identity                                 |
+
+**Decision.** AWS-only components stay EKS add-ons; anything with a multi-cloud equivalent is the socle's.
+
+- EBS CSI, EFS CSI, Pod Identity Agent: no cross-cloud equivalent to keep uniform.
+- CoreDNS: the add-on already tracks the Kubernetes version AWS validated it against — redoing that buys nothing.
+- AWS never auto-updates an add-on — the trigger is always ours, so versions are pinned in the module, never resolved via `most_recent`.
+
+**Decision.** VPC CNI / kube-proxy never installed at all: the cluster is created with `bootstrap_self_managed_addons = false`.
+
+- Cilium documents delete-and-taint, not this flag — but that pattern is the retrofit path for a cluster already running `aws-node`. A module that creates the cluster has nothing to retrofit.
+- AWS documents the flag for exactly this case ("third-party alternative add-ons"), and has for several Kubernetes releases. CoreDNS is skipped by the same flag and comes back as a pinned managed add-on.
+- Consequence the factory inherits: no kube-proxy from the first node, so Cilium needs `kubeProxyReplacement` with an explicit `k8sServiceHost` / `k8sServicePort` — there is no ClusterIP to reach the API server through. Nodes join `NotReady` until Cilium is installed, which is true of either approach.
+
+## 2. Identity: Pod Identity or IRSA?
+
+**Decision.** Pod Identity, exclusively. IRSA absent from the module.
+
+- AWS's own recommendation; its EC2-only restriction matches our EC2-only scope exactly.
+- Verified per component: Crossplane, LB controller, both CSI drivers, Karpenter all support it.
+
+Note: the OIDC issuer URL is still exposed as an output (checklist requirement) — not IRSA, provisions nothing.
+
+## 3. Control plane version policy
+
+**Decision.** Policy ceiling n-1, socle compatibility floor n-2, two decoupled Kargo pipelines (socle release / Kubernetes version), support-margin floor the client cannot lower.
+
+- **Clusters are kept up to date and never enter extended support.**
+- EKS has no release channel: every version bump is ours to trigger.
+- ~3.5 versions in standard support at once (3 releases/yr over 14mo support): n-1 leaves ~10 months margin, n-2 ~6, n-3 ~2. n-2 is the widest range still fully in standard support; n-1 is the tightest safe ceiling.
+- Decoupled pipelines so a socle hotfix reaches a client frozen on Kubernetes version. Cost: we own the compatibility matrix — a bidirectional guard is mandatory, declared inside the socle artifact, read by both pipelines. Kubernetes' own skew policy forces control-plane-before-data-plane ordering on top.
+- Kargo's native gates don't fit: `verification` runs after promotion (too late), `freightCreationCriteria` is global (compatibility is per-cluster).
+- Client-declared maintenance windows/freezes are enforced by our own scheduler, not the AWS API — and not by Kargo either: `PromotionWindow` (cron rules, freeze) merged to `main` in July 2026 marked Enterprise-only, OSS excluded.
+- A Kargo Warehouse only discovers git/image/chart Freight — the target Kubernetes version has to ride an artifact, not a bare string.
+
+## 4. Upgrade Insights: reliable enough to automate?
+
+**Decision.** Mandatory pre-check, never sufficient alone. Called explicitly via `list-insights`, not relied on as an apply-time gate.
+
+- Only check that sees the client's own application behaviour (removed-API usage) — our compatibility guard doesn't know about that.
+- 30-day audit-log window cuts both ways: misses APIs called less than monthly (false negative); keeps reporting fixed issues for up to 30 days (false positive, containers-roadmap#2569). This 30-day blind spot sets the floor for soak duration (open item, below).
+- AWS's own blocking of `update-cluster-version` on `ERROR` findings is currently rolled back — an apply proceeds regardless, so this check must run as an explicit pipeline step, not be trusted to fail on its own.
+- Override available as `force_update_version` on `aws_eks_cluster`, default `false`.
+
+## 5. Backup: Velero or AWS Backup?
+
+**Decision.** Velero. AWS Backup refused as the default — the same reasoning that puts Cilium on all four clouds rather than each cloud's own CNI.
+
+AWS Backup does cover EKS: AWS lists "Amazon EKS clusters and persistent storage backups" among its supported resource types, so this is a real comparison, not a category error.
+
+**The storage cancels out.** Both options snapshot the same EBS volumes at the same rate, so the volume footprint appears on both sides of the table and drops out — exactly as the control plane fee does in the Auto Mode comparison of [Analysis 1](eks-cluster-mode.md). What is left:
+
+| | Cost of its own | Covers |
+| --- | --- | --- |
+| **Velero** | none — open source, and the snapshots are the shared term | Cluster objects plus CSI volume snapshots |
+| AWS Backup | a one-time backup creation fee per namespace backed up | Same, plus vault lock, cross-account fan-in and Audit Manager |
+
+That per-namespace fee is **not published**: the pricing page states the charge exists and gives no figure, and no EKS example appears in it. It is also, after the simplification above, the entire cost difference between the two options — so it is the one number to obtain before pricing this for a client.
+
+- **One restore procedure across four clouds.** The decision does not hinge on that missing figure. A per-cloud backup service means a per-cloud runbook, a per-cloud failure mode and a per-cloud rehearsal; Socle's position is that one procedure everywhere is worth more than a marginally better managed service on one of them.
+- **Both of Velero's modes are available here.** EKS Standard places no restriction on privileged Pods or writable `hostPath`, so the node-agent runs alongside the CSI snapshot path. That second mode writes file-level backups to S3 in a format that is not tied to an EBS snapshot — a copy that can be restored somewhere other than the account and region it was taken in.
+- **Not this module's job.** Velero is a pod, and its S3 bucket and IAM role are provisioned with it. Both arrive through the socle OCI artifact, not through the foundations module.
+
+## Sources
+
+Read 8 September 2026.
+
+- [Update an add-on](https://docs.aws.amazon.com/eks/latest/userguide/updating-an-add-on.html)
+- [What is AWS Backup](https://docs.aws.amazon.com/aws-backup/latest/devguide/whatisbackup.html) · [AWS Backup pricing](https://aws.amazon.com/backup/pricing/) · [Velero](https://velero.io/docs/latest/)
+- [CreateCluster](https://docs.aws.amazon.com/eks/latest/APIReference/API_CreateCluster.html) · [Cilium kube-proxy-free](https://docs.cilium.io/en/stable/network/kubernetes/kubeproxy-free/) · [Cilium EKS requirements](https://docs.cilium.io/en/stable/installation/requirements-eks/)
+- [Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html) · [LB controller install](https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/deploy/installation/) · [Karpenter getting started](https://karpenter.sh/docs/getting-started/getting-started-with-karpenter/) · [Upbound AWS Pod Identity](https://docs.upbound.io/manuals/packages/providers/aws-auth/aws-pod-identity/)
+- [EKS Kubernetes versions](https://docs.aws.amazon.com/eks/latest/userguide/kubernetes-versions.html) · [EKS pricing](https://aws.amazon.com/eks/pricing/) · [K8s release cadence](https://kubernetes.io/releases/release/)
+- [list-insights](https://docs.aws.amazon.com/cli/latest/reference/eks/list-insights.html) · [Enforcement announcement](https://aws.amazon.com/about-aws/whats-new/2025/03/amazon-eks-enforces-upgrade-insights-check-cluster-upgrades) · [containers-roadmap#2570](https://github.com/aws/containers-roadmap/issues/2570) · [#2569](https://github.com/aws/containers-roadmap/issues/2569)
+- [UpdateClusterVersion](https://docs.aws.amazon.com/eks/latest/APIReference/API_UpdateClusterVersion.html) · [aws_eks_addon](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_addon) · [aws_eks_cluster](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_cluster)
+- [Kargo promotion steps](https://docs.kargo.io/user-guide/reference-docs/promotion-steps/) · [akuity/kargo#1328](https://github.com/akuity/kargo/issues/1328) · [PR#6710](https://github.com/akuity/kargo/pull/6710)
+
