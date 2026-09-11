@@ -117,9 +117,9 @@ variable "pod_range_name" {
 }
 
 variable "node_range_cidr" {
-  description = "Primary range of the cluster subnetwork, used by nodes and by internal load balancers."
+  description = "Primary range of the cluster subnetwork, used by nodes and by internal load balancers. A /22 carries 1020 nodes, which is what the Pod range allows."
   type        = string
-  default     = "10.0.0.0/24"
+  default     = "10.0.0.0/22"
 
   validation {
     condition     = can(cidrnetmask(var.node_range_cidr))
@@ -128,9 +128,9 @@ variable "node_range_cidr" {
 }
 
 variable "pod_range_cidr" {
-  description = "Secondary range for Pod addresses. Autopilot fixes 32 Pods per node, so a /26 is consumed per node: a /17 carries 512 nodes."
+  description = "Secondary range for Pod addresses. Autopilot fixes 32 Pods per node, so a /26 is consumed per node: a /16 carries 1024 nodes. Sized generously on purpose — a cluster's Pod range cannot be changed after creation, while the primary range can be expanded in place."
   type        = string
-  default     = "10.4.0.0/17"
+  default     = "10.4.0.0/16"
 
   validation {
     condition     = can(cidrnetmask(var.pod_range_cidr)) && tonumber(split("/", var.pod_range_cidr)[1]) <= 17
