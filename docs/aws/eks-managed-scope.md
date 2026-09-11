@@ -24,7 +24,7 @@ Arbitration rule: reliable provider ops at a reasonable surcharge → delegated.
 **Decision.** VPC CNI / kube-proxy never installed at all: the cluster is created with `bootstrap_self_managed_addons = false`.
 
 - Cilium documents delete-and-taint, not this flag — but that pattern is the retrofit path for a cluster already running `aws-node`. A module that creates the cluster has nothing to retrofit.
-- AWS documents the flag for exactly this case ("third-party alternative add-ons"), GA since Kubernetes 1.29. CoreDNS is skipped by the same flag and comes back as a pinned managed add-on.
+- AWS documents the flag for exactly this case ("third-party alternative add-ons"), and has for several Kubernetes releases. CoreDNS is skipped by the same flag and comes back as a pinned managed add-on.
 - Consequence the factory inherits: no kube-proxy from the first node, so Cilium needs `kubeProxyReplacement` with an explicit `k8sServiceHost` / `k8sServicePort` — there is no ClusterIP to reach the API server through. Nodes join `NotReady` until Cilium is installed, which is true of either approach.
 
 ## 2. Identity: Pod Identity or IRSA?
