@@ -269,34 +269,9 @@ variable "cluster_support_type" {
   }
 }
 
-# Pod Identity is the only workload-identity mechanism this module wires up
-# — IRSA is absent, not toggled off: AWS's own recommendation, and its
-# EC2-only restriction matches Socle's EC2-only scope exactly. The OIDC
-# issuer URL is still exposed as an output (checklist requirement) even
-# though nothing here consumes it — it provisions no IRSA trust relationship.
-
-variable "crossplane_service_account_namespace" {
-  description = "Namespace of the in-cluster Crossplane AWS provider's Kubernetes service account."
-  type        = string
-  default     = "crossplane-system"
-}
-
-variable "crossplane_service_account_name" {
-  description = "Name of the in-cluster Crossplane AWS provider's Kubernetes service account. Must match the socle's DeploymentRuntimeConfig — the provider Pod's service account name is not stable across provider revisions unless it is pinned there."
-  type        = string
-  default     = "provider-aws"
-}
-
-variable "crossplane_policy_arns" {
-  description = "IAM policy ARNs granted to the identity the in-cluster Crossplane AWS provider assumes. Empty by default: the catalog does not exist yet, and a list written today would be a guess."
-  type        = list(string)
-  default     = []
-
-  validation {
-    condition = alltrue([
-      for a in var.crossplane_policy_arns :
-      can(regex("^arn:aws:iam::(aws|[0-9]{12}):policy/", a))
-    ])
-    error_message = "Each entry must be an IAM policy ARN, such as arn:aws:iam::aws:policy/ReadOnlyAccess or a customer-managed policy ARN."
-  }
-}
+# Pod Identity is the only workload-identity mechanism this module would use —
+# IRSA is absent, not toggled off: AWS's own recommendation, and its EC2-only
+# restriction matches Socle's EC2-only scope exactly. No association is created
+# here all the same, because every one of them would name a service account
+# that does not exist yet. The OIDC issuer URL is still exposed as an output
+# (checklist requirement) even though nothing here consumes it.

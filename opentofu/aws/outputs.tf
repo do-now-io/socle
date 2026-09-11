@@ -28,21 +28,6 @@ output "oidc_issuer_url" {
   value       = aws_eks_cluster.socle.identity[0].oidc[0].issuer
 }
 
-output "ebs_csi_role_arn" {
-  description = "The identity the EBS CSI driver assumes. This module creates the role but not its Pod Identity association — the add-on carries its own, so whoever installs the add-on binds this ARN to the ebs-csi-controller-sa service account."
-  value       = aws_iam_role.ebs_csi.arn
-}
-
-output "crossplane_role_arn" {
-  description = "The identity the in-cluster Crossplane AWS provider assumes, via Pod Identity."
-  value       = aws_iam_role.crossplane.arn
-}
-
-output "crossplane_service_account_kubernetes_binding" {
-  description = "The Kubernetes service account bound to that identity, as namespace/name. Must match the socle's DeploymentRuntimeConfig."
-  value       = "${var.crossplane_service_account_namespace}/${var.crossplane_service_account_name}"
-}
-
 output "vpc_id" {
   description = "ID of the VPC the cluster is attached to, whether this module created it or not."
   value       = local.vpc_id

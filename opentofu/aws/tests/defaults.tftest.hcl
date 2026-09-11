@@ -96,23 +96,8 @@ run "defaults_are_the_recommended_position" {
   }
 
   assert {
-    condition     = aws_iam_role.ebs_csi.name == "socle-test-ebs-csi"
-    error_message = "The EBS CSI role stays even though the add-on left: the factory binds it when it installs the driver."
-  }
-
-  assert {
-    condition     = aws_eks_pod_identity_association.crossplane.namespace == "crossplane-system"
-    error_message = "Crossplane's default namespace must be crossplane-system."
-  }
-
-  assert {
-    condition     = aws_eks_pod_identity_association.crossplane.service_account == "provider-aws"
-    error_message = "Crossplane's default service account must be provider-aws."
-  }
-
-  assert {
-    condition     = length(aws_iam_role_policy_attachment.crossplane) == 0
-    error_message = "Crossplane must get no policies by default: the catalog does not exist yet."
+    condition     = aws_iam_role.cluster.name == "socle-test-cluster"
+    error_message = "The cluster's service role is one of the only two roles left: EKS assumes it directly, so it cannot belong to the layer above."
   }
 
   assert {
