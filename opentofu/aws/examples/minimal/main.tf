@@ -29,10 +29,4 @@ module "socle" {
   # No good default exists for who may reach the public API endpoint, so
   # the module has none — replace with the consumer's own admin CIDR.
   cluster_endpoint_public_access_cidrs = var.cluster_endpoint_public_access_cidrs
-
-  # Pinned by whoever triggers the bump, never most_recent — check current
-  # versions with `aws eks describe-addon-versions` before a real apply.
-  coredns_addon_version            = var.coredns_addon_version
-  ebs_csi_addon_version            = var.ebs_csi_addon_version
-  pod_identity_agent_addon_version = var.pod_identity_agent_addon_version
 }

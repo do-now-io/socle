@@ -28,6 +28,11 @@ resource "aws_iam_role_policy_attachment" "cluster" {
 # policy targets pods.eks.amazonaws.com, not an OIDC-federated principal;
 # sts:TagSession alongside sts:AssumeRole is Pod Identity's own
 # requirement, not an IRSA leftover.
+#
+# The role is here; the association is not. The EBS CSI add-on carries its own
+# pod_identity_association, so whoever installs the add-on binds this role to
+# the service account. Creating a standalone association here as well would
+# give one service account two of them. The ARN is an output for that reason.
 
 resource "aws_iam_role" "ebs_csi" {
   name = "${var.cluster_name}-ebs-csi"
@@ -49,10 +54,10 @@ resource "aws_iam_role_policy_attachment" "ebs_csi" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
 }
 
-# Crossplane's own identity, via Pod Identity — verified to support it,
-# same as the LB controller and both CSI drivers. A standalone
-# aws_eks_pod_identity_association, not the aws_eks_addon-embedded block
-# used for ebs_csi above: Crossplane is not an EKS-managed add-on.
+# Crossplane's own identity, via Pod Identity — verified to support it, same as
+# the LB controller and both CSI drivers. This one does get its association
+# here, unlike EBS CSI above: Crossplane is not an EKS-managed add-on, so
+# nothing else will ever create it.
 
 resource "aws_iam_role" "crossplane" {
   name = "${var.cluster_name}-crossplane"
@@ -74,8 +79,6 @@ resource "aws_eks_pod_identity_association" "crossplane" {
   namespace       = var.crossplane_service_account_namespace
   service_account = var.crossplane_service_account_name
   role_arn        = aws_iam_role.crossplane.arn
-
-  depends_on = [aws_eks_addon.pod_identity_agent]
 }
 
 # Empty by default. The catalog does not exist yet, so any list of

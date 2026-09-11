@@ -18,16 +18,12 @@ module "socle" {
 
   kubernetes_version                   = "<version>"
   cluster_endpoint_public_access_cidrs = ["203.0.113.0/32"]
-
-  coredns_addon_version            = "<version>"
-  ebs_csi_addon_version            = "<version>"
-  pod_identity_agent_addon_version = "<version>"
 }
 ```
 
 The region is not a variable: it comes from the `aws` provider you configure.
-Add-on and Kubernetes versions have no default and none are suggested here —
-read the current ones with `aws eks describe-addon-versions`.
+`kubernetes_version` has no default and none is suggested here — the socle
+pipeline owns that choice.
 
 A deployable version of that is in [`examples/minimal`](examples/minimal),
 which also lists the roles the apply needs and where remote state belongs.
@@ -53,7 +49,7 @@ Every default traces back to a research document. The short version:
 | Pod Identity exclusively, IRSA absent | enforced | [managed scope](../../docs/aws/eks-managed-scope.md) |
 | VPC CNI and kube-proxy refused — never installed at all (`bootstrap_self_managed_addons = false`) | enforced | [managed scope](../../docs/aws/eks-managed-scope.md) |
 | End of standard support: cluster stays put, socle pipelines decide when to upgrade (`EXTENDED`) | default | [managed scope](../../docs/aws/eks-managed-scope.md) |
-| Add-on versions pinned, never resolved via `most_recent` | required, no default | [managed scope](../../docs/aws/eks-managed-scope.md) |
+| CoreDNS, EBS CSI, EFS CSI and the Pod Identity Agent stay EKS-managed add-ons — installed by the factory, not here | absent | [managed scope](../../docs/aws/eks-managed-scope.md) |
 | Crossplane's AWS provider identity created here | enforced | [managed scope](../../docs/aws/eks-managed-scope.md) |
 
 ## Also decided, not from research
@@ -103,6 +99,8 @@ and tested, so these are refusals:
 - **IRSA, or any toggle for it** — Pod Identity is the only mechanism this
   module wires up. The OIDC issuer URL is still exposed as an output
   (checklist requirement), not because IRSA needs it.
+- **Every EKS add-on, and every variable that pinned one** — they are still
+  EKS-managed add-ons, they are simply not installed from here. See below.
 - **Any credential as an input** — the module authenticates through the
   provider's ambient credentials, and issues no key.
 - **GuardDuty EKS Protection** — a single detector per account per region,
@@ -113,7 +111,7 @@ and tested, so these are refusals:
 ## Tests
 
 ```bash
-tofu test          # 15 runs: every validation, and the defaults
+tofu test          # 14 runs: every validation, and the defaults
 ```
 
 `tests/emulator/` runs the module against the floci emulator in CI, no cloud
@@ -128,13 +126,20 @@ run summary rather than left to be rediscovered.
 
 ## What an apply does not give you
 
-This module provisions no compute. There is no managed node group, no Fargate
-profile and no Karpenter — those are factory components delivered through the
-socle OCI artifact. A cluster created here therefore has zero schedulable
-nodes, and the CoreDNS and EBS CSI add-ons it installs have nothing to run on
-until compute arrives. **Where that compute comes from is an open decision**,
-not a documented one; this note is here so the gap is recorded rather than
-discovered.
+This module provisions **nothing that needs a pod to run**. That is the rule,
+not a list of exceptions: no node group, no Fargate profile, no Karpenter, and
+no EKS add-on either. What comes out is a VPC, a control plane, log groups and
+identities — every one of which exists without a single node.
+
+The add-ons left for that reason. CoreDNS and the EBS CSI controller are
+Deployments; on a cluster with no nodes their pods cannot schedule, the add-on
+health goes `DEGRADED`, and the apply fails. Keeping them while refusing nodes
+was the one combination that could not converge.
+
+So an apply gives you a cluster that nothing runs on yet. Compute, the CNI and
+the add-ons all arrive with the factory. The identities they bind to are
+already here and waiting — `ebs_csi_role_arn` and `crossplane_role_arn` are
+outputs for exactly that handover.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
@@ -155,10 +160,6 @@ No modules.
 | [aws_cloudwatch_log_group.cluster](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_log_group) | resource |
 | [aws_cloudwatch_log_group.flow_logs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_log_group) | resource |
 | [aws_eip.nat](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eip) | resource |
-| [aws_eks_addon.coredns](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_addon) | resource |
-| [aws_eks_addon.ebs_csi](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_addon) | resource |
-| [aws_eks_addon.efs_csi](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_addon) | resource |
-| [aws_eks_addon.pod_identity_agent](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_addon) | resource |
 | [aws_eks_cluster.socle](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_cluster) | resource |
 | [aws_eks_pod_identity_association.crossplane](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_pod_identity_association) | resource |
 | [aws_flow_log.socle](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/flow_log) | resource |
@@ -194,12 +195,9 @@ No modules.
 | <a name="input_availability_zones"></a> [availability\_zones](#input\_availability\_zones) | AZs the VPC's public and private subnets are spread across. Every VPC<br/>gets at least one public and one private subnet per AZ — never a flat,<br/>all-public layout — to satisfy ISO 27001 A.8.22 and SOC 2 CC6 network<br/>segregation. There is no all-public escape hatch: the private tier is<br/>structural, whether or not a client's workloads use it. | `list(string)` | n/a | yes |
 | <a name="input_cluster_endpoint_public_access_cidrs"></a> [cluster\_endpoint\_public\_access\_cidrs](#input\_cluster\_endpoint\_public\_access\_cidrs) | CIDRs allowed to reach the public EKS API endpoint. Required, no<br/>default: the endpoint is restricted by CIDR rather than left open or<br/>made fully private-only (AWS's own recommended pattern for this case),<br/>and there is no globally correct default to authorize on a client's<br/>behalf. | `list(string)` | n/a | yes |
 | <a name="input_cluster_name"></a> [cluster\_name](#input\_cluster\_name) | Name shared by the VPC, the EKS cluster and every resource this module creates around them. | `string` | n/a | yes |
-| <a name="input_coredns_addon_version"></a> [coredns\_addon\_version](#input\_coredns\_addon\_version) | CoreDNS add-on version. Required, no default: add-on versions are pinned by whoever triggers the bump (the socle pipeline), never resolved via most\_recent — AWS never auto-updates an add-on on its own. | `string` | n/a | yes |
-| <a name="input_ebs_csi_addon_version"></a> [ebs\_csi\_addon\_version](#input\_ebs\_csi\_addon\_version) | EBS CSI driver add-on version. Required, no default — same reasoning as coredns\_addon\_version. | `string` | n/a | yes |
 | <a name="input_environment"></a> [environment](#input\_environment) | Stamped on every billable resource. Also what the factory's upgrade rings (dev/staging/prod) key off. | `string` | n/a | yes |
 | <a name="input_kubernetes_version"></a> [kubernetes\_version](#input\_kubernetes\_version) | EKS control plane version. Required, no default: the module accepts<br/>whatever version it is given rather than enforcing the policy ceiling<br/>itself. The n-1 policy ceiling / n-2 compatibility floor is decided and<br/>bumped by the socle Kargo pipelines, not by this module — a `validation`<br/>block cannot call the AWS API to know what "current" is, and the<br/>decoupled socle-release/Kubernetes-version pipelines are the actual<br/>owners of that decision. | `string` | n/a | yes |
 | <a name="input_owner"></a> [owner](#input\_owner) | Stamped on every billable resource so cost can be attributed and orphans can be found. | `string` | n/a | yes |
-| <a name="input_pod_identity_agent_addon_version"></a> [pod\_identity\_agent\_addon\_version](#input\_pod\_identity\_agent\_addon\_version) | Pod Identity Agent add-on version. Required, no default — same reasoning as coredns\_addon\_version. Prerequisite for all workload identity in this module. | `string` | n/a | yes |
 | <a name="input_additional_tags"></a> [additional\_tags](#input\_additional\_tags) | Extra tags merged onto every resource this module creates, on top of owner/environment/socle-version. | `map(string)` | `{}` | no |
 | <a name="input_cluster_log_types"></a> [cluster\_log\_types](#input\_cluster\_log\_types) | Control plane log types shipped to CloudWatch Logs. All five by default:<br/>the audit and authenticator streams are the only record of who did what<br/>to the API server, which ISO 27001 A.8.15 and SOC 2 CC7 both expect, and<br/>the same argument that puts a private subnet tier in every VPC applies<br/>here. Trim the list to cut ingestion cost; an empty list turns control<br/>plane logging off entirely. | `list(string)` | <pre>[<br/>  "api",<br/>  "audit",<br/>  "authenticator",<br/>  "controllerManager",<br/>  "scheduler"<br/>]</pre> | no |
 | <a name="input_cluster_support_type"></a> [cluster\_support\_type](#input\_cluster\_support\_type) | What happens when this cluster's Kubernetes version reaches the end of<br/>standard support, 14 months after its EKS release.<br/><br/>EXTENDED, the default here and AWS's own: nothing is upgraded. The cluster<br/>enters extended support and the control plane goes from $0.10 to $0.60 an<br/>hour — around +$365 a month — until it is moved back onto a supported<br/>version. The socle pipelines keep deciding when that happens, which is the<br/>whole point of owning the version ceiling.<br/><br/>STANDARD: AWS upgrades the cluster itself at the end of standard support,<br/>on its own schedule, and no extended-support charge is ever possible. It<br/>trades a silent bill for a control plane upgrade nobody here scheduled.<br/><br/>Not reversible under pressure: a cluster already in extended support cannot<br/>be moved to STANDARD until it is upgraded onto a version still in standard<br/>support. | `string` | `"EXTENDED"` | no |
@@ -208,8 +206,6 @@ No modules.
 | <a name="input_crossplane_policy_arns"></a> [crossplane\_policy\_arns](#input\_crossplane\_policy\_arns) | IAM policy ARNs granted to the identity the in-cluster Crossplane AWS provider assumes. Empty by default: the catalog does not exist yet, and a list written today would be a guess. | `list(string)` | `[]` | no |
 | <a name="input_crossplane_service_account_name"></a> [crossplane\_service\_account\_name](#input\_crossplane\_service\_account\_name) | Name of the in-cluster Crossplane AWS provider's Kubernetes service account. Must match the socle's DeploymentRuntimeConfig — the provider Pod's service account name is not stable across provider revisions unless it is pinned there. | `string` | `"provider-aws"` | no |
 | <a name="input_crossplane_service_account_namespace"></a> [crossplane\_service\_account\_namespace](#input\_crossplane\_service\_account\_namespace) | Namespace of the in-cluster Crossplane AWS provider's Kubernetes service account. | `string` | `"crossplane-system"` | no |
-| <a name="input_efs_csi_addon_enabled"></a> [efs\_csi\_addon\_enabled](#input\_efs\_csi\_addon\_enabled) | Install the EFS CSI driver add-on. Catalog option, not default: RWX-only, and the node component may need its own Pod Identity association. | `bool` | `false` | no |
-| <a name="input_efs_csi_addon_version"></a> [efs\_csi\_addon\_version](#input\_efs\_csi\_addon\_version) | EFS CSI driver add-on version. Required when efs\_csi\_addon\_enabled is true — same reasoning as coredns\_addon\_version. | `string` | `null` | no |
 | <a name="input_force_update_version"></a> [force\_update\_version](#input\_force\_update\_version) | Force the control plane version update even if Upgrade Insights reports<br/>blocking findings. Default false: Upgrade Insights is a mandatory<br/>pre-check, never sufficient alone (it only sees the client's own<br/>removed-API usage, over a rolling 30-day audit-log window that both<br/>misses infrequent calls and over-reports fixed ones) — but AWS's own<br/>blocking of `update-cluster-version` on ERROR findings is currently<br/>rolled back, so this module does not assume AWS enforces the check<br/>either. | `bool` | `false` | no |
 | <a name="input_log_retention_days"></a> [log\_retention\_days](#input\_log\_retention\_days) | Retention for the log groups this module creates — the control plane's and the VPC flow logs'. Set explicitly because a log group left to AWS never expires. | `number` | `90` | no |
 | <a name="input_private_subnet_ids"></a> [private\_subnet\_ids](#input\_private\_subnet\_ids) | Existing private subnet IDs, one per AZ in availability\_zones. Required when create\_vpc is false — this module carves its own subnets out of vpc\_cidr only when it also creates the VPC. | `list(string)` | `[]` | no |
@@ -229,6 +225,7 @@ No modules.
 | <a name="output_cluster_name"></a> [cluster\_name](#output\_cluster\_name) | Name of the EKS cluster. |
 | <a name="output_crossplane_role_arn"></a> [crossplane\_role\_arn](#output\_crossplane\_role\_arn) | The identity the in-cluster Crossplane AWS provider assumes, via Pod Identity. |
 | <a name="output_crossplane_service_account_kubernetes_binding"></a> [crossplane\_service\_account\_kubernetes\_binding](#output\_crossplane\_service\_account\_kubernetes\_binding) | The Kubernetes service account bound to that identity, as namespace/name. Must match the socle's DeploymentRuntimeConfig. |
+| <a name="output_ebs_csi_role_arn"></a> [ebs\_csi\_role\_arn](#output\_ebs\_csi\_role\_arn) | The identity the EBS CSI driver assumes. This module creates the role but not its Pod Identity association — the add-on carries its own, so whoever installs the add-on binds this ARN to the ebs-csi-controller-sa service account. |
 | <a name="output_oidc_issuer_url"></a> [oidc\_issuer\_url](#output\_oidc\_issuer\_url) | The cluster's OIDC issuer. Checklist requirement, not this module's identity mechanism — Pod Identity is, IRSA is absent, and nothing here provisions an OIDC trust relationship against it. |
 | <a name="output_private_subnet_ids"></a> [private\_subnet\_ids](#output\_private\_subnet\_ids) | Private subnet IDs, one per AZ. |
 | <a name="output_public_subnet_ids"></a> [public\_subnet\_ids](#output\_public\_subnet\_ids) | Public subnet IDs, one per AZ. |
