@@ -35,10 +35,6 @@ variables {
 
   kubernetes_version                   = "1.34"
   cluster_endpoint_public_access_cidrs = ["203.0.113.0/32"]
-
-  coredns_addon_version            = "v1.11.4-eksbuild.10"
-  ebs_csi_addon_version            = "v1.44.0-eksbuild.1"
-  pod_identity_agent_addon_version = "v1.3.4-eksbuild.1"
 }
 
 run "defaults_are_the_recommended_position" {
@@ -100,8 +96,8 @@ run "defaults_are_the_recommended_position" {
   }
 
   assert {
-    condition     = length(aws_eks_addon.efs_csi) == 0
-    error_message = "EFS CSI must stay off by default — catalog option."
+    condition     = aws_iam_role.ebs_csi.name == "socle-test-ebs-csi"
+    error_message = "The EBS CSI role stays even though the add-on left: the factory binds it when it installs the driver."
   }
 
   assert {
@@ -152,20 +148,6 @@ run "defaults_are_the_recommended_position" {
   assert {
     condition     = aws_eks_cluster.socle.tags["socle-version"] == "0.1.0-dev"
     error_message = "Every billable resource must carry the socle version that created it."
-  }
-}
-
-run "efs_csi_lands_when_enabled_with_a_version" {
-  command = plan
-
-  variables {
-    efs_csi_addon_enabled = true
-    efs_csi_addon_version = "v2.1.9-eksbuild.1"
-  }
-
-  assert {
-    condition     = length(aws_eks_addon.efs_csi) == 1
-    error_message = "EFS CSI must be created once explicitly enabled with a version."
   }
 }
 

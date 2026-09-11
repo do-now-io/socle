@@ -37,10 +37,6 @@ variables {
 
   kubernetes_version                   = "1.34"
   cluster_endpoint_public_access_cidrs = ["203.0.113.0/32"]
-
-  coredns_addon_version            = "v1.11.4-eksbuild.10"
-  ebs_csi_addon_version            = "v1.44.0-eksbuild.1"
-  pod_identity_agent_addon_version = "v1.3.4-eksbuild.1"
 }
 
 # --- Identity of the deployment --------------------------------------------
@@ -165,16 +161,6 @@ run "kubernetes_version_rejects_a_patch_component" {
   }
 
   expect_failures = [var.kubernetes_version]
-}
-
-run "efs_csi_version_is_required_once_enabled" {
-  command = plan
-
-  variables {
-    efs_csi_addon_enabled = true
-  }
-
-  expect_failures = [var.efs_csi_addon_version]
 }
 
 run "crossplane_policy_arns_must_be_iam_policy_arns" {

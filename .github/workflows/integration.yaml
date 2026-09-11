@@ -95,12 +95,11 @@ jobs:
           tofu init -input=false
           tofu plan -input=false -out=tf.plan
           # AWS stops at the plan, which lists everything that would be
-          # created. Two floci gaps block the apply, neither in the module:
-          # EKS CreateAddon is not emulated at all (the request falls through
-          # to the S3 handler), and only five AWS-managed policies ship, none
-          # of them service-role/AmazonEBSCSIDriverPolicy. Everything else —
-          # VPC, endpoints, cluster, log groups, flow logs, identities —
-          # applies clean against the emulator.
+          # created. 37 of the module's 39 resources do apply and destroy
+          # cleanly against the emulator; two cannot, and neither is the
+          # module's doing: AmazonEBSCSIDriverPolicy is not among the five
+          # AWS-managed policies the emulator ships, and its EKS mock does
+          # not implement the Pod Identity association API.
           if [ "${{ matrix.cloud }}" = "aws" ]; then
             exit 0
           fi
@@ -112,9 +111,10 @@ jobs:
             echo "### tofu apply (${{ matrix.cloud }})"
             if [ "${{ matrix.cloud }}" = "aws" ]; then
               echo "⚠️ **Planned only** against \`${{ matrix.emulator }}\` — the plan lists what"
-              echo "would be applied. The emulator cannot finish the apply: EKS add-ons are"
-              echo "not emulated, and \`service-role/AmazonEBSCSIDriverPolicy\` does not exist"
-              echo "there. Everything else applies clean."
+              echo "would be applied. Two of 39 resources cannot be created there:"
+              echo "\`AmazonEBSCSIDriverPolicy\` is not among the managed policies it ships,"
+              echo "and its EKS mock has no Pod Identity association API. The other 37"
+              echo "apply and destroy cleanly."
             elif [ -n "${{ matrix.emulator }}" ]; then
               echo "Applied and destroyed against \`${{ matrix.emulator }}\` — no real cloud touched. ✅"
             else

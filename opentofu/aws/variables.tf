@@ -201,11 +201,12 @@ variable "log_retention_days" {
 
 # --- Add-ons and identity — docs/aws/eks-managed-scope.md ---
 
-# VPC CNI and kube-proxy are refused, not exposed: both are neutralised via
-# Cilium's documented delete-and-taint pattern. CoreDNS, EBS CSI and the Pod
-# Identity Agent stay EKS-managed add-ons — no cross-cloud equivalent to
-# keep uniform, and AWS already tracks CoreDNS against the Kubernetes
-# version it validated it with.
+# No add-on variable here at all. VPC CNI and kube-proxy are refused outright
+# — Cilium replaces both, and the cluster is created without them. CoreDNS,
+# EBS CSI, EFS CSI and the Pod Identity Agent remain EKS-managed add-ons, but
+# they are installed by the factory once compute exists, at versions the socle
+# pipeline pins. This module creates no node, so an add-on installed here
+# would have nowhere to run — see cluster.tf.
 
 variable "kubernetes_version" {
   description = <<-EOT
@@ -265,38 +266,6 @@ variable "cluster_support_type" {
   validation {
     condition     = contains(["EXTENDED", "STANDARD"], var.cluster_support_type)
     error_message = "cluster_support_type must be EXTENDED or STANDARD — the two values the EKS upgrade policy accepts."
-  }
-}
-
-variable "coredns_addon_version" {
-  description = "CoreDNS add-on version. Required, no default: add-on versions are pinned by whoever triggers the bump (the socle pipeline), never resolved via most_recent — AWS never auto-updates an add-on on its own."
-  type        = string
-}
-
-variable "ebs_csi_addon_version" {
-  description = "EBS CSI driver add-on version. Required, no default — same reasoning as coredns_addon_version."
-  type        = string
-}
-
-variable "pod_identity_agent_addon_version" {
-  description = "Pod Identity Agent add-on version. Required, no default — same reasoning as coredns_addon_version. Prerequisite for all workload identity in this module."
-  type        = string
-}
-
-variable "efs_csi_addon_enabled" {
-  description = "Install the EFS CSI driver add-on. Catalog option, not default: RWX-only, and the node component may need its own Pod Identity association."
-  type        = bool
-  default     = false
-}
-
-variable "efs_csi_addon_version" {
-  description = "EFS CSI driver add-on version. Required when efs_csi_addon_enabled is true — same reasoning as coredns_addon_version."
-  type        = string
-  default     = null
-
-  validation {
-    condition     = var.efs_csi_addon_enabled ? var.efs_csi_addon_version != null : true
-    error_message = "efs_csi_addon_version is required when efs_csi_addon_enabled is true."
   }
 }
 

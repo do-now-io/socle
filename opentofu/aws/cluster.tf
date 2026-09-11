@@ -102,7 +102,7 @@ resource "aws_eks_cluster" "socle" {
 
   # No self-managed VPC CNI, kube-proxy or CoreDNS installed at creation.
   # Socle runs Cilium, so the first two would exist only to be removed, and
-  # CoreDNS arrives just below as a pinned managed add-on instead.
+  # CoreDNS arrives later as a pinned managed add-on installed by the factory.
   bootstrap_self_managed_addons = false
 
   # Shipped to the log group below, which is created first so that its
@@ -110,11 +110,10 @@ resource "aws_eks_cluster" "socle" {
   # implicitly and never expires.
   enabled_cluster_log_types = var.cluster_log_types
 
-  # Never resolved via most_recent — see coredns_addon_version and
-  # siblings. Upgrade Insights is a mandatory pre-check run explicitly by
-  # the pipeline (list-insights), not an apply-time gate this resource can
-  # enforce on its own — AWS's own blocking of update-cluster-version on
-  # ERROR findings is currently rolled back.
+  # Upgrade Insights is a mandatory pre-check run explicitly by the pipeline
+  # (list-insights), not an apply-time gate this resource can enforce on its
+  # own — AWS's own blocking of update-cluster-version on ERROR findings is
+  # currently rolled back.
   force_update_version = var.force_update_version
 
   # What happens at the end of standard support. Left unset, AWS picks
@@ -163,70 +162,13 @@ resource "aws_eks_cluster" "socle" {
   ]
 }
 
-# CoreDNS and the Pod Identity Agent: no AWS API calls of their own, so no
-# identity to wire — just the add-on itself, pinned, never most_recent.
-
-resource "aws_eks_addon" "coredns" {
-  cluster_name  = aws_eks_cluster.socle.name
-  addon_name    = "coredns"
-  addon_version = var.coredns_addon_version
-
-  resolve_conflicts_on_create = "OVERWRITE"
-  resolve_conflicts_on_update = "OVERWRITE"
-
-  tags = local.tags
-}
-
-# Prerequisite for all workload identity — every pod_identity_association
-# below depends on this agent running first.
-
-resource "aws_eks_addon" "pod_identity_agent" {
-  cluster_name  = aws_eks_cluster.socle.name
-  addon_name    = "eks-pod-identity-agent"
-  addon_version = var.pod_identity_agent_addon_version
-
-  resolve_conflicts_on_create = "OVERWRITE"
-  resolve_conflicts_on_update = "OVERWRITE"
-
-  tags = local.tags
-}
-
-resource "aws_eks_addon" "ebs_csi" {
-  cluster_name  = aws_eks_cluster.socle.name
-  addon_name    = "aws-ebs-csi-driver"
-  addon_version = var.ebs_csi_addon_version
-
-  resolve_conflicts_on_create = "OVERWRITE"
-  resolve_conflicts_on_update = "OVERWRITE"
-
-  pod_identity_association {
-    role_arn        = aws_iam_role.ebs_csi.arn
-    service_account = "ebs-csi-controller-sa"
-  }
-
-  depends_on = [aws_eks_addon.pod_identity_agent]
-
-  tags = local.tags
-}
-
-# EFS CSI: catalog option, off by default. Stub only — no
-# pod_identity_association wired: AWS publishes no managed IAM policy for
-# it (unlike AmazonEBSCSIDriverPolicy), a custom one still has to be
-# written, and the research doc itself is unresolved on whether the node
-# component needs a second association alongside the controller's. Whoever
-# enables this add-on for the first time writes that policy then.
-
-resource "aws_eks_addon" "efs_csi" {
-  count = var.efs_csi_addon_enabled ? 1 : 0
-
-  cluster_name  = aws_eks_cluster.socle.name
-  addon_name    = "aws-efs-csi-driver"
-  addon_version = var.efs_csi_addon_version
-
-  resolve_conflicts_on_create = "OVERWRITE"
-  resolve_conflicts_on_update = "OVERWRITE"
-
-  depends_on = [aws_eks_addon.pod_identity_agent]
-
-  tags = local.tags
-}
+# No aws_eks_addon here, and that is the module's boundary rather than an
+# omission. CoreDNS and the EBS CSI controller are Deployments; on a cluster
+# with no nodes their pods cannot schedule, the add-on reports DEGRADED and
+# the apply fails. The Pod Identity Agent and the EFS CSI driver leave for the
+# same reason rather than because they would individually break: the rule is
+# that this module provisions nothing that needs a pod to run.
+#
+# All four stay EKS-managed add-ons — that decision is unchanged. They are
+# installed by the factory, once compute exists, at versions the socle
+# pipeline pins. What stays here is what they bind to: the roles in iam.tf.
