@@ -30,7 +30,7 @@ gathered in [By command line](#by-command-line) at the end.
 | --- | --- |
 | EC2 (VPC, subnet, route table, internet gateway, NAT gateway, EIP, VPC endpoint) | the network |
 | EKS (cluster, Pod Identity association) | the cluster itself — add-ons are installed by the factory, not by this module |
-| IAM (role, role policy attachment) | the cluster's, EBS CSI's and Crossplane's identities |
+| IAM (role, role policy attachment, inline role policy) | the cluster's service role and the flow logs' delivery role — workload identities belong to the layer above |
 | KMS (key, key rotation, `DescribeKey`) | secrets encryption, and the log groups' own key — `CreateLogGroup` with a `kmsKeyId` fails with `AccessDeniedException` without `kms:DescribeKey` on that key |
 | STS (`GetCallerIdentity`) | the provider's own credential check |
 

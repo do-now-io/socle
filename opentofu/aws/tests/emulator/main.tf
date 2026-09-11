@@ -11,13 +11,10 @@
 # apply and destroy cleanly — the VPC and everything in it, the cluster, both
 # log groups, the flow log, the KMS keys and the roles. Two do not:
 #
-# - aws_iam_role_policy_attachment.ebs_csi — the emulator ships five
-#   AWS-managed policies and AmazonEBSCSIDriverPolicy is not one of them.
-# - aws_eks_pod_identity_association.crossplane — its EKS mock does not
-#   implement the Pod Identity association API.
-#
-# Neither is reachable from the module: one needs a policy AWS publishes, the
-# other an API the mock lacks. A fuller emulator flips this leg back to apply.
+# both resources that blocked it have since left the module — the managed
+# policy attachment with the EBS CSI role, and the Pod Identity association
+# with Crossplane's. Re-measure before trusting this leg's status either way:
+# what it can and cannot do has changed twice already.
 
 variable "endpoint" {
   description = "Base URL of the floci emulator."
@@ -58,9 +55,6 @@ module "socle" {
 
   kubernetes_version                   = "1.34"
   cluster_endpoint_public_access_cidrs = ["203.0.113.0/32"]
-
-  # Exercises the policy-attachment loop, which is empty by default.
-  crossplane_policy_arns = ["arn:aws:iam::aws:policy/ReadOnlyAccess"]
 }
 
 output "cluster_name" {
@@ -71,9 +65,4 @@ output "cluster_name" {
 output "cluster_endpoint" {
   description = "Proves the control plane answered with an endpoint."
   value       = module.socle.cluster_endpoint
-}
-
-output "crossplane_role_arn" {
-  description = "Proves the identity the socle needs was created."
-  value       = module.socle.crossplane_role_arn
 }
