@@ -16,16 +16,18 @@ module "socle" {
 
   create_vpc = true
 
-  kubernetes_version                   = "1.34"
+  kubernetes_version                   = "<version>"
   cluster_endpoint_public_access_cidrs = ["203.0.113.0/32"]
 
-  coredns_addon_version            = "v1.11.4-eksbuild.10"
-  ebs_csi_addon_version            = "v1.44.0-eksbuild.1"
-  pod_identity_agent_addon_version = "v1.3.4-eksbuild.1"
+  coredns_addon_version            = "<version>"
+  ebs_csi_addon_version            = "<version>"
+  pod_identity_agent_addon_version = "<version>"
 }
 ```
 
 The region is not a variable: it comes from the `aws` provider you configure.
+Add-on and Kubernetes versions have no default and none are suggested here —
+read the current ones with `aws eks describe-addon-versions`.
 
 A deployable version of that is in [`examples/minimal`](examples/minimal),
 which also lists the roles the apply needs and where remote state belongs.

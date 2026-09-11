@@ -1,4 +1,4 @@
-# Integration fixture: plans the module against the floci emulator, so that CI
+# Integration fixture: plans the module against the emulator, so that CI
 # exercises the whole resource graph without a cloud account or a secret.
 #
 # It exists because the module itself has no default for the nine variables a
@@ -7,7 +7,7 @@
 # where CI's throwaway values live instead.
 #
 # The leg stops at the plan, and that is an emulator limit, not a module one.
-# Measured against floci 1.5.34 (community edition):
+# Measured against the image the workflow pins:
 #
 # - EKS CreateAddon is not emulated at all — the request falls through to the
 #   S3 handler and comes back as an S3 XML error.

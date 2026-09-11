@@ -48,7 +48,7 @@ system's own OIDC provider, assuming an IAM role) from CI.
 ## State
 
 An S3 bucket for remote state, with versioning on, created before the
-first `tofu init`. OpenTofu 1.10+ locks natively against S3 through
+first `tofu init`. OpenTofu locks natively against S3 through
 conditional writes — no separate DynamoDB table needed. The module ships
 no backend block; state lives in your own account, so declare it in your
 root configuration:
@@ -65,7 +65,7 @@ terraform {
 
 ## Tooling
 
-- OpenTofu 1.10 or later.
+- OpenTofu, at or above the floor the module's `required_version` sets.
 - AWS CLI, authenticated.
 
 ## Good practices
