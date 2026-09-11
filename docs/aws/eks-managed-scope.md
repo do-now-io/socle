@@ -40,8 +40,8 @@ Note: the OIDC issuer URL is still exposed as an output (checklist requirement) 
 
 **Decision.** Policy ceiling n-1, socle compatibility floor n-2, two decoupled Kargo pipelines (socle release / Kubernetes version), support-margin floor the client cannot lower.
 
-- **Clusters are kept up to date and never enter extended support.** Extended support bills the control plane at 6x the standard rate, and a cluster that has entered it cannot leave until it is upgraded anyway. The module makes this structural rather than aspirational: `upgrade_policy.support_type` is `STANDARD`, not a variable, so AWS upgrades a lapsed cluster instead of billing for it.
-- EKS has no release channel: every version bump is ours to trigger, which is why the policy above needs a floor under it.
+- **Clusters are kept up to date and never enter extended support.**
+- EKS has no release channel: every version bump is ours to trigger.
 - ~3.5 versions in standard support at once (3 releases/yr over 14mo support): n-1 leaves ~10 months margin, n-2 ~6, n-3 ~2. n-2 is the widest range still fully in standard support; n-1 is the tightest safe ceiling.
 - Decoupled pipelines so a socle hotfix reaches a client frozen on Kubernetes version. Cost: we own the compatibility matrix — a bidirectional guard is mandatory, declared inside the socle artifact, read by both pipelines. Kubernetes' own skew policy forces control-plane-before-data-plane ordering on top.
 - Kargo's native gates don't fit: `verification` runs after promotion (too late), `freightCreationCriteria` is global (compatibility is per-cluster).
