@@ -28,7 +28,8 @@ module "socle" {
 
 A deployable version of that is in [`examples/minimal`](examples/minimal),
 which also lists the permissions the apply needs and where remote state
-belongs.
+belongs. What has to exist on the Scaleway account before any of it runs is in
+[prerequisites](../../docs/scaleway/prerequisites.md).
 
 > **OpenTofu does not verify OCI signatures.** It will pull an unsigned or
 > tampered artifact without complaint. Run `cosign verify` in CI before
