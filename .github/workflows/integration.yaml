@@ -61,7 +61,18 @@ jobs:
       AWS_ENDPOINT_URL: http://localhost:4566
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
-      AWS_REGION: eu-west-1
+      AWS_REGION: eu-west-3
+      # opentofu/aws's own six required variables — a root module with values
+      # baked in would be a second, silent set of recommendations, so the
+      # module has none, and CI supplies its own throwaway ones here instead.
+      # Harmless for the other legs: OpenTofu ignores a TF_VAR_* that matches
+      # no declared variable.
+      TF_VAR_cluster_name: socle-emulator
+      TF_VAR_owner: platform
+      TF_VAR_environment: dev
+      TF_VAR_availability_zones: '["eu-west-3a","eu-west-3b"]'
+      TF_VAR_cluster_endpoint_public_access_cidrs: '["203.0.113.0/32"]'
+      TF_VAR_kubernetes_version: "1.34"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
