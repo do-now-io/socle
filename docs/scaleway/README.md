@@ -25,7 +25,23 @@ Kapsule throughout. Each decision is argued in the linked document.
 | Workload metrics | The socle's Prometheus — Cockpit is 2.5× GKE per sample | [kapsule-capabilities](kapsule-capabilities.md) |
 | Scaleway's own metrics and logs | Cockpit, free | [kapsule-capabilities](kapsule-capabilities.md) |
 | Backup | Velero, same on four clouds — Scaleway manages none | [kapsule-capabilities](kapsule-capabilities.md) |
-| Discounted capacity | None exists — no spot market, no Karpenter | [kapsule-capabilities](kapsule-capabilities.md) |
+| Discounted capacity | Savings plans only — ~10% against 3 years of lock-in | [kapsule-capabilities](kapsule-capabilities.md) |
+| Data-plane add-ons | Delegated — no version exposed, no opt-out | [managed-scope](managed-scope.md) |
+| Load balancers | Delegated — the CCM covers it, ~50 annotations | [managed-scope](managed-scope.md) |
+| DNS and certificates | Factory — External-DNS and cert-manager's Scaleway webhook | [managed-scope](managed-scope.md) |
+| Certificates on the Load Balancer | Refused — a second certificate store | [managed-scope](managed-scope.md) |
+| IAM boundary | One Project per environment | [managed-scope](managed-scope.md) |
+| Per-resource IAM | Does not exist outside IAM, Key and Secret Manager | [managed-scope](managed-scope.md) |
+| Factory runner credentials | IP-bound policy condition, always | [managed-scope](managed-scope.md) |
+| OpenTofu state | Object Storage — native locking, no second service | [managed-scope](managed-scope.md) |
+| Ops overhead vs AWS | ~1.5 days/month per client, nearly all credentials | [managed-scope](managed-scope.md) |
+| Scaleway service metrics | Cockpit `/federate`, every 300 s | [cloud-observability](cloud-observability.md) |
+| Scraping the Scaleway APIs | Refused — Cockpit holds the data already, free | [cloud-observability](cloud-observability.md) |
+| Alerting | Ours — one Alertmanager for four clouds | [cloud-observability](cloud-observability.md) |
+| Scaleway alert manager | Refused — regionalised, and blocks Grafana's own | [cloud-observability](cloud-observability.md) |
+| Cost attribution | Consumption API, resource lines, Project-scoped | [cloud-observability](cloud-observability.md) |
+| Per-namespace cost | Does not exist — OpenCost as a catalog option | [cloud-observability](cloud-observability.md) |
+| Quotas | Raised at onboarding — the estate does not fit the defaults | [cloud-observability](cloud-observability.md) |
 
 ## Reference estate
 
@@ -43,9 +59,23 @@ Three clusters — prod 20 vCPU / 40 GiB of Pod requests, staging 8 / 16, dev
 
 fr-par list price excluding VAT, read 14 September 2026.
 
+Add ~1.5 days/month of Do Now operations against an AWS baseline, argued in
+[managed-scope](managed-scope.md#what-it-costs-per-client).
+
 ## The limits nothing downstream can fix
 
 - No workload identity federation — a Pod calling the Scaleway API carries a
   long-lived API key.
 - The control plane always has a public IP.
 - etcd is capped at 55 MB mutualized, 200 MB dedicated.
+- No per-resource IAM outside IAM, Key Manager and Secret Manager, and no
+  tags on consumption — so the Project is the only boundary for both access
+  and cost.
+
+## Nothing in the module can do these
+
+- Raise the instance quotas the reference estate needs. Production's node
+  type has a default quota of 2 and the estate wants 4 — a support ticket
+  before the first apply.
+- Validate the Organization's identity, without which most useful instance
+  types have no quota at all.
