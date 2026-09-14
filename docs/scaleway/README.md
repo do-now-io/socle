@@ -30,6 +30,12 @@ Kapsule throughout. Each decision is argued in the linked document.
 | Alerting | Ours — one Alertmanager for four clouds | [cloud-observability](cloud-observability.md) |
 | Cost attribution | Consumption API, Project-scoped, monthly | [cloud-observability](cloud-observability.md) |
 | Quotas | Raised at onboarding — the estate does not fit the defaults | [cloud-observability](cloud-observability.md) |
+| The Crossplane bet | Holds — coverage is excellent, cadence is not | [crossplane-iac](crossplane-iac.md) |
+| Crossplane provider | Scaleway's own, upjet-generated, version pinned | [crossplane-iac](crossplane-iac.md) |
+| Provider regeneration | Factory-owned fork — ~3–5 days, once | [crossplane-iac](crossplane-iac.md) |
+| Missing Crossplane resource | `provider-terraform` inside the Composition | [crossplane-iac](crossplane-iac.md) |
+| tofu-controller | Refused — a second reconciler beside Flux | [crossplane-iac](crossplane-iac.md) |
+| OpenTofu provider, foundations | No gaps — nothing to work around | [crossplane-iac](crossplane-iac.md) |
 
 ## Reference estate
 
