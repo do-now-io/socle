@@ -14,6 +14,10 @@ tofu apply \
   -var 'cluster_endpoint_public_access_cidrs=["203.0.113.0/24"]'
 ```
 
+Everything that has to exist on the account beforehand, with the commands to
+create it, is in
+[prerequisites](../../../../docs/scaleway/prerequisites.md).
+
 ## Before the first apply
 
 - **Raise the instance quota.** The default pool is two
@@ -57,10 +61,11 @@ carrying:
 | Permission set | For |
 | --- | --- |
 | `KubernetesFullAccess` | the cluster, its pools and its ACL |
-| `VPCFullAccess` | the VPC and the Private Network |
-| `PublicGatewaysFullAccess` | the gateways and their flexible IPs |
+| `VPCFullAccess` | the VPC |
+| `PrivateNetworksFullAccess` | the cluster's Private Network |
+| `VPCGatewayFullAccess` | the gateways and their flexible IPs |
 | `IPAMFullAccess` | the gateways' private address reservations |
-| `InstancesFullAccess` | the placement groups and the security group |
+| `InstancesFullAccess` | the placement groups and the security groups |
 | `IAMManager` | the Crossplane application, policy and key |
 | `ObservabilityFullAccess` | the query-only Cockpit token |
 
