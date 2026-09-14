@@ -62,7 +62,7 @@ not.
 | --- | --- | --- |
 | Node-less mode | none | Autopilot, Fargate |
 | Node autoscaling | cluster-autoscaler | + Karpenter, NAP, node auto-provisioning |
-| Discounted capacity | savings plans only, ~10% at 3 years | Spot at 70–90% off, plus committed-use discounts |
+| Discounted capacity | savings plans, 10–25% against 1–3 years | Spot at 70–90% off, plus committed-use discounts |
 | Workload identity | **none** | WIF, Pod Identity, Workload Identity |
 | Private control plane | **impossible** | standard on all three |
 | Managed backup | none | Backup for GKE, AWS Backup, AKS Backup |
@@ -99,6 +99,100 @@ and the CSI driver. The practical consequences:
 
 So Cilium-on-four-clouds is true on the box and false in the detail: three
 clouds run the socle's Cilium, Scaleway runs Scaleway's.
+
+## Autoscaling
+
+Kapsule runs the upstream cluster-autoscaler, configured on the cluster and
+scaled per pool. **There is no Karpenter for Scaleway** — no provider
+exists, official or community — so there is nothing to install and nothing
+to refuse.
+
+| | cluster-autoscaler, here | Karpenter, elsewhere |
+| --- | --- | --- |
+| Unit of scaling | the pool, one instance type | the Pod's actual requirements |
+| Instance type | **ours to choose, per pool** | the controller's |
+| Consolidation | **none** | repacks, replaces nodes with cheaper ones |
+| Scale to zero | yes, `min_size = 0` | yes |
+| Spot | nothing to handle | interruption, fallback, spot-to-spot |
+
+**What is lost is consolidation, not spot.** The autoscaler removes a node
+once it falls below the utilisation threshold and its Pods fit elsewhere; it
+never replaces a running node with a cheaper one. That repacking is
+Karpenter's main saving on a pure on-demand estate, and it has no equivalent
+here.
+
+**So pool shape is a design act.** Several workload shapes mean several
+pools, each carrying its own `min_size` floor, and every floor is billed
+whether or not anything schedules on it.
+
+Everything is tunable on the cluster: `scale_down_unneeded_time` (10m),
+`scale_down_utilization_threshold` (0.5), `scale_down_delay_after_add`
+(10m), `max_graceful_termination_sec` (600), `estimator` (binpacking),
+`expander` (**random**), `balance_similar_node_groups`,
+`ignore_daemonsets_utilization`, `skip_nodes_with_local_storage`,
+`expendable_pods_priority_cutoff`.
+
+**`expander = "least_waste"` is a module default, because Scaleway ships
+`random`.** With more than one pool, the shipped default picks which pool to
+grow by coin flip. `least_waste` picks the one that strands the least
+capacity. `price` is also in the enum and is not used — upstream implements
+it for GCE and AWS only.
+
+## Instance types and zones
+
+The constraint that shapes the estate, and it is documented nowhere as such.
+It comes out of the Instances API.
+
+**Scaleway is mid-generation change, and the two generations never share a
+zone.**
+
+| Zone | POP2 / POP2-HC / PRO2 | COMPUTE3 / BASIC3, Zen 5 | GPU |
+| --- | --- | --- | --- |
+| fr-par-1 | — | yes | L4 |
+| fr-par-2 | — | yes | H100, B300 |
+| fr-par-3 | yes | — | — |
+| nl-ams-1 | — | yes | — |
+| nl-ams-2 | POP2 only | yes | — |
+| nl-ams-3 | yes | — | — |
+| pl-waw-1 | yes | — | — |
+| pl-waw-2 | yes | — | H100, L4, L40S |
+| pl-waw-3 | yes | — | — |
+
+Read from `/instance/v1/zones/{zone}/products/servers`, 14 September 2026.
+**Scaleway's own documentation disagrees**, listing POP2 in PAR1 and PAR2
+where the API offers none. The API is what a `tofu apply` meets; re-check it
+at onboarding.
+
+What follows from it:
+
+- **Only pl-waw can run a homogeneous three-AZ cluster.** fr-par and nl-ams
+  each carry the modern range in two zones and the previous one in the third.
+- **Three AZs in fr-par means mixing generations** — COMPUTE3 in par-1 and
+  par-2, POP2-HC in par-3 — across hardware Scaleway itself claims is 35%
+  apart, and which `balance_similar_node_groups` will not treat as similar.
+- **GPU sits with the modern range**, in fr-par-1 and fr-par-2, and in
+  pl-waw only in waw-2. A GPU pool next to par-3's POP2-HC is impossible.
+
+**Decision: COMPUTE3-X across fr-par-1 and fr-par-2. Two zones, not three.**
+
+- Dedicated vCPU at 1:2, the estate's own ratio, on current hardware, in the
+  region a client buying European sovereignty actually asked for.
+- **BASIC3-X is refused for nodes.** Shared vCPU and a 99% SLO against 99.5%
+  for the dedicated ranges. It is cheaper — €130 against €171 for 8 vCPU /
+  16 GiB — and it is not what a production node is.
+- **pl-waw on POP2-HC is the catalog option** when three availability zones
+  are a hard requirement, at the cost of the previous hardware generation.
+
+## GPU
+
+**Delegated, entirely.** Scaleway installs the NVIDIA GPU operator on every
+GPU pool by default — device plugin, container toolkit, drivers. Nothing for
+the catalog to ship, nothing for the factory to maintain.
+
+- The trap is Scaleway's own: the operator installs drivers *after* the node
+  registers, so a workload scheduling immediately misses them. Startup
+  taints are the answer and Kapsule supports them per pool.
+- Quotas are low and identity-gated — 3 H100 nodes, 5 L4 or L40S.
 
 ## Versions and upgrades
 
@@ -156,10 +250,11 @@ the one thing the socle exists to prevent.
 no HA. Scaleway is explicit: a gateway in PAR-1 serving nodes in PAR-2 and
 PAR-3 stops serving them when PAR-1 fails, and the documented workaround is
 several gateways on one Private Network, each advertising a default route.
-One gateway is functionally enough for a whole region; three are what it
-takes to survive losing a zone. Production pays for three, dev and staging
-one each. The ceilings are 8 Private Networks per gateway and 50 gateways
-per Organization.
+One gateway is functionally enough for a whole region; surviving a zone
+outage takes one per zone the cluster actually spans. On the default
+two-zone fr-par layout that is **two in production**, one each in dev and
+staging — three in production only on the pl-waw option. The ceilings are 10
+Private Networks per gateway and 50 gateways per Organization.
 
 - The dependency is hard in both directions: detach the gateways and the
   nodes lose their route to the control plane.
@@ -215,33 +310,39 @@ series per data source, Loki 4 MB/s.
 The sprint's reference estate: prod 20 vCPU / 40 GiB of Pod requests,
 staging 8 / 16, dev 4 / 8.
 
-Kapsule bills nodes, not requests. Sizing rule below: POP2-HC (1 vCPU :
-2 GiB, the estate's own ratio), capacity covering requests plus 25% for
-kubelet reserve, system daemons and rollout headroom, rounded to whole
-nodes.
+Kapsule bills nodes, not requests. Sizing rule: COMPUTE3-X (1 vCPU : 2 GiB,
+the estate's own ratio), capacity covering requests plus 25% for kubelet
+reserve, system daemons and rollout headroom, rounded to whole nodes.
 
 | | Nodes | Per month |
 | --- | --- | --- |
-| prod | 4 × POP2-HC-8C-16G | €621 |
-| staging | 2 × POP2-HC-6C-12G | €233 |
-| dev | 2 × POP2-HC-4C-8G | €155 |
+| prod | 4 × COMPUTE3-X8C-16G | €684 |
+| staging | 2 × COMPUTE3-X6C-12G | €256 |
+| dev | 2 × COMPUTE3-X4C-8G | €171 |
 | Dedicated 4 control plane, prod only | | €80 |
 | One LB-S per cluster | | €50 |
-| Public Gateways — 3 in prod, 1 each elsewhere | 5 × VPC-GW-S | €95 |
-| **Total** | | **~€1,235** |
+| Public Gateways — 2 in prod, 1 each elsewhere | 4 × VPC-GW-S | €76 |
+| **Total** | | **~€1,317** |
 
 - The same estate on GKE Autopilot is **$1,488/month**. Kapsule comes out
   lower, but the two bill different things — Autopilot charges the 32 vCPU
   of requests, Kapsule charges the 52 vCPU of nodes those requests need.
-- **This sizing does not survive a zone loss.** Production's four nodes
-  cover requests plus headroom, not requests plus a missing third of the
-  cluster. Six nodes, two per AZ, do — **+€311/month**.
+- **This sizing does not survive a zone loss, and two zones make that
+  expensive.** With production split across fr-par-1 and fr-par-2, surviving
+  the loss of one means each zone carrying the whole estate: eight nodes,
+  **+€684/month**, a doubling. The same resilience on pl-waw's three zones
+  costs six POP2-HC nodes, **+€311** — half as much. **Zone count, not node
+  price, is what resilience costs here.**
+- Node prices read from the Instances API, 14 September 2026; COMPUTE3-X is
+  ~10% dearer than the POP2-HC shape it replaces.
 - Persistent volumes are extra at €0.095/GB/month (5K IOPS).
 - **There is no Spot line to save.** The only discount Scaleway sells is a
-  savings plan: compute only, 12 or 36 months, €50/month minimum, ~10% off
-  at three years, billed in full whether the commitment is used or not, and
-  neither cancellable nor exchangeable. On this estate that is ~€100/month
-  against three years of lock-in — a commercial decision per client, never a
+  savings plan: compute only, 12 or 36 months, €50 to €9,999 a month, billed
+  in full whether the commitment is used or not, neither cancellable nor
+  exchangeable. **The rate is bracketed by amount and duration and is not
+  published** — Scaleway's worked example gives 10% for €900/month over
+  three years, its Compute Optimized page advertises up to 25%. GPU
+  instances are excluded outright. A commercial decision per client, never a
   module default.
 
 fr-par list price excluding VAT, read 14 September 2026.
@@ -260,6 +361,11 @@ fr-par list price excluding VAT, read 14 September 2026.
   Hubble or the kube-proxy replacement anywhere it wants to stay portable.
 - **Full isolation everywhere, one Public Gateway per AZ, and an allowed-IP
   list with no default** — argued in [networking](#networking).
+- **COMPUTE3-X across fr-par-1 and fr-par-2**, two zones rather than three,
+  because the modern instance range and the previous one never share a zone.
+  pl-waw on POP2-HC is the option when three zones are required.
+- **`expander = "least_waste"`**, because Scaleway's cluster-autoscaler
+  ships `random` and the estate runs more than one pool.
 
 Deferred to the rest of the sprint: the upgrade ring mechanism (managed
 scope), the samples/second budget (supervision), and how the Crossplane
@@ -275,6 +381,11 @@ Read 14 September 2026.
 [IAM and RBAC][rbac] · [audit logs][audit] · [allowed IPs][allowed] ·
 [etcd space recovery][etcd] · [Cilium encryption on Kapsule][cilium-enc] ·
 [Public Gateway FAQ][pgw-faq] · [VPC concepts][vpc] ·
+[General Purpose range][gp-range] · [Specialized range][spec-range] ·
+[NVIDIA GPU operator on Kapsule][gpu-op] · [savings plans][savings] ·
+[cluster-autoscaler options][tf-cluster] ·
+`GET /instance/v1/zones/{zone}/products/servers` for what each zone
+actually offers, and its prices.
 [organization quotas][quotas] · [Cockpit pricing][cockpit-price] ·
 [Cockpit limits][cockpit-limits] · [Kapsule pricing][k8s-price] ·
 [Instances pricing][inst-price] · [Network pricing][net-price] ·
@@ -294,6 +405,11 @@ Read 14 September 2026.
 [cilium-enc]: https://www.scaleway.com/en/docs/tutorials/enabling-encryption-in-kapsule-with-cilium/
 [pgw-faq]: https://www.scaleway.com/en/docs/public-gateways/faq/
 [vpc]: https://www.scaleway.com/en/docs/vpc/concepts/
+[gp-range]: https://www.scaleway.com/en/docs/instances/reference-content/general-purpose/
+[spec-range]: https://www.scaleway.com/en/docs/instances/reference-content/specialized/
+[gpu-op]: https://www.scaleway.com/en/docs/kubernetes/how-to/use-nvidia-gpu-operator/
+[savings]: https://www.scaleway.com/en/docs/billing/additional-content/understanding-savings-plans/
+[tf-cluster]: https://registry.terraform.io/providers/scaleway/scaleway/latest/docs/resources/k8s_cluster
 [quotas]: https://www.scaleway.com/en/docs/organizations-and-projects/additional-content/organization-quotas/
 [cockpit-price]: https://www.scaleway.com/en/docs/cockpit/reference-content/cockpit-pricing/
 [cockpit-limits]: https://www.scaleway.com/en/docs/cockpit/reference-content/cockpit-limitations/

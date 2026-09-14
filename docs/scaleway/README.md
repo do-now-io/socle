@@ -25,7 +25,15 @@ Kapsule throughout. Each decision is argued in the linked document.
 | Workload metrics | The socle's Prometheus — Cockpit is 2.5× GKE per sample | [kapsule-capabilities](kapsule-capabilities.md) |
 | Scaleway's own metrics and logs | Cockpit, free | [kapsule-capabilities](kapsule-capabilities.md) |
 | Backup | Velero, same on four clouds — Scaleway manages none | [kapsule-capabilities](kapsule-capabilities.md) |
-| Discounted capacity | Savings plans only — ~10% against 3 years of lock-in | [kapsule-capabilities](kapsule-capabilities.md) |
+| Discounted capacity | Savings plans — 10–25%, rate unpublished, GPU excluded | [kapsule-capabilities](kapsule-capabilities.md) |
+| Node autoscaling | cluster-autoscaler — no Karpenter exists for Scaleway | [kapsule-capabilities](kapsule-capabilities.md) |
+| Autoscaler expander | `least_waste` — Scaleway ships `random` | [kapsule-capabilities](kapsule-capabilities.md) |
+| Consolidation | Does not exist — pool shape is a design act | [kapsule-capabilities](kapsule-capabilities.md) |
+| Node range | COMPUTE3-X — dedicated vCPU, current generation | [kapsule-capabilities](kapsule-capabilities.md) |
+| BASIC3-X for nodes | Refused — shared vCPU, 99% SLO | [kapsule-capabilities](kapsule-capabilities.md) |
+| Zones, production | fr-par-1 and fr-par-2 — two, not three | [kapsule-capabilities](kapsule-capabilities.md) |
+| Three availability zones | Catalog option — pl-waw on POP2-HC only | [kapsule-capabilities](kapsule-capabilities.md) |
+| GPU | Delegated — Scaleway installs the NVIDIA operator | [kapsule-capabilities](kapsule-capabilities.md) |
 | Data-plane add-ons | Delegated — no version exposed, no opt-out | [managed-scope](managed-scope.md) |
 | Load balancers | Delegated — the CCM covers it, ~50 annotations | [managed-scope](managed-scope.md) |
 | DNS and certificates | Factory — External-DNS and cert-manager's Scaleway webhook | [managed-scope](managed-scope.md) |
@@ -50,12 +58,13 @@ Three clusters — prod 20 vCPU / 40 GiB of Pod requests, staging 8 / 16, dev
 
 | | Per month |
 | --- | --- |
-| Nodes | €1,010 |
+| Nodes — COMPUTE3-X | €1,111 |
 | Dedicated 4 control plane, prod only | +€80 |
 | One Load Balancer per cluster | +€50 |
-| Public Gateways — 3 in prod, 1 each elsewhere | +€95 |
-| **Total** | **~€1,235** |
-| *Production sized to survive a zone loss* | *+€311* |
+| Public Gateways — 2 in prod, 1 each elsewhere | +€76 |
+| **Total** | **~€1,317** |
+| *Production surviving a zone loss, on two zones* | *+€684* |
+| *The same, on pl-waw's three zones* | *+€311* |
 
 fr-par list price excluding VAT, read 14 September 2026.
 
@@ -68,14 +77,17 @@ Add ~1.5 days/month of Do Now operations against an AWS baseline, argued in
   long-lived API key.
 - The control plane always has a public IP.
 - etcd is capped at 55 MB mutualized, 200 MB dedicated.
+- The current and previous instance generations never share an Availability
+  Zone, so only pl-waw can run a homogeneous three-zone cluster.
 - No per-resource IAM outside IAM, Key Manager and Secret Manager, and no
   tags on consumption — so the Project is the only boundary for both access
   and cost.
 
 ## Nothing in the module can do these
 
-- Raise the instance quotas the reference estate needs. Production's node
-  type has a default quota of 2 and the estate wants 4 — a support ticket
+- Raise the instance quotas the reference estate needs. The quota table has
+  no figure at all for the Zen 5 generation, and the shape COMPUTE3-X
+  replaces is capped at 2 against an estate that wants 4 — a support ticket
   before the first apply.
 - Validate the Organization's identity, without which most useful instance
   types have no quota at all.

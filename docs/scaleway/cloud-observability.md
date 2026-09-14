@@ -132,7 +132,8 @@ deployment. **The reference estate does not fit in a default account.**
 
 | Quota | Default, identity validated | Estate needs |
 | --- | --- | --- |
-| `POP2-HC-8C-16G` | **2** | **4 in production** |
+| `COMPUTE3-X8C-16G` | **not published** | **4 in production** |
+| `POP2-HC-8C-16G`, the shape it replaces | **2** | 4 |
 | `POP2-HC-4C-8G` | 4 | 2 |
 | Kapsule clusters | 40 | 3 |
 | Kapsule with a dedicated control plane 4 or 8 | **4** | 1 per production cluster |
@@ -141,9 +142,11 @@ deployment. **The reference estate does not fit in a default account.**
 | Private Networks attached to Public Gateways | 10 | 1 |
 | Private Networks per Organization | 255 | 3 |
 
-- **Production's node type is the blocker**: four nodes against a quota of
-  two. A support ticket before the first apply is an onboarding step, not a
-  runtime concern — the module cannot raise a quota.
+- **Production's node type is the blocker.** The quota table has not been
+  updated for the Zen 5 generation, so `COMPUTE3-X` has no published figure
+  at all — but the shape it replaces is capped at two against an estate that
+  wants four, and there is no reason to expect better. Read the real number
+  from the console before the first apply; the module cannot raise a quota.
 - **The dedicated control plane quota caps the offer at four production
   clusters** per Organization before another ticket. Worth knowing when
   pricing a client with many production environments.
