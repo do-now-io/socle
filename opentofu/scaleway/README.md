@@ -107,8 +107,18 @@ tested, so these are refusals:
 
 `integration.yaml` runs this module's leg **plan-only**. Scaleway publishes no
 emulator, and there is no third-party one — recorded in the conformance
-checklist as an exception, not hidden. Convergence is therefore proven on a
-real test account, not in CI.
+checklist as an exception, not hidden.
+
+Two offline checks stand in for an apply, and neither is one:
+
+- **`tofu test`** plans the module itself — 37 runs, 5 asserting the
+  recommended defaults and 32 tripping the 32 validation blocks one by one.
+- **`tofu plan` on `examples/minimal`** plans the module the way a consumer
+  calls it, so the example's own wiring and outputs are exercised too.
+
+Both use fixture credentials over empty state, so no API call leaves the
+runner and forks can run them. **Convergence is not proven by either.** That
+needs a real Project, a quota raise and an apply.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
