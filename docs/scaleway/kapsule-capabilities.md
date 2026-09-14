@@ -134,18 +134,56 @@ can be exchanged against.
 
 ## Networking
 
-- Every cluster consumes a **/22**. Create the Private Network yourself and
-  the range is yours; let Kapsule create one and it is assigned. Either way
-  it is one flat /22 per cluster — no subnet-per-concern layout.
-- **Controlled isolation** (default) gives nodes a public IP for egress,
-  inbound dropped by a shared `Kapsule default security group`. **Full
-  isolation** removes the public IPs and requires a Public Gateway
-  (€19/month and up) that becomes a hard dependency: detach it and the nodes
-  lose their control plane.
-- The control plane keeps a public IP either way. The mitigation is the
-  allowed-IP list, on by default for clusters created after March 2025.
-- Multi-AZ means node pools per zone inside one region; a zone-redundant API
-  server means a dedicated offer.
+Decided here, because no other ticket in the Scaleway sprint owns it.
+
+| Question | Position |
+| --- | --- |
+| Node isolation | Full isolation, every environment |
+| Public Gateways | One per AZ the cluster's pools span |
+| Control plane exposure | Allowed-IP list, required, never `0.0.0.0/0` |
+| Security group | One per cluster, created by the module |
+| Layout | One VPC per environment, one /22 Private Network per cluster |
+| Node spread | One pool per AZ, each in its own placement group |
+
+**Full isolation everywhere.** Nodes carry no public IP and egress leaves
+through a Public Gateway, which matches the private-node position already
+taken on AWS and GCP and yields a stable egress IP to allow-list elsewhere.
+Controlled isolation is free and drops inbound traffic anyway, but it would
+have dev and staging exercising a different egress path from production —
+the one thing the socle exists to prevent.
+
+**One gateway per Availability Zone.** The Public Gateway is zoned and has
+no HA. Scaleway is explicit: a gateway in PAR-1 serving nodes in PAR-2 and
+PAR-3 stops serving them when PAR-1 fails, and the documented workaround is
+several gateways on one Private Network, each advertising a default route.
+One gateway is functionally enough for a whole region; three are what it
+takes to survive losing a zone. Production pays for three, dev and staging
+one each. The ceilings are 8 Private Networks per gateway and 50 gateways
+per Organization.
+
+- The dependency is hard in both directions: detach the gateways and the
+  nodes lose their route to the control plane.
+
+**The allowed-IP list is required, with no default.** The control plane
+cannot be made private, so this list is the only boundary that exists — and
+`0.0.0.0/0` is what Kapsule ships. A variable with no default is the only
+way to make someone decide. It carries the pipeline's egress and the
+operators', nothing else.
+
+**A security group per cluster.** New clusters are attached to a
+`Kapsule default security group` that is **shared between clusters**:
+editing it to open a port on one cluster opens it on all of them.
+`security_group_id` is settable at creation, so the module sets it.
+
+**One VPC per environment, one Private Network per cluster.** Routing is
+VPC-wide, so a single VPC makes every cluster routable from every other. The
+/22 belongs to the cluster and its range is the module's to choose.
+
+**A placement group per pool.** Multi-AZ is one pool per zone; inside a
+zone, nothing otherwise stops a pool's nodes landing on one hypervisor.
+
+A zone-redundant API server still requires a dedicated control plane —
+production has one, dev and staging do not.
 
 ## Observability
 
@@ -189,11 +227,15 @@ nodes.
 | dev | 2 × POP2-HC-4C-8G | €155 |
 | Dedicated 4 control plane, prod only | | €80 |
 | One LB-S per cluster | | €50 |
-| **Total** | | **~€1,140** |
+| Public Gateways — 3 in prod, 1 each elsewhere | 5 × VPC-GW-S | €95 |
+| **Total** | | **~€1,235** |
 
 - The same estate on GKE Autopilot is **$1,488/month**. Kapsule comes out
   lower, but the two bill different things — Autopilot charges the 32 vCPU
   of requests, Kapsule charges the 52 vCPU of nodes those requests need.
+- **This sizing does not survive a zone loss.** Production's four nodes
+  cover requests plus headroom, not requests plus a missing third of the
+  cluster. Six nodes, two per AZ, do — **+€311/month**.
 - Persistent volumes are extra at €0.095/GB/month (5K IOPS).
 - There is no Spot line to add, and none to save.
 
@@ -211,10 +253,12 @@ fr-par list price excluding VAT, read 14 September 2026.
   comes free through Cockpit.
 - **Cilium is Scaleway's on this cloud.** The catalog must not assume
   Hubble or the kube-proxy replacement anywhere it wants to stay portable.
+- **Full isolation everywhere, one Public Gateway per AZ, and an allowed-IP
+  list with no default** — argued in [networking](#networking).
 
-Deferred to the rest of the sprint: the isolation mode and the allowed-IP
-policy (network and security), the upgrade ring mechanism (managed scope),
-and how the Crossplane identity's API key is rotated (foundations module).
+Deferred to the rest of the sprint: the upgrade ring mechanism (managed
+scope), the samples/second budget (supervision), and how the Crossplane
+identity's API key is rotated (foundations module).
 
 ## Sources
 
@@ -225,6 +269,7 @@ Read 14 September 2026.
 [concepts][concepts] · [Private Network][pn] · [multi-AZ][multiaz] ·
 [IAM and RBAC][rbac] · [audit logs][audit] · [allowed IPs][allowed] ·
 [etcd space recovery][etcd] · [Cilium encryption on Kapsule][cilium-enc] ·
+[Public Gateway FAQ][pgw-faq] · [VPC concepts][vpc] ·
 [organization quotas][quotas] · [Cockpit pricing][cockpit-price] ·
 [Cockpit limits][cockpit-limits] · [Kapsule pricing][k8s-price] ·
 [Instances pricing][inst-price] · [Network pricing][net-price] ·
@@ -242,6 +287,8 @@ Read 14 September 2026.
 [allowed]: https://www.scaleway.com/en/docs/kubernetes/how-to/manage-allowed-ips/
 [etcd]: https://www.scaleway.com/en/docs/kubernetes/how-to/recover-space-etcd/
 [cilium-enc]: https://www.scaleway.com/en/docs/tutorials/enabling-encryption-in-kapsule-with-cilium/
+[pgw-faq]: https://www.scaleway.com/en/docs/public-gateways/faq/
+[vpc]: https://www.scaleway.com/en/docs/vpc/concepts/
 [quotas]: https://www.scaleway.com/en/docs/organizations-and-projects/additional-content/organization-quotas/
 [cockpit-price]: https://www.scaleway.com/en/docs/cockpit/reference-content/cockpit-pricing/
 [cockpit-limits]: https://www.scaleway.com/en/docs/cockpit/reference-content/cockpit-limitations/
