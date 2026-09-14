@@ -14,7 +14,7 @@ structural — the module is shaped around them, not against them.**
 | No workload identity federation | Pods authenticate to Scaleway with a long-lived API key, held as a Secret |
 | The control plane always has a public IP | There is no fully private cluster; an IP allow-list is the only boundary |
 | etcd capped at 55 MB (mutualized) / 200 MB (dedicated) | A CRD-heavy socle — Flux, Crossplane, the catalog — is a sizing input, not a detail |
-| No spot market, no Karpenter | Capacity is fixed node types under cluster-autoscaler, at list price |
+| No spot market, no Karpenter | Capacity is fixed node types under cluster-autoscaler; the only discount is a three-year commitment |
 
 None of these has a workaround inside the cluster. They are priced and
 designed for, or the cluster is not run on Scaleway.
@@ -62,7 +62,7 @@ not.
 | --- | --- | --- |
 | Node-less mode | none | Autopilot, Fargate |
 | Node autoscaling | cluster-autoscaler | + Karpenter, NAP, node auto-provisioning |
-| Discounted capacity | **none** | Spot everywhere, committed-use discounts |
+| Discounted capacity | savings plans only, ~10% at 3 years | Spot at 70–90% off, plus committed-use discounts |
 | Workload identity | **none** | WIF, Pod Identity, Workload Identity |
 | Private control plane | **impossible** | standard on all three |
 | Managed backup | none | Backup for GKE, AWS Backup, AKS Backup |
@@ -237,7 +237,12 @@ nodes.
   cover requests plus headroom, not requests plus a missing third of the
   cluster. Six nodes, two per AZ, do — **+€311/month**.
 - Persistent volumes are extra at €0.095/GB/month (5K IOPS).
-- There is no Spot line to add, and none to save.
+- **There is no Spot line to save.** The only discount Scaleway sells is a
+  savings plan: compute only, 12 or 36 months, €50/month minimum, ~10% off
+  at three years, billed in full whether the commitment is used or not, and
+  neither cancellable nor exchangeable. On this estate that is ~€100/month
+  against three years of lock-in — a commercial decision per client, never a
+  module default.
 
 fr-par list price excluding VAT, read 14 September 2026.
 
