@@ -145,9 +145,6 @@ resource "aws_route_table_association" "private" {
 # Identity, Karpenter), not a cost optimisation — neither is a toggle.
 # Both gated on create_vpc: this module only manages endpoints on the VPC
 # and route tables it also manages.
-#
-# DynamoDB dropped: no cited Socle use case, here or in
-# docs/aws/cloud-observability.md — see docs/aws/eks-network-security.md.
 
 resource "aws_vpc_endpoint" "s3" {
   count = var.create_vpc ? 1 : 0

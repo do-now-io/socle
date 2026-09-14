@@ -7,14 +7,24 @@
 # where CI's throwaway values live instead.
 #
 # The leg stops at the plan, and that is an emulator limit, not a module one.
-# Measured against the image the workflow pins: 37 of the module's 39 resources
-# apply and destroy cleanly — the VPC and everything in it, the cluster, both
-# log groups, the flow log, the KMS keys and the roles. Two do not:
+# Measured against the image the workflow pins: the first apply succeeds
+# clean, all 34 resources — the blockers from an earlier version of this
+# module (a managed policy the emulator didn't ship, a Pod Identity
+# association API it didn't implement) left with the resources that needed
+# them.
 #
-# both resources that blocked it have since left the module — the managed
-# policy attachment with the EBS CSI role, and the Pod Identity association
-# with Crossplane's. Re-measure before trusting this leg's status either way:
-# what it can and cannot do has changed twice already.
+# What replaces them: a second `plan` — or `destroy`, which plans first —
+# against the same cluster fails outright. DescribeCluster on this image
+# comes back with an empty `identity`, though CreateCluster populated it at
+# apply time, so `oidc_issuer_url` (aws_eks_cluster.socle.identity[0].oidc[0]
+# .issuer) errors on a nonexistent index instead of just drifting. The same
+# read loses enabled_cluster_log_types, encryption_config and two IAM roles'
+# tags, and the flow log's iam_role_arn comes back empty, which forces a
+# replace. None of this reproduces on floci/floci:latest-compat, where every
+# field survives the read — so it is a gap in this specific image's
+# DescribeCluster response, not a module bug. Re-measure before trusting
+# this leg's status either way: what it can and cannot do has changed three
+# times already.
 
 variable "endpoint" {
   description = "Base URL of the floci emulator."
