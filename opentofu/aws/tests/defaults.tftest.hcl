@@ -61,6 +61,11 @@ run "defaults_are_the_recommended_position" {
   }
 
   assert {
+    condition     = aws_eks_cluster.socle.access_config[0].bootstrap_cluster_creator_admin_permissions == true
+    error_message = "The apply-time principal must get a cluster-admin access entry: left unset, a real apply against provider 6.x grants none at all, only EKS's own service role."
+  }
+
+  assert {
     condition     = length(aws_kms_key.secrets) == 1
     error_message = "A KMS key must be created by default: secrets_encryption_enabled defaults to true and no external key is supplied."
   }
