@@ -189,15 +189,6 @@ JSON
 aws s3api put-bucket-lifecycle-configuration --bucket "$STATE_BUCKET" --lifecycle-configuration file://lifecycle.json
 ```
 
-GuardDuty, once per account per region (skip if a detector already exists
-— check with `aws guardduty list-detectors` first):
-
-```sh
-DETECTOR_ID=$(aws guardduty create-detector --enable --query DetectorId --output text)
-aws guardduty update-detector --detector-id "$DETECTOR_ID" \
-  --features Name=EKS_AUDIT_LOGS,Status=ENABLED Name=EKS_RUNTIME_MONITORING,Status=ENABLED
-```
-
 Then point the backend at the state bucket and initialise:
 
 ```sh
