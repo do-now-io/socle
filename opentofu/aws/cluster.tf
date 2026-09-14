@@ -137,12 +137,19 @@ resource "aws_eks_cluster" "socle" {
     public_access_cidrs     = var.cluster_endpoint_public_access_cidrs
   }
 
-  # API-only: the aws-auth ConfigMap is legacy. The apply-time principal
-  # keeps its default cluster-admin access entry (bootstrap_cluster_creator
-  # _admin_permissions is left at its true default) — enough to bootstrap
-  # Flux, nothing this module has to manage explicitly.
+  # API-only: the aws-auth ConfigMap is legacy. bootstrap_cluster_creator_
+  # admin_permissions is set explicitly rather than left to its documented
+  # default: measured against a real cluster on provider 6.x, an apply with
+  # this left unset produces exactly one access entry — EKS's own service
+  # role — and none for the principal that ran the apply. Explicit is what
+  # actually grants that principal cluster-admin, which is what bootstraps
+  # Flux.
+  #
+  # ForceNew: AWS accepts this only at cluster creation, never as an update.
+  # Changing it here replaces every existing cluster.
   access_config {
-    authentication_mode = "API"
+    authentication_mode                         = "API"
+    bootstrap_cluster_creator_admin_permissions = true
   }
 
   dynamic "encryption_config" {

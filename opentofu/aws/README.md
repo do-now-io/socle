@@ -60,8 +60,13 @@ such in the code rather than dressed up with a citation that doesn't exist:
 - **`vpc_cidr` default (`10.0.0.0/16`)** — arbitrary, just large enough for
   any socle estate.
 - **`access_config.authentication_mode = "API"`** — the aws-auth ConfigMap
-  is legacy; the apply-time principal keeps default cluster-admin access,
-  enough to bootstrap Flux.
+  is legacy.
+- **`access_config.bootstrap_cluster_creator_admin_permissions = true`** —
+  set explicitly, not left to its documented default. Measured against a
+  real cluster on provider 6.x: an apply with this unset grants cluster-admin
+  to nobody human, only an access entry for EKS's own service role. Explicit
+  is what actually lets the apply-time principal bootstrap Flux. ForceNew —
+  changing it replaces the cluster, since AWS accepts it only at creation.
 - **`upgrade_policy.support_type = "STANDARD"`, with no variable** — the
   policy is that a cluster never enters extended support, so an option to
   enter it is an option we would not recommend. AWS's own default is exactly
