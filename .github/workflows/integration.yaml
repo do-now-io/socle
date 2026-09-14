@@ -4,8 +4,11 @@
 # fork-friendly. A green apply proves the module converges end to end.
 #
 # Emulator coverage: AWS (floci), GCP (floci-gcp), Azure (floci-az).
-# Scaleway has no emulator yet — its apply runs offline, which is only
-# meaningful while the module holds no resources.
+# Scaleway has no emulator, from floci or anyone else. Its leg therefore
+# declares mode: test and stops at a plan, like the AWS and GCP legs do for
+# their own reasons, instead of pretending to apply. The conformance
+# checklist requires each leg to say which it does, and why, in the run
+# summary.
 name: Integration tests
 
 on:
@@ -22,25 +25,29 @@ concurrency:
 
 jobs:
   opentofu-apply:
-    name: tofu apply (${{ matrix.cloud }})
+    name: tofu ${{ matrix.mode }} (${{ matrix.cloud }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
           - cloud: aws
+            mode: apply
             emulator: floci/floci:1.5.34
             port: "4566"
             health_path: /_localstack/health
           - cloud: gcp
+            mode: apply
             emulator: floci/floci-gcp:0.8.0
             port: "4588"
             health_path: /_floci-gcp/health
           - cloud: azure
+            mode: apply
             emulator: floci/floci-az:0.10.0
             port: "4577"
             health_path: /_floci/health
           - cloud: scaleway
+            mode: test
             emulator: ""
             port: ""
             health_path: ""
@@ -85,22 +92,62 @@ jobs:
         if: matrix.cloud == 'aws'
         run: aws sts get-caller-identity --endpoint-url "$AWS_ENDPOINT_URL"
       - name: tofu apply
+        if: matrix.mode == 'apply'
         working-directory: opentofu/${{ matrix.cloud }}
         run: |
           tofu init -input=false
           tofu plan -input=false -out=tf.plan
           tofu apply -input=false -auto-approve tf.plan
           tofu destroy -input=false -auto-approve
+      # No emulator exists for this cloud, so convergence cannot be proven
+      # here. Two offline checks stand in for it, and neither is an apply.
+      #
+      # First, `tofu test` plans the module itself, asserting that the
+      # recommended defaults resolve as intended and that every validation
+      # block rejects what it should.
+      - name: tofu test
+        if: matrix.mode == 'test'
+        working-directory: opentofu/${{ matrix.cloud }}
+        run: |
+          tofu init -backend=false -input=false
+          tofu test
+      # Second, a plan of the minimal example — the module the way a consumer
+      # calls it, rather than as a root module. It exercises the example's own
+      # wiring and outputs, which `tofu test` never touches.
+      #
+      # The credentials are fixtures. A plan over empty state creates nothing
+      # and reads nothing back, so no API call leaves the runner: this stays
+      # fork-friendly and secret-free, exactly like the emulator legs.
+      - name: tofu plan (minimal example)
+        if: matrix.mode == 'test'
+        working-directory: opentofu/${{ matrix.cloud }}/examples/minimal
+        env:
+          SCW_ACCESS_KEY: SCWXXXXXXXXXXXXXXXXX
+          SCW_SECRET_KEY: 11111111-1111-1111-1111-111111111111
+          SCW_DEFAULT_ORGANIZATION_ID: 33333333-3333-3333-3333-333333333333
+          TF_VAR_project_id: 22222222-2222-2222-2222-222222222222
+          TF_VAR_cluster_endpoint_public_access_cidrs: '["203.0.113.0/24"]'
+        run: |
+          tofu init -backend=false -input=false
+          tofu plan -input=false
       - name: Summary
         run: |
           {
-            echo "### tofu apply (${{ matrix.cloud }})"
-            if [ -n "${{ matrix.emulator }}" ]; then
-              echo "Applied and destroyed against \`${{ matrix.emulator }}\` — no real cloud touched. ✅"
+            echo "### tofu ${{ matrix.mode }} (${{ matrix.cloud }})"
+            if [ "${{ matrix.mode }}" = "apply" ]; then
+              echo "**Applied and destroyed** against \`${{ matrix.emulator }}\` — no real cloud touched. ✅"
             else
-              echo "⚠️ No emulator exists for this cloud yet — the apply ran offline,"
-              echo "which only proves module validity while it holds no resources."
-              echo "A disposable project (or floci Scaleway support) is needed once"
-              echo "real resources land."
+              echo "**Plan-only.** No emulator exists for this cloud, from floci or"
+              echo "anyone else, so convergence is *not* proven here. Two offline"
+              echo "checks stand in for it:"
+              echo ""
+              echo "- \`tofu test\` — the module itself, asserting the recommended"
+              echo "  defaults and every validation block."
+              echo "- \`tofu plan\` on \`examples/minimal\` — the module as a consumer"
+              echo "  calls it, exercising the example's wiring and outputs."
+              echo ""
+              echo "Both run on fixture credentials over empty state, so no API call"
+              echo "leaves the runner. A disposable Scaleway Project (or floci Scaleway"
+              echo "support) is what it would take to prove an apply converges."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
