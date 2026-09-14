@@ -15,6 +15,13 @@ Kapsule throughout. Each decision is argued in the linked document.
 | Release channels | None exist; ring order is the pipeline's | [kapsule-capabilities](kapsule-capabilities.md) |
 | Workload identity | None on Scaleway — IAM application and API key | [kapsule-capabilities](kapsule-capabilities.md) |
 | Private control plane | Impossible — allowed-IP list is the boundary | [kapsule-capabilities](kapsule-capabilities.md) |
+| Allowed-IP list | Required, no default — `0.0.0.0/0` is refused | [kapsule-capabilities](kapsule-capabilities.md) |
+| Node isolation | Full isolation, every environment | [kapsule-capabilities](kapsule-capabilities.md) |
+| Controlled isolation | Refused — dev would not exercise prod's egress path | [kapsule-capabilities](kapsule-capabilities.md) |
+| Public Gateways | One per AZ — the gateway is zoned and has no HA | [kapsule-capabilities](kapsule-capabilities.md) |
+| Security group | One per cluster — the default one is shared | [kapsule-capabilities](kapsule-capabilities.md) |
+| Network layout | One VPC per environment, one /22 per cluster | [kapsule-capabilities](kapsule-capabilities.md) |
+| Node spread | One pool per AZ, each in a placement group | [kapsule-capabilities](kapsule-capabilities.md) |
 | Workload metrics | The socle's Prometheus — Cockpit is 2.5× GKE per sample | [kapsule-capabilities](kapsule-capabilities.md) |
 | Scaleway's own metrics and logs | Cockpit, free | [kapsule-capabilities](kapsule-capabilities.md) |
 | Backup | Velero, same on four clouds — Scaleway manages none | [kapsule-capabilities](kapsule-capabilities.md) |
@@ -30,7 +37,9 @@ Three clusters — prod 20 vCPU / 40 GiB of Pod requests, staging 8 / 16, dev
 | Nodes | €1,010 |
 | Dedicated 4 control plane, prod only | +€80 |
 | One Load Balancer per cluster | +€50 |
-| **Total** | **~€1,140** |
+| Public Gateways — 3 in prod, 1 each elsewhere | +€95 |
+| **Total** | **~€1,235** |
+| *Production sized to survive a zone loss* | *+€311* |
 
 fr-par list price excluding VAT, read 14 September 2026.
 
