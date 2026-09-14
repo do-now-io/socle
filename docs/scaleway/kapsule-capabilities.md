@@ -134,8 +134,9 @@ can be exchanged against.
 
 ## Networking
 
-- Every cluster gets a Private Network with an auto-assigned **/22** — no
-  say in the prefix, no subnet-per-concern layout.
+- Every cluster consumes a **/22**. Create the Private Network yourself and
+  the range is yours; let Kapsule create one and it is assigned. Either way
+  it is one flat /22 per cluster — no subnet-per-concern layout.
 - **Controlled isolation** (default) gives nodes a public IP for egress,
   inbound dropped by a shared `Kapsule default security group`. **Full
   isolation** removes the public IPs and requires a Public Gateway
