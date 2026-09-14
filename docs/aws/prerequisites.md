@@ -12,17 +12,11 @@ gathered in [By command line](#by-command-line) at the end.
 - An AWS account. It is very likely to hold **several clusters** —
   dev/staging/prod rings, or more than one environment for the same
   client. This module does not assume exclusive ownership of the account,
-  and the account-wide prerequisites below (GuardDuty in particular)
-  follow from that.
+  and the account-wide prerequisites below follow from that.
 - Service quotas high enough for however many clusters share this account
   — VPCs per region, EIPs per region, NAT Gateways per AZ. Default quotas
   usually clear a handful of clusters; worth checking ahead of the third
   or fourth.
-- GuardDuty EKS Protection, if wanted: enabled once per account per
-  region, outside this module entirely — see
-  [Good practices → GuardDuty](#guardduty) and
-  [network & security](eks-network-security.md) for the decision and its
-  cost.
 
 ## Roles on the principal running OpenTofu
 
@@ -107,16 +101,6 @@ losing it means the cluster exists but is no longer manageable.
 - One prefix per cluster/environment: one account, and therefore one
   bucket, commonly serves several clusters.
 - Never shared with application data.
-
-### GuardDuty
-
-- Enabled once per account per region, never per cluster. A second
-  `tofu apply` of this module in the same account must not try to create
-  its own detector — that is exactly why this module has no
-  `guardduty_*` variable.
-- Audit Log Monitoring and Runtime Monitoring turn on independently; see
-  [network & security](eks-network-security.md) for the cost and the
-  decision.
 
 ## By command line
 
