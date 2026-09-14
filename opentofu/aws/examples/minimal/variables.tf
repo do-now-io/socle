@@ -1,7 +1,7 @@
 variable "region" {
   description = "AWS region for the cluster and its VPC. Configures the provider; the module reads it back from there."
   type        = string
-  default     = "eu-west-1"
+  default     = "eu-west-3"
 }
 
 variable "cluster_name" {
@@ -25,7 +25,7 @@ variable "environment" {
 variable "availability_zones" {
   description = "AZs the VPC's subnets are spread across."
   type        = list(string)
-  default     = ["eu-west-1a", "eu-west-1b"]
+  default     = ["eu-west-3a", "eu-west-3b"]
 }
 
 variable "kubernetes_version" {
