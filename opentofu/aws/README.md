@@ -124,15 +124,18 @@ and tested, so these are refusals:
 tofu test          # 12 runs: every validation, and the defaults
 ```
 
-`tests/emulator/` runs the module against the floci emulator in CI, no cloud
-account and no secret. It exists because the module has nine variables with no
-default: CI needs somewhere to put throwaway values that is not the module
-itself.
+CI plans this module directly against the floci emulator — no fixture
+directory, no cloud account, no secret. The `aws` provider already honors
+`AWS_ENDPOINT_URL` on its own, and the six variables with no default get
+throwaway values from `TF_VAR_*`, both set in `integration.yaml`'s shared
+`env:` block rather than baked into the module itself.
 
-That leg **plans, it does not apply** — floci emulates no EKS add-on API and
-ships none of the service-role managed policies. Both limits are the
-emulator's; the reasons are in `tests/emulator/main.tf` and in the workflow's
-run summary rather than left to be rediscovered.
+That leg **plans, it does not apply** — an apply run this way does create all
+34 resources, but fails as it closes out: `oidc_issuer_url` indexes into
+`identity`, which this image's `DescribeCluster` returns empty. Confirmed to
+be the emulator's gap, not the module's — the same sequence against a real
+EKS cluster showed zero drift. The reason is in the workflow's run summary
+rather than left to be rediscovered.
 
 ## What an apply does not give you
 
