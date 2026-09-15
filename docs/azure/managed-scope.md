@@ -10,8 +10,8 @@ Who operates what on a Standard + NAP cluster — see
 | Long-Term Support (Premium) | Refused — `stable` never lets a cluster sit still long enough to need it |
 | Storage CSI (Disk, File) | AKS-managed, no in-tree alternative available |
 | Monitoring | Managed Prometheus + Container Insights, enabled explicitly |
-| Policy enforcement | Not this module's job |
-| Backup | Velero, both modes available |
+| Policy enforcement | Azure Policy + baseline Pod Security Standards, Enforce — the module's own choice |
+| Backup | Velero, CSI-snapshot mode always; node-agent needs its namespace excluded |
 | Workload identity | Microsoft Entra Workload ID, enabled explicitly |
 
 ## Upgrades
@@ -57,10 +57,11 @@ would extend a support window this module never lets a cluster need.
 | Azure Disk CSI | AKS-managed | Default since Kubernetes 1.21, no in-tree alternative since 1.26 |
 | Azure File CSI | AKS-managed | Same lifecycle as Disk CSI |
 | Metrics and dashboards | Managed Prometheus + Container Insights | Not on by default on Standard — this module turns both on |
-| Policy | Azure Policy, Pod Security Standards | Neither enabled here — see below |
+| Policy | Deployment Safeguards, baseline Pod Security Standards | Enforce mode — the module turns this on |
 
 **Decision.** Storage CSI stays AKS-managed; monitoring is turned on
-explicitly; policy enforcement is left out of this module entirely.
+explicitly; Deployment Safeguards is turned on at Baseline/Enforce — what
+Automatic would have forced, chosen here instead of inherited.
 
 - Disk and File CSI have no cross-cloud equivalent worth keeping uniform —
   same logic as any provider-native component with nothing to replace it
@@ -69,24 +70,31 @@ explicitly; policy enforcement is left out of this module entirely.
   dashboard with nothing behind it. Managed Prometheus and Container
   Insights need an explicit `az aks` flag or Terraform block either way, so
   this module sets them.
-- Policy enforcement is an application-facing concern, the same boundary
-  that keeps Velero out of this module (see Backup) — it arrives through
-  whatever deploys workloads, not through the cluster's own creation.
+- Deployment Safeguards is Microsoft's own documented best-practice
+  collection, not an Automatic-only convenience: resource requests and
+  limits set where missing, anti-affinity and topology spread added,
+  `:latest` image tags rejected, in-tree storage classes rejected in favor
+  of the CSI drivers already decided above. Standard just doesn't turn it
+  on by itself.
 
 ## Backup
 
-**Decision: Velero, both modes available.**
+**Decision: Velero, CSI-snapshot mode by default.**
 
-- This module enables no Pod Security Standards level and no Azure Policy
-  baseline. Without either, nothing here forbids privileged containers or
-  `hostPath` volumes — Velero's node-agent, the mode that produces a
-  portable, file-level backup restorable outside the account and region it
-  was taken in, runs the same as the CSI-snapshot mode.
-- If a later layer turns on baseline Pod Security Standards for its own
-  reasons, Velero's namespace needs an explicit exclusion
-  (`az aks safeguards update --excluded-ns`) to keep the node-agent working
-  — a consequence for whoever makes that call, not a default this module
-  sets.
+- Baseline Pod Security Standards forbid privileged containers and
+  `hostPath` volumes — both required by Velero's node-agent, the mode
+  that produces a portable, file-level backup restorable outside the
+  account and region it was taken in. Blocked, by this module's own
+  choice above.
+- Namespaces can be excluded from Deployment Safeguards and Pod Security
+  Standards entirely (`az aks safeguards update --excluded-ns`) — a
+  workload in an excluded namespace is left alone by the baseline
+  standards. Giving Velero's own namespace that exclusion recovers the
+  node-agent mode; it isn't excluded by default here, since this module
+  doesn't deploy Velero — that exclusion is set when whatever does deploy
+  it, through the socle artifact, needs it.
+- CSI-snapshot mode needs neither privileged access nor `hostPath`, and
+  covers cluster objects plus volume snapshots regardless.
 
 ## Identity
 
@@ -112,12 +120,13 @@ Not abandoned, not a blocker for the identity this shell exposes.
 | --- | --- | --- |
 | `maintenance_window` | none — required | ≥ 4 hours, staggered per cluster |
 | `node_os_maintenance_window` | none — required | Same constraint, separate schedule |
+| `deployment_safeguards_excluded_namespaces` | `[]` | Set by whichever layer deploys a workload that needs the exclusion — not defaulted here |
 
-Hardcoded, no variable: the `stable` auto-upgrade channel, and the
-`KubernetesOfficial` support plan — Premium/LTS is never reachable through
-this module, the same way extended support is refused outright elsewhere.
-Absent by decision: any Pod Security Standards or Azure Policy toggle —
-left to whatever layer deploys workloads.
+Hardcoded, no variable: the `stable` auto-upgrade channel, the
+`KubernetesOfficial` support plan, and Deployment Safeguards at
+Baseline/Enforce — Premium/LTS is never reachable through this module,
+and neither is a weaker policy posture than the one Automatic would have
+forced.
 
 ## Sources
 
@@ -127,6 +136,8 @@ Read September 2026.
 [planned maintenance](https://learn.microsoft.com/en-us/azure/aks/planned-maintenance) ·
 [long-term support](https://learn.microsoft.com/en-us/azure/aks/long-term-support) ·
 [CSI storage drivers](https://learn.microsoft.com/en-us/azure/aks/csi-storage-drivers) ·
+[deployment safeguards](https://learn.microsoft.com/en-us/azure/aks/deployment-safeguards) ·
 [Velero node-agent configuration](https://velero.io/docs/main/supported-configmaps/node-agent-configmap/) ·
+[Kubernetes Pod Security Standards](https://kubernetes.io/docs/concepts/security/pod-security-standards) ·
 [crossplane-contrib/provider-azure](https://github.com/crossplane-contrib/provider-azure) ·
 [crossplane-contrib/provider-upjet-azure](https://github.com/crossplane-contrib/provider-upjet-azure).
