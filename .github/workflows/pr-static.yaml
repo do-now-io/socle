@@ -89,6 +89,27 @@ jobs:
             (cd "${dir}" && tofu init -backend=false -input=false > /dev/null && tofu validate)
             echo "| \`${dir}\` | ✅ | ✅ |" >> "$GITHUB_STEP_SUMMARY"
           done
+      - name: tofu test (every root module that has tests)
+        if: steps.detect.outputs.found == 'true'
+        run: |
+          for dir in opentofu/*/; do
+            if compgen -G "${dir}tests/*.tftest.hcl" > /dev/null; then
+              echo "==> ${dir}"
+              (cd "${dir}" && tofu test)
+              echo "tofu test \`${dir}\` ✅" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+      - name: terraform-docs is current (every module that generates docs)
+        if: steps.detect.outputs.found == 'true'
+        run: |
+          image=quay.io/terraform-docs/terraform-docs:0.20.0@sha256:37329e2dc2518e7f719a986a3954b10771c3fe000f50f83fd4d98d489df2eae2
+          for cfg in opentofu/*/.terraform-docs.yml opentofu/*/examples/*/.terraform-docs.yml; do
+            [ -f "${cfg}" ] || continue
+            dir="$(dirname "${cfg}")"
+            echo "==> ${dir}"
+            docker run --rm -w /w -v "${PWD}/${dir}:/w" "${image}" markdown . -c .terraform-docs.yml --output-check
+            echo "terraform-docs \`${dir}\` ✅" >> "$GITHUB_STEP_SUMMARY"
+          done
       - uses: terraform-linters/setup-tflint@6e1e0642c0289bd619021bf6b34e3c08ed1e005a # v6.3.0
         if: steps.detect.outputs.found == 'true'
       - name: tflint (every root module)
@@ -177,6 +198,14 @@ jobs:
           format: table
           exit-code: '1'
           severity: HIGH,CRITICAL
+      - name: Trivy secret scan (always gates — a leaked secret is never a finding to triage)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: secret
+          format: table
+          exit-code: '1'
       - name: Summary
         run: |
           {
