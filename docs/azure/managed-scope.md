@@ -1,18 +1,18 @@
 # AKS managed scope: upgrades, add-ons, identity
 
-Who operates what on an Automatic cluster — see
+Who operates what on a Standard + NAP cluster — see
 [cluster mode](cluster-mode.md).
 
 | Question | Position |
 | --- | --- |
-| Kubernetes minor version | AKS's stable channel decides — locked, no override |
+| Kubernetes minor version | The `stable` channel — our own choice, not imposed |
 | Which cluster upgrades first | Ours, through the maintenance window |
-| Long-Term Support (Premium) | Refused — the stable channel never lets a cluster sit still long enough to need it |
+| Long-Term Support (Premium) | Refused — `stable` never lets a cluster sit still long enough to need it |
 | Storage CSI (Disk, File) | AKS-managed, no in-tree alternative available |
-| Monitoring | Managed Prometheus + Container Insights, Automatic's own default |
-| Policy enforcement | Automatic's own baseline Pod Security Standards, enforce mode, locked |
-| Backup | Velero, CSI-snapshot mode by default; the node-agent mode needs an explicit namespace exclusion |
-| Workload identity | Microsoft Entra Workload ID — preconfigured, not optional |
+| Monitoring | Managed Prometheus + Container Insights, enabled explicitly |
+| Policy enforcement | Not this module's job |
+| Backup | Velero, both modes available |
+| Workload identity | Microsoft Entra Workload ID, enabled explicitly |
 
 ## Upgrades
 
@@ -23,19 +23,20 @@ Who operates what on an Automatic cluster — see
 | `stable` | Latest patch on minor N-1 |
 | `rapid` | Latest patch on the newest minor |
 
-**Decision: the stable channel, because there is no other option — and the
-ring order comes from the maintenance window, not from a channel choice.**
+**Decision: the `stable` channel, hardcoded — and the ring order comes from
+the maintenance window, not from the channel.**
 
-- Automatic clusters can't change the autoupgrade channel at all: it's
-  preconfigured to stable, and nothing in the tier or support-plan
-  documentation describes a way to override it.
+- AKS keeps clusters in a rolling N-2 support window. `stable` sits one
+  minor behind latest, the same margin a client never has to think about
+  falling out of support on.
 - Two clocks, one owner each: Kargo owns the socle artifact, AKS owns the
   Kubernetes version.
-- What stays ours: three maintenance-window configurations can run at once —
-  `default` (AKS's own weekly platform releases), `aksManagedAutoUpgradeSchedule`
-  (the minor-version bump), `aksManagedNodeOSUpgradeSchedule` (node OS
-  patching). Staggering `aksManagedAutoUpgradeSchedule` per cluster is the
-  ring order: dev first, staging next, prod last.
+- Rings come from the maintenance window, not the channel: three
+  configurations can run at once — `default` (AKS's own weekly platform
+  releases), `aksManagedAutoUpgradeSchedule` (the minor-version bump),
+  `aksManagedNodeOSUpgradeSchedule` (node OS patching). Staggering
+  `aksManagedAutoUpgradeSchedule` per cluster is the ring order: dev first,
+  staging next, prod last.
 - Two real constraints on that plan: maintenance windows are best-effort —
   AKS can break one for an urgent or critical patch regardless of what's
   configured — and reusing one maintenance configuration across several
@@ -44,11 +45,10 @@ ring order comes from the maintenance window, not from a channel choice.**
 
 ### Long-Term Support
 
-**Decision: refused.** Not because Premium tier blocks it — it doesn't — but
-because it can't do anything for a cluster on this module. LTS buys time on
-an aging Kubernetes version; the stable channel, locked regardless of tier,
-never lets a cluster become one. Paying for Premium's LTS support plan here
-would extend a support window the cluster is never in a position to need.
+**Decision: refused.** LTS buys time on an aging Kubernetes version. A
+cluster hardcoded to the `stable` channel is never in that position — it's
+always within one minor of latest. Paying for Premium's LTS support plan
+would extend a support window this module never lets a cluster need.
 
 ## Add-ons: who manages what
 
@@ -56,44 +56,47 @@ would extend a support window the cluster is never in a position to need.
 | --- | --- | --- |
 | Azure Disk CSI | AKS-managed | Default since Kubernetes 1.21, no in-tree alternative since 1.26 |
 | Azure File CSI | AKS-managed | Same lifecycle as Disk CSI |
-| Metrics and dashboards | Managed Prometheus + Container Insights | Automatic's own default, not locked |
-| Policy | Azure Policy + baseline Pod Security Standards | Locked by Automatic, enforce mode — nothing for the catalog to add here, and nothing it should contradict |
+| Metrics and dashboards | Managed Prometheus + Container Insights | Not on by default on Standard — this module turns both on |
+| Policy | Azure Policy, Pod Security Standards | Neither enabled here — see below |
 
-**Decision.** Storage CSI stays AKS-managed; monitoring stays on Automatic's
-own default; policy is inherited as given, not layered on top of.
+**Decision.** Storage CSI stays AKS-managed; monitoring is turned on
+explicitly; policy enforcement is left out of this module entirely.
 
 - Disk and File CSI have no cross-cloud equivalent worth keeping uniform —
   same logic as any provider-native component with nothing to replace it
   with.
-- The baseline Pod Security Standards enforced here are already the
-  strictest thing a workload will meet on this cluster. Anything the
-  catalog would add on top is redundant at best.
+- Standard doesn't default to any monitoring pipeline — only a portal-only
+  dashboard with nothing behind it. Managed Prometheus and Container
+  Insights need an explicit `az aks` flag or Terraform block either way, so
+  this module sets them.
+- Policy enforcement is an application-facing concern, the same boundary
+  that keeps Velero out of this module (see Backup) — it arrives through
+  whatever deploys workloads, not through the cluster's own creation.
 
 ## Backup
 
-**Decision: Velero, CSI-snapshot mode by default.**
+**Decision: Velero, both modes available.**
 
-- The enforced baseline Pod Security Standards forbid privileged containers
-  and `hostPath` volumes — both required by Velero's node-agent, the mode
-  that produces a portable, file-level backup restorable outside the
-  account and region it was taken in. Blocked by default.
-- Unlike the rest of Automatic's locked posture, this one has a documented
-  way out: a namespace can be excluded from deployment safeguards
-  (`az aks safeguards update --excluded-ns`), and a workload in an excluded
-  namespace is left alone by the baseline standards entirely. Giving
-  Velero's own namespace that exclusion recovers the node-agent mode — a
-  decision for whoever deploys Velero through the socle artifact, not a
-  default this module sets.
-- CSI-snapshot mode needs neither privileged access nor `hostPath`, and
-  covers cluster objects plus volume snapshots either way.
+- This module enables no Pod Security Standards level and no Azure Policy
+  baseline. Without either, nothing here forbids privileged containers or
+  `hostPath` volumes — Velero's node-agent, the mode that produces a
+  portable, file-level backup restorable outside the account and region it
+  was taken in, runs the same as the CSI-snapshot mode.
+- If a later layer turns on baseline Pod Security Standards for its own
+  reasons, Velero's namespace needs an explicit exclusion
+  (`az aks safeguards update --excluded-ns`) to keep the node-agent working
+  — a consequence for whoever makes that call, not a default this module
+  sets.
 
 ## Identity
 
-Automatic preconfigures Microsoft Entra Workload ID; it isn't a toggle.
+Standard doesn't preconfigure Microsoft Entra Workload ID — this module
+turns it on explicitly: the OIDC issuer, and workload identity federation
+for anything that needs Azure access.
 
-**Decision: workloads that need Azure access get a federated Entra identity
-bound to their Kubernetes service account.** That is all the shell needs
-today.
+**Decision: workloads that need Azure access get a federated Entra
+identity bound to their Kubernetes service account.** That is all the
+shell needs today.
 
 ### Crossplane's Azure provider
 
@@ -109,29 +112,21 @@ Not abandoned, not a blocker for the identity this shell exposes.
 | --- | --- | --- |
 | `maintenance_window` | none — required | ≥ 4 hours, staggered per cluster |
 | `node_os_maintenance_window` | none — required | Same constraint, separate schedule |
-| `k8s_support_plan` | `"KubernetesOfficial"` | Premium/LTS not exposed as an option |
-| `deployment_safeguards_excluded_namespaces` | `[]` | Set by whichever layer deploys a workload that needs the exclusion — not defaulted here |
 
-Absent by decision: any auto-upgrade channel toggle, the Premium tier, any
-Pod Security Standards level toggle.
+Hardcoded, no variable: the `stable` auto-upgrade channel, and the
+`KubernetesOfficial` support plan — Premium/LTS is never reachable through
+this module, the same way extended support is refused outright elsewhere.
+Absent by decision: any Pod Security Standards or Azure Policy toggle —
+left to whatever layer deploys workloads.
 
 ## Sources
 
 Read September 2026.
 
-[Automatic upgrade behavior][auto-upgrade] · [planned maintenance][maintenance] ·
-[long-term support][lts] · [CSI storage drivers][csi] ·
-[deployment safeguards][safeguards] · [Velero node-agent configuration][velero-node-agent] ·
-[Kubernetes Pod Security Standards][pss] ·
-[crossplane-contrib/provider-azure][cp-azure-old] ·
-[crossplane-contrib/provider-upjet-azure][cp-azure-new].
-
-[auto-upgrade]: https://learn.microsoft.com/en-us/azure/aks/auto-upgrade-cluster
-[maintenance]: https://learn.microsoft.com/en-us/azure/aks/planned-maintenance
-[lts]: https://learn.microsoft.com/en-us/azure/aks/long-term-support
-[csi]: https://learn.microsoft.com/en-us/azure/aks/csi-storage-drivers
-[safeguards]: https://learn.microsoft.com/en-us/azure/aks/deployment-safeguards
-[velero-node-agent]: https://velero.io/docs/main/supported-configmaps/node-agent-configmap/
-[pss]: https://kubernetes.io/docs/concepts/security/pod-security-standards
-[cp-azure-old]: https://github.com/crossplane-contrib/provider-azure
-[cp-azure-new]: https://github.com/crossplane-contrib/provider-upjet-azure
+[Automatic upgrade behavior](https://learn.microsoft.com/en-us/azure/aks/auto-upgrade-cluster) ·
+[planned maintenance](https://learn.microsoft.com/en-us/azure/aks/planned-maintenance) ·
+[long-term support](https://learn.microsoft.com/en-us/azure/aks/long-term-support) ·
+[CSI storage drivers](https://learn.microsoft.com/en-us/azure/aks/csi-storage-drivers) ·
+[Velero node-agent configuration](https://velero.io/docs/main/supported-configmaps/node-agent-configmap/) ·
+[crossplane-contrib/provider-azure](https://github.com/crossplane-contrib/provider-azure) ·
+[crossplane-contrib/provider-upjet-azure](https://github.com/crossplane-contrib/provider-upjet-azure).
