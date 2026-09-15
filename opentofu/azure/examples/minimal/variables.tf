@@ -1,0 +1,75 @@
+variable "location" {
+  description = "Azure region for the cluster and its resource group."
+  type        = string
+  default     = "francecentral"
+}
+
+variable "cluster_name" {
+  description = "Name of the cluster."
+  type        = string
+  default     = "socle-minimal"
+}
+
+variable "resource_group_name" {
+  description = "Name of the resource group the cluster and its resources are created in."
+  type        = string
+  default     = "socle-minimal"
+}
+
+variable "owner" {
+  description = "Team accountable for the cluster."
+  type        = string
+  default     = "platform"
+}
+
+variable "environment" {
+  description = "Environment this cluster serves."
+  type        = string
+  default     = "dev"
+}
+
+variable "kubernetes_version" {
+  description = "AKS control plane version. The default tracks the same n-1 policy ceiling as the other clouds — not the newest AKS offers, and not one close to the end of its standard support."
+  type        = string
+  default     = "1.34"
+}
+
+variable "maintenance_window_auto_upgrade" {
+  description = "Window Kubernetes version auto-upgrades are allowed to run in."
+  type = object({
+    frequency   = string
+    interval    = number
+    duration    = number
+    day_of_week = optional(string)
+    start_time  = optional(string)
+    utc_offset  = optional(string)
+  })
+  default = {
+    frequency   = "Weekly"
+    interval    = 1
+    duration    = 4
+    day_of_week = "Sunday"
+    start_time  = "02:00"
+    utc_offset  = "+00:00"
+  }
+}
+
+variable "maintenance_window_node_os" {
+  description = "Window node OS security patches are allowed to run in."
+  type = object({
+    frequency   = string
+    interval    = number
+    duration    = number
+    day_of_week = optional(string)
+    start_time  = optional(string)
+    utc_offset  = optional(string)
+  })
+  default = {
+    frequency   = "Weekly"
+    interval    = 1
+    duration    = 4
+    day_of_week = "Saturday"
+    start_time  = "03:00"
+    utc_offset  = "+00:00"
+  }
+}
