@@ -1,0 +1,90 @@
+---
+# Publishes the repository as one OpenTofu module package in an OCI registry,
+# signed with a keyless cosign signature.
+#
+# One artifact carries every cloud, so a consumer addresses a module by
+# subdirectory: oci://ghcr.io/do-now-io/socle//opentofu/gcp?digest=sha256:...
+#
+# OpenTofu does NOT verify OCI signatures. It will pull a tampered artifact
+# without complaint. The signature only counts because the consumer runs
+# cosign verify before init — that step is documented in the module README,
+# and this workflow prints the digest to pin.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Push and sign the module package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      # Fulcio issues a short-lived certificate bound to this workflow's
+      # identity. No private key exists to store or rotate.
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # git archive carries exactly what the tag contains: no .terraform
+      # directory, no lock file, no local edit.
+      - name: Build the module package
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          echo "version=${version}" >> "$GITHUB_ENV"
+          git archive --format=zip --output="socle-${version}.zip" "${GITHUB_REF_NAME}"
+          unzip -l "socle-${version}.zip" | tail -1
+
+      - uses: oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d # v2.0.1
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Log in to ghcr.io
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "${TOKEN}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      # artifactType and the archive/zip layer are what make OpenTofu
+      # recognise this as a module package. It accepts no other media type.
+      - name: Push the artifact
+        run: |
+          repo="ghcr.io/${GITHUB_REPOSITORY,,}"
+          oras push "${repo}:${GITHUB_REF_NAME}" \
+            --artifact-type application/vnd.opentofu.modulepkg \
+            --format go-template='{{.digest}}' \
+            "socle-${version}.zip:archive/zip" > digest.txt
+          echo "repo=${repo}" >> "$GITHUB_ENV"
+          echo "digest=$(cat digest.txt)" >> "$GITHUB_ENV"
+
+      # Signing the tag would sign a mutable pointer. The digest is the thing.
+      - name: Sign the digest
+        run: cosign sign --yes "${repo}@${digest}"
+
+      - name: Summary
+        run: |
+          {
+            echo "### Module package published"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Tag | \`${GITHUB_REF_NAME}\` |"
+            echo "| Digest | \`${digest}\` |"
+            echo
+            echo "Consumers pin the digest and verify the signature themselves:"
+            echo
+            echo '```sh'
+            echo "cosign verify ${repo}@${digest} \\"
+            echo "  --certificate-identity-regexp '^https://github.com/${GITHUB_REPOSITORY}/' \\"
+            echo "  --certificate-oidc-issuer https://token.actions.githubusercontent.com"
+            echo '```'
+            echo
+            echo '```hcl'
+            echo "source = \"oci://${repo}//opentofu/gcp?digest=${digest}\""
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
