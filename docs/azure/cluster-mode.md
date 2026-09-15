@@ -46,10 +46,11 @@ because the underlying VM price it's added to is so much lower.
 
 ## Why, beyond cost
 
-Automatic's entire case against this option is a pod-readiness SLA and not
-having to pick an upgrade channel or a policy mode. Against a surcharge
-that erases most of the point of using Spot at all, that's not enough —
-Automatic charges a permanent tax for conveniences this narrow.
+Automatic's own tax doesn't scale down with Spot — it stays a fixed
+$/vCPU/h, so on Spot it costs nearly as much as the compute itself.
+Spot's own discount is untouched; the tax on top of it isn't. Against
+that, and against a pod-readiness SLA and not having to pick an upgrade
+channel or a policy mode, Automatic isn't worth its permanent cost.
 
 ## What you give up
 
