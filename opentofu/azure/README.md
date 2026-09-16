@@ -139,8 +139,20 @@ every cross-resource ID reference overridden to a realistic ARM ID: the
 provider's own SDK parses those into their expected segment shape during
 plan, even against a mock.
 
-CI plans this module directly against the floci-az emulator — no fixture
-directory, no cloud account, no secret.
+CI plans [`tests/emulator`](tests/emulator) against the floci-az emulator —
+no cloud account, no secret. Unlike `aws`/`google`, `azurerm` has no
+environment-only configuration path, so a fixture with its own `provider`
+block is required rather than optional — the bare module cannot be planned
+against an emulator directly.
+
+**Currently known-red, not blocking.** floci-az's self-signed TLS
+certificate fails Go's x509 validation, and `azurerm`'s cloud-metadata
+discovery is HTTPS-only with no way to skip verification — the plan fails
+at provider configuration, before a single resource. A floci-az bug,
+outside this repo's control; `continue-on-error` keeps it off the required
+checks in the meantime. What a working plan would additionally cover past
+that point — real VNet/AKS/Monitor resource acceptance by floci-az — is
+untested and unknown.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
