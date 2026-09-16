@@ -1,10 +1,14 @@
 ---
-# Integration tests: apply every OpenTofu root module against a local
+# Integration tests: plan every OpenTofu root module against a local
 # cloud emulator (https://floci.io) — no real cloud account, no secrets,
-# fork-friendly. A green apply proves the module converges end to end.
+# fork-friendly. A green plan proves the module resolves its providers,
+# data sources and inputs, and lists what it would create.
+#
+# The apply stops here: no floci emulator completes one for the modules
+# we ship, so it proved nothing beyond the plan.
 #
 # Emulator coverage: AWS (floci), GCP (floci-gcp), Azure (floci-az).
-# Scaleway has no emulator yet — its apply runs offline, which is only
+# Scaleway has no emulator yet — its plan runs offline, which is only
 # meaningful while the module holds no resources.
 name: Integration tests
 
@@ -21,8 +25,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  opentofu-apply:
-    name: tofu apply (${{ matrix.cloud }})
+  opentofu-plan:
+    name: tofu plan (${{ matrix.cloud }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -32,18 +36,22 @@ jobs:
             emulator: floci/floci:1.5.34
             port: "4566"
             health_path: /_localstack/health
+            work_dir: opentofu/aws
           - cloud: gcp
             emulator: floci/floci-gcp:0.8.0
             port: "4588"
             health_path: /_floci-gcp/health
+            work_dir: opentofu/gcp/tests/emulator
           - cloud: azure
             emulator: floci/floci-az:0.10.0
             port: "4577"
             health_path: /_floci/health
+            work_dir: opentofu/azure
           - cloud: scaleway
             emulator: ""
             port: ""
             health_path: ""
+            work_dir: opentofu/scaleway
     env:
       # The aws provider natively honors AWS_ENDPOINT_URL and sends every
       # API call to the emulator instead of real AWS. The google and
@@ -53,7 +61,18 @@ jobs:
       AWS_ENDPOINT_URL: http://localhost:4566
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
-      AWS_REGION: eu-west-1
+      AWS_REGION: eu-west-3
+      # opentofu/aws's own six required variables — a root module with values
+      # baked in would be a second, silent set of recommendations, so the
+      # module has none, and CI supplies its own throwaway ones here instead.
+      # Harmless for the other legs: OpenTofu ignores a TF_VAR_* that matches
+      # no declared variable.
+      TF_VAR_cluster_name: socle-emulator
+      TF_VAR_owner: platform
+      TF_VAR_environment: dev
+      TF_VAR_availability_zones: '["eu-west-3a","eu-west-3b"]'
+      TF_VAR_cluster_endpoint_public_access_cidrs: '["203.0.113.0/32"]'
+      TF_VAR_kubernetes_version: "1.34"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -84,21 +103,20 @@ jobs:
       - name: Smoke-test the emulated AWS control plane
         if: matrix.cloud == 'aws'
         run: aws sts get-caller-identity --endpoint-url "$AWS_ENDPOINT_URL"
-      - name: tofu apply
-        working-directory: opentofu/${{ matrix.cloud }}
+      - name: tofu plan
+        working-directory: ${{ matrix.work_dir }}
         run: |
           tofu init -input=false
-          tofu plan -input=false -out=tf.plan
-          tofu apply -input=false -auto-approve tf.plan
-          tofu destroy -input=false -auto-approve
+          tofu plan -input=false
       - name: Summary
         run: |
           {
-            echo "### tofu apply (${{ matrix.cloud }})"
+            echo "### tofu plan (${{ matrix.cloud }})"
             if [ -n "${{ matrix.emulator }}" ]; then
-              echo "Applied and destroyed against \`${{ matrix.emulator }}\` — no real cloud touched. ✅"
+              echo "Planned against \`${{ matrix.emulator }}\` — the plan lists what would be"
+              echo "created, and no real cloud was touched. ✅"
             else
-              echo "⚠️ No emulator exists for this cloud yet — the apply ran offline,"
+              echo "⚠️ No emulator exists for this cloud yet — the plan ran offline,"
               echo "which only proves module validity while it holds no resources."
               echo "A disposable project (or floci Scaleway support) is needed once"
               echo "real resources land."
