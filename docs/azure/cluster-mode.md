@@ -11,6 +11,11 @@ tier — Socle is not the right foundation for that cluster.
 
 - NAP provisions and scales workload nodes — the same open-source engine
   Automatic uses, opt-in and explicit here instead of preconfigured.
+- No separate Azure charge for NAP itself: the retail price list carries a
+  per-category compute meter only under the Automatic product — Standard
+  has none. Node price is identical to running Karpenter self-hosted; NAP's
+  advantage is skipping the operational cost of running that controller,
+  not a lower bill.
 - Upgrade channel, node OS image upgrade, and policy enforcement are the
   factory's to configure — nothing locked.
 - NAP's own limits apply regardless of tier: no Windows node pools, no IPv6
