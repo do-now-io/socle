@@ -40,7 +40,7 @@ module "socle" {
 ```
 
 The region is not a variable, it's `location` — Azure resources take a
-region per-resource rather than from provider config, unlike AWS/GCP.
+region per-resource rather than from provider config.
 `kubernetes_version` and both maintenance windows have no default and none
 is suggested here — the socle pipeline owns the version choice, and there
 is no globally correct maintenance window to pick on a client's behalf.
@@ -77,8 +77,8 @@ such in the code rather than dressed up with a citation that doesn't exist:
 - **`vnet_cidr` default (`10.0.0.0/16`)** — arbitrary, just large enough for
   any socle estate. The single node subnet covers the whole range: there's
   nothing else in this VNet to carve address space out for.
-- **The mandatory system node pool** — AKS, unlike EKS, cannot exist with
-  zero node pools. Kept small (`Standard_D2s_v5`, 2 nodes by default) and
+- **The mandatory system node pool** — AKS cannot exist with zero node
+  pools. Kept small (`Standard_D2s_v5`, 2 nodes by default) and
   tainted system-only (`only_critical_addons_enabled`), since NAP owns
   every workload-shaped node.
 - **`outbound_type = "userAssignedNATGateway"`** — this module attaches its
@@ -106,15 +106,13 @@ and tested, so these are refusals:
   version's schema, not a decision.
 - **Microsoft Defender for Containers** — a subscription-level singleton
   (`azurerm_security_center_subscription_pricing`), not a per-cluster
-  setting. Same shape as AWS's GuardDuty detector, which was pulled out of
-  `opentofu/aws/` entirely and dropped from Socle's documentation
-  altogether — it's the client's own call on their own subscription, not
+  setting — it's the client's own call on their own subscription, not
   Socle's to toggle or document.
 - **Any Log Analytics ingestion for account-level PaaS metrics** — decided
   in [cloud observability](../../docs/azure/cloud-observability.md), but
-  that decision creates no resources in this module at all (like AWS): it
-  concerns a central observability cluster reading this account from the
-  outside, out of this module's scope per the sprint deliverable.
+  that decision creates no resources in this module at all: it concerns a
+  central observability cluster reading this account from the outside,
+  out of this module's scope per the sprint deliverable.
 - **Every workload identity, Crossplane's included** — a federated
   credential here would be half an identity. The other half is a
   Kubernetes service account that does not exist until the plugins are
@@ -131,8 +129,8 @@ and tested, so these are refusals:
 tofu test          # 12 runs: every validation, and the defaults
 ```
 
-Mocked, not credential-skipped: unlike `aws`/`google`, `azurerm` builds a
-real authorizer and contacts Azure AD during configure regardless of
+Mocked, not credential-skipped: `azurerm` builds a real authorizer and
+contacts Azure AD during configure regardless of
 `skip_*_validation`-style flags — there is no offline stub mode to opt
 into, so the provider itself is mocked (`mock_provider "azurerm" {}`), with
 every cross-resource ID reference overridden to a realistic ARM ID: the
@@ -140,8 +138,8 @@ provider's own SDK parses those into their expected segment shape during
 plan, even against a mock.
 
 CI plans [`tests/emulator`](tests/emulator) against the floci-az emulator —
-no cloud account, no secret. Unlike `aws`/`google`, `azurerm` has no
-environment-only configuration path, so a fixture with its own `provider`
+no cloud account, no secret. `azurerm` has no environment-only
+configuration path, so a fixture with its own `provider`
 block is required rather than optional — the bare module cannot be planned
 against an emulator directly.
 
@@ -207,7 +205,7 @@ No modules.
 | <a name="input_system_node_pool_vm_size"></a> [system\_node\_pool\_vm\_size](#input\_system\_node\_pool\_vm\_size) | VM size for the mandatory system node pool. This is a structural AKS requirement, not a Karpenter/NAP-managed pool — kept small and tainted for-system-only by default (only\_critical\_addons\_enabled), since NAP provisions everything workload-shaped. | `string` | `"Standard_D2s_v5"` | no |
 | <a name="input_vnet_cidr"></a> [vnet\_cidr](#input\_vnet\_cidr) | CIDR for the VNet — and its single node subnet, which covers the whole range — when this module creates it. Arbitrary default (not a research decision), sized generously since it only ever needs to fit nodes: Cilium's own IPAM owns pod addressing entirely, decoupled from the VNet. | `string` | `"10.0.0.0/16"` | no |
 | <a name="input_vnet_name"></a> [vnet\_name](#input\_vnet\_name) | Existing VNet name to attach to. Required when create\_vnet is false, and incoherent to set when create\_vnet is true — this module cannot both create a VNet and attach to a different one. | `string` | `null` | no |
-| <a name="input_zones"></a> [zones](#input\_zones) | Availability zones the default system node pool spreads across. Unlike AWS's per-AZ subnets, Azure subnets aren't zone-scoped — zone placement happens on the node pool itself. | `list(string)` | <pre>[<br/>  "1",<br/>  "2",<br/>  "3"<br/>]</pre> | no |
+| <a name="input_zones"></a> [zones](#input\_zones) | Availability zones the default system node pool spreads across. Azure subnets aren't zone-scoped — zone placement happens on the node pool itself. | `list(string)` | <pre>[<br/>  "1",<br/>  "2",<br/>  "3"<br/>]</pre> | no |
 
 ## Outputs
 

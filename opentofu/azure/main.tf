@@ -7,7 +7,7 @@
 # infrastructure — arrives through the socle OCI artifact and Crossplane.
 #
 # Every default here traces back to a research document under docs/azure/.
-# Resources live in network.tf, cluster.tf and iam.tf.
+# Resources live in network.tf and cluster.tf.
 
 locals {
   # Stamped onto every billable resource so cost can be attributed and
@@ -15,7 +15,7 @@ locals {
   socle_version = "0.1.0-dev"
 
   # The standard tag set. Azure tags take any UTF-8 key/value, so no
-  # normalisation is needed here — unlike labels on GCP.
+  # normalisation is needed here.
   tags = merge(
     {
       owner           = var.owner

@@ -2,8 +2,8 @@
 # that CI proves the module resolves its providers, data sources and inputs
 # without a cloud account or a secret.
 #
-# A fixture, not the bare module, because azurerm — unlike aws — has no
-# environment-only configuration path: it hard-requires an explicit
+# A fixture, not the bare module, because azurerm has no environment-only
+# configuration path: it hard-requires an explicit
 # `provider "azurerm" { features {} }` block regardless of what's set in the
 # environment. Confirmed empirically against floci-az directly: a plan with
 # every ARM_* variable set and no provider block still fails with "Provider
@@ -17,11 +17,10 @@ variable "endpoint" {
 
 # floci-az implements Azure's own custom-cloud metadata discovery contract
 # (GET /metadata/endpoints — the same mechanism real sovereign clouds like
-# Azure Germany or Azure China use), so metadata_host is enough on its own:
-# unlike floci-gcp, there's no need to override each service's endpoint
-# individually. Credentials aren't cryptographically validated by the
-# emulator; they exist only so the provider does not go looking for real
-# ones.
+# Azure Germany or Azure China use), so metadata_host is enough on its own —
+# no need to override each service's endpoint individually. Credentials
+# aren't cryptographically validated by the emulator; they exist only so
+# the provider does not go looking for real ones.
 #
 # azurerm's metadata discovery is HTTPS-only, unconditionally — confirmed
 # empirically, there is no plaintext override. floci-az must run with

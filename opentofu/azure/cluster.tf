@@ -83,11 +83,9 @@ resource "azurerm_monitor_data_collection_rule_association" "prometheus" {
 #
 # - Microsoft Defender for Containers: a subscription-level singleton
 #   (azurerm_security_center_subscription_pricing), not a per-cluster
-#   setting — same shape as AWS's GuardDuty detector, which was pulled out
-#   of opentofu/aws/ entirely and dropped from Socle's documentation
-#   altogether, not just the module. Same treatment here: no resource, no
-#   variable, nothing planned to document about it either — it is the
-#   client's own call on their own subscription.
+#   setting — it is the client's own call on their own subscription, not
+#   this module's or Socle's to toggle or document. No resource, no
+#   variable, nothing planned to document about it either.
 
 # Two scanner findings are answered here rather than argued in a review.
 #
@@ -118,8 +116,8 @@ resource "azurerm_kubernetes_cluster" "socle" {
   # static scanner reading the HCL sees the same thing the API returns.
   role_based_access_control_enabled = true
 
-  # Azure's own inline identity — no separate role resource needed, unlike
-  # EKS. See iam.tf.
+  # Azure's own inline identity — Azure creates and manages it itself, no
+  # separate role resource for this module to create.
   identity {
     type = "SystemAssigned"
   }
@@ -130,9 +128,9 @@ resource "azurerm_kubernetes_cluster" "socle" {
     mode = "Auto"
   }
 
-  # A default node pool is structurally mandatory on this resource — AKS,
-  # unlike EKS, cannot exist with zero node pools. This is the minimum
-  # AKS requires to exist at all, not a Karpenter/NAP replacement: NAP
+  # A default node pool is structurally mandatory on this resource — AKS
+  # cannot exist with zero node pools. This is the minimum AKS requires to
+  # exist at all, not a Karpenter/NAP replacement: NAP
   # only ever manages the "user" node pools it provisions on demand, never
   # this "system" one. Kept as small and as tainted-for-system-only as
   # AKS allows, so nothing workload-shaped schedules here by accident.

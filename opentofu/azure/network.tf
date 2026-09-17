@@ -1,12 +1,12 @@
 # Network — docs/azure/network-security.md.
 #
-# One VNet, one node-only subnet. Unlike AWS's per-AZ public/private split,
-# Azure subnets aren't AZ-scoped at all — zone placement happens on the node
-# pool itself (see cluster.tf), not on the subnet — and there is no public
-# subnet to carve out: the Standard Load Balancer a Kubernetes Service of
-# type LoadBalancer provisions attaches a public IP directly to its own
-# frontend, backed by the node subnet's private IPs. Nothing here needs to
-# sit in a publicly routable subnet.
+# One VNet, one node-only subnet. Azure subnets aren't AZ-scoped at all —
+# zone placement happens on the node pool itself (see cluster.tf), not on
+# the subnet — and there is no public subnet to carve out: the Standard
+# Load Balancer a Kubernetes Service of type LoadBalancer provisions
+# attaches a public IP directly to its own frontend, backed by the node
+# subnet's private IPs. Nothing here needs to sit in a publicly routable
+# subnet.
 #
 # The subnet is sized for nodes only, never pods: Cilium — installed later,
 # through the socle OCI artifact, not by this module — owns pod IPAM
@@ -52,10 +52,8 @@ resource "azurerm_subnet" "node" {
   address_prefixes     = [var.vnet_cidr]
 }
 
-# One NAT Gateway per VNet — not per AZ. Unlike AWS, where a NAT Gateway
-# lives inside one AZ's own public subnet and cross-AZ traffic to a
-# different AZ's NAT carries a data transfer charge, an Azure NAT Gateway is
-# a zonal-or-regional resource attached directly to a subnet that already
+# One NAT Gateway per VNet — not per AZ. An Azure NAT Gateway is a
+# zonal-or-regional resource attached directly to a subnet that already
 # spans every zone — there is no per-AZ duplication to avoid or pay for.
 resource "azurerm_public_ip" "nat" {
   count = var.create_vnet && var.create_nat_gateway ? 1 : 0
