@@ -88,6 +88,22 @@ resource "azurerm_monitor_data_collection_rule_association" "prometheus" {
 #   altogether, not just the module. Same treatment here: no resource, no
 #   variable, nothing planned to document about it either — it is the
 #   client's own call on their own subscription.
+
+# Two scanner findings are answered here rather than argued in a review.
+#
+# Network policy (AZU-0043) is not a choice this resource can make: azurerm
+# only accepts network_policy when network_plugin is "azure" — there is no
+# value to set under BYO CNI's "none". Cilium provides the real enforcement
+# once the factory installs it — full L3/L4/L7, not gated behind a paid
+# add-on. Argued in docs/azure/network-security.md.
+#
+# Disk encryption set (AZU-0067) would swap Microsoft-managed keys for a
+# customer-managed one on the node OS disks. Microsoft-managed is the
+# module's default posture; a CMK is a client's own compliance decision on
+# their own Key Vault, the same class of call as Defender, above — not
+# something to default into an empty-shell module.
+#trivy:ignore:AZU-0043
+#trivy:ignore:AZU-0067
 resource "azurerm_kubernetes_cluster" "socle" {
   name                = var.cluster_name
   resource_group_name = local.resource_group_name
@@ -96,6 +112,11 @@ resource "azurerm_kubernetes_cluster" "socle" {
   kubernetes_version  = var.kubernetes_version
 
   sku_tier = "Standard"
+
+  # Already the provider's own default — AKS has required Kubernetes RBAC
+  # for years, this can no longer be turned off. Declared explicitly so a
+  # static scanner reading the HCL sees the same thing the API returns.
+  role_based_access_control_enabled = true
 
   # Azure's own inline identity — no separate role resource needed, unlike
   # EKS. See iam.tf.
