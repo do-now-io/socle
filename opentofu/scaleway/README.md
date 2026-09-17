@@ -105,16 +105,28 @@ tested, so these are refusals:
 
 ## Integration testing
 
-`integration.yaml` runs this module's leg **plan-only**. Scaleway publishes no
-emulator, and there is no third-party one — recorded in the conformance
-checklist as an exception, not hidden. Convergence is therefore proven on a
-real test account, not in CI.
+This module's leg is **plan-only**. Scaleway publishes no emulator, and there
+is no third-party one — recorded in the conformance checklist as an exception,
+not hidden.
+
+Two offline checks stand in for an apply, and neither is one:
+
+- **`tofu test`**, in `pr-static.yaml`, plans the module itself — 37 runs, 5
+  asserting the recommended defaults and 32 tripping the 32 validation blocks
+  one by one.
+- **`tofu plan` on `examples/minimal`**, in `integration.yaml`, plans the
+  module the way a consumer calls it, so the example's own wiring and outputs
+  are exercised too.
+
+Both use fixture credentials over empty state, so no API call leaves the
+runner and forks can run them. **Convergence is not proven by either.** That
+needs a real Project, a quota raise and an apply.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
 
 | Name | Version |
-| ---- | ------- |
+|------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.10 |
 | <a name="requirement_scaleway"></a> [scaleway](#requirement\_scaleway) | >= 2.82, < 3.0 |
 
@@ -125,7 +137,7 @@ No modules.
 ## Resources
 
 | Name | Type |
-| ---- | ---- |
+|------|------|
 | [scaleway_cockpit_token.observability](https://registry.terraform.io/providers/scaleway/scaleway/latest/docs/resources/cockpit_token) | resource |
 | [scaleway_iam_api_key.crossplane](https://registry.terraform.io/providers/scaleway/scaleway/latest/docs/resources/iam_api_key) | resource |
 | [scaleway_iam_application.crossplane](https://registry.terraform.io/providers/scaleway/scaleway/latest/docs/resources/iam_application) | resource |
@@ -145,7 +157,7 @@ No modules.
 ## Inputs
 
 | Name | Description | Type | Default | Required |
-| ---- | ----------- | ---- | ------- | :------: |
+|------|-------------|------|---------|:--------:|
 | <a name="input_cluster_endpoint_public_access_cidrs"></a> [cluster\_endpoint\_public\_access\_cidrs](#input\_cluster\_endpoint\_public\_access\_cidrs) | CIDRs allowed to reach the Kubernetes API server. Required with no default: the control plane cannot be made private on Kapsule, so this list is the only boundary there is, and Kapsule ships 0.0.0.0/0. | `list(string)` | n/a | yes |
 | <a name="input_cluster_name"></a> [cluster\_name](#input\_cluster\_name) | Name of the Kapsule cluster. Also names the network resources the module creates. | `string` | n/a | yes |
 | <a name="input_crossplane_permission_sets"></a> [crossplane\_permission\_sets](#input\_crossplane\_permission\_sets) | Permission sets granted to the in-cluster Crossplane identity, scoped to this Project. Required with no default: what Crossplane may provision is a per-client decision, and a default would either be uselessly narrow or dangerously wide. | `list(string)` | n/a | yes |
@@ -177,7 +189,7 @@ No modules.
 ## Outputs
 
 | Name | Description |
-| ---- | ----------- |
+|------|-------------|
 | <a name="output_cluster_ca_certificate"></a> [cluster\_ca\_certificate](#output\_cluster\_ca\_certificate) | Base64-encoded cluster CA certificate, for building a kubeconfig. |
 | <a name="output_cluster_endpoint"></a> [cluster\_endpoint](#output\_cluster\_endpoint) | URL of the Kubernetes API server. Always public on Kapsule — a fully private control plane does not exist — and reachable only from cluster\_endpoint\_public\_access\_cidrs. |
 | <a name="output_cluster_id"></a> [cluster\_id](#output\_cluster\_id) | ID of the Kapsule cluster, in region/uuid form. |
