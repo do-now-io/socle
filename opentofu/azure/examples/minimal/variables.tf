@@ -28,6 +28,18 @@ variable "environment" {
   default     = "dev"
 }
 
+variable "zones" {
+  description = "Availability zones the default system node pool spreads across. Not every subscription/region/VM-size combination has all three available — override if the module's default fails with AvailabilityZoneNotSupported."
+  type        = list(string)
+  default     = ["1", "2", "3"]
+}
+
+variable "system_node_pool_vm_size" {
+  description = "VM size for the mandatory system node pool. Override if the module's default is unavailable in your subscription's quota for this region."
+  type        = string
+  default     = "Standard_D2s_v5"
+}
+
 variable "kubernetes_version" {
   description = "AKS control plane version. The default tracks the same n-1 policy ceiling as the other clouds — not the newest AKS offers, and not one close to the end of its standard support."
   type        = string
