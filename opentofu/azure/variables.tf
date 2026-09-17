@@ -79,7 +79,7 @@ variable "vnet_cidr" {
 }
 
 variable "zones" {
-  description = "Availability zones the default system node pool spreads across. Unlike AWS's per-AZ subnets, Azure subnets aren't zone-scoped — zone placement happens on the node pool itself."
+  description = "Availability zones the default system node pool spreads across. Azure subnets aren't zone-scoped — zone placement happens on the node pool itself."
   type        = list(string)
   default     = ["1", "2", "3"]
 }
