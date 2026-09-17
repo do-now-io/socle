@@ -1,7 +1,7 @@
 # Observing Azure resources outside the cluster
 
-Managed services around a cluster, cost data, and quota signals — read from
-a central observability cluster, not per client. In-cluster metrics: see
+Managed services around a cluster, cost data, and quota signals — read into
+the client's own observability cluster. In-cluster metrics: see
 [managed scope](managed-scope.md).
 
 | Question | Position |
