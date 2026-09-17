@@ -122,6 +122,14 @@ resource "azurerm_kubernetes_cluster" "socle" {
     zones                        = var.zones
     vnet_subnet_id               = local.node_subnet_id
     only_critical_addons_enabled = true
+
+    # AKS assigns this block its own defaults server-side regardless of
+    # whether it's declared. Left unset, that produces a perpetual diff —
+    # every plan sees Azure's default and proposes tearing it back out.
+    # Declared explicitly, matching Azure's own default, so plan converges.
+    upgrade_settings {
+      max_surge = "10%"
+    }
   }
 
   # BYO CNI: Cilium is not installed by this module, same as Karpenter and

@@ -24,6 +24,10 @@ module "socle" {
   create_resource_group = true
   create_vnet           = true
 
+  zones = var.zones
+
+  system_node_pool_vm_size = var.system_node_pool_vm_size
+
   kubernetes_version = var.kubernetes_version
 
   # No good default exists for when maintenance is allowed to run, so the

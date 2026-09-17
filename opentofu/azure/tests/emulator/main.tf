@@ -49,14 +49,14 @@ provider "azurerm" {
 module "socle" {
   source = "../../"
 
-  location             = "francecentral"
-  cluster_name         = "socle-emulator"
-  owner                = "platform"
-  environment          = "dev"
+  location            = "francecentral"
+  cluster_name        = "socle-emulator"
+  owner               = "platform"
+  environment         = "dev"
   resource_group_name = "socle-emulator"
 
   create_resource_group = true
-  create_vnet             = true
+  create_vnet           = true
 
   kubernetes_version = "1.34"
 
