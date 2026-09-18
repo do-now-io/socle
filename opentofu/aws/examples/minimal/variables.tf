@@ -31,7 +31,7 @@ variable "availability_zones" {
 variable "kubernetes_version" {
   description = "EKS control plane version. The default tracks the n-1 policy ceiling — not the newest EKS offers, and not one close to the end of its standard support."
   type        = string
-  default     = "1.35"
+  default     = "1.36"
 }
 
 variable "cluster_endpoint_public_access_cidrs" {
