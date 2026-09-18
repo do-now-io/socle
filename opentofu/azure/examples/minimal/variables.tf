@@ -41,9 +41,9 @@ variable "system_node_pool_vm_size" {
 }
 
 variable "kubernetes_version" {
-  description = "AKS control plane version. The default tracks the same n-1 policy ceiling as the other clouds — not the newest AKS offers, and not one close to the end of its standard support."
+  description = "AKS control plane version. The default tracks the n-1 policy ceiling — not the newest AKS offers, and not one close to the end of its standard support."
   type        = string
-  default     = "1.34"
+  default     = "1.36"
 }
 
 variable "maintenance_window_auto_upgrade" {
