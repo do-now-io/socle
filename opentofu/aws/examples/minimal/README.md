@@ -52,7 +52,7 @@ No resources.
 | <a name="input_cluster_endpoint_public_access_cidrs"></a> [cluster\_endpoint\_public\_access\_cidrs](#input\_cluster\_endpoint\_public\_access\_cidrs) | CIDRs allowed to reach the public EKS API endpoint. Replace with the consumer's own admin CIDR. | `list(string)` | <pre>[<br/>  "203.0.113.0/32"<br/>]</pre> | no |
 | <a name="input_cluster_name"></a> [cluster\_name](#input\_cluster\_name) | Name of the cluster. | `string` | `"socle-minimal"` | no |
 | <a name="input_environment"></a> [environment](#input\_environment) | Environment this cluster serves. | `string` | `"dev"` | no |
-| <a name="input_kubernetes_version"></a> [kubernetes\_version](#input\_kubernetes\_version) | EKS control plane version. The default tracks the n-1 policy ceiling — not the newest EKS offers, and not one close to the end of its standard support. | `string` | `"1.35"` | no |
+| <a name="input_kubernetes_version"></a> [kubernetes\_version](#input\_kubernetes\_version) | EKS control plane version. The default tracks the n-1 policy ceiling — not the newest EKS offers, and not one close to the end of its standard support. | `string` | `"1.36"` | no |
 | <a name="input_owner"></a> [owner](#input\_owner) | Team accountable for the cluster. | `string` | `"platform"` | no |
 | <a name="input_region"></a> [region](#input\_region) | AWS region for the cluster and its VPC. Configures the provider; the module reads it back from there. | `string` | `"eu-west-3"` | no |
 
