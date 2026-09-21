@@ -1,0 +1,18 @@
+---
+# The root sync, as a chart of two objects rather than as the FluxInstance's
+# own sync block.
+#
+# The operator's sync block cannot express two things this socle needs: a
+# cosign verification, and a target namespace for manifests that carry none.
+# Both were established on a real cluster, 21 September 2026 — see
+# docs/flux-bootstrap.md. Everything else about the instance stays the
+# operator's.
+#
+# A local chart, not a published one: it is an implementation detail of the
+# module, and Helm is the only provider here that applies custom resources
+# without needing their CRDs to exist at plan time.
+apiVersion: v2
+name: socle-sync
+description: The socle's root OCIRepository and Kustomization
+type: application
+version: 0.1.0

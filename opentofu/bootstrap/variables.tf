@@ -150,12 +150,6 @@ variable "sync_ref" {
   }
 }
 
-variable "sync_path" {
-  description = "Path inside the artifact the root Kustomization builds."
-  type        = string
-  default     = "."
-}
-
 variable "sync_interval" {
   description = "How often the root source is checked. One minute is the operator's own default and costs one registry HEAD request."
   type        = string
@@ -164,6 +158,52 @@ variable "sync_interval" {
   validation {
     condition     = can(regex("^([0-9]+(\\.[0-9]+)?(ms|s|m|h))+$", var.sync_interval))
     error_message = "sync_interval must be a Go duration, such as 1m or 30s."
+  }
+}
+
+variable "sync_digest" {
+  description = "Digest the tag must resolve to, pinning the artifact by content rather than by name. Empty trusts the tag, which a registry can move."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.sync_digest == "" || can(regex("^sha256:[0-9a-f]{64}$", var.sync_digest))
+    error_message = "sync_digest must be a sha256:<64 hex> digest, or empty."
+  }
+}
+
+variable "sync_path" {
+  description = "Path inside the artifact the root Kustomization builds."
+  type        = string
+  default     = "."
+}
+
+variable "sync_target_namespace" {
+  description = "Namespace for manifests that carry none of their own. Empty leaves each object where it declares itself, which is what a well-formed socle artifact does."
+  type        = string
+  default     = ""
+}
+
+variable "sync_prune" {
+  description = "Delete objects the artifact no longer contains. On: without it a version bump could only ever add, and a removed component would linger."
+  type        = bool
+  default     = true
+}
+
+variable "sync_wait" {
+  description = "Have the root Kustomization report ready only once the objects it applied are themselves healthy."
+  type        = bool
+  default     = true
+}
+
+variable "sync_timeout" {
+  description = "How long the root Kustomization waits for health before failing a reconciliation."
+  type        = string
+  default     = "5m"
+
+  validation {
+    condition     = can(regex("^([0-9]+(\\.[0-9]+)?(ms|s|m|h))+$", var.sync_timeout))
+    error_message = "sync_timeout must be a Go duration, such as 5m."
   }
 }
 
@@ -178,7 +218,7 @@ variable "sync_pull_secret" {
 # ---------------------------------------------------------------------------
 
 variable "cosign_verification_enabled" {
-  description = "Patch the root OCIRepository so Flux verifies the artifact's cosign signature before applying it. The FluxInstance sync spec has no verify field of its own, so this goes through a kustomize patch."
+  description = "Have Flux verify the artifact's cosign signature before applying it, and on every reconciliation after. This is why the root source is a chart of our own rather than the FluxInstance's sync block, which has no verify field."
   type        = bool
   default     = true
 

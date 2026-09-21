@@ -1,9 +1,9 @@
 # Socle bootstrap — Flux, on any of the four clouds
 
-One module, no cloud provider. It installs `flux-operator`, then a
-`FluxInstance` describing what the cluster should run and what it should pull.
-After that OpenTofu owns nothing: the operator converges the Flux controllers,
-and Flux converges everything the artifact contains.
+One module, no cloud provider. It installs `flux-operator`, a `FluxInstance`
+saying which controllers run, and the root source the cluster pulls. After
+that OpenTofu owns nothing: the operator converges the Flux controllers, and
+Flux converges everything the artifact contains.
 
 ```hcl
 module "bootstrap" {
@@ -47,27 +47,40 @@ clusters.
 | Operator version | pinned exactly — it is pre-1.0 | [flux-bootstrap](../../docs/flux-bootstrap.md) |
 | Flux version | `2.x`, the operator converges it | [flux-bootstrap](../../docs/flux-bootstrap.md) |
 | Source kind | `OCIRepository` — the socle ships as an artifact, not a repository | [flux-bootstrap](../../docs/flux-bootstrap.md) |
+| The root source | Ours, not `instance.sync` — see below | [flux-bootstrap](../../docs/flux-bootstrap.md) |
+| Pruning | on — a dropped object must leave the cluster | [flux-bootstrap](../../docs/flux-bootstrap.md) |
 | Reference | required, and `latest`/`main`/`master`/`HEAD` refused | [flux-bootstrap](../../docs/flux-bootstrap.md) |
 | Signature | cosign, verified by Flux on every reconciliation | [flux-bootstrap](../../docs/flux-bootstrap.md) |
 | Image automation controllers | absent — the version moves through Git | [flux-bootstrap](../../docs/flux-bootstrap.md) |
 | Network policies | on | [flux-bootstrap](../../docs/flux-bootstrap.md) |
 
-## The one thing to verify on the first cluster
+## Why the root sync is a chart of our own
 
-**The `FluxInstance` sync spec has no `verify` field.** Signature
-verification is therefore expressed as a kustomize patch on the
-`OCIRepository` the operator generates, which is why the root source carries a
-fixed name (`socle`) the patch can target.
+The `FluxInstance` has a `sync` block, and using it was the first design. A
+real cluster showed it cannot express two things this socle needs:
 
-That mechanism is sound on paper and unproven in practice here. On the first
-real cluster, check that the patch landed rather than assuming it:
+- **no `verify` field**, so no cosign verification;
+- **no `targetNamespace`**, so no home for manifests that declare none.
+
+Expressing the first as a kustomize patch was tried and **does not work**: the
+operator applies `instance.kustomize.patches` to the Flux components only, not
+to the objects it generates for the sync. The patch finds no target and the
+instance goes `Stalled` — nothing is deployed at all, while OpenTofu reports a
+clean apply. Measured 21 September 2026; see
+[docs/flux-bootstrap.md](../../docs/flux-bootstrap.md#cosign).
+
+So the module ships `chart/`, two objects it owns outright — an
+`OCIRepository` with its `verify` block and a `Kustomization` with `prune`,
+`wait` and an optional `targetNamespace`. Helm carries them because it is the
+only provider here that applies a custom resource without needing its CRD at
+plan time, and the instance release runs the chart's health check so the CRDs
+exist before the sync release starts.
+
+Worth checking on a new cluster all the same:
 
 ```sh
 kubectl -n flux-system get ocirepository socle -o jsonpath='{.spec.verify}'
 ```
-
-An empty result means the artifact is being pulled unverified — the module's
-`cosign_verification` output would be lying, and the patch needs another shape.
 
 ## What is deliberately absent
 
@@ -87,7 +100,7 @@ An empty result means the artifact is being pulled unverified — the module's
 ## Integration testing
 
 Plan-only, and not even that in CI: this module talks to a cluster, so a plan
-needs one. `tofu test` covers the interface — 18 runs, one per validation
+needs one. `tofu test` covers the interface — 20 runs, one per validation
 block — and runs in `pr-static.yaml` like every other module's.
 
 Convergence is proven by an apply against a real cluster, and nowhere else.
@@ -110,6 +123,7 @@ No modules.
 |------|------|
 | [helm_release.instance](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 | [helm_release.operator](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
+| [helm_release.sync](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 
 ## Inputs
 
@@ -122,7 +136,7 @@ No modules.
 | <a name="input_sync_url"></a> [sync\_url](#input\_sync\_url) | Where the cluster pulls the socle from. An oci:// artifact by default — the socle is distributed as one signed OCI artifact, not as a Git repository per client. | `string` | n/a | yes |
 | <a name="input_cluster_type"></a> [cluster\_type](#input\_cluster\_type) | Which cloud this runs on. The operator uses it to wire workload identity for the controllers: aws, azure and gcp have federated identity, kubernetes covers Scaleway and anything else. | `string` | `"kubernetes"` | no |
 | <a name="input_cosign_identity"></a> [cosign\_identity](#input\_cosign\_identity) | Keyless identity the signature must match, as an object of issuer and subject regexes. Null verifies the signature without pinning who produced it, which is weaker and should be temporary. | <pre>object({<br/>    issuer  = string<br/>    subject = string<br/>  })</pre> | `null` | no |
-| <a name="input_cosign_verification_enabled"></a> [cosign\_verification\_enabled](#input\_cosign\_verification\_enabled) | Patch the root OCIRepository so Flux verifies the artifact's cosign signature before applying it. The FluxInstance sync spec has no verify field of its own, so this goes through a kustomize patch. | `bool` | `true` | no |
+| <a name="input_cosign_verification_enabled"></a> [cosign\_verification\_enabled](#input\_cosign\_verification\_enabled) | Have Flux verify the artifact's cosign signature before applying it, and on every reconciliation after. This is why the root source is a chart of our own rather than the FluxInstance's sync block, which has no verify field. | `bool` | `true` | no |
 | <a name="input_flux_components"></a> [flux\_components](#input\_flux\_components) | Flux controllers to install. The image automation pair is absent by default: the socle's version moves through Git, not through a controller rewriting tags in the cluster. | `list(string)` | <pre>[<br/>  "source-controller",<br/>  "kustomize-controller",<br/>  "helm-controller",<br/>  "notification-controller"<br/>]</pre> | no |
 | <a name="input_flux_version"></a> [flux\_version](#input\_flux\_version) | Flux version the operator installs and keeps converged. "2.x" tracks the latest 2 series; an exact version pins it. | `string` | `"2.x"` | no |
 | <a name="input_helm_timeout_seconds"></a> [helm\_timeout\_seconds](#input\_helm\_timeout\_seconds) | How long to wait for each release to become ready. The operator reconciles the Flux controllers after its own install, so the instance release is the slow one. | `number` | `600` | no |
@@ -132,10 +146,15 @@ No modules.
 | <a name="input_network_policy"></a> [network\_policy](#input\_network\_policy) | Let the operator install network policies isolating the Flux namespace. On by default; Cilium and Dataplane V2 both enforce them. | `bool` | `true` | no |
 | <a name="input_operator_version"></a> [operator\_version](#input\_operator\_version) | Chart version of flux-operator, which is also the operator's own version. Pinned exactly: the operator is pre-1.0 and its minors are not a stable contract. | `string` | `"0.60.0"` | no |
 | <a name="input_storage_class"></a> [storage\_class](#input\_storage\_class) | Storage class for the source-controller's artifact cache. Empty uses the cluster default. | `string` | `""` | no |
+| <a name="input_sync_digest"></a> [sync\_digest](#input\_sync\_digest) | Digest the tag must resolve to, pinning the artifact by content rather than by name. Empty trusts the tag, which a registry can move. | `string` | `""` | no |
 | <a name="input_sync_interval"></a> [sync\_interval](#input\_sync\_interval) | How often the root source is checked. One minute is the operator's own default and costs one registry HEAD request. | `string` | `"1m"` | no |
 | <a name="input_sync_kind"></a> [sync\_kind](#input\_sync\_kind) | Source kind the operator creates for the root sync. OCIRepository matches the socle's distribution; GitRepository exists for a client who insists on a repository. | `string` | `"OCIRepository"` | no |
 | <a name="input_sync_path"></a> [sync\_path](#input\_sync\_path) | Path inside the artifact the root Kustomization builds. | `string` | `"."` | no |
+| <a name="input_sync_prune"></a> [sync\_prune](#input\_sync\_prune) | Delete objects the artifact no longer contains. On: without it a version bump could only ever add, and a removed component would linger. | `bool` | `true` | no |
 | <a name="input_sync_pull_secret"></a> [sync\_pull\_secret](#input\_sync\_pull\_secret) | Name of an existing Kubernetes secret holding registry credentials for the artifact. Empty means the registry is public or the node identity is enough. | `string` | `""` | no |
+| <a name="input_sync_target_namespace"></a> [sync\_target\_namespace](#input\_sync\_target\_namespace) | Namespace for manifests that carry none of their own. Empty leaves each object where it declares itself, which is what a well-formed socle artifact does. | `string` | `""` | no |
+| <a name="input_sync_timeout"></a> [sync\_timeout](#input\_sync\_timeout) | How long the root Kustomization waits for health before failing a reconciliation. | `string` | `"5m"` | no |
+| <a name="input_sync_wait"></a> [sync\_wait](#input\_sync\_wait) | Have the root Kustomization report ready only once the objects it applied are themselves healthy. | `bool` | `true` | no |
 
 ## Outputs
 

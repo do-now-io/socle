@@ -11,6 +11,7 @@ Kapsule — nothing here is cloud-specific, which is the point.
 | Where it runs | A second root module, after foundations, with its own state |
 | Inside the foundations module | Refused — three providers instead of one, and a provider configured from its own apply |
 | What the cluster pulls | One `OCIRepository`, pinned to a tag |
+| The root source | Ours, as a local chart — `instance.sync` expresses neither verify nor targetNamespace |
 | Signature | cosign, verified by Flux on every reconciliation |
 | Operator version | Pinned exactly — it is pre-1.0 |
 | Flux version | `2.x`, converged by the operator |
@@ -84,10 +85,10 @@ module refuses a range. On a pre-1.0 dependency a minor is not a contract.
 
 ## What the cluster pulls
 
-One `OCIRepository` and one `Kustomization`, both named `socle`, created by the
-operator from the instance's `sync` block. The name is fixed rather than
-derived: it is immutable in the CRD, so deriving it from the cluster name
-would make renaming a cluster a destroy.
+One `OCIRepository` and one `Kustomization`, both named `socle`, shipped by the
+module rather than generated from the instance's `sync` block — for the
+reasons in [Cosign](#cosign) below. The name is fixed rather than derived, so
+that renaming a cluster does not recreate its sync.
 
 **The reference is required, and `latest`, `main`, `master` and `HEAD` are
 refused by validation.** A cluster that follows a moving head cannot answer
@@ -106,23 +107,40 @@ GitOps one.
 no `verify` field.** Its fields are `name`, `interval`, `kind`, `url`, `ref`,
 `path`, `pullSecret` and `provider` — signature verification is not among them.
 
-So verification is expressed as a **kustomize patch** on the generated
-`OCIRepository`, which the operator supports through `instance.kustomize.patches`.
-That is why the sync name is fixed: the patch needs a target.
+The first design expressed verification as a **kustomize patch** on the
+generated `OCIRepository`, through `instance.kustomize.patches`. **Tried
+against a real Kapsule cluster on 21 September 2026: it does not work.**
 
-**This is the one part of the design that is unproven.** The mechanism is
-sound on paper; whether the operator applies patches to the objects it
-generates for the sync, and not only to the Flux components, has to be checked
-on the first cluster:
-
-```sh
-kubectl -n flux-system get ocirepository socle -o jsonpath='{.spec.verify}'
+```
+Stalled=True :: BuildFailed :: no resource matches strategic merge patch
+"OCIRepository.v1.source.toolkit.fluxcd.io/socle.[noNs]"
 ```
 
-An empty result means the artifact is pulled unverified. If the patch does not
-reach it, the fallbacks in order of preference are: raise it upstream, or drop
-`instance.sync` entirely and ship the root `OCIRepository` as a small chart of
-our own.
+Those patches reach the **Flux components** only, not the objects the operator
+generates for the sync. Two things follow, and the second is the worse one:
+
+- the mechanism is unavailable, and
+- **the failure mode is silent and total.** A patch that misses stalls the
+  whole instance — no controllers, no sync, nothing — while OpenTofu reports
+  two Helm releases `deployed` and a clean apply. A pipeline watching only the
+  apply's exit code would call that bootstrap a success.
+
+The same run turned up a second gap: **`sync` has no `targetNamespace`
+either**, so manifests carrying no namespace of their own have nowhere to
+land.
+
+**Decision: the module ships the root source itself**, as a local chart of two
+objects — an `OCIRepository` carrying `verify`, and a `Kustomization` carrying
+`prune`, `wait` and an optional `targetNamespace`. `instance.sync` is left
+unset. Helm carries them because it is the only provider in this module that
+applies a custom resource without needing its CRD to exist at plan time, and
+the instance release enables the chart's health check so the operator has
+installed those CRDs before the sync release starts.
+
+What this costs: two objects the operator does not manage, so a future
+operator release changing the sync's shape will not carry them along. What it
+buys: signature verification, garbage collection and namespace placement —
+none of which `instance.sync` can express.
 
 ## Configuration, and where it lives
 
@@ -152,6 +170,8 @@ or to the fleet repository, where Flux owns it.
 | `operator_version` | `0.60.0` | exact `x.y.z`, no ranges |
 | `flux_version` | `2.x` | converged by the operator |
 | `cosign_verification_enabled` | `true` | OCIRepository only |
+| `sync_target_namespace` | `""` | for manifests declaring no namespace |
+| `sync_prune` | `true` | a dropped object must leave the cluster |
 | `cosign_identity` | `null` | issuer and subject, both non-empty |
 | `flux_components` | four controllers | source and kustomize cannot be dropped |
 

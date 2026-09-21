@@ -145,6 +145,22 @@ run "cosign_identity_refuses_a_half_filled_object" {
   expect_failures = [var.cosign_identity]
 }
 
+run "sync_digest_refuses_a_truncated_digest" {
+  command = plan
+  variables {
+    sync_digest = "sha256:deadbeef"
+  }
+  expect_failures = [var.sync_digest]
+}
+
+run "sync_timeout_refuses_a_bare_number" {
+  command = plan
+  variables {
+    sync_timeout = "300"
+  }
+  expect_failures = [var.sync_timeout]
+}
+
 run "instance_size_refuses_an_invented_profile" {
   command = plan
   variables {

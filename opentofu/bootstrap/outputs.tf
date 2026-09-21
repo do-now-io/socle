@@ -21,10 +21,11 @@ output "sync_name" {
 output "sync_source" {
   description = "What this cluster pulls, as kind, URL and pinned reference."
   value = {
-    kind = var.sync_kind
-    url  = var.sync_url
-    ref  = var.sync_ref
-    path = var.sync_path
+    kind   = var.sync_kind
+    url    = var.sync_url
+    ref    = var.sync_ref
+    digest = var.sync_digest
+    path   = var.sync_path
   }
 }
 
