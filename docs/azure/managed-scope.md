@@ -114,6 +114,29 @@ its underlying `provider-upjet-azure` — regular releases, low open-issue
 count relative to its size, most recent push days before this was written.
 Not abandoned, not a blocker for the identity this shell exposes.
 
+## Customer-managed keys
+
+**Decision: refused, for two different reasons — neither is cost-free to
+reverse.**
+
+- Kubernetes Secrets (etcd): Microsoft already encrypts etcd at rest with
+  its own key, unconditionally — nothing insecure by default. The
+  customer-key layer on top (AKS's KMS etcd encryption via Key Vault)
+  doesn't fit this module's identity model: it requires a user-assigned
+  identity created and granted Key Vault access *before* the cluster
+  exists, not the `SystemAssigned` identity this module uses — a circular
+  dependency Microsoft's own docs call out. Not a cost problem, an
+  architecture one.
+- Logs (Log Analytics / Container Insights): also Microsoft-encrypted by
+  default. A customer key here requires a dedicated cluster resource,
+  billed on a commitment-tier model with a 100 GB/day floor — real,
+  fixed money committed regardless of what a given client's cluster
+  actually logs.
+- Both are the client's own compliance decision to make on their own Key
+  Vault, the same class of call as the disk encryption set above
+  (AZU-0067) — not something to default into an empty-shell,
+  multi-client module.
+
 ## Module specification
 
 | Variable | Default | Constraint |
@@ -137,6 +160,8 @@ Read September 2026.
 [long-term support](https://learn.microsoft.com/en-us/azure/aks/long-term-support) ·
 [CSI storage drivers](https://learn.microsoft.com/en-us/azure/aks/csi-storage-drivers) ·
 [deployment safeguards](https://learn.microsoft.com/en-us/azure/aks/deployment-safeguards) ·
+[KMS etcd encryption](https://learn.microsoft.com/en-us/azure/aks/use-kms-etcd-encryption) ·
+[Log Analytics customer-managed keys](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/customer-managed-keys) ·
 [Velero node-agent configuration](https://velero.io/docs/main/supported-configmaps/node-agent-configmap/) ·
 [Kubernetes Pod Security Standards](https://kubernetes.io/docs/concepts/security/pod-security-standards) ·
 [crossplane-contrib/provider-azure](https://github.com/crossplane-contrib/provider-azure) ·
