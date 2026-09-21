@@ -142,6 +142,33 @@ operator release changing the sync's shape will not carry them along. What it
 buys: signature verification, garbage collection and namespace placement —
 none of which `instance.sync` can express.
 
+### Proven, both ways
+
+Same cluster, same day, against Flux's own signed example artifact.
+
+**It verifies.** The `OCIRepository` reaches `Ready=True` with the `verify`
+block live, having checked a keyless signature it does not own:
+
+```
+spec.verify = {"provider":"cosign","matchOIDCIdentity":[{"issuer":"…","subject":"^https://github.com/stefanprodan/podinfo/.*"}]}
+status       = stored artifact for digest '6.15.0@sha256:87815bbd58f5…'
+```
+
+**It refuses.** With the subject changed to an identity that did not sign it,
+the same source fails rather than falling back:
+
+```
+failed to verify the signature using provider 'cosign keyless':
+expected SAN value to match regex "^https://github.com/do-now-io/.*",
+got "https://github.com/stefanprodan/podinfo/.github/workflows/release.yml@refs/tags/6.15.0"
+```
+
+A verification that only ever passes proves nothing, which is why the negative
+case belongs here. The error also states the SAN shape a keyless GitHub
+Actions signature carries — `https://github.com/<org>/<repo>/.github/workflows/<file>@refs/tags/<tag>`
+— which is the value `cosign_identity.subject` will take for the socle's own
+artifact.
+
 ## Configuration, and where it lives
 
 **In the cluster's own root configuration — and as little of it as possible.**
