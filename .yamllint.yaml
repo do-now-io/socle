@@ -5,6 +5,12 @@ extends: default
 
 ignore:
   - .git/
+  # Helm templates are Go templates that happen to end in .yaml: `{{- if }}`
+  # at the start of a line is not a YAML node, and no linter setting makes it
+  # one. They are checked by rendering them instead — `helm template` in the
+  # module's own test path. Only templates/ is exempt; a chart's Chart.yaml
+  # and values.yaml are real YAML and stay linted.
+  - opentofu/*/chart/templates/
 
 rules:
   # Manifests with long image references or URLs need some headroom.
