@@ -8,8 +8,13 @@
 # we ship, so it proved nothing beyond the plan.
 #
 # Emulator coverage: AWS (floci), GCP (floci-gcp), Azure (floci-az).
-# Scaleway has no emulator yet — its plan runs offline, which is only
-# meaningful while the module holds no resources.
+# Scaleway has no emulator, from floci or anyone else. Its leg plans the
+# minimal example instead — the module as a consumer calls it — against
+# fixture credentials. The module holds no data source, so a plan over
+# empty state reads nothing back and no API call leaves the runner.
+# Convergence is therefore unproven on that leg, and the run summary says
+# so. Its validations and defaults are covered by `tofu test`, in
+# pr-static.yaml.
 name: Integration tests
 
 on:
@@ -58,7 +63,7 @@ jobs:
             emulator: ""
             port: ""
             health_path: ""
-            work_dir: opentofu/scaleway
+            work_dir: opentofu/scaleway/examples/minimal
     env:
       # The aws provider natively honors AWS_ENDPOINT_URL and sends every
       # API call to the emulator instead of real AWS. The google equivalent
@@ -69,17 +74,6 @@ jobs:
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
       AWS_REGION: eu-west-3
-      # opentofu/aws's own six required variables — a root module with values
-      # baked in would be a second, silent set of recommendations, so the
-      # module has none, and CI supplies its own throwaway ones here instead.
-      # Harmless for the other legs: OpenTofu ignores a TF_VAR_* that matches
-      # no declared variable.
-      TF_VAR_cluster_name: socle-emulator
-      TF_VAR_owner: platform
-      TF_VAR_environment: dev
-      TF_VAR_availability_zones: '["eu-west-3a","eu-west-3b"]'
-      TF_VAR_cluster_endpoint_public_access_cidrs: '["203.0.113.0/32"]'
-      TF_VAR_kubernetes_version: "1.34"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -111,6 +105,35 @@ jobs:
       - name: Smoke-test the emulated AWS control plane
         if: matrix.cloud == 'aws'
         run: aws sts get-caller-identity --endpoint-url "$AWS_ENDPOINT_URL"
+      # opentofu/aws's own six required variables. A root module with values
+      # baked in would be a second, silent set of recommendations, so the
+      # module has none and CI supplies throwaway ones. Set per leg, not on
+      # the job: every cloud declares a `cluster_name`, and eu-west-3a is not
+      # a zone anywhere else.
+      - name: AWS variable fixtures
+        if: matrix.cloud == 'aws'
+        run: |
+          {
+            echo "TF_VAR_cluster_name=socle-emulator"
+            echo "TF_VAR_owner=platform"
+            echo "TF_VAR_environment=dev"
+            echo 'TF_VAR_availability_zones=["eu-west-3a","eu-west-3b"]'
+            echo 'TF_VAR_cluster_endpoint_public_access_cidrs=["203.0.113.0/32"]'
+            echo "TF_VAR_kubernetes_version=1.34"
+          } >> "$GITHUB_ENV"
+      # Fixtures, not secrets: the format is all the provider validates, and
+      # a plan over empty state never authenticates. The example supplies
+      # every other input from its own defaults.
+      - name: Scaleway variable fixtures
+        if: matrix.cloud == 'scaleway'
+        run: |
+          {
+            echo "SCW_ACCESS_KEY=SCWFIXTURE0000000000"
+            echo "SCW_SECRET_KEY=00000000-0000-4000-8000-000000000000"
+            echo "SCW_DEFAULT_ORGANIZATION_ID=00000000-0000-4000-8000-000000000000"
+            echo "TF_VAR_project_id=00000000-0000-4000-8000-000000000000"
+            echo 'TF_VAR_cluster_endpoint_public_access_cidrs=["203.0.113.0/32"]'
+          } >> "$GITHUB_ENV"
       - name: Trust the floci-az TLS certificate
         # azurerm's cloud-metadata discovery is HTTPS-only, no override.
         # SSL_CERT_FILE is enough for the Go client to find it — no system
@@ -144,9 +167,10 @@ jobs:
               echo "Planned against \`${{ matrix.emulator }}\` — the plan lists what would be"
               echo "created, and no real cloud was touched. ✅"
             else
-              echo "⚠️ No emulator exists for this cloud yet — the plan ran offline,"
-              echo "which only proves module validity while it holds no resources."
-              echo "A disposable project (or floci Scaleway support) is needed once"
-              echo "real resources land."
+              echo "⚠️ No emulator exists for this cloud, so this leg plans and does not"
+              echo "apply: convergence is unproven here. The plan ran offline against the"
+              echo "minimal example, which proves the module resolves as a consumer calls"
+              echo "it. A disposable project (or floci Scaleway support) is what an apply"
+              echo "would take."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
