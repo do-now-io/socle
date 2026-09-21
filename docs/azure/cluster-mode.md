@@ -1,8 +1,10 @@
 # AKS cluster mode: Automatic vs Standard + Node Auto-Provisioning
 
 **AKS Standard + Node Auto-Provisioning.** NAP runs the same engine
-Automatic would have preconfigured; the upgrade channel, node-image
-patching, and policy enforcement stay the factory's to set.
+Automatic would have preconfigured. The upgrade channel and policy
+enforcement are this module's own hardcoded choice, not Microsoft's — see
+[managed scope](managed-scope.md) — the same posture Automatic would force,
+just decided in code instead of by the platform.
 
 Need Windows node pools or an IPv6 cluster? NAP supports neither, on any
 tier — Socle is not the right foundation for that cluster.
@@ -16,8 +18,9 @@ tier — Socle is not the right foundation for that cluster.
   has none. Node price is identical to running Karpenter self-hosted; NAP's
   advantage is skipping the operational cost of running that controller,
   not a lower bill.
-- Upgrade channel, node OS image upgrade, and policy enforcement are the
-  factory's to configure — nothing locked.
+- Upgrade channel and policy enforcement are hardcoded by this module, not
+  a variable — the module's own choice, not Microsoft's. Maintenance-window
+  timing is what's actually left to the factory to configure.
 - NAP's own limits apply regardless of tier: no Windows node pools, no IPv6
   clusters.
 
@@ -27,7 +30,7 @@ tier — Socle is not the right foundation for that cluster.
 | --- | --- | --- |
 | Per-vCPU surcharge | None | +17.5% on On-Demand, +94.7% on Spot |
 | Pod readiness SLA | None | 99.9% of qualifying operations in under 5 minutes |
-| Upgrade channel, policy enforcement | Factory's choice | Forced |
+| Upgrade channel, policy enforcement | Hardcoded by the module | Forced by the platform |
 | System components | Factory-operated | Microsoft-operated, no access |
 
 ## Cost
@@ -54,15 +57,17 @@ because the underlying VM price it's added to is so much lower.
 Automatic's own tax doesn't scale down with Spot — it stays a fixed
 $/vCPU/h, so on Spot it costs nearly as much as the compute itself.
 Spot's own discount is untouched; the tax on top of it isn't. Against
-that, and against a pod-readiness SLA and not having to pick an upgrade
-channel or a policy mode, Automatic isn't worth its permanent cost.
+that, and against a pod-readiness SLA, Automatic isn't worth its permanent
+cost.
 
 ## What you give up
 
 - The pod-readiness SLA (99.9% of qualifying operations in under 5
   minutes) — Automatic-only, financially backed.
-- A hands-off upgrade channel and policy baseline: the factory now picks
-  and maintains both instead of inheriting Microsoft's default.
+- A platform-enforced upgrade channel and policy baseline: Automatic's
+  `stable` channel and policy enforcement can't be changed by anyone, ever.
+  Standard + NAP hardcodes the same values today, but as this module's own
+  choice, not a guarantee Azure enforces.
 
 ## Sources
 
