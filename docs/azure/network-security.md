@@ -109,14 +109,13 @@ egress.
 | Pod CIDR     | Still declared at creation for control-plane routing, even though Cilium assigns the real pod IPs |
 
 
-One NAT Gateway per environment, not per AZ — a deliberate difference
-from the AWS module's per-AZ pattern. Azure subnets spanning every zone
-is what makes a single gateway *possible*, not what makes it free:
+One NAT Gateway per environment, not per AZ. Azure subnets spanning every
+zone is what makes a single gateway *possible*, not what makes it free:
 this gateway is nonzonal, so Azure places it in one physical zone, and
 traffic from a node in any other zone still crosses a zone boundary to
-reach it. It costs nothing extra only because Azure, unlike AWS, doesn't
-charge for data transfer between availability zones in the same region —
-a pricing policy, not a structural guarantee.
+reach it. It costs nothing extra only because Azure doesn't charge for
+data transfer between availability zones in the same region — a pricing
+policy, not a structural guarantee.
 
 NAT Gateway: $0.045/hour ($32.85/month) plus $0.045/GB processed, priced
 flat regardless of region — one per environment, for the same node egress
