@@ -14,20 +14,26 @@ module "bootstrap" {
   owner        = "platform"
   cluster_type = "kubernetes" # aws | azure | gcp | openshift
 
-  sync_url = "oci://ghcr.io/do-now-io/socle/socle"
-  sync_ref = "v1.4.0"
+  sync_url = "oci://ghcr.io/do-now-io/socle"
+  sync_ref = "1.4.0"
 
   cosign_identity = {
     issuer  = "https://token.actions.githubusercontent.com"
-    subject = "^https://github\\.com/do-now-io/socle/\\.github/workflows/release\\.yaml@"
+    subject = "^https://github\\.com/do-now-io/socle/\\.github/workflows/"
   }
 }
 ```
 
-`subject` is a regex, matched by Flux against the certificate's SAN — not a
-literal. Pinning the workflow rather than the tag means a new release verifies
-without touching this configuration. What is published, where, and by whom:
+`sync_url` is the socle's own artifact, not the module package — a different
+name, a different shape, and published by its own workflow. The modules live
+at `…/socle/modules`; what a tag publishes there:
 [docs/distribution.md](../../docs/distribution.md).
+
+`subject` is a **regex**, matched by Flux against the certificate's SAN, not a
+literal. The one above pins the repository and leaves the workflow file open,
+because the socle's publishing pipeline is still being settled; narrow it to
+that one file once its name is fixed, and a release will keep verifying
+without this configuration being touched.
 
 Why the operator rather than `flux bootstrap` or the `flux` provider, and what
 its licence costs: [docs/flux-bootstrap.md](../../docs/flux-bootstrap.md).

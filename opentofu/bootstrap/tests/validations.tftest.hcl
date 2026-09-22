@@ -7,7 +7,7 @@ variables {
   cluster_name = "socle-dev"
   environment  = "dev"
   owner        = "platform"
-  sync_url     = "oci://ghcr.io/do-now-io/socle/socle"
+  sync_url     = "oci://ghcr.io/do-now-io/socle"
   sync_ref     = "v0.1.0"
 }
 
@@ -78,7 +78,7 @@ run "flux_components_refuses_dropping_the_reconciliation_path" {
 run "sync_url_refuses_a_bare_host" {
   command = plan
   variables {
-    sync_url = "ghcr.io/do-now-io/socle/socle"
+    sync_url = "ghcr.io/do-now-io/socle"
   }
   expect_failures = [var.sync_url]
 }
