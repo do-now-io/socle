@@ -7,22 +7,27 @@ Flux converges everything the artifact contains.
 
 ```hcl
 module "bootstrap" {
-  source = "oci://<registry>/<repo>//opentofu/bootstrap?tag=<version>"
+  source = "oci://ghcr.io/do-now-io/socle/modules//opentofu/bootstrap?digest=sha256:<digest>"
 
   cluster_name = "socle-prod"
   environment  = "prod"
   owner        = "platform"
   cluster_type = "kubernetes" # aws | azure | gcp | openshift
 
-  sync_url = "oci://rg.fr-par.scw.cloud/socle/socle"
+  sync_url = "oci://ghcr.io/do-now-io/socle/socle"
   sync_ref = "v1.4.0"
 
   cosign_identity = {
     issuer  = "https://token.actions.githubusercontent.com"
-    subject = "https://github.com/do-now-io/socle/.github/workflows/release.yaml@refs/tags/v1.4.0"
+    subject = "^https://github\\.com/do-now-io/socle/\\.github/workflows/release\\.yaml@"
   }
 }
 ```
+
+`subject` is a regex, matched by Flux against the certificate's SAN — not a
+literal. Pinning the workflow rather than the tag means a new release verifies
+without touching this configuration. What is published, where, and by whom:
+[docs/distribution.md](../../docs/distribution.md).
 
 Why the operator rather than `flux bootstrap` or the `flux` provider, and what
 its licence costs: [docs/flux-bootstrap.md](../../docs/flux-bootstrap.md).

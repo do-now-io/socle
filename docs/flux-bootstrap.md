@@ -95,6 +95,10 @@ refused by validation.** A cluster that follows a moving head cannot answer
 "which version is deployed", which is the one question a versioned
 distribution exists to answer.
 
+The artifact itself is `oci://ghcr.io/do-now-io/socle/socle`, published by
+[`release.yaml`](../.github/workflows/release.yaml) on every `v*` tag —
+what it contains and how it is signed: [distribution](distribution.md).
+
 ## Cosign
 
 The foundations READMEs carry a warning: *OpenTofu does not verify OCI

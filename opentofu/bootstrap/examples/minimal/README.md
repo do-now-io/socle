@@ -7,7 +7,7 @@ module's defaults.
 tofu init
 tofu apply \
   -var kubeconfig_path=~/.kube/socle-dev.yaml \
-  -var sync_url=oci://rg.fr-par.scw.cloud/socle/socle \
+  -var sync_url=oci://ghcr.io/do-now-io/socle/socle \
   -var sync_ref=v0.1.0
 ```
 
