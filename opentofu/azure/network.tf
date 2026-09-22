@@ -52,16 +52,16 @@ resource "azurerm_subnet" "node" {
   address_prefixes     = [var.vnet_cidr]
 }
 
-# One NAT Gateway per VNet — not per AZ, unlike the AWS module. Azure
-# subnets aren't AZ-scoped, so one gateway can legally serve nodes in
-# every zone without the "zonal stacks" (one subnet + one zonal gateway
-# per AZ) Microsoft's own reliability docs describe as the alternative —
-# that's what makes a single gateway possible, not what makes it free.
-# This gateway is nonzonal: Azure places it in one physical zone, and
-# traffic from a node in any other zone still crosses a zone boundary to
-# reach it. It costs nothing extra only because Azure, unlike AWS,
-# doesn't charge for data transfer between availability zones in the same
-# region — a pricing policy, not a structural guarantee.
+# One NAT Gateway per VNet — not one per AZ. Azure subnets aren't
+# AZ-scoped, so one gateway can legally serve nodes in every zone without
+# the "zonal stacks" (one subnet + one zonal gateway per AZ) Microsoft's
+# own reliability docs describe as the alternative — that's what makes a
+# single gateway possible, not what makes it free. This gateway is
+# nonzonal: Azure places it in one physical zone, and traffic from a node
+# in any other zone still crosses a zone boundary to reach it. It costs
+# nothing extra only because Azure doesn't charge for data transfer
+# between availability zones in the same region — a pricing policy, not a
+# structural guarantee.
 resource "azurerm_public_ip" "nat" {
   count = var.create_vnet && var.create_nat_gateway ? 1 : 0
 
