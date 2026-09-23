@@ -24,8 +24,8 @@ output "cluster_ca_certificate" {
 }
 
 output "oidc_issuer_url" {
-  description = "The cluster's OIDC issuer. Checklist requirement, not this module's identity mechanism — Pod Identity is, IRSA is absent, and nothing here provisions an OIDC trust relationship against it."
-  value       = aws_eks_cluster.socle.identity[0].oidc[0].issuer
+  description = "The cluster's OIDC issuer. Checklist requirement, not this module's identity mechanism — Pod Identity is, IRSA is absent, and nothing here provisions an OIDC trust relationship against it. Null on an emulated cluster that reports no identity (floci), so an apply there still converges."
+  value       = try(aws_eks_cluster.socle.identity[0].oidc[0].issuer, null)
 }
 
 output "vpc_id" {
@@ -46,4 +46,18 @@ output "public_subnet_ids" {
 output "tags" {
   description = "The standard tag set applied to every billable resource this module creates."
   value       = local.tags
+}
+
+output "helm_kubernetes" {
+  description = "Drop-in value for the helm provider's kubernetes attribute, so a root configures it in one line. Carries no credential: the exec plugin obtains a short-lived token from the caller's ambient AWS credentials at call time, exactly as the aws provider itself authenticates."
+  value = {
+    host                   = aws_eks_cluster.socle.endpoint
+    cluster_ca_certificate = base64decode(aws_eks_cluster.socle.certificate_authority[0].data)
+    exec = {
+      api_version = "client.authentication.k8s.io/v1beta1"
+      command     = "aws"
+      args        = ["eks", "get-token", "--cluster-name", aws_eks_cluster.socle.name, "--region", data.aws_region.current.region]
+    }
+  }
+  sensitive = true
 }

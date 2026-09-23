@@ -136,7 +136,7 @@ run "defaults_are_the_recommended_position" {
   }
 
   assert {
-    condition     = aws_eks_cluster.socle.tags["socle-version"] == "0.1.0-dev"
+    condition     = aws_eks_cluster.socle.tags["socle-version"] == "0.0.0" # x-release-please-version
     error_message = "Every billable resource must carry the socle version that created it."
   }
 }
@@ -159,5 +159,32 @@ run "attaching_to_an_existing_vpc_with_matching_subnets_is_coherent" {
   assert {
     condition     = length(aws_vpc_endpoint.interface) == 0
     error_message = "Endpoints are only managed on a VPC this module also creates."
+  }
+}
+
+run "helm_kubernetes_is_credential_free_and_uses_the_aws_exec_plugin" {
+  command = plan
+
+  assert {
+    condition     = output.helm_kubernetes.exec.command == "aws" && contains(output.helm_kubernetes.exec.args, "get-token")
+    error_message = "helm_kubernetes must obtain its token at call time through aws eks get-token, never carry one."
+  }
+  assert {
+    condition     = !can(output.helm_kubernetes.token) && !can(output.helm_kubernetes.client_key)
+    error_message = "helm_kubernetes must carry no credential."
+  }
+}
+
+run "a_null_input_takes_the_module_default" {
+  command = plan
+  variables {
+    create_vpc            = null
+    vpc_flow_logs_enabled = null
+    log_retention_days    = null
+  }
+
+  assert {
+    condition     = length(aws_vpc.socle) == 1 && length(aws_flow_log.socle) == 1
+    error_message = "a root that passes an omitted optional key as null must get the module's recommended position, not a null: nullable = false is what makes that true."
   }
 }

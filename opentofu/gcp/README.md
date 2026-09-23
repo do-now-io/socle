@@ -167,6 +167,7 @@ No modules.
 | <a name="output_cluster_endpoint"></a> [cluster\_endpoint](#output\_cluster\_endpoint) | IP endpoint of the control plane. Empty when IP endpoints are disabled, which is the default. |
 | <a name="output_cluster_location"></a> [cluster\_location](#output\_cluster\_location) | Region of the cluster. Regional by default; there is no zonal option. |
 | <a name="output_cluster_name"></a> [cluster\_name](#output\_cluster\_name) | Name of the GKE cluster. |
+| <a name="output_helm_kubernetes"></a> [helm\_kubernetes](#output\_helm\_kubernetes) | Drop-in value for the helm provider's kubernetes attribute, so a root configures it in one line. Uses the DNS endpoint, the only one enabled by default. Carries no credential: gke-gcloud-auth-plugin obtains a short-lived token from the caller's ambient gcloud credentials at call time. |
 | <a name="output_labels"></a> [labels](#output\_labels) | The standard label set applied to every billable resource this module creates. |
 | <a name="output_network_name"></a> [network\_name](#output\_network\_name) | Name of the VPC the cluster is attached to, whether the module created it or not. |
 | <a name="output_oidc_issuer_url"></a> [oidc\_issuer\_url](#output\_oidc\_issuer\_url) | The cluster's OIDC issuer, for federating an external identity provider against this cluster. |
