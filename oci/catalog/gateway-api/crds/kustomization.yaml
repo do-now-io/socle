@@ -1,0 +1,9 @@
+# The Gateway API standard channel, exactly one pinned upstream release,
+# vendored verbatim into the artifact (see the header of standard-install.yaml
+# and .github/scripts/vendor-crds.sh). Applied by the
+# gateway-api-crds Flux Kustomization the module's ResourceSet renders when
+# kube.gateway_api.install_crds is true — never on GKE, which installs them.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - standard-install.yaml

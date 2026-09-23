@@ -13,6 +13,10 @@ ignore:
   # .github/scripts/check-gateway-api-crds.sh proves it byte for byte, and
   # kubeconform checks the render. Linting would only argue with upstream.
   - opentofu/bootstrap/gateway-api-crds/templates/
+  # Upstream CRDs vendored verbatim into the artifact; their digest is what
+  # CI checks (.github/scripts/vendor-crds.sh --check).
+  - oci/catalog/gateway-api/crds/standard-install.yaml
+  - oci/catalog/gateway-api/envoy-gateway/envoy-gateway-crds.yaml
 
 rules:
   # Manifests with long image references or URLs need some headroom.

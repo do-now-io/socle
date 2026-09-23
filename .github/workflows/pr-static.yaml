@@ -227,13 +227,21 @@ jobs:
             'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
             -ignore-filename-pattern '\.patch\.yaml$' \
             oci/catalog oci/clusters | tee kubeconform-oci.out
-      - name: kustomize build every cluster overlay
+      - name: kustomize build every cluster overlay and every module folder
         if: steps.detect.outputs.found == 'true'
         run: |
-          for dir in oci/clusters/*/; do
+          # The overlays are what the root Kustomization builds; the module
+          # folders (oci/catalog/<module>/<folder>/kustomization.yaml) are what
+          # a module's own Flux Kustomizations build from the same artifact.
+          for k in oci/clusters/*/kustomization.yaml oci/catalog/*/*/kustomization.yaml; do
+            dir="$(dirname "${k}")"
             echo "==> ${dir}"
             kubectl kustomize --load-restrictor LoadRestrictionsNone "${dir}" > /dev/null
           done
+      - name: Vendored CRDs are the upstream release, untouched
+        if: steps.detect.outputs.found == 'true'
+        run: |
+          .github/scripts/vendor-crds.sh --check | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Summary
         if: steps.detect.outputs.found == 'true'
         run: |
