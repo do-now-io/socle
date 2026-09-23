@@ -24,6 +24,11 @@ aws = {
 # Only what differs from the catalog's defaults. An unknown module or
 # attribute is refused at plan, with the allowed list in the message.
 kube = {
+  # gateway_api is on by default: the Gateway API CRDs and Envoy Gateway
+  # behind the GatewayClass `socle`. Hand it to Cilium once Cilium implements
+  # it on this cluster, or switch it off:
+  # gateway_api = { implementation = "cilium", install_crds = false }
+  # gateway_api = { enabled = false }
   hello = {
     replicas = 2
   }

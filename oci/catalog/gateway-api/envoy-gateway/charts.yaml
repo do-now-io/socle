@@ -1,0 +1,17 @@
+# The Envoy Gateway controller chart, pinned by digest. The tag is for humans
+# and for a bump; Flux resolves the digest and refuses anything else. Its
+# version moves with envoy-gateway-crds.yaml (same release).
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: envoy-gateway
+  namespace: envoy-gateway-system
+spec:
+  interval: 1h
+  url: oci://docker.io/envoyproxy/gateway-helm
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+  ref:
+    tag: v1.9.1
+    digest: sha256:91bae9aedb91ab34731e987afe01a3ccf454393015abeca705eea8ee15553e86

@@ -39,6 +39,10 @@ run "defaults_are_the_recommended_position" {
     error_message = "a module absent from kube must be at its catalog defaults."
   }
   assert {
+    condition     = output.inputs.modules.gateway_api.enabled == true && output.inputs.modules.gateway_api.implementation == "envoy-gateway" && output.inputs.modules.gateway_api.install_crds == true
+    error_message = "on aws the socle installs the Gateway API CRDs and Envoy Gateway implements them, until Cilium does."
+  }
+  assert {
     condition     = can(regex("refs/heads/main\\$$", output.cosign_identity.subject))
     error_message = "the default cosign identity must trust the release workflow on main only."
   }
@@ -203,6 +207,28 @@ run "hubble_and_gateway_api_toggles_reach_the_chart_and_the_templates" {
   assert {
     condition     = output.inputs.cilium.hubble == true && output.inputs.cilium.gatewayApi == false
     error_message = "the templates must see the toggles as set."
+  }
+}
+
+run "gke_owns_the_gateway_api_and_its_crds" {
+  command = plan
+  variables { cloud = "gcp" }
+
+  assert {
+    condition     = output.inputs.modules.gateway_api.implementation == "managed" && output.inputs.modules.gateway_api.install_crds == false
+    error_message = "on gcp the module must default to GKE's managed controller and never install the CRDs GKE ships."
+  }
+}
+
+run "a_client_may_hand_the_gateway_api_to_cilium_on_aws" {
+  command = plan
+  variables {
+    kube = { gateway_api = { implementation = "cilium", install_crds = false } }
+  }
+
+  assert {
+    condition     = output.inputs.modules.gateway_api.implementation == "cilium" && output.inputs.modules.gateway_api.install_crds == false && output.inputs.modules.gateway_api.enabled == true
+    error_message = "cilium is a valid implementation on aws and the client's install_crds must flow, enabled keeping its default."
   }
 }
 

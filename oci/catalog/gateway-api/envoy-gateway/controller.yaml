@@ -1,0 +1,29 @@
+# The controller. crds.enabled=false is the chart's documented mode for a
+# cluster whose CRDs are managed elsewhere: it drops the bundled Gateway API
+# CRDs (experimental channel), the bundled Envoy Gateway CRDs and the
+# safe-upgrade admission policy, all of which the socle applies from their
+# own vendored release files. The CRDs are applied by the Flux Kustomization
+# that applies this folder, before this object.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: envoy-gateway
+  namespace: envoy-gateway-system
+spec:
+  interval: 10m
+  timeout: 10m
+  releaseName: envoy-gateway
+  chartRef:
+    kind: OCIRepository
+    name: envoy-gateway
+  install:
+    crds: Skip
+    remediation:
+      retries: 3
+  upgrade:
+    crds: Skip
+    remediation:
+      retries: 3
+  values:
+    crds:
+      enabled: false

@@ -102,6 +102,22 @@ variable "kube" {
     ]))
     error_message = "kube: an attribute has the wrong type. Each value must have the type of its catalog default: ${jsonencode({ for m, d in local.catalog : m => { for a, x in d : a => lookup(local.json_kinds, substr(jsonencode(x), 0, 1), "number") } })}."
   }
+
+  # gateway_api, per cloud (catalog.tf, docs/catalog/gateway-api.md). An
+  # implementation the cloud cannot run — Cilium's on a cloud whose Cilium is
+  # the provider's, GKE's managed controller anywhere but GKE — is refused at
+  # plan; an absent or non-string value is the previous blocks' business.
+  validation {
+    condition     = try(contains(local.gateway_api_implementations[var.cloud], var.kube.gateway_api.implementation), true)
+    error_message = "kube.gateway_api.implementation on ${var.cloud} must be one of: ${join(", ", local.gateway_api_implementations[var.cloud])}."
+  }
+
+  # GKE installs and upgrades the Gateway API CRDs with the cluster; a second
+  # owner would fight it on every reconciliation.
+  validation {
+    condition     = var.cloud != "gcp" || try(var.kube.gateway_api.install_crds, false) != true
+    error_message = "kube.gateway_api.install_crds cannot be true on gcp: GKE owns the Gateway API CRDs (gateway_api_enabled in the foundations module)."
+  }
 }
 
 # ---------------------------------------------------------------------------

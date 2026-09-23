@@ -1,0 +1,95 @@
+# The gateway_api module: the Gateway API CRDs, and one implementation per
+# cloud behind a stable class name, socle. Design: docs/catalog/gateway-api.md.
+#
+# Three Flux Kustomizations over static folders of this artifact, rather than
+# the HelmReleases inline as in hello, because ordering is the whole problem
+# here: a GatewayClass cannot be applied before its CRD exists, and the
+# operator applies a ResourceSet's resources as one set. The CRDs folder is
+# applied by the first Kustomization; the implementation folder by the second,
+# which dependsOn the first whenever this module installs the CRDs. The folders
+# are read from the same OCIRepository the root already pulls and verifies, so
+# nothing here adds a source or a trust root.
+#
+# The on/off toggle stays the reconcile annotation on each resource, as every
+# module: enabled is the client's switch, install_crds and implementation pick
+# which of the three exist. A disabled object is garbage-collected — except
+# the CRDs, whose Kustomization has prune: false (a CRD gone takes every
+# Gateway and HTTPRoute of the cluster with it; removing them is a deliberate
+# act, never a side effect of a toggle).
+#
+# resourcesTemplate rather than resources for the same reason as the root:
+# the optional dependsOn block is added or dropped structurally.
+apiVersion: fluxcd.controlplane.io/v1
+kind: ResourceSet
+metadata:
+  name: gateway-api
+  namespace: flux-system
+spec:
+  inputsFrom:
+    - apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSetInputProvider
+      name: socle
+  wait: true
+  resourcesTemplate: |
+    << $g := inputs.modules.gateway_api >>
+    apiVersion: kustomize.toolkit.fluxcd.io/v1
+    kind: Kustomization
+    metadata:
+      name: gateway-api-crds
+      namespace: flux-system
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if and $g.enabled $g.install_crds >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 10m
+      retryInterval: 1m
+      timeout: 5m
+      sourceRef:
+        kind: OCIRepository
+        name: socle
+      path: ./catalog/gateway-api/crds
+      prune: false
+      wait: true
+    ---
+    apiVersion: kustomize.toolkit.fluxcd.io/v1
+    kind: Kustomization
+    metadata:
+      name: gateway-api-envoy-gateway
+      namespace: flux-system
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if and $g.enabled (eq $g.implementation "envoy-gateway") >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 10m
+      retryInterval: 1m
+      timeout: 15m
+      << if $g.install_crds >>
+      dependsOn:
+        - name: gateway-api-crds
+      << end >>
+      sourceRef:
+        kind: OCIRepository
+        name: socle
+      path: ./catalog/gateway-api/envoy-gateway
+      prune: true
+      wait: true
+    ---
+    apiVersion: kustomize.toolkit.fluxcd.io/v1
+    kind: Kustomization
+    metadata:
+      name: gateway-api-cilium
+      namespace: flux-system
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if and $g.enabled (eq $g.implementation "cilium") >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 10m
+      retryInterval: 1m
+      timeout: 5m
+      << if $g.install_crds >>
+      dependsOn:
+        - name: gateway-api-crds
+      << end >>
+      sourceRef:
+        kind: OCIRepository
+        name: socle
+      path: ./catalog/gateway-api/cilium
+      prune: true
+      wait: true

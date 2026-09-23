@@ -1,0 +1,9 @@
+# Cilium as the socle's Gateway API implementation: Cilium itself is a
+# bootstrap concern (it is the CNI, installed before Flux, with the Gateway
+# API CRDs it needs at start-up), so the catalog module contributes the class
+# name only. Applied by the gateway-api-cilium Flux Kustomization the module's
+# ResourceSet renders when kube.gateway_api.implementation is cilium.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - gatewayclass.yaml

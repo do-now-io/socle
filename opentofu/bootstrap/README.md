@@ -36,6 +36,9 @@ type, is an error at plan, with the allowed list in the message.
 
 | Module | Attribute | Default | Meaning |
 | --- | --- | --- | --- |
+| `gateway_api` | `enabled` | `true` | Gateway API on this cluster: the standard-channel CRDs and one implementation behind the `GatewayClass` named `socle` ([design note](../../docs/catalog/gateway-api.md)) |
+| `gateway_api` | `install_crds` | per cloud: `true`; `false` on gcp | Let the socle install the pinned Gateway API CRDs. Refused on gcp, where GKE owns them; `false` elsewhere when Cilium's bootstrap release installs them |
+| `gateway_api` | `implementation` | per cloud: `envoy-gateway` on aws, azure, scaleway; `managed` on gcp | What implements the class: `envoy-gateway`, `cilium` (aws, azure) or `managed` (gcp only, GKE's controller — nothing installed). Anything else for the cloud is refused at plan |
 | `hello` | `enabled` | `true` | Deploy podinfo as a proof the pipeline works |
 | `hello` | `replicas` | `1` | Replicas of the podinfo Deployment |
 | `hello` | `message` | `"hello from socle"` | Message podinfo serves |

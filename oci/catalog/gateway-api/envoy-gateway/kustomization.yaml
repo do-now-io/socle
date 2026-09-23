@@ -1,0 +1,28 @@
+# Envoy Gateway as the socle's Gateway API implementation, applied by the
+# gateway-api-envoy-gateway Flux Kustomization the module's ResourceSet renders
+# when kube.gateway_api.implementation is envoy-gateway. Static on purpose: the
+# v1 client surface has nothing to template here, and a Flux Kustomization is
+# what orders the GatewayClass after the CRDs it needs (docs/catalog/gateway-api.md).
+#
+# Envoy Gateway's own CRDs are the release asset, vendored verbatim
+# (.github/scripts/vendor-crds.sh), not the project's CRDs chart: that
+# release is over the 1 MiB Helm stores per release Secret and never
+# installs. kustomize-controller applies CRDs before the objects that need
+# them, within this one Kustomization. A CRD is never removed by a toggle:
+# the patch below exempts them from pruning, as prune: false does for the
+# Gateway API CRDs.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - envoy-gateway-crds.yaml
+  - charts.yaml
+  - controller.yaml
+  - gatewayclass.yaml
+patches:
+  - target:
+      kind: CustomResourceDefinition
+    patch: |
+      - op: add
+        path: /metadata/annotations/kustomize.toolkit.fluxcd.io~1prune
+        value: disabled

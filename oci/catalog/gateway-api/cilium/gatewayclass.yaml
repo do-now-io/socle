@@ -1,0 +1,9 @@
+# The one class name every other socle module may rely on, whatever
+# implements it on the cloud (docs/catalog/gateway-api.md).
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: socle
+spec:
+  controllerName: io.cilium/gateway-controller
+  description: The socle's Gateway API class, implemented by Cilium.
