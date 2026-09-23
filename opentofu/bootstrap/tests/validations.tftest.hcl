@@ -7,6 +7,12 @@ variables {
   cluster_name = "socle-test"
   environment  = "dev"
   owner        = "platform"
+
+  cluster_network = {
+    api_endpoint = "https://ABCDEF.gr7.eu-west-3.eks.amazonaws.com"
+    service_cidr = "172.20.0.0/16"
+    pod_cidr     = "10.244.0.0/16"
+  }
 }
 
 run "cloud_refuses_a_value_that_is_not_one_of_ours" {
@@ -61,6 +67,68 @@ run "kube_refuses_an_attribute_of_the_wrong_type" {
   command = plan
   variables { kube = { hello = { replicas = "three" } } }
   expect_failures = [var.kube]
+}
+
+run "cilium_refuses_a_value_that_is_not_an_object" {
+  command = plan
+  variables { cilium = "yes" }
+  expect_failures = [var.cilium]
+}
+
+run "cilium_refuses_an_unknown_attribute" {
+  command = plan
+  variables { cilium = { hubbel = true } }
+  expect_failures = [var.cilium]
+}
+
+run "cilium_refuses_an_attribute_of_the_wrong_type" {
+  command = plan
+  variables { cilium = { hubble = "yes" } }
+  expect_failures = [var.cilium]
+}
+
+run "cilium_is_refused_where_the_cloud_operates_it" {
+  command = plan
+  variables {
+    cloud           = "gcp"
+    cilium          = { hubble = true }
+    cluster_network = null
+  }
+  expect_failures = [var.cilium]
+}
+
+run "cluster_network_is_required_where_the_socle_installs_cilium" {
+  command = plan
+  variables { cluster_network = null }
+  expect_failures = [var.cluster_network]
+}
+
+run "cluster_network_needs_the_service_cidr_on_aws" {
+  command = plan
+  variables {
+    cluster_network = { api_endpoint = "https://ABCDEF.gr7.eu-west-3.eks.amazonaws.com" }
+  }
+  expect_failures = [var.cluster_network]
+}
+
+run "cluster_network_needs_the_pod_cidr_on_azure" {
+  command = plan
+  variables {
+    cloud           = "azure"
+    cluster_network = { api_endpoint = "socle-test-abc123.privatelink.westeurope.azmk8s.io" }
+  }
+  expect_failures = [var.cluster_network]
+}
+
+run "cluster_network_refuses_an_endpoint_that_is_not_a_host" {
+  command = plan
+  variables {
+    cluster_network = {
+      api_endpoint = "ftp://ABCDEF.gr7.eu-west-3.eks.amazonaws.com"
+      service_cidr = "172.20.0.0/16"
+    }
+  }
+  expect_failures = [var.cluster_network]
 }
 
 run "socle_version_refuses_a_moving_head" {

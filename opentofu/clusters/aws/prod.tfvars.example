@@ -28,3 +28,10 @@ kube = {
     replicas = 2
   }
 }
+
+# Cilium is installed before Flux with these defaults; list only what
+# differs. hubble adds Hubble Relay and UI; gateway_api = false stops Cilium
+# serving the Gateway API (the CRDs stay).
+# cilium = {
+#   hubble = true
+# }

@@ -9,6 +9,14 @@ variables {
   cluster_name = "socle-test"
   environment  = "dev"
   owner        = "platform"
+
+  # What a root passes from its foundations' outputs, known here so the
+  # rendered values can be asserted; unknown at plan on a real first apply.
+  cluster_network = {
+    api_endpoint = "https://ABCDEF.gr7.eu-west-3.eks.amazonaws.com"
+    service_cidr = "172.20.0.0/16"
+    pod_cidr     = "10.244.0.0/16"
+  }
 }
 
 run "defaults_are_the_recommended_position" {
@@ -62,7 +70,10 @@ run "client_values_are_merged_over_catalog_defaults" {
 
 run "scaleway_is_a_plain_kubernetes_cluster_for_the_operator" {
   command = plan
-  variables { cloud = "scaleway" }
+  variables {
+    cloud           = "scaleway"
+    cluster_network = null
+  }
 
   assert {
     condition     = yamldecode(helm_release.instance.values[0]).instance.cluster.type == "kubernetes"
@@ -71,6 +82,127 @@ run "scaleway_is_a_plain_kubernetes_cluster_for_the_operator" {
   assert {
     condition     = output.inputs.cloud == "scaleway"
     error_message = "inputs.cloud must carry the socle's own cloud name, which the artifact's clusters/<cloud> path uses."
+  }
+  assert {
+    condition     = length(helm_release.cilium) == 0 && length(helm_release.coredns) == 0 && length(helm_release.gateway_api_crds) == 0 && output.inputs.cilium.installed == false
+    error_message = "Kapsule operates Cilium: the socle must install nothing on scaleway, and the templates must be told so."
+  }
+}
+
+# --- Cilium — cilium.tf, docs/catalog/cilium.md ---
+
+run "aws_installs_the_gateway_api_crds_cilium_and_coredns_before_flux" {
+  command = plan
+
+  assert {
+    condition     = length(helm_release.gateway_api_crds) == 1 && length(helm_release.cilium) == 1 && length(helm_release.coredns) == 1
+    error_message = "on aws the foundations create a cluster with no CNI, kube-proxy or CoreDNS: all three releases must exist by default."
+  }
+  assert {
+    condition     = yamldecode(helm_release.cilium[0].values[0]).eni.enabled == true
+    error_message = "aws must run Cilium in ENI mode: pods carry VPC addresses, as the foundations' network design assumes."
+  }
+  assert {
+    condition     = yamldecode(helm_release.cilium[0].values[0]).kubeProxyReplacement == true && yamldecode(helm_release.cilium[0].values[0]).k8sServiceHost == "ABCDEF.gr7.eu-west-3.eks.amazonaws.com" && yamldecode(helm_release.cilium[0].values[0]).k8sServicePort == 443
+    error_message = "with no kube-proxy, Cilium must replace it and reach the API server by the host the foundations output, port 443."
+  }
+  assert {
+    condition     = yamldecode(helm_release.cilium[0].values[0]).operator.replicas == 1 && yamldecode(helm_release.cilium[0].values[0]).hubble.relay.enabled == false && yamldecode(helm_release.cilium[0].values[0]).hubble.ui.enabled == false && yamldecode(helm_release.cilium[0].values[0]).gatewayAPI.enabled == true
+    error_message = "the defaults are one operator, no Hubble Relay/UI, and Cilium serving the Gateway API."
+  }
+  assert {
+    condition     = yamldecode(helm_release.coredns[0].values[0]).service.clusterIP == "172.20.0.10" && yamldecode(helm_release.coredns[0].values[0]).service.name == "kube-dns"
+    error_message = "CoreDNS must take the .10 address of the service range under the kube-dns name — what every EKS node's kubelet is told to use."
+  }
+  assert {
+    condition     = output.inputs.cilium.installed == true && output.inputs.cilium.gatewayApi == true && output.inputs.cilium.hubble == false
+    error_message = "the templates must be told that the socle's Cilium runs here and serves the Gateway API."
+  }
+  assert {
+    condition     = output.cilium.chart_version == "1.20.2" && output.cilium.gateway_api_version == "1.6.1"
+    error_message = "the pinned versions must be visible to the root that consumes them."
+  }
+}
+
+run "azure_installs_cilium_in_byocni_mode_and_no_coredns" {
+  command = plan
+  variables {
+    cloud = "azure"
+    cluster_network = {
+      api_endpoint = "socle-test-abc123.privatelink.westeurope.azmk8s.io"
+      pod_cidr     = "10.244.0.0/16"
+    }
+  }
+
+  assert {
+    condition     = length(helm_release.gateway_api_crds) == 1 && length(helm_release.cilium) == 1 && length(helm_release.coredns) == 0
+    error_message = "AKS ships CoreDNS as a system pod even under BYO CNI: Cilium and the CRDs only."
+  }
+  assert {
+    condition     = yamldecode(helm_release.cilium[0].values[0]).aksbyocni.enabled == true && !can(yamldecode(helm_release.cilium[0].values[0]).eni)
+    error_message = "azure must run Cilium in AKS BYOCNI mode, and carry nothing of the aws configuration."
+  }
+  assert {
+    condition     = yamldecode(helm_release.cilium[0].values[0]).ipam.operator.clusterPoolIPv4PodCIDRList == ["10.244.0.0/16"]
+    error_message = "the cluster pool must be the foundations' pod_cidr: the chart's default, 10.0.0.0/8, contains the VNet."
+  }
+  assert {
+    condition     = yamldecode(helm_release.cilium[0].values[0]).k8sServiceHost == "socle-test-abc123.privatelink.westeurope.azmk8s.io" && yamldecode(helm_release.cilium[0].values[0]).k8sServicePort == 443
+    error_message = "a bare FQDN, as AKS outputs it, must become the API server host with port 443."
+  }
+}
+
+run "gcp_operates_its_own_cilium" {
+  command = plan
+  variables {
+    cloud           = "gcp"
+    cluster_network = null
+  }
+
+  assert {
+    condition     = length(helm_release.cilium) == 0 && length(helm_release.coredns) == 0 && length(helm_release.gateway_api_crds) == 0
+    error_message = "Autopilot's Dataplane V2 is Cilium: the socle must install nothing on gcp."
+  }
+  assert {
+    condition     = output.inputs.cilium.installed == false && output.inputs.cilium.gatewayApi == false && output.cilium.chart_version == null
+    error_message = "the templates and the root must be told that no socle-managed Cilium exists here."
+  }
+}
+
+run "a_cluster_that_brings_its_own_cni_turns_cilium_off" {
+  command = plan
+  variables {
+    cilium          = { enabled = false }
+    cluster_network = null
+  }
+
+  assert {
+    condition     = length(helm_release.cilium) == 0 && length(helm_release.coredns) == 0 && length(helm_release.gateway_api_crds) == 0
+    error_message = "cilium.enabled = false must install none of the three releases: the cluster brings its own CNI and DNS — floci's k3s in the e2e jobs."
+  }
+  assert {
+    condition     = output.inputs.cilium.installed == false
+    error_message = "the templates must not assume the Gateway API CRDs or a cilium GatewayClass on a cluster that brought its own CNI."
+  }
+}
+
+run "hubble_and_gateway_api_toggles_reach_the_chart_and_the_templates" {
+  command = plan
+  variables {
+    cilium = { hubble = true, gateway_api = false }
+  }
+
+  assert {
+    condition     = yamldecode(helm_release.cilium[0].values[0]).hubble.relay.enabled == true && yamldecode(helm_release.cilium[0].values[0]).hubble.ui.enabled == true
+    error_message = "hubble = true must enable Relay and UI together."
+  }
+  assert {
+    condition     = yamldecode(helm_release.cilium[0].values[0]).gatewayAPI.enabled == false && length(helm_release.gateway_api_crds) == 1
+    error_message = "gateway_api = false turns Cilium's controller off but keeps the CRDs: the API exists on every cloud, only the implementation differs."
+  }
+  assert {
+    condition     = output.inputs.cilium.hubble == true && output.inputs.cilium.gatewayApi == false
+    error_message = "the templates must see the toggles as set."
   }
 }
 
