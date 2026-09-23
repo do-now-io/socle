@@ -19,11 +19,22 @@ aws = {
 
   # No good default exists for who may reach the API endpoint.
   cluster_endpoint_public_access_cidrs = ["203.0.113.0/24"]
+
+  # Crossplane's own AWS identity, the one the socle cannot create for itself.
+  # allowed_services is the ceiling of every role a catalog module gets:
+  # add a service when you enable a module that uses it (route53 for
+  # external_dns). Empty grants nothing.
+  # crossplane = { allowed_services = ["route53"] }
 }
 
 # Only what differs from the catalog's defaults. An unknown module or
 # attribute is refused at plan, with the allowed list in the message.
 kube = {
+  # How catalog modules get their cloud access (docs/catalog/crossplane.md).
+  # Off until a module needs it; with aws.crossplane set above, the root wires
+  # the permissions boundary for you. Before turning it off again, delete the
+  # modules' claims.
+  # crossplane = { enabled = true }
   hello = {
     replicas = 2
   }
