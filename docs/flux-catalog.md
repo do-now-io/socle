@@ -350,6 +350,30 @@ Rules for a module template, all measured:
   `values`, `values` wins, because it is merged last — the named attribute is
   a convenience, not a lock.
 
+- **A module that needs a cloud service carries its own access.** Not the
+  foundations: the module ships its `ServiceAccount` and the object that
+  creates the role granting that access, as Crossplane managed resources
+  rendered by its own `ResourceSet`. `external_dns` needing Route 53, Cloud
+  DNS or Azure DNS is the case that decided it — the permission belongs with
+  the thing that needs it, so enabling a module is one decision rather than
+  one tfvars change here and an optional IAM block there.
+
+  This puts Crossplane under the catalog rather than beside it, and it puts an
+  ordering chain under the socle: the foundations create the cluster **and the
+  one identity Crossplane's provider assumes**, then Cilium and CoreDNS, then
+  Flux, then Crossplane, then a module's role, then that module's workload. The
+  foundations keep exactly that one identity and nothing else — an identity
+  allowed to create roles is the most powerful thing in the cluster, so its
+  scope is argued per cloud, never widened by convenience.
+
+  Anything needed **before** Crossplane exists cannot use it: Cilium's own ENI
+  permissions on AWS are on the node role, from the foundations, and that is
+  the boundary rather than an exception to argue about.
+
+  The design, the ordering costs and the escape hatch for a cluster without
+  Crossplane are in `docs/catalog/crossplane.md`; each module's own note says
+  what access it declares.
+
 Deleting a `ResourceSet` uninstalls everything it rendered — measured.
 
 ## 7. Publishing the artifact, and releasing
