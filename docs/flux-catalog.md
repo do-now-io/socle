@@ -323,6 +323,33 @@ Rules for a module template, all measured:
   rendered several times with different values; the operator supports it
   without changing this design.
 
+- **Every module takes the client's own chart values**, through two
+  attributes the catalog schema gives each of them:
+
+  | Attribute | Default | What it is |
+  | --- | --- | --- |
+  | `values` | `{}` | free-form chart values, written in the tfvars |
+  | `values_secret` | `""` | the name of a Secret the client creates in the module's namespace, with a `values.yaml` key |
+
+  The template renders `values` into a `ConfigMap` named
+  `<module>-client-values` in the module's namespace
+  (`data: { values.yaml: << toYaml inputs.modules.<m>.values | nindent 4 >> }`,
+  same reconcile toggle as every other resource), and the `HelmRelease` lists
+  it — then the Secret when named — under `valuesFrom`, before its own
+  `values:` block. helm-controller deep-merges in that order, so the client's
+  values win over the socle's, which is the point: a module's named attributes
+  are the curated surface the socle promises to keep working, `values` is
+  everything else the chart can do, without waiting for us to expose it.
+
+  Two rules make it safe. **Secrets never go in `values`** — it lands in the
+  OpenTofu state and in a plain `ConfigMap` — so each module refuses its
+  chart's secret-bearing paths at plan (`kube.argocd.values.configs.secret`
+  and friends: see `opentofu/bootstrap/variables.tf`) and the client puts them
+  in `values_secret`, which OpenTofu never reads. And **a named attribute
+  always wins nothing**: when a client sets both `domain` and the same key in
+  `values`, `values` wins, because it is merged last — the named attribute is
+  a convenience, not a lock.
+
 Deleting a `ResourceSet` uninstalls everything it rendered — measured.
 
 ## 7. Publishing the artifact, and releasing
