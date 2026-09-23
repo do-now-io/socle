@@ -7,7 +7,7 @@ else: the operator renders the catalog from the inputs, Flux converges it.
 
 ```hcl
 module "socle" {
-  source = "oci://ghcr.io/do-now-io/socle/modules//opentofu/bootstrap?tag=${var.socle_version}"
+  source = "oci://ghcr.io/do-now-io/socle/opentofu-modules//opentofu/bootstrap?tag=${var.socle_version}"
 
   cloud        = "aws"
   cluster_name = "acme-prod"
@@ -109,7 +109,7 @@ No modules.
 | <a name="input_environment"></a> [environment](#input\_environment) | Environment this cluster serves. Stamped as a label, exposed as inputs.cluster.environment, and the axis the upgrade rings follow. | `string` | n/a | yes |
 | <a name="input_owner"></a> [owner](#input\_owner) | Team accountable for the cluster. Stamped as a label on every object. | `string` | n/a | yes |
 | <a name="input_artifact_pull_secret"></a> [artifact\_pull\_secret](#input\_artifact\_pull\_secret) | Name of an existing kubernetes.io/dockerconfigjson Secret in flux-system that Flux uses to pull the artifact from a private registry. Empty for a public registry. The Secret is created outside this module — a credential never enters OpenTofu. | `string` | `""` | no |
-| <a name="input_artifact_url"></a> [artifact\_url](#input\_artifact\_url) | OCI repository the socle artifact is pulled from. Override for a mirror; the tag is socle\_version. | `string` | `"oci://ghcr.io/do-now-io/socle"` | no |
+| <a name="input_artifact_url"></a> [artifact\_url](#input\_artifact\_url) | OCI repository the socle artifact is pulled from. Override for a mirror; the tag is socle\_version. | `string` | `"oci://ghcr.io/do-now-io/socle/flux-modules"` | no |
 | <a name="input_cosign_identity"></a> [cosign\_identity](#input\_cosign\_identity) | Keyless identity the artifact's signature must match, as issuer and subject regexes. Defaults to the socle's release workflow on main, so production never consumes a branch build by accident. Override on a dev cluster testing a branch. Null means this default. Verification cannot be disabled. | <pre>object({<br/>    issuer  = string<br/>    subject = string<br/>  })</pre> | <pre>{<br/>  "issuer": "^https://token\\.actions\\.githubusercontent\\.com$",<br/>  "subject": "^https://github\\.com/do-now-io/socle/\\.github/workflows/publish-artifact\\.yaml@refs/heads/main$"<br/>}</pre> | no |
 | <a name="input_flux_components"></a> [flux\_components](#input\_flux\_components) | Flux controllers to install. The image automation pair is absent by default: the socle's version moves through a reviewed tfvars change, not through a controller rewriting tags. | `list(string)` | <pre>[<br/>  "source-controller",<br/>  "kustomize-controller",<br/>  "helm-controller",<br/>  "notification-controller"<br/>]</pre> | no |
 | <a name="input_flux_version"></a> [flux\_version](#input\_flux\_version) | Flux version the operator installs and keeps converged. 2.x tracks the latest 2 series; an exact version pins it. | `string` | `"2.x"` | no |

@@ -79,15 +79,15 @@ Rules the root enforces:
 - **`socle_version` is a variable in both module sources — in a client's
   copy.** The modules are published separately from the socle artifact (PR
   #15, one OCI tag cannot carry both shapes), so a client's copy reads:
-  `source = "oci://ghcr.io/do-now-io/socle/modules//opentofu/aws?tag=${var.socle_version}"`
+  `source = "oci://ghcr.io/do-now-io/socle/opentofu-modules//opentofu/aws?tag=${var.socle_version}"`
   and
-  `source = "oci://ghcr.io/do-now-io/socle/modules//opentofu/bootstrap?tag=${var.socle_version}"`.
+  `source = "oci://ghcr.io/do-now-io/socle/opentofu-modules//opentofu/bootstrap?tag=${var.socle_version}"`.
   OpenTofu ≥ 1.8 resolves both at init from the tfvars (measured with
   1.12.6). A bump is one line and a `tofu init`, which every pipeline runs
   anyway. In the repository, `opentofu/clusters/aws` uses relative sources
   instead, so CI applies it straight from a checkout; the `?tag=` form is
   what a client's copy puts on both sources. The socle artifact itself stays
-  at `ghcr.io/do-now-io/socle` (§7).
+  at `ghcr.io/do-now-io/socle/flux-modules` (§7).
 - **`<cloud>` is a typed object** mirroring the foundations module's
   variables; the root passes them through one by one. Nothing is renamed.
   `aws.kubernetes_version` is required — the foundations module has no
@@ -194,7 +194,7 @@ when their roots are written — pending.
 | `cluster_name`, `environment`, `owner` | **required** | labels, and `inputs.cluster.*` |
 | `kube` | `{}` | `any`, validated and normalised against `catalog.tf` |
 | `socle_version` | the module's own `local.socle_version` | override for a dev cluster testing a branch artifact |
-| `artifact_url` | `oci://ghcr.io/do-now-io/socle` | override for a mirror |
+| `artifact_url` | `oci://ghcr.io/do-now-io/socle/flux-modules` | override for a mirror |
 | `artifact_pull_secret` | `""` | name of an existing `kubernetes.io/dockerconfigjson` Secret in `flux-system` for a private registry; the credential is created outside OpenTofu and never enters its state |
 | `cosign_identity` | the release workflow on `refs/heads/main` | override to trust a branch build; `null` means the default identity — verification cannot be disabled |
 | `operator_version` | exact `x.y.z` | ranges refused |
@@ -392,8 +392,8 @@ is read from the conventional commits since it.
   GitHub only dispatches `delete`, `schedule` and `workflow_dispatch` from the
   default branch, so the workflow's first real run — and the answer to whether
   `GITHUB_TOKEN` may delete org package versions, else a fine-grained PAT is
-  needed — comes after this branch merges. The probe tag
-  `0.0.0-tmp-cleanup-probe.dfee6e3` awaits that first scheduled sweep.
+  needed — comes after this branch merges. A nested package name is
+  `%2F`-encoded in the packages API path (`socle%2Fflux-modules`).
 - **Tested how**: the branch path runs in CI on every push of this branch.
   `compute-tag.sh` is exercised on a throwaway git repository with a stubbed
   `crane`: docs-only → patch, feat → minor, existing alphas → N+1, the release
@@ -406,11 +406,18 @@ is read from the conventional commits since it.
   first changelog spanning the whole history. The first real cycle is
   the merge of this PR: `0.1.0-alpha.1`, a release PR titled
   `chore(release): 0.1.0`, and its merge releases `0.1.0`.
-- **Alignment with PR #15**: the modules package (`socle/modules:<version>`)
+- **Alignment with PR #15**: the modules package (`socle/opentofu-modules:<version>`)
   still follows the older rule there — `VERSION` published as an immutable
   tag on every push to `main`. One `socle_version` pins both packages, so it
   should reuse `compute-tag.sh` for its alphas and add a `promote` job of its
   own on `release_created`; noted on the PR.
+- **Names**: the artifact is `ghcr.io/do-now-io/socle/flux-modules` — what
+  Flux syncs, not a Helm chart — and PR #15's OpenTofu modules package is
+  `ghcr.io/do-now-io/socle/opentofu-modules`. Both under the `socle` prefix,
+  both pinned by the one `socle_version`. The branch's first pushes went to
+  `ghcr.io/do-now-io/socle` before the names were settled; that package, with
+  its branch tags and the cleanup probe tag, is dead weight to delete by hand
+  in the GHCR UI.
 - **Visibility**: the first push created the GHCR package private. GitHub
   offers no API to change a package's visibility — it is a one-time manual
   setting (Package settings → Change visibility → Public). The package is

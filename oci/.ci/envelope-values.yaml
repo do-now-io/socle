@@ -5,7 +5,7 @@ inputs:
     environment: dev
     owner: platform
   socle:
-    url: oci://ghcr.io/do-now-io/socle
+    url: oci://ghcr.io/do-now-io/socle/flux-modules
     version: 0.0.0-ci.0000000
     pullSecret: ""
   cosign:

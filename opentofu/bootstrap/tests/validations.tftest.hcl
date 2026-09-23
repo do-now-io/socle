@@ -77,7 +77,7 @@ run "socle_version_refuses_a_non_semver" {
 
 run "artifact_url_refuses_a_non_oci_url" {
   command = plan
-  variables { artifact_url = "https://ghcr.io/do-now-io/socle" }
+  variables { artifact_url = "https://ghcr.io/do-now-io/socle/flux-modules" }
   expect_failures = [var.artifact_url]
 }
 

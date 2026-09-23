@@ -14,8 +14,8 @@ Upgrading the socle is one line in the tfvars, `socle_version`, then
 artifact — one OCI tag cannot carry both shapes (PR #15):
 
 ```hcl
-source = "oci://ghcr.io/do-now-io/socle/modules//opentofu/aws?tag=${var.socle_version}"
-source = "oci://ghcr.io/do-now-io/socle/modules//opentofu/bootstrap?tag=${var.socle_version}"
+source = "oci://ghcr.io/do-now-io/socle/opentofu-modules//opentofu/aws?tag=${var.socle_version}"
+source = "oci://ghcr.io/do-now-io/socle/opentofu-modules//opentofu/bootstrap?tag=${var.socle_version}"
 ```
 
 which OpenTofu ≥ 1.8 resolves at init.
@@ -29,7 +29,7 @@ aws provider uses. Nothing is stored.
 
 ## A private registry
 
-While `ghcr.io/do-now-io/socle` is private, Flux needs a pull secret. Create it
+While `ghcr.io/do-now-io/socle/flux-modules` is private, Flux needs a pull secret. Create it
 once, outside OpenTofu, then name it in the tfvars:
 
 ```sh
