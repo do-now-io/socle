@@ -58,6 +58,7 @@ module "socle" {
   cluster_name         = "socle-e2e-catalog"
   environment          = "dev"
   owner                = "platform"
+  region               = "eu-west-3"
   kube                 = var.kube
   socle_version        = var.socle_version
   cosign_identity      = var.cosign_identity

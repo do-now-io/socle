@@ -1,0 +1,259 @@
+# The crossplane module: the tooling through which every catalog module
+# carries its own cloud IAM. It installs Crossplane and, per cloud, the IAM
+# providers and their ProviderConfig — and nothing that belongs to a module.
+# A module that needs a cloud service declares its own managed resources
+# (on AWS an IAM Role and a PodIdentityAssociation) in its own ResourceSet,
+# for each cloud it runs on; adding such a module never touches this one.
+# The contract those resources follow, the ordering chain and the
+# measurements: docs/catalog/crossplane.md.
+#
+# Three steps, applied and health-checked in order by the operator:
+# 1. core — Crossplane and its RBAC manager, the official chart. From
+#    Crossplane's Helm repository over HTTPS, not OCI like the other modules:
+#    upstream publishes the chart to charts.crossplane.io only (its promote
+#    workflow pushes images to OCI registries, never the chart).
+# 2. providers — per cloud, the provider packages. They need the core's
+#    CRDs, which the core applies itself at start: hence a step.
+# 3. config — the ProviderConfig. It needs the providers' own CRDs, which
+#    only exist once they are Healthy — a condition the operator's health
+#    check does not read (Crossplane packages report Healthy, not Ready). So
+#    the step is a child ResourceSet that dependsOn the packages with a
+#    readyExpr on Healthy; this step waits for the child to be Ready. When
+#    the module is off the child goes with everything else, so a dependency
+#    on an absent Provider can never wedge socle-root.
+#
+# Only AWS has providers yet (`if eq inputs.cloud "aws"`); GCP, Azure and
+# Scaleway each add their branch in their own PR, and until then those two
+# steps render nothing there.
+#
+# resourcesTemplate rather than resources: the values Secret is listed only
+# when the client names one, and the operator's block `<< if >>`/`<< end >>`
+# is text templating, which the structured resources list cannot carry (see
+# opentofu/bootstrap/manifests/templates/root.yaml).
+apiVersion: fluxcd.controlplane.io/v1
+kind: ResourceSet
+metadata:
+  name: crossplane
+  namespace: flux-system
+spec:
+  inputsFrom:
+    - apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSetInputProvider
+      name: socle
+  wait: true
+  steps:
+    - name: core
+      resourcesTemplate: |
+        apiVersion: v1
+        kind: Namespace
+        metadata:
+          name: crossplane-system
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
+        ---
+        apiVersion: source.toolkit.fluxcd.io/v1
+        kind: HelmRepository
+        metadata:
+          name: crossplane-stable
+          namespace: crossplane-system
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
+        spec:
+          interval: 1h
+          url: https://charts.crossplane.io/stable
+        ---
+        # The socle's own values, first in valuesFrom so that everything after
+        # it wins. In a ConfigMap rather than in the HelmRelease's .values
+        # because helm-controller merges .values LAST, over every valuesFrom
+        # entry (fluxcd/pkg chartutil.ChartValuesFromReferences): kept there,
+        # the socle's keys would silently beat the client's.
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: crossplane-socle-values
+          namespace: crossplane-system
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
+        data:
+          values.yaml: |
+            # Measured on k3s: idle with no provider, core 3m / 32Mi and RBAC
+            # manager 2m / 12Mi; with the AWS provider's 71 CRDs loaded, the
+            # core at 109Mi. The chart's own 100m / 256Mi each would reserve
+            # half a gigabyte before anything is declared.
+            # No limits, like every socle module: a memory limit turns a CRD
+            # surge into an OOM loop, and a CPU limit throttles reconciliation.
+            resourcesCrossplane:
+              limits: null
+              requests:
+                cpu: 50m
+                memory: 128Mi
+            resourcesRBACManager:
+              limits: null
+              requests:
+                cpu: 10m
+                memory: 32Mi
+        ---
+        # The client's own chart values, as he wrote them in
+        # kube.crossplane.values. OpenTofu refuses secrets in there.
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: crossplane-client-values
+          namespace: crossplane-system
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
+        data:
+          values.yaml: |<< toYaml inputs.modules.crossplane.values | nindent 4 >>
+        ---
+        apiVersion: helm.toolkit.fluxcd.io/v2
+        kind: HelmRelease
+        metadata:
+          name: crossplane
+          namespace: crossplane-system
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
+        spec:
+          interval: 10m
+          releaseName: crossplane
+          chart:
+            spec:
+              chart: crossplane
+              version: 2.4.2  # appVersion v2.4.2
+              sourceRef:
+                kind: HelmRepository
+                name: crossplane-stable
+              interval: 1h
+          # Merged in this order, later wins: the socle's values, the client's
+          # from kube.crossplane.values, then his Secret when he named one —
+          # created by him in crossplane-system, never read by OpenTofu,
+          # optional so the release does not wait for it. No .values, on
+          # purpose.
+          valuesFrom:
+            - kind: ConfigMap
+              name: crossplane-socle-values
+              valuesKey: values.yaml
+            - kind: ConfigMap
+              name: crossplane-client-values
+              valuesKey: values.yaml
+            << if inputs.modules.crossplane.values_secret >>
+            - kind: Secret
+              name: << inputs.modules.crossplane.values_secret | quote >>
+              valuesKey: values.yaml
+              optional: true
+            << end >>
+          # The chart ships no crds/ folder: Crossplane's init container
+          # applies its core CRDs at every start, so an upgrade of the chart is
+          # an upgrade of the CRDs, and Helm's CRD policy does not apply.
+          install:
+            remediation:
+              retries: 3
+          upgrade:
+            remediation:
+              retries: 3
+    - name: providers
+      resourcesTemplate: |
+        << if eq inputs.cloud "aws" >>
+        # IAM for the modules' roles, EKS for their Pod Identity
+        # associations: what every module's AWS access is made of. One
+        # ServiceAccount name for every AWS provider pod, so the foundations
+        # can write its Pod Identity association before the cluster has a
+        # node: Crossplane otherwise names it after the ProviderRevision, a
+        # hash. Requests from what was measured on k3s:
+        # 306Mi to 441Mi per provider once its CRDs are loaded.
+        apiVersion: pkg.crossplane.io/v1beta1
+        kind: DeploymentRuntimeConfig
+        metadata:
+          name: provider-aws
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
+        spec:
+          serviceAccountTemplate:
+            metadata:
+              name: provider-aws
+          deploymentTemplate:
+            spec:
+              selector: {}
+              template:
+                spec:
+                  containers:
+                    - name: package-runtime
+                      resources:
+                        requests:
+                          cpu: 50m
+                          memory: 320Mi
+        ---
+        # The family provider is a dependency of the other two; declared so
+        # that its version is pinned here and not resolved by Crossplane.
+        apiVersion: pkg.crossplane.io/v1
+        kind: Provider
+        metadata:
+          name: provider-family-aws
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
+        spec:
+          package: xpkg.crossplane.io/crossplane-contrib/provider-family-aws:v2.8.1
+          runtimeConfigRef:
+            name: provider-aws
+        ---
+        apiVersion: pkg.crossplane.io/v1
+        kind: Provider
+        metadata:
+          name: provider-aws-iam
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
+        spec:
+          package: xpkg.crossplane.io/crossplane-contrib/provider-aws-iam:v2.8.1
+          runtimeConfigRef:
+            name: provider-aws
+        ---
+        apiVersion: pkg.crossplane.io/v1
+        kind: Provider
+        metadata:
+          name: provider-aws-eks
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
+        spec:
+          package: xpkg.crossplane.io/crossplane-contrib/provider-aws-eks:v2.8.1
+          runtimeConfigRef:
+            name: provider-aws
+        << end >>
+    - name: config
+      resourcesTemplate: |
+        << if eq inputs.cloud "aws" >>
+        apiVersion: fluxcd.controlplane.io/v1
+        kind: ResourceSet
+        metadata:
+          name: crossplane-provider-config
+          namespace: flux-system
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
+        spec:
+          dependsOn:
+            - apiVersion: pkg.crossplane.io/v1
+              kind: Provider
+              name: provider-family-aws
+              ready: true
+              readyExpr: status.conditions.exists(c, c.type == 'Healthy' && c.status == 'True')
+            - apiVersion: pkg.crossplane.io/v1
+              kind: Provider
+              name: provider-aws-iam
+              ready: true
+              readyExpr: status.conditions.exists(c, c.type == 'Healthy' && c.status == 'True')
+            - apiVersion: pkg.crossplane.io/v1
+              kind: Provider
+              name: provider-aws-eks
+              ready: true
+              readyExpr: status.conditions.exists(c, c.type == 'Healthy' && c.status == 'True')
+          wait: true
+          resources:
+            # The provider's credentials: EKS Pod Identity, through the
+            # association the foundations wrote for crossplane-system/
+            # provider-aws. No key anywhere.
+            - apiVersion: aws.m.upbound.io/v1beta1
+              kind: ClusterProviderConfig
+              metadata:
+                name: default
+              spec:
+                credentials:
+                  source: PodIdentity
+        << end >>
