@@ -175,6 +175,19 @@ run "helm_kubernetes_is_credential_free_and_uses_the_aws_exec_plugin" {
   }
 }
 
+run "cilium_operator_policy_grants_eni_ipam_and_nothing_more" {
+  command = plan
+
+  assert {
+    condition     = contains(jsondecode(output.cilium_operator_policy_json).Statement[0].Action, "ec2:CreateNetworkInterface") && contains(jsondecode(output.cilium_operator_policy_json).Statement[0].Action, "ec2:AssignPrivateIpAddresses")
+    error_message = "the policy must carry what Cilium's operator calls to allocate ENIs and addresses."
+  }
+  assert {
+    condition     = alltrue([for a in jsondecode(output.cilium_operator_policy_json).Statement[0].Action : startswith(a, "ec2:")])
+    error_message = "the policy must stay within EC2: the operator manages network interfaces, nothing else."
+  }
+}
+
 run "a_null_input_takes_the_module_default" {
   command = plan
   variables {
