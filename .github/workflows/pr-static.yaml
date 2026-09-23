@@ -171,6 +171,17 @@ jobs:
           url="https://github.com/controlplaneio-fluxcd/flux-operator/releases/download/v${FLUX_OPERATOR_VERSION}/${asset}"
           curl -sL "${url}" | tar xz -C /usr/local/bin flux-operator
           flux-operator --version
+          # The operator's own JSON schemas, from the same release: the datree
+          # catalog's ResourceSet predates spec.steps (v0.60.0), so the
+          # fluxcd.controlplane.io kinds are validated against these first.
+          # Laid out as kubeconform's {{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.
+          mkdir -p schemas/fluxcd.controlplane.io /tmp/crd-schemas
+          curl -sL "https://github.com/controlplaneio-fluxcd/flux-operator/releases/download/v${FLUX_OPERATOR_VERSION}/crd-schemas.tar.gz" \
+            | tar xz -C /tmp/crd-schemas
+          for f in /tmp/crd-schemas/*-fluxcd-v1.json; do
+            kind="$(basename "${f}" -fluxcd-v1.json)"
+            cp "${f}" "schemas/fluxcd.controlplane.io/${kind}_v1.json"
+          done
       - name: Render the catalog and the bootstrap envelope
         if: steps.detect.outputs.found == 'true'
         run: |
@@ -201,10 +212,11 @@ jobs:
       - name: kubeconform the render (strict)
         if: steps.detect.outputs.found == 'true'
         run: |
-          docker run --rm -v "${PWD}/rendered:/work/rendered" -w /work \
+          docker run --rm -v "${PWD}/rendered:/work/rendered" -v "${PWD}/schemas:/work/schemas" -w /work \
             ghcr.io/yannh/kubeconform:v0.7.0@sha256:85dbef6b4b312b99133decc9c6fc9495e9fc5f92293d4ff3b7e1b30f5611823c \
             -strict -summary \
             -schema-location default \
+            -schema-location 'schemas/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
             -schema-location \
             'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
             rendered/ | tee kubeconform-rendered.out
@@ -220,6 +232,7 @@ jobs:
             -strict -summary \
             -ignore-missing-schemas \
             -schema-location default \
+            -schema-location 'schemas/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
             -schema-location \
             'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
             -ignore-filename-pattern '\.patch\.yaml$' \
