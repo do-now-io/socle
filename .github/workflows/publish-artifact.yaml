@@ -129,6 +129,108 @@ jobs:
             echo "| Signed as | \`$SUBJECT\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # The other half of the same release: the OpenTofu roots, as a module package
+  # `tofu init` can pull. It cannot be the same artifact — an OCI tag holds one
+  # manifest, and a modulepkg with an archive/zip layer is not a Flux
+  # tar+gzip — nor the same pull: `tofu init` runs on the client's runner,
+  # before the cluster Flux would reconcile from exists.
+  #
+  # Same tag, from the same compute-tag.sh, so one socle_version pins both.
+  # Same promotion below, so they carry the release at the same moment.
+  #
+  # OpenTofu does NOT verify OCI signatures, where Flux does on every
+  # reconciliation. The signature only counts because the consumer runs cosign
+  # verify before init — docs/distribution.md carries that command.
+  publish-modules:
+    name: Push and sign opentofu/
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    env:
+      REPOSITORY: do-now-io/socle/opentofu-modules
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      subject: ${{ steps.identity.outputs.subject }}
+    steps:
+      # Full history and tags, for the same reason as `publish`: compute-tag.sh
+      # reads the commits since the last release.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d # v2.0.1
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - uses: imjasonh/setup-crane@feee3b6bb0d4c68370f256a4502498c9227e5c6b # v0.7
+      - name: Log in to GHCR
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          printf '%s' "$TOKEN" | crane auth login "$REGISTRY" -u "$GITHUB_ACTOR" --password-stdin
+          printf '%s' "$TOKEN" | oras login "$REGISTRY" -u "$GITHUB_ACTOR" --password-stdin
+      # crane answers the registry questions, oras writes the artifact: the
+      # script needs the first, and only oras can set an artifactType.
+      - name: Compute the tag
+        id: tag
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: .github/scripts/compute-tag.sh >> "$GITHUB_OUTPUT"
+      - name: The identity a consumer verifies against
+        id: identity
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          echo "subject=https://github.com/${GITHUB_REPOSITORY}/.github/workflows/publish-artifact.yaml@${REF}" >> "$GITHUB_OUTPUT"
+      # git archive carries exactly what the commit holds, and nothing a runner
+      # left behind: no .terraform directory, no local edit.
+      - name: Push opentofu/ as a module package
+        id: push
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          git archive --format=zip --output="modules.zip" "$GITHUB_SHA"
+          unzip -l modules.zip | tail -1
+          # artifactType and the single archive/zip layer are what make
+          # OpenTofu recognise this. It accepts no other shape. The revision
+          # annotation is what release.sh matches to find this commit's alpha.
+          digest="$(oras push "$REGISTRY/$REPOSITORY:$TAG" \
+            --artifact-type application/vnd.opentofu.modulepkg \
+            --annotation "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            --annotation "org.opencontainers.image.revision=${GITHUB_REF_NAME}@sha1:${GITHUB_SHA}" \
+            --annotation "org.opencontainers.image.created=$(git log -1 --format=%cI "$GITHUB_SHA")" \
+            --format go-template='{{.digest}}' \
+            "modules.zip:archive/zip")"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - name: Sign, keyless
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: cosign sign --yes "$REGISTRY/$REPOSITORY@$DIGEST"
+      - name: Verify what was just signed
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          SUBJECT: ${{ steps.identity.outputs.subject }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          KIND: ${{ steps.tag.outputs.kind }}
+        run: |
+          cosign verify "$REGISTRY/$REPOSITORY@$DIGEST" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity "$SUBJECT" > /dev/null
+          {
+            echo "### Publish modules ✅"
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Tag | \`$TAG\` ($KIND) |"
+            echo "| Digest | \`$DIGEST\` |"
+            echo "| Signed as | \`$SUBJECT\` |"
+            echo ""
+            echo '```hcl'
+            echo "source = \"oci://$REGISTRY/$REPOSITORY//opentofu/<cloud>?digest=$DIGEST\""
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # floci runs a real k3s behind its emulated EKS once the Docker socket is
   # mounted and FLOCI_SERVICES_EKS_MOCK is left unset — the flag the plan legs
   # in integration.yaml carry, which hands back a fake endpoint instead. The
@@ -368,7 +470,7 @@ jobs:
   release-please:
     name: Release PR, or release
     runs-on: ubuntu-latest
-    needs: [publish, e2e-aws-root, e2e-aws-catalog]
+    needs: [publish, publish-modules, e2e-aws-root, e2e-aws-catalog]
     if: github.ref == 'refs/heads/main'
     permissions:
       contents: write
@@ -408,7 +510,7 @@ jobs:
   promote:
     name: Promote this commit's alpha to the release
     runs-on: ubuntu-latest
-    needs: [publish, release-please]
+    needs: [publish, publish-modules, release-please]
     if: needs.release-please.outputs.release_created == 'true'
     permissions:
       contents: read
@@ -429,6 +531,16 @@ jobs:
           RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
           SHA: ${{ needs.release-please.outputs.sha }}
         run: .github/scripts/release.sh >> "$GITHUB_OUTPUT"
+      # The same promotion for the modules package, from the same script and
+      # the same commit. A release where only one of the two carries the
+      # version would leave socle_version pinning half a socle.
+      - name: Tag the commit's module alpha with the same version
+        id: release_modules
+        env:
+          REPOSITORY: do-now-io/socle/opentofu-modules
+          RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
+          SHA: ${{ needs.release-please.outputs.sha }}
+        run: .github/scripts/release.sh >> "$GITHUB_OUTPUT"
       # The alpha was signed by this push to main, so the release carries
       # main's identity — the one the bootstrap module trusts by default.
       - name: The release still verifies as main
@@ -438,18 +550,24 @@ jobs:
           DIGEST: ${{ steps.release.outputs.digest }}
           SUBJECT: ${{ needs.publish.outputs.subject }}
           RELEASE_URL: ${{ needs.release-please.outputs.html_url }}
+          MODULES_REPOSITORY: do-now-io/socle/opentofu-modules
+          MODULES_ALPHA: ${{ steps.release_modules.outputs.alpha }}
+          MODULES_DIGEST: ${{ steps.release_modules.outputs.digest }}
         run: |
           cosign verify "$REGISTRY/$REPOSITORY:$TAG" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             --certificate-identity "$SUBJECT" > /dev/null
+          cosign verify "$REGISTRY/$MODULES_REPOSITORY:$TAG" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity "$SUBJECT" > /dev/null
           {
-            echo "### Release ✅"
-            echo "| | |"
-            echo "|---|---|"
-            echo "| Released | \`$TAG\` |"
-            echo "| Promoted from | \`$ALPHA\` |"
-            echo "| Digest | \`$DIGEST\` |"
-            echo "| Signed as | \`$SUBJECT\` |"
+            echo "### Release \`$TAG\` ✅"
+            echo "| Artifact | Promoted from | Digest |"
+            echo "|---|---|---|"
+            echo "| \`$REPOSITORY\` | \`$ALPHA\` | \`$DIGEST\` |"
+            echo "| \`$MODULES_REPOSITORY\` | \`$MODULES_ALPHA\` | \`$MODULES_DIGEST\` |"
+            echo ""
+            echo "Both signed as \`$SUBJECT\`."
             echo ""
             echo "Release: $RELEASE_URL"
           } >> "$GITHUB_STEP_SUMMARY"
