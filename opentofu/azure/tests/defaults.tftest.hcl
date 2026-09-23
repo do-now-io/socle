@@ -199,7 +199,7 @@ run "defaults_are_the_recommended_position" {
   }
 
   assert {
-    condition     = azurerm_kubernetes_cluster.socle.tags["socle-version"] == "0.1.0-dev"
+    condition     = azurerm_kubernetes_cluster.socle.tags["socle-version"] == "0.0.0" # x-release-please-version
     error_message = "Every billable resource must carry the socle version that created it."
   }
 }
@@ -222,5 +222,14 @@ run "attaching_to_an_existing_resource_group_and_vnet_is_coherent" {
   assert {
     condition     = length(azurerm_virtual_network.socle) == 0
     error_message = "No VNet should be created when attaching to an existing one."
+  }
+}
+
+run "helm_kubernetes_is_credential_free_and_uses_kubelogin" {
+  command = plan
+
+  assert {
+    condition     = output.helm_kubernetes.exec.command == "kubelogin" && contains(output.helm_kubernetes.exec.args, "azurecli")
+    error_message = "helm_kubernetes must obtain its token at call time through kubelogin with the Azure CLI login, never carry one."
   }
 }

@@ -107,3 +107,17 @@ output "tags" {
   description = "The standard tag set applied to every resource this module creates that accepts tags."
   value       = local.tags
 }
+
+output "helm_kubernetes" {
+  description = "Drop-in value for the helm provider's kubernetes attribute, so a root configures it in one line. Kapsule has no exec credential plugin and accepts the IAM secret key as a bearer token, so the exec emits an ExecCredential from SCW_SECRET_KEY — the variable the scaleway provider already reads — at call time. No token is stored in state."
+  value = {
+    host                   = scaleway_k8s_cluster.socle.apiserver_url
+    cluster_ca_certificate = base64decode(scaleway_k8s_cluster.socle.kubeconfig[0].cluster_ca_certificate)
+    exec = {
+      api_version = "client.authentication.k8s.io/v1beta1"
+      command     = "sh"
+      args        = ["-c", "printf '{\"apiVersion\":\"client.authentication.k8s.io/v1beta1\",\"kind\":\"ExecCredential\",\"status\":{\"token\":\"%s\"}}' \"$SCW_SECRET_KEY\""]
+    }
+  }
+  sensitive = true
+}

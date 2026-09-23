@@ -93,8 +93,19 @@ resource "aws_kms_key" "secrets" {
 # is the part that actually matters.
 #
 # Both are argued in docs/aws/eks-network-security.md.
+# AVD-AWS-0039 (secrets encryption) and AVD-AWS-0038 (control plane logs)
+# fire only when this module is scanned through a root that passes
+# secrets_encryption_enabled or cluster_log_types as an explicit null
+# (opentofu/clusters/aws groups its inputs in an object, so an omitted key
+# arrives as null). Both variables are nullable = false with the hardened
+# default, so OpenTofu encrypts and ships all five log types; Trivy evaluates
+# the null literally and does not model nullable. Scanned on its own, this
+# module carries neither finding. The ignore lines must stay contiguous and
+# directly above the resource, or Trivy drops them.
 #trivy:ignore:AVD-AWS-0040
 #trivy:ignore:AVD-AWS-0041
+#trivy:ignore:AVD-AWS-0039
+#trivy:ignore:AVD-AWS-0038
 resource "aws_eks_cluster" "socle" {
   name     = var.cluster_name
   role_arn = aws_iam_role.cluster.arn

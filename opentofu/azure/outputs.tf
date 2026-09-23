@@ -47,3 +47,17 @@ output "tags" {
   description = "The standard tag set applied to every billable resource this module creates."
   value       = local.tags
 }
+
+output "helm_kubernetes" {
+  description = "Drop-in value for the helm provider's kubernetes attribute, so a root configures it in one line. Carries no credential: kubelogin obtains a short-lived Entra token from the caller's Azure CLI login at call time; the server ID is AKS's well-known Entra application. PRECONDITION NOT YET MET BY THIS MODULE: the exec only authenticates against a cluster with Entra ID authentication enabled (azure_active_directory_role_based_access_control), which this module does not configure yet — local accounts remain its auth path. Enabling it is a pending decision for docs/azure; until then this output is the shape a root will consume, not a working login."
+  value = {
+    host                   = azurerm_kubernetes_cluster.socle.kube_config[0].host
+    cluster_ca_certificate = base64decode(azurerm_kubernetes_cluster.socle.kube_config[0].cluster_ca_certificate)
+    exec = {
+      api_version = "client.authentication.k8s.io/v1beta1"
+      command     = "kubelogin"
+      args        = ["get-token", "--login", "azurecli", "--server-id", "6dae42f8-4368-4678-94ff-3960e28e3630"]
+    }
+  }
+  sensitive = true
+}
