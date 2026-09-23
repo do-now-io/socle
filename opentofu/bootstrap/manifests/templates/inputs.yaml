@@ -1,0 +1,11 @@
+# The client's configuration, exactly as OpenTofu validated and normalised it.
+# Every catalog ResourceSet reads this one provider by name.
+apiVersion: fluxcd.controlplane.io/v1
+kind: ResourceSetInputProvider
+metadata:
+  name: socle
+  namespace: flux-system
+spec:
+  type: Static
+  defaultValues:
+    {{- toYaml .Values.inputs | nindent 4 }}

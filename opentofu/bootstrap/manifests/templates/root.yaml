@@ -1,0 +1,66 @@
+# What the cluster pulls. Written once; the << >> below are the operator's
+# templating, rendered from the inputs above, not Helm's.
+#
+# A ResourceSet rather than bare Flux objects: the FluxInstance's sync block
+# has no verify field and its kustomize patches never reach the objects it
+# generates (measured in PR #28), and a ResourceSet puts the root source under
+# the operator's inventory, drift correction and garbage collection.
+#
+# resourcesTemplate rather than resources: the OCIRepository's secretRef is
+# optional, and the operator only supports a block `<< if >>`/`<< end >>`
+# spanning a whole key — adding or dropping it structurally — over the raw
+# text of resourcesTemplate. resources is a list of already-parsed objects;
+# a bare `<< if >>` line inside one is not valid YAML (confirmed: both `helm
+# template` and `flux-operator build rset -f` refuse it before either ever
+# reaches the operator's per-field token substitution).
+apiVersion: fluxcd.controlplane.io/v1
+kind: ResourceSet
+metadata:
+  name: socle-root
+  namespace: flux-system
+spec:
+  inputsFrom:
+    - apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSetInputProvider
+      name: socle
+  wait: true
+  resourcesTemplate: |
+    apiVersion: source.toolkit.fluxcd.io/v1
+    kind: OCIRepository
+    metadata:
+      name: socle
+      namespace: flux-system
+    spec:
+      interval: 1m
+      url: << inputs.socle.url >>
+      ref:
+        tag: << inputs.socle.version | quote >>
+      << if inputs.socle.pullSecret >>
+      secretRef:
+        name: << inputs.socle.pullSecret >>
+      << end >>
+      # Checked on every reconciliation, not once at install. OpenTofu cannot
+      # verify an OCI signature; Flux can, and refuses what does not match.
+      verify:
+        provider: cosign
+        matchOIDCIdentity:
+          - issuer: << inputs.cosign.issuer | quote >>
+            subject: << inputs.cosign.subject | quote >>
+    ---
+    apiVersion: kustomize.toolkit.fluxcd.io/v1
+    kind: Kustomization
+    metadata:
+      name: socle
+      namespace: flux-system
+    spec:
+      interval: 10m
+      retryInterval: 1m
+      timeout: 5m
+      sourceRef:
+        kind: OCIRepository
+        name: socle
+      path: ./clusters/<< inputs.cloud >>
+      # An object dropped from the artifact must leave the cluster, or a
+      # version bump could only ever add.
+      prune: true
+      wait: true
