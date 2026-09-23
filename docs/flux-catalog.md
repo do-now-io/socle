@@ -240,6 +240,9 @@ may configure, so `.github/scripts/check-catalog-clouds.sh` fails CI when they
 disagree in either direction. The two travel together because the module and the
 artifact share `socle_version`.
 
+Each real module carries its own design note under `docs/catalog/`:
+[`gateway-api.md`](catalog/gateway-api.md) — the CRDs and one implementation per cloud.
+
 Cilium, CoreDNS on AWS and the Gateway API CRDs are not catalog modules: they precede Flux on the clouds created without a CNI — [catalog/cilium.md](catalog/cilium.md).
 
 ## 4. What foundations expose — `helm_kubernetes`
