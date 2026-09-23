@@ -120,7 +120,7 @@ kustomize-controller applies CRDs before the objects that need them within
 one Kustomization, and a kustomize patch marks each
 `kustomize.toolkit.fluxcd.io/prune: disabled`, the same rule as the Gateway
 API CRDs. `HelmRelease/envoy-gateway` runs the controller with
-`crds.enabled=false` — the chart's documented mode for externally managed
+`crds.enabled=false`, from the socle's values ConfigMap (§3.1) — the chart's documented mode for externally managed
 CRDs, which also drops the safe-upgrade admission policy the upstream
 standard bundle already carries. The `OCIRepository` pins the chart by
 **digest**, the tag beside it for a bump; the vendored CRDs move with it. Envoy Gateway v1.9.1 supports Gateway API v1.6.x; Cilium 1.20 requires
@@ -158,14 +158,17 @@ Gateway chart can do that the three named attributes do not cover — replicas,
 resources, logging level, extension APIs, pod annotations, topology — the
 client writes in `values`, or in a Secret he creates in
 `envoy-gateway-system` with a `values.yaml` key and names in `values_secret`.
-The module renders `values` into `ConfigMap/gateway-api-client-values` in
-`envoy-gateway-system`, next to the namespace itself. It adds a `valuesFrom`
-to `HelmRelease/envoy-gateway` listing that ConfigMap, then the Secret when
-named, `optional: true`. The `HelmRelease` is static in the artifact's
+`HelmRelease/envoy-gateway` carries no inline `values:` block. Its
+`valuesFrom` lists, in this order, `ConfigMap/gateway-api-socle-values` (the
+socle's defaults, today `crds.enabled: false` alone), then
+`ConfigMap/gateway-api-client-values` (the client's `values`), then the
+client's Secret when named, `optional: true`; later wins. Both ConfigMaps are
+rendered by the `ResourceSet` in `envoy-gateway-system`, next to the
+namespace itself. The `HelmRelease` is static in the artifact's
 `./envoy-gateway` folder, so the `valuesFrom` travels as a `patches` entry of
 the `gateway-api-envoy-gateway` Kustomization, which the operator templates.
 The namespace moved from that folder into the `ResourceSet` for the same
-reason: the ConfigMap must exist in it before the release reads it.
+reason: the ConfigMaps must exist in it before the release reads them.
 
 Both apply to Envoy Gateway only. Cilium's chart is its bootstrap release's,
 and GKE's controller has no chart. So both are refused at plan when
@@ -186,16 +189,21 @@ the cluster), so nothing else is refused. The Secret named in
 there, and the refusals do not apply to it.
 
 **Precedence, as measured.** helm-controller merges the `valuesFrom` entries
-in order, then `spec.values` last, over them (`fluxcd/pkg`
-`chartutil.ChartValuesFromReferences`: "the values map is merged in last
-overwriting values from references"). With the three refusals above, the
-socle's only inline value in this module is `crds.enabled: false`. So every
-key a client can write is applied, with the Secret winning over the
-ConfigMap. Live, on a local k3s v1.34.1 with Flux: `values` with
-`deployment.replicas: 2` and a CPU request gave a 2-replica controller at
-`200m`. A Secret with `deployment.replicas: 3` and `crds.enabled: true` then
-gave 3 replicas and left `crds.enabled` at `false`. An absent optional Secret
+in order, then `spec.values` last, over all of them: `fluxcd/pkg`
+`chartutil.ChartValuesFromReferences` ends on `MergeMaps(result, values)`,
+and its doc comment says "the values map is merged in last overwriting
+values from references". I found this while applying the values convention to
+this module, and reported it; it is why the catalog's contract now forbids an
+inline block (`docs/flux-catalog.md` §6). Live, on a local k3s v1.34.1 with
+Flux: `values` with `deployment.replicas: 2` and a CPU request gave a
+2-replica controller at `200m`. A Secret with `deployment.replicas: 3` and
+`crds.enabled: true` then gave 3 replicas, and left `crds.enabled` at `false`
+because that value was still inline at the time. An absent optional Secret
 did not hold the release.
+
+This module has no precedence e2e, unlike the others: its one socle default,
+`crds.enabled`, is refused in the client's `values` at plan, so no key a
+client can write ever meets a socle key, and there is no override to assert.
 
 The per-cloud defaults live in `catalog.tf`, not in overlay patches: the
 inputs then carry the truth (`kubectl -n flux-system get
