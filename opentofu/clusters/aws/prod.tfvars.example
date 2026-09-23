@@ -1,0 +1,30 @@
+# One file per cluster. Copy to prod.tfvars and edit; apply with
+#   tofu init && tofu apply -var-file=prod.tfvars
+
+# The only line an upgrade touches.
+socle_version = "0.0.0" # x-release-please-version
+
+# While the registry is private, name the pull secret created outside OpenTofu
+# (see README, "A private registry"):
+# artifact_pull_secret = "ghcr-auth"
+
+aws = {
+  region             = "eu-west-3"
+  cluster_name       = "acme-prod"
+  owner              = "platform"
+  environment        = "prod"
+  # Kubernetes minor to run; the foundations module has no default for it.
+  kubernetes_version = "1.34"
+  availability_zones = ["eu-west-3a", "eu-west-3b", "eu-west-3c"]
+
+  # No good default exists for who may reach the API endpoint.
+  cluster_endpoint_public_access_cidrs = ["203.0.113.0/24"]
+}
+
+# Only what differs from the catalog's defaults. An unknown module or
+# attribute is refused at plan, with the allowed list in the message.
+kube = {
+  hello = {
+    replicas = 2
+  }
+}
