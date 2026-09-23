@@ -4,8 +4,8 @@
 # applies. A client's copy points both at the published module, with the
 # version in the source:
 #
-#   source = "oci://ghcr.io/do-now-io/socle/modules//opentofu/aws?tag=${var.socle_version}"
-#   source = "oci://ghcr.io/do-now-io/socle/modules//opentofu/bootstrap?tag=${var.socle_version}"
+#   source = "oci://ghcr.io/do-now-io/socle/opentofu-modules//opentofu/aws?tag=${var.socle_version}"
+#   source = "oci://ghcr.io/do-now-io/socle/opentofu-modules//opentofu/bootstrap?tag=${var.socle_version}"
 #
 # (the modules package, not the socle artifact: one OCI tag cannot carry both
 # shapes — PR #15)

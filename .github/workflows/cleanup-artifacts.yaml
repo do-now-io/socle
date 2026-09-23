@@ -38,7 +38,8 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       ORG: do-now-io
-      PACKAGE: socle
+      # Nested package names travel %2F-encoded in the packages API path.
+      PACKAGE: socle%2Fflux-modules
     steps:
       - name: Decide what to delete
         id: scope

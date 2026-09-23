@@ -19,7 +19,7 @@ run "defaults_are_the_recommended_position" {
     error_message = "socle_version must default to the module's own version, so one tag bump moves module and artifact together."
   }
   assert {
-    condition     = output.inputs.socle.url == "oci://ghcr.io/do-now-io/socle"
+    condition     = output.inputs.socle.url == "oci://ghcr.io/do-now-io/socle/flux-modules"
     error_message = "the artifact URL must default to the socle registry."
   }
   assert {
@@ -93,7 +93,7 @@ run "a_null_override_means_the_default_never_no_verification" {
   }
 
   assert {
-    condition     = can(regex("refs/heads/main\\$$", output.cosign_identity.subject)) && output.inputs.socle.url == "oci://ghcr.io/do-now-io/socle" && output.inputs.modules.hello.enabled == true
+    condition     = can(regex("refs/heads/main\\$$", output.cosign_identity.subject)) && output.inputs.socle.url == "oci://ghcr.io/do-now-io/socle/flux-modules" && output.inputs.modules.hello.enabled == true
     error_message = "null on an overridable input must mean the module's default — the release identity on main, the socle registry, the catalog defaults — never an absent value."
   }
 }

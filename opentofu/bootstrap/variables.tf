@@ -122,7 +122,7 @@ variable "socle_version" {
 variable "artifact_url" {
   description = "OCI repository the socle artifact is pulled from. Override for a mirror; the tag is socle_version."
   type        = string
-  default     = "oci://ghcr.io/do-now-io/socle"
+  default     = "oci://ghcr.io/do-now-io/socle/flux-modules"
   nullable    = false
 
   validation {

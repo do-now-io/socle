@@ -33,7 +33,7 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  REPOSITORY: do-now-io/socle
+  REPOSITORY: do-now-io/socle/flux-modules
 
 # `shell: bash` runs every step with -o pipefail: a failure on the left of a
 # pipe (`| tee`, `| python3`) fails the step instead of vanishing behind the
@@ -206,7 +206,7 @@ jobs:
           {
             echo "### e2e-aws-root"
             echo "Applied \`opentofu/clusters/aws\` — the real root, foundations included —"
-            echo "once on floci's real k3s against \`ghcr.io/do-now-io/socle:$TAG\`, signed as"
+            echo "once on floci's real k3s against \`ghcr.io/do-now-io/socle/flux-modules:$TAG\`, signed as"
             echo "\`$SUBJECT\`. Proven: the artifact is pulled by that exact tag, its signature"
             echo "verifies against the workflow identity, and both the \`socle-root\` and"
             echo "\`hello\` ResourceSets reach Ready with \`hello/podinfo\` at 1 replica."
@@ -347,7 +347,7 @@ jobs:
           {
             echo "### e2e-aws-catalog"
             echo "Applied \`opentofu/clusters/aws/tests/floci\` — a bare cluster plus the real"
-            echo "bootstrap module — on floci's real k3s against \`ghcr.io/do-now-io/socle:$TAG\`,"
+            echo "bootstrap module — on floci's real k3s against \`ghcr.io/do-now-io/socle/flux-modules:$TAG\`,"
             echo "signed as \`$SUBJECT\`. Proven: the artifact pulled by tag with its signature"
             echo "verified, \`socle-root\` and \`hello\` Ready with \`hello/podinfo\` at 1 replica,"
             echo "then \`kube.hello.enabled=false\` garbage-collecting the HelmRelease off the"
