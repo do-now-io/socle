@@ -368,11 +368,20 @@ Rules for a module template, all measured:
 
   One thing cannot live in the artifact, because it is what lets the artifact
   act on the cloud at all: the credential Crossplane's own provider assumes.
-  It is constant — one per cloud, the same for every client, unchanged by any
-  catalog choice — so it does not break the invariance, and it is the only
-  cloud identity the foundations carry. Its scope is argued per cloud and
-  never widened by convenience: an identity allowed to create roles is the
-  most powerful thing in the cluster.
+  The foundations grant it **expressly and once**, per cloud, and it is broad
+  by design — Crossplane creates whatever role a module declares, and the
+  foundations cannot know that list without becoming a function of the
+  catalog again. It is constant, the same for every client and unchanged by
+  any catalog choice, so it does not break the invariance, and it is the only
+  cloud identity the foundations carry.
+
+  That grant is the socle's most powerful object, and it is written down as
+  such rather than left implicit: a credential that can create roles can
+  create one that can do anything. What keeps it honest is a bound on shape,
+  not on list — on AWS a permissions boundary plus a name and path prefix the
+  socle owns, so Crossplane can mint roles freely inside its own namespace and
+  nowhere else. The equivalent per cloud is `docs/catalog/crossplane.md`'s job
+  to state.
 
   Anything needed **before** Crossplane exists cannot use it: Cilium's own ENI
   permissions on AWS are on the node role, from the foundations, and that is
