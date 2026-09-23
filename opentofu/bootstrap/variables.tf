@@ -105,6 +105,88 @@ variable "kube" {
 }
 
 # ---------------------------------------------------------------------------
+# Cilium — cilium.tf and docs/catalog/cilium.md
+# ---------------------------------------------------------------------------
+
+variable "cilium" {
+  description = <<-EOT
+    The socle's Cilium, on the clouds whose foundations create a cluster with
+    no CNI — aws and azure — as `{ enabled, hubble, gateway_api }`, every key
+    optional: `enabled` (true) installs it before Flux; false means the
+    cluster brings its own CNI and DNS, which only a test double does.
+    `hubble` (false) adds Hubble Relay and UI. `gateway_api` (true) makes
+    Cilium serve the `cilium` GatewayClass. Refused on gcp and scaleway, where
+    the cloud operates Cilium. Typed `any` and validated like `kube`, so a
+    misspelt key is an error at plan. Chart versions are pinned in cilium.tf.
+  EOT
+  type        = any
+  default     = {}
+  nullable    = false
+
+  validation {
+    condition     = can(keys(var.cilium))
+    error_message = "cilium must be an object of attributes."
+  }
+
+  validation {
+    condition     = !can(keys(var.cilium)) || alltrue([for a in keys(var.cilium) : contains(keys(local.cilium_schema), a)])
+    error_message = "cilium: unknown attribute. Allowed: ${join(", ", keys(local.cilium_schema))}."
+  }
+
+  validation {
+    condition = !can(keys(var.cilium)) || alltrue([
+      for a, x in var.cilium :
+      !contains(keys(local.cilium_schema), a)
+      || lookup(local.json_kinds, substr(jsonencode(x), 0, 1), "number") == lookup(local.json_kinds, substr(jsonencode(local.cilium_schema[a]), 0, 1), "number")
+    ])
+    error_message = "cilium: an attribute has the wrong type. Each value must have the type of its default: ${jsonencode({ for a, x in local.cilium_schema : a => lookup(local.json_kinds, substr(jsonencode(x), 0, 1), "number") })}."
+  }
+
+  validation {
+    condition     = !can(keys(var.cilium)) || contains(local.cilium_clouds, var.cloud) || length(keys(var.cilium)) == 0
+    error_message = "cilium is only configurable on ${join(" and ", local.cilium_clouds)}: on gcp (Dataplane V2) and scaleway (Kapsule) the cloud operates Cilium, and the socle installs nothing."
+  }
+}
+
+variable "cluster_network" {
+  description = <<-EOT
+    What Cilium needs to know about the cluster, from the foundations'
+    outputs, never from the client: `api_endpoint`, the API server as EKS
+    returns it (https://host) or AKS does (a bare FQDN), for kube-proxy
+    replacement; `service_cidr`, the service range, whose `.10` is CoreDNS's
+    address on aws; `pod_cidr`, Cilium's pool on azure, where the VNet holds
+    nodes only. Required wherever the socle installs Cilium, ignored
+    elsewhere.
+  EOT
+  type = object({
+    api_endpoint = string
+    service_cidr = optional(string)
+    pod_cidr     = optional(string)
+  })
+  default = null
+
+  validation {
+    condition     = !local.cilium_installed || var.cluster_network != null
+    error_message = "cluster_network is required where the socle installs Cilium (aws, azure): pass the foundations' cluster_endpoint as api_endpoint, and service_cidr (aws) or pod_cidr (azure)."
+  }
+
+  validation {
+    condition     = !(local.cilium_installed && var.cloud == "aws") || try(var.cluster_network.service_cidr != null, false)
+    error_message = "cluster_network.service_cidr is required on aws: CoreDNS takes the .10 address of the service range, the one every node's kubelet is told to use."
+  }
+
+  validation {
+    condition     = !(local.cilium_installed && var.cloud == "azure") || try(var.cluster_network.pod_cidr != null, false)
+    error_message = "cluster_network.pod_cidr is required on azure: Cilium's cluster pool must not default to 10.0.0.0/8, which contains the VNet."
+  }
+
+  validation {
+    condition     = !local.cilium_installed || var.cluster_network == null || can(regex("^(https://)?[A-Za-z0-9.-]+(:[0-9]+)?/?$", var.cluster_network.api_endpoint))
+    error_message = "cluster_network.api_endpoint must be a host name, with or without https:// and a port — what the foundations' cluster_endpoint output is."
+  }
+}
+
+# ---------------------------------------------------------------------------
 # What the cluster pulls — docs/flux-catalog.md §3 and §7
 # ---------------------------------------------------------------------------
 

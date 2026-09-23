@@ -64,5 +64,13 @@ module "socle" {
   artifact_url         = var.artifact_url
   artifact_pull_secret = var.artifact_pull_secret
 
+  # Cilium, and CoreDNS with it, before Flux: EKS is created with no CNI.
+  # What Cilium needs to know comes from the foundations, not from the tfvars.
+  cilium = var.cilium
+  cluster_network = {
+    api_endpoint = module.foundations.cluster_endpoint
+    service_cidr = module.foundations.service_cidr
+  }
+
   depends_on = [module.foundations]
 }

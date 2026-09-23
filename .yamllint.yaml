@@ -9,6 +9,10 @@ ignore:
   # ... }}) that is not a YAML node. They are checked by rendering them —
   # helm template + kubeconform in pr-static.yaml. Chart.yaml stays linted.
   - opentofu/*/manifests/templates/
+  # The Gateway API CRDs are the upstream release asset, vendored verbatim —
+  # .github/scripts/check-gateway-api-crds.sh proves it byte for byte, and
+  # kubeconform checks the render. Linting would only argue with upstream.
+  - opentofu/bootstrap/gateway-api-crds/templates/
 
 rules:
   # Manifests with long image references or URLs need some headroom.

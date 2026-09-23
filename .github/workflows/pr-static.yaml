@@ -74,6 +74,9 @@ jobs:
       - name: The catalog and the per-cloud overlays agree
         run: |
           .github/scripts/check-catalog-clouds.sh | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: The Gateway API CRDs are the upstream release, verbatim
+        run: |
+          .github/scripts/check-gateway-api-crds.sh | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Detect OpenTofu sources
         id: detect
         run: |

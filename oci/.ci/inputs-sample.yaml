@@ -11,3 +11,7 @@
       enabled: true
       replicas: 2
       message: hi
+  cilium:
+    installed: true
+    gatewayApi: true
+    hubble: false

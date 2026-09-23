@@ -16,3 +16,7 @@ inputs:
       enabled: true
       replicas: 1
       message: hello from socle
+  cilium:
+    installed: true
+    gatewayApi: true
+    hubble: false

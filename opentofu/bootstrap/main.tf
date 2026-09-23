@@ -7,6 +7,10 @@
 # ResourceSetInputProvider carrying the client's config and a ResourceSet
 # carrying the root source with its cosign verification. Helm is the applier,
 # never the templater: docs/flux-catalog.md §3.
+#
+# On aws and azure three more releases precede the operator — the Gateway API
+# CRDs, Cilium and (aws) CoreDNS — because those clusters are created with no
+# CNI and Flux cannot run, let alone render, without one: cilium.tf.
 
 locals {
   # Bumped with the module's own tag. VERSION at the repo root is the source;
@@ -51,10 +55,21 @@ locals {
     }
     cosign  = var.cosign_identity
     modules = local.modules
+    # What the bootstrap decided about the network, for the templates that
+    # depend on it: `installed` — the socle's Cilium runs here, and with it
+    # the Gateway API CRDs; `gatewayApi` — it serves the `cilium`
+    # GatewayClass, so no other implementation is needed; `hubble` — Relay
+    # and UI exist. All false where the cloud operates Cilium.
+    cilium = {
+      installed  = local.cilium_installed
+      gatewayApi = local.cilium_installed && local.cilium.gateway_api
+      hubble     = local.cilium_installed && local.cilium.hubble
+    }
   }
 }
 
-# 1. The operator. The official chart, pinned exactly.
+# 1. The operator. The official chart, pinned exactly. After the network:
+# its pod has no hostNetwork and its controllers resolve ghcr.io.
 resource "helm_release" "operator" {
   name       = "flux-operator"
   repository = "oci://ghcr.io/controlplaneio-fluxcd/charts"
@@ -70,6 +85,8 @@ resource "helm_release" "operator" {
   values = [yamlencode({
     commonLabels = local.common_labels
   })]
+
+  depends_on = [helm_release.cilium, helm_release.coredns]
 }
 
 # 2. The instance: which controllers run, how they are wired. No sync block —

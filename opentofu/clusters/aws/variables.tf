@@ -43,6 +43,12 @@ variable "kube" {
   default     = {}
 }
 
+variable "cilium" {
+  description = "The socle's Cilium, installed before Flux because EKS is created with no CNI: { enabled = true, hubble = false, gateway_api = true }, every key optional. Only what differs from those defaults; validated by the bootstrap module. enabled = false is for a cluster that brings its own CNI and DNS — the e2e test double, never a real EKS."
+  type        = any
+  default     = {}
+}
+
 variable "cosign_identity" {
   description = "Override of the signature identity the cluster trusts. Null keeps the bootstrap module's default, the release workflow on main. Set it only on a dev cluster testing a branch build."
   type = object({
