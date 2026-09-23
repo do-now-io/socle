@@ -27,9 +27,14 @@
 # flux-operator then depends on all three.
 #
 # The chart versions are pinned here, not variables: they move with the
-# socle release, like the operator's. The client's surface is `var.cilium`:
-# on/off, Hubble, Gateway API. Everything else is the position argued in the
-# design note.
+# socle release, like the operator's. The client's surface is `var.cilium`
+# (on/off, Hubble, Gateway API, and `values`) and `var.coredns` (`values`).
+# `values` is the same promise as a catalog module's: any chart value, merged
+# after the socle's so the client wins, without waiting for a socle release.
+# Each release lists the socle's block first and the client's second; the
+# helm provider deep-merges the list in order. Secrets are refused there —
+# a helm_release's values land in the OpenTofu state — and the charts name
+# an existing Secret instead (docs/catalog/cilium.md §5).
 
 locals {
   # Chart versions. The Gateway API version is the one this Cilium minor
@@ -45,8 +50,18 @@ locals {
     enabled     = true
     hubble      = false
     gateway_api = true
+    values      = {}
   }
   cilium = merge(local.cilium_schema, var.cilium)
+
+  coredns_schema = {
+    values = {}
+  }
+  coredns = merge(local.coredns_schema, var.coredns)
+
+  # Where the socle installs CoreDNS: aws, with its Cilium. Elsewhere the
+  # cloud ships it and `coredns` is refused.
+  coredns_installed = var.cloud == "aws" && local.cilium_installed
 
   # Where the socle runs Cilium: the two clouds whose foundations create a
   # cluster with no CNI. `enabled = false` is the escape hatch for a cluster
@@ -150,7 +165,11 @@ resource "helm_release" "cilium" {
   wait    = true
   timeout = var.helm_timeout_seconds
 
-  values = [yamlencode(merge(local.cilium_values_common, local.cilium_values_cloud[var.cloud]))]
+  # The socle's position, then the client's values over it.
+  values = [
+    yamlencode(merge(local.cilium_values_common, local.cilium_values_cloud[var.cloud])),
+    yamlencode(local.cilium.values),
+  ]
 
   depends_on = [helm_release.gateway_api_crds]
 }
@@ -160,7 +179,7 @@ resource "helm_release" "cilium" {
 # `.10` of the service range, under the name and label the managed add-on
 # would have given it, so nothing downstream can tell the difference.
 resource "helm_release" "coredns" {
-  count = var.cloud == "aws" && local.cilium_installed ? 1 : 0
+  count = local.coredns_installed ? 1 : 0
 
   name       = "coredns"
   repository = "oci://ghcr.io/coredns/charts"
@@ -172,36 +191,40 @@ resource "helm_release" "coredns" {
   wait    = true
   timeout = var.helm_timeout_seconds
 
-  values = [yamlencode({
-    fullnameOverride = "coredns"
-    service = {
-      name      = "kube-dns"
-      clusterIP = cidrhost(var.cluster_network.service_cidr, 10)
-    }
-    k8sAppLabelOverride = "kube-dns"
-    priorityClassName   = "system-cluster-critical"
-
-    # Two replicas on different nodes when the cluster has them; the EKS
-    # add-on's own sizing.
-    replicaCount = 2
-    resources = {
-      requests = { cpu = "100m", memory = "70Mi" }
-      limits   = { memory = "170Mi" }
-    }
-    podDisruptionBudget = { maxUnavailable = 1 }
-    affinity = {
-      podAntiAffinity = {
-        preferredDuringSchedulingIgnoredDuringExecution = [{
-          weight = 100
-          podAffinityTerm = {
-            topologyKey   = "kubernetes.io/hostname"
-            labelSelector = { matchLabels = { "k8s-app" = "kube-dns" } }
-          }
-        }]
+  # The socle's position, then the client's values over it.
+  values = [
+    yamlencode({
+      fullnameOverride = "coredns"
+      service = {
+        name      = "kube-dns"
+        clusterIP = cidrhost(var.cluster_network.service_cidr, 10)
       }
-    }
-    tolerations = [{ key = "CriticalAddonsOnly", operator = "Exists" }]
-  })]
+      k8sAppLabelOverride = "kube-dns"
+      priorityClassName   = "system-cluster-critical"
+
+      # Two replicas on different nodes when the cluster has them; the EKS
+      # add-on's own sizing.
+      replicaCount = 2
+      resources = {
+        requests = { cpu = "100m", memory = "70Mi" }
+        limits   = { memory = "170Mi" }
+      }
+      podDisruptionBudget = { maxUnavailable = 1 }
+      affinity = {
+        podAntiAffinity = {
+          preferredDuringSchedulingIgnoredDuringExecution = [{
+            weight = 100
+            podAffinityTerm = {
+              topologyKey   = "kubernetes.io/hostname"
+              labelSelector = { matchLabels = { "k8s-app" = "kube-dns" } }
+            }
+          }]
+        }
+      }
+      tolerations = [{ key = "CriticalAddonsOnly", operator = "Exists" }]
+    }),
+    yamlencode(local.coredns.values),
+  ]
 
   depends_on = [helm_release.cilium]
 }

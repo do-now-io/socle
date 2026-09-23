@@ -66,7 +66,8 @@ module "socle" {
 
   # Cilium, and CoreDNS with it, before Flux: EKS is created with no CNI.
   # What Cilium needs to know comes from the foundations, not from the tfvars.
-  cilium = var.cilium
+  cilium  = var.cilium
+  coredns = var.coredns
   cluster_network = {
     api_endpoint = module.foundations.cluster_endpoint
     service_cidr = module.foundations.service_cidr
