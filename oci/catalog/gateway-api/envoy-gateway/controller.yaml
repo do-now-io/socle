@@ -1,14 +1,10 @@
-# The controller. crds.enabled=false is the chart's documented mode for a
-# cluster whose CRDs are managed elsewhere: it drops the bundled Gateway API
-# CRDs (experimental channel), the bundled Envoy Gateway CRDs and the
-# safe-upgrade admission policy, all of which the socle applies from their
-# own vendored release files. The CRDs are applied by the Flux Kustomization
-# that applies this folder, before this object.
-#
-# valuesFrom (the client's ConfigMap, then his Secret) is added by that
-# Kustomization's patch (../resourceset.yaml). helm-controller merges
-# valuesFrom in order and spec.values last, so the value below stays the
-# socle's even if a client sets it — OpenTofu refuses it there anyway.
+# The Envoy Gateway controller. No inline values, by the catalog's
+# convention (docs/flux-catalog.md §6): helm-controller merges spec.values
+# last, over valuesFrom, so an inline default would beat the client's. The
+# socle's values (crds.enabled=false among them) and the client's arrive
+# through valuesFrom, which the Flux Kustomization applying this folder adds
+# as a patch (../resourceset.yaml). The CRDs are applied by that same
+# Kustomization, before this object.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -29,6 +25,3 @@ spec:
     crds: Skip
     remediation:
       retries: 3
-  values:
-    crds:
-      enabled: false
