@@ -115,9 +115,12 @@ variable "cilium" {
     optional: `enabled` (true) installs it before Flux; false means the
     cluster brings its own CNI and DNS, which only a test double does.
     `hubble` (false) adds Hubble Relay and UI. `gateway_api` (true) makes
-    Cilium serve the `cilium` GatewayClass. Refused on gcp and scaleway, where
-    the cloud operates Cilium. Typed `any` and validated like `kube`, so a
-    misspelt key is an error at plan. Chart versions are pinned in cilium.tf.
+    Cilium serve the `cilium` GatewayClass. `values` ({}) is any Cilium chart
+    value, merged over the socle's so the client wins; private keys are
+    refused there, and the chart's `existingSecret` fields name a Secret
+    instead. Refused on gcp and scaleway, where the cloud operates Cilium.
+    Typed `any` and validated like `kube`, so a misspelt key is an error at
+    plan. Chart versions are pinned in cilium.tf.
   EOT
   type        = any
   default     = {}
@@ -145,6 +148,72 @@ variable "cilium" {
   validation {
     condition     = !can(keys(var.cilium)) || contains(local.cilium_clouds, var.cloud) || length(keys(var.cilium)) == 0
     error_message = "cilium is only configurable on ${join(" and ", local.cilium_clouds)}: on gcp (Dataplane V2) and scaleway (Kapsule) the cloud operates Cilium, and the socle installs nothing."
+  }
+
+  # values is free-form on purpose, minus one rule: no private key. A
+  # helm_release's values land in the OpenTofu state. These are the chart's
+  # (1.20.2) paths that take key material inline; each has a Secret-by-name
+  # alternative: `existingSecret` beside every Hubble TLS block, a `cilium-ca`
+  # Secret created before the apply (or `*.tls.auto.method = certmanager`),
+  # and clustermesh.config.enabled = false with the client's own
+  # `cilium-clustermesh` Secret.
+  validation {
+    condition = (
+      !can(var.cilium.values)
+      || !can(keys(var.cilium.values))
+      || (
+        !can(var.cilium.values.tls.ca.key)
+        && !can(var.cilium.values.hubble.tls.server.key)
+        && !can(var.cilium.values.hubble.relay.tls.client.key)
+        && !can(var.cilium.values.hubble.relay.tls.server.key)
+        && !can(var.cilium.values.hubble.ui.tls.client.key)
+        && !can(var.cilium.values.hubble.metrics.tls.server.key)
+        && alltrue([
+          for c in try(values(var.cilium.values.clustermesh.config.clusters), var.cilium.values.clustermesh.config.clusters, []) :
+          !can(c.tls.key)
+        ])
+      )
+    )
+    error_message = "cilium.values must not carry private keys: tls.ca.key, hubble.{tls.server,relay.tls.client,relay.tls.server,ui.tls.client,metrics.tls.server}.key and clustermesh.config.clusters[*].tls.key are refused — they would land in the OpenTofu state. Create the Secret in kube-system and name it: the Hubble blocks' existingSecret, a cilium-ca Secret, or clustermesh.config.enabled = false with your own cilium-clustermesh Secret."
+  }
+}
+
+variable "coredns" {
+  description = <<-EOT
+    The CoreDNS the socle installs on aws, right after Cilium, as
+    `{ values }`: `values` ({}) is any CoreDNS chart value, merged over the
+    socle's so the client wins — extra zones, forwarders, plugins. The chart
+    has no value that takes secret material inline; a Secret is mounted by
+    name through `extraSecrets`, or read through `env[].valueFrom`. Refused
+    where the socle installs no CoreDNS: every cloud but aws, and aws with
+    cilium.enabled = false. Chart version pinned in cilium.tf.
+  EOT
+  type        = any
+  default     = {}
+  nullable    = false
+
+  validation {
+    condition     = can(keys(var.coredns))
+    error_message = "coredns must be an object of attributes."
+  }
+
+  validation {
+    condition     = !can(keys(var.coredns)) || alltrue([for a in keys(var.coredns) : contains(keys(local.coredns_schema), a)])
+    error_message = "coredns: unknown attribute. Allowed: ${join(", ", keys(local.coredns_schema))}."
+  }
+
+  validation {
+    condition = !can(keys(var.coredns)) || alltrue([
+      for a, x in var.coredns :
+      !contains(keys(local.coredns_schema), a)
+      || lookup(local.json_kinds, substr(jsonencode(x), 0, 1), "number") == lookup(local.json_kinds, substr(jsonencode(local.coredns_schema[a]), 0, 1), "number")
+    ])
+    error_message = "coredns: an attribute has the wrong type. Each value must have the type of its default: ${jsonencode({ for a, x in local.coredns_schema : a => lookup(local.json_kinds, substr(jsonencode(x), 0, 1), "number") })}."
+  }
+
+  validation {
+    condition     = !can(keys(var.coredns)) || length(keys(var.coredns)) == 0 || local.coredns_installed
+    error_message = "coredns is only configurable where the socle installs it: aws, with cilium.enabled. AKS, GKE and Kapsule ship their own CoreDNS."
   }
 }
 

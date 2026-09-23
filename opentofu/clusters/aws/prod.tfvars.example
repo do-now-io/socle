@@ -31,7 +31,15 @@ kube = {
 
 # Cilium is installed before Flux with these defaults; list only what
 # differs. hubble adds Hubble Relay and UI; gateway_api = false stops Cilium
-# serving the Gateway API (the CRDs stay).
+# serving the Gateway API (the CRDs stay). values takes any Cilium chart
+# value and wins over the socle's; a private key is refused there — name a
+# Secret you created in kube-system instead (existingSecret).
 # cilium = {
 #   hubble = true
+#   values = { bandwidthManager = { enabled = true } }
+# }
+#
+# The same for the CoreDNS installed with it:
+# coredns = {
+#   values = { replicaCount = 3 }
 # }

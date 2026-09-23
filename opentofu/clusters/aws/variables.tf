@@ -44,7 +44,13 @@ variable "kube" {
 }
 
 variable "cilium" {
-  description = "The socle's Cilium, installed before Flux because EKS is created with no CNI: { enabled = true, hubble = false, gateway_api = true }, every key optional. Only what differs from those defaults; validated by the bootstrap module. enabled = false is for a cluster that brings its own CNI and DNS — the e2e test double, never a real EKS."
+  description = "The socle's Cilium, installed before Flux because EKS is created with no CNI: { enabled = true, hubble = false, gateway_api = true, values = {} }, every key optional. values is any Cilium chart value, the client's winning; private keys are refused, name a Secret instead. Validated by the bootstrap module. enabled = false is for a cluster that brings its own CNI and DNS — the e2e test double, never a real EKS."
+  type        = any
+  default     = {}
+}
+
+variable "coredns" {
+  description = "The CoreDNS installed right after Cilium: { values = {} }. values is any CoreDNS chart value, the client's winning. Validated by the bootstrap module."
   type        = any
   default     = {}
 }

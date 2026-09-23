@@ -12,7 +12,7 @@ what the other catalog modules can rely on. Part of issue #32.
 | CoreDNS on Azure | AKS's own, which BYO CNI keeps; nothing installed |
 | Gateway API CRDs | Standard channel v1.6.1, installed by the bootstrap module before Cilium, on AWS and Azure |
 | Gateway API implementation on AWS and Azure | Cilium's `cilium` GatewayClass, on by default |
-| Client surface | `cilium = { enabled, hubble, gateway_api }` on the bootstrap module and the AWS root |
+| Client surface | `cilium = { enabled, hubble, gateway_api, values }` and, on AWS, `coredns = { values }`, on the bootstrap module and the AWS root |
 | Versions | Cilium chart 1.20.2, CoreDNS chart 1.47.1, pinned in `opentofu/bootstrap/cilium.tf` |
 
 ## 1. The chicken-and-egg, and why option 1
@@ -181,33 +181,86 @@ no DNS step. *Not measured on a real AKS cluster: there is no Azure root yet.*
 
 ## 5. What the client may set
 
-On the bootstrap module and on the AWS root, `cilium = { … }`, where every
-key is optional:
+On the bootstrap module and on the AWS root, `cilium = { … }` and
+`coredns = { … }`, where every key is optional:
 
-| Attribute | Default | Meaning |
-| --- | --- | --- |
-| `enabled` | `true` | Install Cilium, and CoreDNS on aws, before Flux. `false` is for a cluster that brings its own CNI and DNS; the e2e k3s is the only such cluster |
-| `hubble` | `false` | Adds Hubble Relay and UI. Hubble in the agent is always on |
-| `gateway_api` | `true` | Cilium serves the `cilium` GatewayClass. The CRDs stay either way |
+| Variable | Attribute | Default | Meaning |
+| --- | --- | --- | --- |
+| `cilium` | `enabled` | `true` | Install Cilium, and CoreDNS on aws, before Flux. `false` is for a cluster that brings its own CNI and DNS; the e2e k3s is the only such cluster |
+| `cilium` | `hubble` | `false` | Adds Hubble Relay and UI. Hubble in the agent is always on |
+| `cilium` | `gateway_api` | `true` | Cilium serves the `cilium` GatewayClass. The CRDs stay either way |
+| `cilium` | `values` | `{}` | Any Cilium chart value, the client's winning (below) |
+| `coredns` | `values` | `{}` | Any CoreDNS chart value, the client's winning. aws only, where the socle installs CoreDNS |
 
 It is validated like `kube`: a typo or a wrong type is refused at plan, and
 any key at all is refused on `gcp` and `scaleway`. The cluster's own facts
 (`cluster_network`: API endpoint, service range, pod range) come from the
 foundations' outputs in the root and never from the tfvars.
 
-**Deliberately not configurable:** chart versions, IPAM and routing mode,
-kube-proxy replacement, the operator replica count, resources, the
-GatewayClass name, WireGuard encryption, cluster mesh, the BGP control plane,
-egress gateway, and Cilium's L2 announcements. Each one is either dictated by
-the foundations' network design or has no socle use case yet. Adding one is
-an entry in `local.cilium_schema`, a value in `cilium.tf`, and a test.
+**Not named attributes:** chart versions, IPAM and routing mode, kube-proxy
+replacement, the operator replica count, resources, the GatewayClass name,
+WireGuard encryption, cluster mesh, the BGP control plane, egress gateway,
+and Cilium's L2 announcements. Each one is either dictated by the
+foundations' network design or has no socle use case yet. All of them except
+the chart versions are still reachable through `values`. Promoting one to a
+named attribute is an entry in `local.cilium_schema`, a value in `cilium.tf`,
+and a test.
+
+### The client's own chart values
+
+This is the same promise the catalog makes, in `docs/flux-catalog.md` §6. A
+client passes any chart value to every release the socle installs, without
+waiting for a socle release, and secrets never enter the OpenTofu state. The
+mechanism differs because these are `helm_release`s, not catalog modules:
+
+| | Catalog module | Cilium, CoreDNS (this module) |
+| --- | --- | --- |
+| Free-form values | `kube.<m>.values`, rendered into the `<m>-client-values` ConfigMap | `cilium.values`, `coredns.values` |
+| Merge | `valuesFrom` before the HelmRelease's own `values:`; helm-controller deep-merges, the client wins | the release's `values` list is the socle's block, then `yamlencode(values)`; the helm provider deep-merges in order, the client wins |
+| Secrets | `values_secret`, a Secret with a `values.yaml` key, merged by helm-controller | a Secret the client creates in `kube-system`, named through the chart's own reference fields |
+| Refused at plan | the chart's secret-bearing paths | the same |
+
+**No `values_secret` here.** A `helm_release` cannot merge a Secret that
+already exists in the cluster. OpenTofu would have to read it, which puts it
+in the state, and it would need the `kubernetes` provider, which this chain
+refuses. Both charts already take a Secret by name, so the client writes the
+name, which is not secret, in `values`.
+
+**Refused in `cilium.values`**, measured against the 1.20.2 chart: every path
+whose template renders inline private key material.
+
+| Refused path | Name a Secret instead |
+| --- | --- |
+| `hubble.tls.server.key` | `hubble.tls.server.existingSecret` |
+| `hubble.relay.tls.client.key`, `hubble.relay.tls.server.key` | `hubble.relay.tls.{client,server}.existingSecret` |
+| `hubble.ui.tls.client.key` | `hubble.ui.tls.client.existingSecret` |
+| `hubble.metrics.tls.server.key` | `hubble.metrics.tls.server.existingSecret` |
+| `tls.ca.key` | a `cilium-ca` Secret created before the apply, or `*.tls.auto.method: certmanager` |
+| `clustermesh.config.clusters[*].tls.key` | `clustermesh.config.enabled: false` and the client's own `cilium-clustermesh` Secret |
+
+Certificates alone (`cert`) are accepted: they are public. IPsec already
+takes a name, `encryption.ipsec.secretName`, and nothing about it is
+refused.
+
+**Nothing is refused in `coredns.values`.** The chart has no value that
+renders secret material inline. A Secret reaches CoreDNS through
+`extraSecrets`, which mounts it by name, or through `env[].valueFrom`.
+
+**`values` always wins.** A client who sets `hubble = true` and
+`hubble.relay.enabled: false` in `values` gets no Relay, because `values` is
+merged last. The same goes for the socle's own positions, such as
+`eni.enabled` or `k8sServiceHost`: overriding them is possible and is the
+client's responsibility. `inputs.cilium` reflects the named attributes only.
+
+The Gateway API CRDs take no values. They are the upstream file, verbatim.
 
 ## 6. What was measured, and what was not
 
 Measured on 2026-09-23 with OpenTofu 1.12.6, helm 4.1.0 and flux-operator
 0.60.0:
 
-- `tofu test` in `opentofu/bootstrap` passes all 38 runs. Five of them are
+- `tofu test` in `opentofu/bootstrap` passes all 47 runs; the client-values
+  layer added two default runs and seven validation runs. Five of them are
   new default cases: aws gets three releases in order; azure gets BYOCNI and
   no CoreDNS; gcp gets nothing; `enabled = false` gets nothing; and the
   toggles reach both the chart values and the inputs. The scaleway run also

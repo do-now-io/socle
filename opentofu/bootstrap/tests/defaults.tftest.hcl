@@ -229,3 +229,42 @@ run "a_null_override_means_the_default_never_no_verification" {
     error_message = "null on an overridable input must mean the module's default — the release identity on main, the socle registry, the catalog defaults — never an absent value."
   }
 }
+
+run "client_values_are_merged_after_the_socles_so_the_client_wins" {
+  command = plan
+  variables {
+    cilium = { values = {
+      operator         = { replicas = 2 }
+      bandwidthManager = { enabled = true }
+      # A Secret named, not inlined: what the refusal points the client to.
+      hubble = { tls = { server = { existingSecret = "hubble-server-certs" } } }
+    } }
+    coredns = { values = { replicaCount = 3 } }
+  }
+
+  assert {
+    condition     = length(helm_release.cilium[0].values) == 2 && yamldecode(helm_release.cilium[0].values[0]).operator.replicas == 1 && yamldecode(helm_release.cilium[0].values[1]).operator.replicas == 2
+    error_message = "Cilium's values must be the socle's block then the client's: the helm provider merges the list in order, so the client's operator.replicas wins and the socle's block stays readable."
+  }
+  assert {
+    condition     = yamldecode(helm_release.cilium[0].values[1]).bandwidthManager.enabled == true
+    error_message = "any Cilium chart value must reach the release, not only the attributes the socle exposes."
+  }
+  assert {
+    condition     = yamldecode(helm_release.cilium[0].values[1]).hubble.tls.server.existingSecret == "hubble-server-certs"
+    error_message = "naming an existing Secret must be accepted: it is the way secrets reach Cilium without entering the state."
+  }
+  assert {
+    condition     = length(helm_release.coredns[0].values) == 2 && yamldecode(helm_release.coredns[0].values[0]).replicaCount == 2 && yamldecode(helm_release.coredns[0].values[1]).replicaCount == 3
+    error_message = "CoreDNS's values must be the socle's block then the client's, the client's winning."
+  }
+}
+
+run "no_client_values_is_an_empty_last_layer" {
+  command = plan
+
+  assert {
+    condition     = yamldecode(helm_release.cilium[0].values[1]) == {} && yamldecode(helm_release.coredns[0].values[1]) == {}
+    error_message = "absent client values must merge as an empty map, changing nothing."
+  }
+}

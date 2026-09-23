@@ -97,6 +97,55 @@ run "cilium_is_refused_where_the_cloud_operates_it" {
   expect_failures = [var.cilium]
 }
 
+run "cilium_refuses_values_that_are_not_an_object" {
+  command = plan
+  variables { cilium = { values = "hubble: {}" } }
+  expect_failures = [var.cilium]
+}
+
+run "cilium_refuses_a_hubble_private_key_in_values" {
+  command = plan
+  variables { cilium = { values = { hubble = { tls = { server = { cert = "LS0t", key = "LS0t" } } } } } }
+  expect_failures = [var.cilium]
+}
+
+run "cilium_refuses_the_ca_private_key_in_values" {
+  command = plan
+  variables { cilium = { values = { tls = { ca = { cert = "LS0t", key = "LS0t" } } } } }
+  expect_failures = [var.cilium]
+}
+
+run "cilium_refuses_a_clustermesh_client_key_in_values" {
+  command = plan
+  variables { cilium = { values = { clustermesh = { config = { enabled = true, clusters = [{ name = "peer", tls = { cert = "LS0t", key = "LS0t" } }] } } } } }
+  expect_failures = [var.cilium]
+}
+
+run "coredns_refuses_an_unknown_attribute" {
+  command = plan
+  variables { coredns = { replicas = 3 } }
+  expect_failures = [var.coredns]
+}
+
+run "coredns_refuses_values_that_are_not_an_object" {
+  command = plan
+  variables { coredns = { values = ["replicaCount: 3"] } }
+  expect_failures = [var.coredns]
+}
+
+run "coredns_is_refused_where_the_socle_installs_none" {
+  command = plan
+  variables {
+    cloud = "azure"
+    cluster_network = {
+      api_endpoint = "socle-test-abc123.privatelink.westeurope.azmk8s.io"
+      pod_cidr     = "10.244.0.0/16"
+    }
+    coredns = { values = { replicaCount = 3 } }
+  }
+  expect_failures = [var.coredns]
+}
+
 run "cluster_network_is_required_where_the_socle_installs_cilium" {
   command = plan
   variables { cluster_network = null }
