@@ -52,6 +52,14 @@ resource "google_container_cluster" "socle" {
     enable_private_nodes = var.enable_private_nodes
   }
 
+  # Gateway API is GKE's: its controller, and the standard-channel CRDs it
+  # installs and upgrades with the cluster. Explicit so that the position is
+  # enforced, not inherited from Autopilot's default, and so that the catalog
+  # module may rely on it (docs/catalog/gateway-api.md).
+  gateway_api_config {
+    channel = var.gateway_api_enabled ? "CHANNEL_STANDARD" : "CHANNEL_DISABLED"
+  }
+
   # The DNS-based endpoint is the access path: a stable FQDN, authorised by
   # IAM, reachable wherever Google Cloud APIs are. IP endpoints are off, and
   # with them the authorized-networks maintenance problem.
