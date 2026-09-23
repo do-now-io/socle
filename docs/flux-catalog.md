@@ -331,24 +331,42 @@ Rules for a module template, all measured:
   | `values` | `{}` | free-form chart values, written in the tfvars |
   | `values_secret` | `""` | the name of a Secret the client creates in the module's namespace, with a `values.yaml` key |
 
-  The template renders `values` into a `ConfigMap` named
-  `<module>-client-values` in the module's namespace
-  (`data: { values.yaml: << toYaml inputs.modules.<m>.values | nindent 4 >> }`,
-  same reconcile toggle as every other resource), and the `HelmRelease` lists
-  it — then the Secret when named — under `valuesFrom`, before its own
-  `values:` block. helm-controller deep-merges in that order, so the client's
-  values win over the socle's, which is the point: a module's named attributes
-  are the curated surface the socle promises to keep working, `values` is
-  everything else the chart can do, without waiting for us to expose it.
+  The `HelmRelease` carries **no inline `values:` block at all**. Its
+  `valuesFrom` lists three entries, in this order: `<module>-socle-values`,
+  the socle's own defaults rendered by the template; `<module>-client-values`,
+  the client's `values` rendered the same way
+  (`data: { values.yaml: << toYaml inputs.modules.<m>.values | nindent 4 >> }`);
+  and the Secret when the client named one, `optional: true`. Both ConfigMaps
+  live in the module's namespace and carry the same reconcile toggle as every
+  other resource.
+
+  **The empty `values:` block is the whole trick, and it was measured.**
+  helm-controller merges the `valuesFrom` entries in order and then merges
+  `spec.values` over the result — `chartutil.ChartValuesFromReferences` ends
+  on `MergeMaps(result, values)`. So a socle default written inline silently
+  beats the client on every key both set, and the client could only ever add
+  keys the socle had not thought of. Moving the socle's defaults into the
+  first reference is what makes the promise true: a module's named attributes
+  are the curated surface the socle keeps working, `values` is everything else
+  the chart can do, and where the two meet the client wins. Each module proves
+  it in the e2e, by overriding one socle default and asserting the client's
+  value on the live object — a test on a key the socle leaves unset proves
+  nothing, which is how this went unnoticed at first.
+
+  A consequence worth knowing: a `clusters/<cloud>/` overlay can no longer
+  JSON-patch one value by path, because the values are now a YAML document
+  inside a ConfigMap string. Per-cloud values go in the template instead,
+  under `<< if eq inputs.cloud "aws" >>` inside the socle-values document —
+  a mechanism §6 already allows, and one place rather than two. An overlay
+  that must still act replaces the whole document.
 
   Two rules make it safe. **Secrets never go in `values`** — it lands in the
   OpenTofu state and in a plain `ConfigMap` — so each module refuses its
   chart's secret-bearing paths at plan (`kube.argocd.values.configs.secret`
   and friends: see `opentofu/bootstrap/variables.tf`) and the client puts them
-  in `values_secret`, which OpenTofu never reads. And **a named attribute
-  always wins nothing**: when a client sets both `domain` and the same key in
-  `values`, `values` wins, because it is merged last — the named attribute is
-  a convenience, not a lock.
+  in `values_secret`, which OpenTofu never reads. And **a named attribute is a
+  convenience, not a lock**: a client who sets both `domain` and the same key
+  in `values` gets what `values` says, because it is merged later.
 
 - **A module that needs a cloud service carries its own access.** Not the
   foundations: the module ships its `ServiceAccount` and the object that
