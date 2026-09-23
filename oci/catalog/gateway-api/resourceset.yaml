@@ -18,7 +18,16 @@
 # act, never a side effect of a toggle).
 #
 # resourcesTemplate rather than resources for the same reason as the root:
-# the optional dependsOn block is added or dropped structurally.
+# the optional dependsOn and Secret blocks are added or dropped structurally.
+#
+# The client's chart values (kube.gateway_api.values, values_secret) follow the
+# catalog's convention (docs/flux-catalog.md §6): a ConfigMap
+# gateway-api-client-values in the chart's namespace, and the HelmRelease's
+# valuesFrom listing it, then the client's Secret when named. The HelmRelease
+# is static in ./envoy-gateway, so its valuesFrom is a patch the
+# gateway-api-envoy-gateway Kustomization carries; the namespace is rendered
+# here, not in the folder, because the ConfigMap must exist in it before the
+# HelmRelease reads it.
 apiVersion: fluxcd.controlplane.io/v1
 kind: ResourceSet
 metadata:
@@ -32,6 +41,25 @@ spec:
   wait: true
   resourcesTemplate: |
     << $g := inputs.modules.gateway_api >>
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: envoy-gateway-system
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if and $g.enabled (eq $g.implementation "envoy-gateway") >>enabled<< else >>disabled<< end >>
+    ---
+    # The client's own Envoy Gateway chart values, as he wrote them in
+    # kube.gateway_api.values. OpenTofu refuses secrets in there.
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: gateway-api-client-values
+      namespace: envoy-gateway-system
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if and $g.enabled (eq $g.implementation "envoy-gateway") >>enabled<< else >>disabled<< end >>
+    data:
+      values.yaml: |<< toYaml $g.values | nindent 4 >>
+    ---
     apiVersion: kustomize.toolkit.fluxcd.io/v1
     kind: Kustomization
     metadata:
@@ -71,6 +99,30 @@ spec:
       path: ./catalog/gateway-api/envoy-gateway
       prune: true
       wait: true
+      # The client's values, then his Secret when he named one — created by
+      # him in envoy-gateway-system, never read by OpenTofu, optional so the
+      # release does not wait for it.
+      patches:
+        - target:
+            kind: HelmRelease
+            name: envoy-gateway
+          patch: |
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            metadata:
+              name: envoy-gateway
+              namespace: envoy-gateway-system
+            spec:
+              valuesFrom:
+                - kind: ConfigMap
+                  name: gateway-api-client-values
+                  valuesKey: values.yaml
+                << if $g.values_secret >>
+                - kind: Secret
+                  name: << $g.values_secret | quote >>
+                  valuesKey: values.yaml
+                  optional: true
+                << end >>
     ---
     apiVersion: kustomize.toolkit.fluxcd.io/v1
     kind: Kustomization

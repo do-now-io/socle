@@ -16,6 +16,14 @@ inputs:
       enabled: true
       install_crds: true
       implementation: envoy-gateway
+      values:
+        deployment:
+          replicas: 2
+          envoyGateway:
+            resources:
+              requests:
+                cpu: 200m
+      values_secret: gateway-api-values
     hello:
       enabled: true
       replicas: 1

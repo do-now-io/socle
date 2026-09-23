@@ -39,7 +39,7 @@ run "defaults_are_the_recommended_position" {
     error_message = "a module absent from kube must be at its catalog defaults."
   }
   assert {
-    condition     = output.inputs.modules.gateway_api.enabled == true && output.inputs.modules.gateway_api.implementation == "envoy-gateway" && output.inputs.modules.gateway_api.install_crds == true
+    condition     = output.inputs.modules.gateway_api.enabled == true && output.inputs.modules.gateway_api.implementation == "envoy-gateway" && output.inputs.modules.gateway_api.install_crds == true && output.inputs.modules.gateway_api.values == {} && output.inputs.modules.gateway_api.values_secret == ""
     error_message = "on aws the socle installs the Gateway API CRDs and Envoy Gateway implements them, until Cilium does."
   }
   assert {
@@ -229,6 +229,32 @@ run "a_client_may_hand_the_gateway_api_to_cilium_on_aws" {
   assert {
     condition     = output.inputs.modules.gateway_api.implementation == "cilium" && output.inputs.modules.gateway_api.install_crds == false && output.inputs.modules.gateway_api.enabled == true
     error_message = "cilium is a valid implementation on aws and the client's install_crds must flow, enabled keeping its default."
+  }
+}
+
+run "gateway_api_takes_the_clients_envoy_gateway_values" {
+  command = plan
+  variables {
+    kube = {
+      gateway_api = {
+        values = {
+          deployment = {
+            replicas     = 2
+            envoyGateway = { extraEnv = [{ name = "TOKEN", valueFrom = { secretKeyRef = { name = "eg", key = "token" } } }] }
+          }
+        }
+        values_secret = "eg-values"
+      }
+    }
+  }
+
+  assert {
+    condition     = output.inputs.modules.gateway_api.values.deployment.replicas == 2 && output.inputs.modules.gateway_api.values_secret == "eg-values"
+    error_message = "the client's chart values and values_secret must reach the inputs as written; an env var by valueFrom is a reference, not a secret."
+  }
+  assert {
+    condition     = output.inputs.modules.gateway_api.implementation == "envoy-gateway"
+    error_message = "setting values must leave the cloud's implementation default in place."
   }
 }
 

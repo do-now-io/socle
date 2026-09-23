@@ -69,6 +69,42 @@ run "kube_refuses_an_attribute_of_the_wrong_type" {
   expect_failures = [var.kube]
 }
 
+run "kube_refuses_a_gateway_api_implementation_outside_the_enum" {
+  command = plan
+  variables { kube = { gateway_api = { implementation = "nginx" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_cilium_gateway_api_where_cilium_is_the_providers" {
+  command = plan
+  variables {
+    cloud = "scaleway"
+    kube  = { gateway_api = { implementation = "cilium" } }
+  }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_a_managed_gateway_api_outside_gke" {
+  command = plan
+  variables { kube = { gateway_api = { implementation = "managed" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_installing_the_gateway_api_crds_on_gke" {
+  command = plan
+  variables {
+    cloud = "gcp"
+    kube  = { gateway_api = { install_crds = true } }
+  }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_install_crds_that_is_not_a_bool" {
+  command = plan
+  variables { kube = { gateway_api = { install_crds = "no" } } }
+  expect_failures = [var.kube]
+}
+
 run "socle_version_refuses_a_moving_head" {
   command = plan
   variables { socle_version = "latest" }
@@ -251,38 +287,47 @@ run "cluster_network_refuses_an_endpoint_that_is_not_a_host" {
   expect_failures = [var.cluster_network]
 }
 
-run "kube_refuses_a_gateway_api_implementation_outside_the_enum" {
+run "kube_refuses_gateway_api_values_that_are_not_an_object" {
   command = plan
-  variables { kube = { gateway_api = { implementation = "nginx" } } }
+  variables { kube = { gateway_api = { values = "deployment: {}" } } }
   expect_failures = [var.kube]
 }
 
-run "kube_refuses_cilium_gateway_api_where_cilium_is_the_providers" {
+run "kube_refuses_gateway_api_values_carrying_a_literal_env_value" {
   command = plan
-  variables {
-    cloud = "scaleway"
-    kube  = { gateway_api = { implementation = "cilium" } }
-  }
+  variables { kube = { gateway_api = { values = { deployment = { envoyGateway = { extraEnv = [{ name = "TOKEN", value = "s3cret" }] } } } } } }
   expect_failures = [var.kube]
 }
 
-run "kube_refuses_a_managed_gateway_api_outside_gke" {
+run "kube_refuses_gateway_api_values_reinstalling_the_charts_crds" {
   command = plan
-  variables { kube = { gateway_api = { implementation = "managed" } } }
+  variables { kube = { gateway_api = { values = { crds = { enabled = true } } } } }
   expect_failures = [var.kube]
 }
 
-run "kube_refuses_installing_the_gateway_api_crds_on_gke" {
+run "kube_refuses_gateway_api_values_renaming_the_controller" {
+  command = plan
+  variables { kube = { gateway_api = { values = { config = { envoyGateway = { gateway = { controllerName = "acme.io/gw" } } } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_gateway_api_values_secret_that_is_not_a_secret_name" {
+  command = plan
+  variables { kube = { gateway_api = { values_secret = "EG_Values" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_gateway_api_values_on_gke_managed" {
   command = plan
   variables {
     cloud = "gcp"
-    kube  = { gateway_api = { install_crds = true } }
+    kube  = { gateway_api = { values = { deployment = { replicas = 2 } } } }
   }
   expect_failures = [var.kube]
 }
 
-run "kube_refuses_install_crds_that_is_not_a_bool" {
+run "kube_refuses_gateway_api_values_secret_with_cilium" {
   command = plan
-  variables { kube = { gateway_api = { install_crds = "no" } } }
+  variables { kube = { gateway_api = { implementation = "cilium", install_crds = false, values_secret = "eg-values" } } }
   expect_failures = [var.kube]
 }

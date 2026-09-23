@@ -39,6 +39,8 @@ type, is an error at plan, with the allowed list in the message.
 | `gateway_api` | `enabled` | `true` | Gateway API on this cluster: the standard-channel CRDs and one implementation behind the `GatewayClass` named `socle` ([design note](../../docs/catalog/gateway-api.md)) |
 | `gateway_api` | `install_crds` | per cloud: `true`; `false` on gcp | Let the socle install the pinned Gateway API CRDs. Refused on gcp, where GKE owns them; `false` elsewhere when Cilium's bootstrap release installs them |
 | `gateway_api` | `implementation` | per cloud: `envoy-gateway` on aws, azure, scaleway; `managed` on gcp | What implements the class: `envoy-gateway`, `cilium` (aws, azure) or `managed` (gcp only, GKE's controller — nothing installed). Anything else for the cloud is refused at plan |
+| `gateway_api` | `values` | `{}` | Envoy Gateway chart values, deep-merged by helm-controller. Refused: a literal `extraEnv` value, `crds`, the controller name, and any value when `implementation` is not `envoy-gateway` |
+| `gateway_api` | `values_secret` | `""` | Name of a Secret the client creates in `envoy-gateway-system` with a `values.yaml` key, merged after `values`; never read by OpenTofu |
 | `hello` | `enabled` | `true` | Deploy podinfo as a proof the pipeline works |
 | `hello` | `replicas` | `1` | Replicas of the podinfo Deployment |
 | `hello` | `message` | `"hello from socle"` | Message podinfo serves |

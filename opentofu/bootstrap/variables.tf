@@ -118,6 +118,43 @@ variable "kube" {
     condition     = var.cloud != "gcp" || try(var.kube.gateway_api.install_crds, false) != true
     error_message = "kube.gateway_api.install_crds cannot be true on gcp: GKE owns the Gateway API CRDs (gateway_api_enabled in the foundations module)."
   }
+
+  # gateway_api.values is free-form on purpose, minus three rules. No secret
+  # material: it ends up in the OpenTofu state and in a ConfigMap, and the one
+  # path of the Envoy Gateway chart that takes a literal secret is an env
+  # var's value (valueFrom, a reference, is fine). And two paths that are the
+  # module itself: crds, which would reinstall the chart's experimental
+  # Gateway API bundle over the pinned standard one, and the controller name,
+  # which would orphan the socle GatewayClass.
+  validation {
+    condition = (
+      !can(var.kube.gateway_api.values)
+      || !can(keys(var.kube.gateway_api.values))
+      || (
+        alltrue([
+          for e in try(var.kube.gateway_api.values.deployment.envoyGateway.extraEnv, []) : !can(e.value)
+        ])
+        && !can(var.kube.gateway_api.values.crds)
+        && !can(var.kube.gateway_api.values.config.envoyGateway.gateway.controllerName)
+      )
+    )
+    error_message = "kube.gateway_api.values must not carry secrets nor the module's own paths: a literal value under deployment.envoyGateway.extraEnv (use valueFrom, or put it in a Secret named in kube.gateway_api.values_secret), crds, and config.envoyGateway.gateway.controllerName are refused."
+  }
+
+  validation {
+    condition     = !can(var.kube.gateway_api.values_secret) || try(var.kube.gateway_api.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.gateway_api.values_secret)), true)
+    error_message = "kube.gateway_api.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
+  }
+
+  # values and values_secret reach Envoy Gateway's chart and nothing else; on
+  # another implementation they would be silently ignored, so they are refused.
+  validation {
+    condition = (
+      try(var.kube.gateway_api.implementation, local.gateway_api_defaults[var.cloud].implementation) == "envoy-gateway"
+      || (length(try(keys(var.kube.gateway_api.values), [])) == 0 && try(var.kube.gateway_api.values_secret, "") == "")
+    )
+    error_message = "kube.gateway_api.values and values_secret configure the Envoy Gateway chart; they are refused when implementation is not envoy-gateway (on ${var.cloud} it is ${try(var.kube.gateway_api.implementation, local.gateway_api_defaults[var.cloud].implementation)})."
+  }
 }
 
 # ---------------------------------------------------------------------------

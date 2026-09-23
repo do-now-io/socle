@@ -16,11 +16,20 @@ locals {
     # table below, not the client's to know: GKE ships the CRDs and a managed
     # controller, the others get Envoy Gateway until Cilium implements it
     # (docs/catalog/gateway-api.md). install_crds and implementation are
-    # validated per cloud in variables.tf.
+    # validated per cloud in variables.tf. values is the client's own Envoy
+    # Gateway chart values — replicas, resources, logging, extension APIs —
+    # deep-merged by helm-controller with the socle's; values_secret names a
+    # Secret the client creates in envoy-gateway-system with a values.yaml
+    # key, never read by OpenTofu. Both apply to envoy-gateway only: Cilium's
+    # chart is its bootstrap release's, GKE's controller has none. A literal
+    # env value, the chart's CRD switch and the controller name are refused
+    # in values (variables.tf).
     gateway_api = {
       enabled        = true
       install_crds   = local.gateway_api_defaults[var.cloud].install_crds
       implementation = local.gateway_api_defaults[var.cloud].implementation
+      values         = {}
+      values_secret  = ""
     }
     # v1: proves the pipeline end to end. A real module reads exactly like it.
     hello = {

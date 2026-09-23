@@ -4,6 +4,10 @@
 # v1 client surface has nothing to template here, and a Flux Kustomization is
 # what orders the GatewayClass after the CRDs it needs (docs/catalog/gateway-api.md).
 #
+# The namespace, envoy-gateway-system, is rendered by the module's
+# ResourceSet with the client's values ConfigMap, and the HelmRelease's
+# valuesFrom is a patch the Flux Kustomization applying this folder carries.
+#
 # Envoy Gateway's own CRDs are the release asset, vendored verbatim
 # (.github/scripts/vendor-crds.sh), not the project's CRDs chart: that
 # release is over the 1 MiB Helm stores per release Secret and never
@@ -14,7 +18,6 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - namespace.yaml
   - envoy-gateway-crds.yaml
   - charts.yaml
   - controller.yaml

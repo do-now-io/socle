@@ -4,6 +4,11 @@
 # safe-upgrade admission policy, all of which the socle applies from their
 # own vendored release files. The CRDs are applied by the Flux Kustomization
 # that applies this folder, before this object.
+#
+# valuesFrom (the client's ConfigMap, then his Secret) is added by that
+# Kustomization's patch (../resourceset.yaml). helm-controller merges
+# valuesFrom in order and spec.values last, so the value below stays the
+# socle's even if a client sets it — OpenTofu refuses it there anyway.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
