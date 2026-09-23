@@ -319,6 +319,24 @@ jobs:
           done
           echo "::error::hello never came back after re-enabling"
           exit 1
+      # crossplane is off by default (catalog.tf), so the default path above
+      # proves nothing about it. Turned on here with one client value that
+      # overrides a socle default, a module-shaped Role against floci's IAM,
+      # then off again — .github/scripts/e2e/crossplane.sh says what each
+      # phase asserts, and what floci cannot prove.
+      - name: Crossplane turns on, turns a module's Role into an IAM role, turns off
+        run: |
+          apply() {
+            tofu apply -input=false -auto-approve \
+              -var "socle_version=$TAG" \
+              -var "cosign_identity=$COSIGN" \
+              -var artifact_pull_secret=ghcr-auth \
+              -var "kube=$1"
+          }
+          apply '{hello={replicas=1},crossplane={enabled=true,values={resourcesRBACManager={requests={memory="48Mi"}}}}}'
+          "$GITHUB_WORKSPACE/.github/scripts/e2e/crossplane.sh" on
+          apply '{hello={replicas=1}}'
+          "$GITHUB_WORKSPACE/.github/scripts/e2e/crossplane.sh" off
       - name: A second plan is empty
         run: |
           tofu plan -input=false -detailed-exitcode \
@@ -351,7 +369,10 @@ jobs:
             echo "signed as \`$SUBJECT\`. Proven: the artifact pulled by tag with its signature"
             echo "verified, \`socle-root\` and \`hello\` Ready with \`hello/podinfo\` at 1 replica,"
             echo "then \`kube.hello.enabled=false\` garbage-collecting the HelmRelease off the"
-            echo "cluster, re-enabling bringing it back, and a second \`tofu plan\` empty."
+            echo "cluster, re-enabling bringing it back, \`kube.crossplane.enabled=true\` converging"
+            echo "Crossplane and its AWS provider with a client value beating the socle's, a"
+            echo "module-shaped \`Role\` becoming an IAM role in floci and going when deleted,"
+            echo "turning it off garbage-collecting its HelmRelease, and a second \`tofu plan\` empty."
             echo ""
             echo "This root exists because floci cannot re-apply the real one; the real root is"
             echo "applied once, by \`e2e-aws-root\`."
