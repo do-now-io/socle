@@ -126,7 +126,7 @@ and tested, so these are refusals:
 ## Tests
 
 ```bash
-tofu test          # 12 runs: every validation, and the defaults
+tofu test          # 14 runs: every validation, and the defaults
 ```
 
 Mocked, not credential-skipped: `azurerm` builds a real authorizer and
@@ -200,6 +200,7 @@ No modules.
 | <a name="input_dns_service_ip"></a> [dns\_service\_ip](#input\_dns\_service\_ip) | IP address within service\_cidr used for cluster service discovery (kube-dns). | `string` | `"10.1.0.10"` | no |
 | <a name="input_log_retention_days"></a> [log\_retention\_days](#input\_log\_retention\_days) | Retention for the Container Insights Log Analytics workspace this module creates. | `number` | `90` | no |
 | <a name="input_node_subnet_id"></a> [node\_subnet\_id](#input\_node\_subnet\_id) | Existing node subnet ID to attach to. Required when create\_vnet is false — this module carves its own subnet out of vnet\_cidr only when it also creates the VNet. | `string` | `null` | no |
+| <a name="input_pod_cidr"></a> [pod\_cidr](#input\_pod\_cidr) | Range Cilium allocates pod addresses from, as the cluster pool of the<br/>Cilium the bootstrap module installs (docs/catalog/cilium.md). Not set on<br/>the cluster: azurerm refuses pod\_cidr under network\_plugin = "none" (see<br/>cluster.tf), so this module only carries the value to the bootstrap<br/>through its output. Must not overlap the VNet, service\_cidr or any<br/>connected network. The default is AKS's own pod range, which the chart's<br/>default (10.0.0.0/8) would not be: that one contains the VNet. | `string` | `"10.244.0.0/16"` | no |
 | <a name="input_service_cidr"></a> [service\_cidr](#input\_service\_cidr) | CIDR for Kubernetes service IPs. Must not overlap the VNet or any connected network, and be smaller than /12 — an AKS constraint independent of the BYO CNI choice below. | `string` | `"10.1.0.0/16"` | no |
 | <a name="input_system_node_pool_node_count"></a> [system\_node\_pool\_node\_count](#input\_system\_node\_pool\_node\_count) | Node count for the mandatory system node pool. Small and fixed rather than autoscaled: this pool exists to satisfy AKS's structural minimum, not to run workloads. | `number` | `2` | no |
 | <a name="input_system_node_pool_vm_size"></a> [system\_node\_pool\_vm\_size](#input\_system\_node\_pool\_vm\_size) | VM size for the mandatory system node pool. This is a structural AKS requirement, not a Karpenter/NAP-managed pool — kept small and tainted for-system-only by default (only\_critical\_addons\_enabled), since NAP provisions everything workload-shaped. | `string` | `"Standard_D2s_v5"` | no |
@@ -218,6 +219,7 @@ No modules.
 | <a name="output_location"></a> [location](#output\_location) | Region the cluster and its resources were created in. |
 | <a name="output_node_subnet_id"></a> [node\_subnet\_id](#output\_node\_subnet\_id) | ID of the node subnet. |
 | <a name="output_oidc_issuer_url"></a> [oidc\_issuer\_url](#output\_oidc\_issuer\_url) | The cluster's OIDC issuer — what a workload identity federation binding built by the layer above (Crossplane's provider, or anything else) will need. |
+| <a name="output_pod_cidr"></a> [pod\_cidr](#output\_pod\_cidr) | Range the bootstrap module hands Cilium as its cluster pool. Passed through, never set on the cluster: azurerm refuses pod\_cidr under BYO CNI. |
 | <a name="output_resource_group_name"></a> [resource\_group\_name](#output\_resource\_group\_name) | Name of the resource group the cluster and its resources live in, whether this module created it or not. |
 | <a name="output_tags"></a> [tags](#output\_tags) | The standard tag set applied to every billable resource this module creates. |
 | <a name="output_vnet_name"></a> [vnet\_name](#output\_vnet\_name) | Name of the VNet the cluster is attached to, whether this module created it or not. |
