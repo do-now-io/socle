@@ -1,0 +1,58 @@
+# The hello module: podinfo, as a proof that inputs flow, render, converge and
+# garbage-collect. A real module reads exactly like this one.
+#
+# Rules every module follows (docs/flux-catalog.md §6):
+# - inputsFrom the one provider named socle; never inline inputs.
+# - the on/off toggle is the reconcile annotation on EACH resource's own
+#   metadata — commonMetadata is not templated by the operator.
+# - templates test values, never presence: OpenTofu normalised the inputs.
+apiVersion: fluxcd.controlplane.io/v1
+kind: ResourceSet
+metadata:
+  name: hello
+  namespace: flux-system
+spec:
+  inputsFrom:
+    - apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSetInputProvider
+      name: socle
+  wait: true
+  resources:
+    - apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: hello
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.hello.enabled >>enabled<< else >>disabled<< end >>
+    - apiVersion: source.toolkit.fluxcd.io/v1
+      kind: OCIRepository
+      metadata:
+        name: podinfo-chart
+        namespace: hello
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.hello.enabled >>enabled<< else >>disabled<< end >>
+      spec:
+        interval: 1h
+        url: oci://ghcr.io/stefanprodan/charts/podinfo
+        layerSelector:
+          mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+          operation: copy
+        ref:
+          tag: 6.15.0
+    - apiVersion: helm.toolkit.fluxcd.io/v2
+      kind: HelmRelease
+      metadata:
+        name: podinfo
+        namespace: hello
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.hello.enabled >>enabled<< else >>disabled<< end >>
+      spec:
+        interval: 10m
+        releaseName: podinfo
+        chartRef:
+          kind: OCIRepository
+          name: podinfo-chart
+        values:
+          replicaCount: << inputs.modules.hello.replicas | int >>
+          ui:
+            message: << printf "%s — %s on %s" inputs.modules.hello.message inputs.cluster.name inputs.cloud | quote >>

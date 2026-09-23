@@ -1,0 +1,6 @@
+# podinfo's UI colour on aws. A JSON 6902 patch on the hello ResourceSet: index 2
+# of spec.resources is its HelmRelease. The message already names the cloud
+# through inputs.cloud; the colour shows the other mechanism, an overlay patch.
+- op: add
+  path: /spec/resources/2/spec/values/ui/color
+  value: "#FF9900"
