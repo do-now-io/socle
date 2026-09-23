@@ -33,3 +33,35 @@ resource "aws_iam_role_policy_attachment" "cluster" {
 # What remains here are the two roles this module's own resources cannot do
 # without: the cluster's service role, which EKS itself assumes, and the flow
 # logs' delivery role in network.tf.
+
+# What Cilium's operator calls in ENI mode, as a policy document rather than a
+# role: the bootstrap module installs Cilium, but the identity it runs under is
+# the node's until Pod Identity exists (its agent is an add-on installed once
+# compute does), and nodes are the factory's. Whoever creates the node role
+# attaches this. A document, not an aws_iam_policy: nothing billable, nothing
+# to toggle. The list is Cilium's own (docs.cilium.io, ENI IPAM, "Required
+# privileges"), plus DescribeTags for its ENI garbage collection.
+data "aws_iam_policy_document" "cilium_operator" {
+  statement {
+    sid = "CiliumEniIpam"
+    actions = [
+      "ec2:AssignPrivateIpAddresses",
+      "ec2:AttachNetworkInterface",
+      "ec2:CreateNetworkInterface",
+      "ec2:CreateTags",
+      "ec2:DeleteNetworkInterface",
+      "ec2:DescribeInstanceTypes",
+      "ec2:DescribeNetworkInterfaces",
+      "ec2:DescribeRouteTables",
+      "ec2:DescribeSecurityGroups",
+      "ec2:DescribeSubnets",
+      "ec2:DescribeTags",
+      "ec2:DescribeVpcs",
+      "ec2:ModifyNetworkInterfaceAttribute",
+    ]
+    # EC2's network-interface actions take no resource-level scoping that
+    # would survive ENIs being created on the fly; AWS's own VPC CNI policy
+    # (AmazonEKS_CNI_Policy) grants the same actions on "*".
+    resources = ["*"]
+  }
+}

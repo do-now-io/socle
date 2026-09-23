@@ -23,6 +23,16 @@ output "cluster_ca_certificate" {
   sensitive   = true
 }
 
+output "service_cidr" {
+  description = "The Kubernetes service range EKS chose for this cluster (172.20.0.0/16 or 10.100.0.0/16, by VPC CIDR). The bootstrap module gives CoreDNS its .10 address, the one every node's kubelet is told to use. Null on an emulated cluster that reports none (floci)."
+  value       = try(aws_eks_cluster.socle.kubernetes_network_config[0].service_ipv4_cidr, null)
+}
+
+output "cilium_operator_policy_json" {
+  description = "IAM policy the Cilium operator needs in ENI mode — the bootstrap module installs Cilium on this cluster before Flux. For the node role, which this module does not create: whoever creates it attaches this document."
+  value       = data.aws_iam_policy_document.cilium_operator.json
+}
+
 output "oidc_issuer_url" {
   description = "The cluster's OIDC issuer. Checklist requirement, not this module's identity mechanism — Pod Identity is, IRSA is absent, and nothing here provisions an OIDC trust relationship against it. Null on an emulated cluster that reports no identity (floci), so an apply there still converges."
   value       = try(aws_eks_cluster.socle.identity[0].oidc[0].issuer, null)
