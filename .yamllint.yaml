@@ -5,6 +5,10 @@ extends: default
 
 ignore:
   - .git/
+  # The bootstrap envelope's templates carry one Helm expression ({{- toYaml
+  # ... }}) that is not a YAML node. They are checked by rendering them —
+  # helm template + kubeconform in pr-static.yaml. Chart.yaml stays linted.
+  - opentofu/*/manifests/templates/
 
 rules:
   # Manifests with long image references or URLs need some headroom.

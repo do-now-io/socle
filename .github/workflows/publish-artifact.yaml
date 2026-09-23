@@ -1,0 +1,455 @@
+---
+# The socle artifact: oci/ pushed to GHCR and signed, and the release cycle.
+#   push to main    → <next>-alpha.N. VERSION is the last release; <next> is
+#                     what the conventional commits since it call for (fix →
+#                     patch, feat → minor, breaking → minor before 1.0.0),
+#                     computed by .github/scripts/compute-tag.sh exactly as
+#                     release-please computes it. Signed by main, run through
+#                     the e2e proofs; then release-please refreshes its release
+#                     PR for the commits that passed.
+#   push elsewhere  → 0.0.0-<branch>.<sha>, a SemVer pre-release: sorts below
+#                     any release, never matches >=1.0.0, deletable
+#                     (cleanup-artifacts.yaml).
+#   merge of the release PR → release-please tags the commit and publishes the
+#                     GitHub release; the alpha that same push produced gets
+#                     the version as a second tag. Same digest, same signature,
+#                     nothing rebuilt. A release tag is never overwritten.
+# Flux verifies the signature against the workflow identity on every
+# reconciliation; the bootstrap module trusts main by default.
+name: Publish artifact
+
+on:
+  push:
+    branches: ['**']
+
+permissions:
+  contents: read
+
+# One group per ref, never cancelled: runs on main are serialised, so the
+# alpha, its proofs, the release PR refresh and a promotion never interleave.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  REPOSITORY: do-now-io/socle
+
+# `shell: bash` runs every step with -o pipefail: a failure on the left of a
+# pipe (`| tee`, `| python3`) fails the step instead of vanishing behind the
+# right-hand command's exit code. The unspecified default, `bash -e`, does not.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  publish:
+    name: Push and sign oci/
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      subject: ${{ steps.identity.outputs.subject }}
+      cosign_identity: ${{ steps.identity.outputs.cosign_identity }}
+    steps:
+      # Full history and tags: compute-tag.sh reads the commits since the last
+      # release to name the next version.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: fluxcd/flux2/action@dd233c4fadef306a62b7893204f8e3817fecc2b2 # v2.9.5
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - uses: imjasonh/setup-crane@feee3b6bb0d4c68370f256a4502498c9227e5c6b # v0.7
+      - name: Log in to GHCR
+        env:
+          TOKEN: ${{ github.token }}
+        run: printf '%s' "$TOKEN" | crane auth login "$REGISTRY" -u "$GITHUB_ACTOR" --password-stdin
+      # On main the script names the next version from the commits since the
+      # last release and asks the registry for its highest alpha. It fails
+      # loudly when the registry cannot answer: publishing on doubt is how a
+      # tag gets overwritten.
+      - name: Compute the tag
+        id: tag
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: .github/scripts/compute-tag.sh >> "$GITHUB_OUTPUT"
+      - name: The identity Flux will verify against
+        id: identity
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          subject="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/publish-artifact.yaml@${REF}"
+          # The same identity as the e2e roots' cosign_identity variable: two
+          # anchored regexes, every dot escaped, and doubled because OpenTofu
+          # parses the -var value as an HCL string before the regex exists.
+          issuer_re='^https://token\\.actions\\.githubusercontent\\.com$'
+          subject_re="^$(printf '%s' "$subject" | sed 's/[.]/\\\\./g')\$"
+          {
+            echo "subject=$subject"
+            echo "cosign_identity={issuer=\"$issuer_re\",subject=\"$subject_re\"}"
+          } >> "$GITHUB_OUTPUT"
+      - name: Push oci/ as an OCI artifact
+        id: push
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          out="$(flux push artifact "oci://$REGISTRY/$REPOSITORY:$TAG" \
+            --path=./oci \
+            --source="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            --revision="${GITHUB_REF_NAME}@sha1:${GITHUB_SHA}" \
+            --output=json)"
+          digest="$(printf '%s' "$out" | python3 -c 'import sys,json; print(json.load(sys.stdin)["digest"])')"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - name: Sign, keyless
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: cosign sign --yes "$REGISTRY/$REPOSITORY@$DIGEST"
+      - name: Verify what was just signed
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          SUBJECT: ${{ steps.identity.outputs.subject }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          KIND: ${{ steps.tag.outputs.kind }}
+        run: |
+          cosign verify "$REGISTRY/$REPOSITORY@$DIGEST" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity "$SUBJECT" > /dev/null
+          {
+            echo "### Publish artifact ✅"
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Tag | \`$TAG\` ($KIND) |"
+            echo "| Digest | \`$DIGEST\` |"
+            echo "| Signed as | \`$SUBJECT\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # floci runs a real k3s behind its emulated EKS once the Docker socket is
+  # mounted and FLOCI_SERVICES_EKS_MOCK is left unset — the flag the plan legs
+  # in integration.yaml carry, which hands back a fake endpoint instead. The
+  # real root applies green there, but only once: floci does not read back
+  # several EKS/CloudWatch attributes, so every refresh re-discovers the same
+  # drift, and AssociateKmsKey is unsupported, which fails the second apply.
+  # The proof is therefore split in two — this job applies the real root once,
+  # e2e-aws-catalog runs the mutations on a bare, idempotent root.
+  e2e-aws-root:
+    name: Apply the real AWS root on floci
+    runs-on: ubuntu-latest
+    needs: publish
+    permissions:
+      contents: read
+      packages: read
+    env:
+      AWS_ENDPOINT_URL: http://localhost:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_REGION: eu-west-3
+      AWS_DEFAULT_REGION: eu-west-3
+      KUBECONFIG: /tmp/e2e.kubeconfig
+      TAG: ${{ needs.publish.outputs.tag }}
+      SUBJECT: ${{ needs.publish.outputs.subject }}
+      COSIGN: ${{ needs.publish.outputs.cosign_identity }}
+      EXPECT_UI_COLOR: "#FF9900"   # oci/clusters/aws/hello-color.patch.yaml
+    defaults:
+      run:
+        working-directory: opentofu/clusters/aws
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+      - name: Start floci with a real EKS
+        run: |
+          "$GITHUB_WORKSPACE/.github/scripts/e2e/start-floci.sh"
+      - name: Apply the root, once
+        run: |
+          tofu init -input=false
+          tofu apply -input=false -auto-approve \
+            -var-file=tests/floci.tfvars \
+            -var "socle_version=$TAG" \
+            -var "cosign_identity=$COSIGN" \
+            -var artifact_pull_secret=ghcr-auth
+      # The package is private: the pull secret is created in the cluster after
+      # the apply, from this workflow's own token, so that no credential ever
+      # enters OpenTofu.
+      - name: Authenticate the cluster to GHCR
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          "$GITHUB_WORKSPACE/.github/scripts/e2e/ghcr-auth.sh" socle-e2e
+      - name: The root ResourceSet and the hello module converge
+        run: |
+          "$GITHUB_WORKSPACE/.github/scripts/e2e/wait-converged.sh"
+      - name: What the cluster looked like when it failed
+        if: failure()
+        run: |
+          "$GITHUB_WORKSPACE/.github/scripts/e2e/dump-cluster.sh"
+      - name: Summary
+        if: always()
+        working-directory: .
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          if [ "$JOB_STATUS" != success ]; then
+            {
+              echo "### e2e-aws-root ❌"
+              echo "The run failed before the proof completed — see the failed step and the"
+              echo "\`What the cluster looked like when it failed\` step above."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "### e2e-aws-root"
+            echo "Applied \`opentofu/clusters/aws\` — the real root, foundations included —"
+            echo "once on floci's real k3s against \`ghcr.io/do-now-io/socle:$TAG\`, signed as"
+            echo "\`$SUBJECT\`. Proven: the artifact is pulled by that exact tag, its signature"
+            echo "verifies against the workflow identity, and both the \`socle-root\` and"
+            echo "\`hello\` ResourceSets reach Ready with \`hello/podinfo\` at 1 replica."
+            echo ""
+            echo "No idempotence check here: floci does not read back several EKS/CloudWatch"
+            echo "attributes, so a refresh always re-discovers drift, and a second apply dies"
+            echo "on an unsupported \`AssociateKmsKey\`. The mutation tests — toggle, garbage"
+            echo "collection, second plan empty — run in \`e2e-aws-catalog\` on a bare root."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # The mutations, on the bare root floci can re-apply: disabling a module
+  # garbage-collects it, re-enabling recreates it, and a second plan is empty.
+  # Same artifact, same bootstrap module, same templating as e2e-aws-root —
+  # only the foundations are replaced by a single aws_eks_cluster.
+  e2e-aws-catalog:
+    name: Mutate the catalog on floci
+    runs-on: ubuntu-latest
+    needs: publish
+    permissions:
+      contents: read
+      packages: read
+    env:
+      AWS_ENDPOINT_URL: http://localhost:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_REGION: eu-west-3
+      AWS_DEFAULT_REGION: eu-west-3
+      KUBECONFIG: /tmp/e2e.kubeconfig
+      TAG: ${{ needs.publish.outputs.tag }}
+      SUBJECT: ${{ needs.publish.outputs.subject }}
+      COSIGN: ${{ needs.publish.outputs.cosign_identity }}
+      EXPECT_UI_COLOR: "#FF9900"   # oci/clusters/aws/hello-color.patch.yaml
+    defaults:
+      run:
+        working-directory: opentofu/clusters/aws/tests/floci
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+      - name: Start floci with a real EKS
+        run: |
+          "$GITHUB_WORKSPACE/.github/scripts/e2e/start-floci.sh"
+      - name: Apply, with hello on
+        run: |
+          tofu init -input=false
+          tofu apply -input=false -auto-approve \
+            -var "socle_version=$TAG" \
+            -var "cosign_identity=$COSIGN" \
+            -var artifact_pull_secret=ghcr-auth \
+            -var 'kube={hello={replicas=1}}'
+      - name: Authenticate the cluster to GHCR
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          "$GITHUB_WORKSPACE/.github/scripts/e2e/ghcr-auth.sh" socle-e2e-catalog
+      - name: The root ResourceSet and the hello module converge
+        run: |
+          "$GITHUB_WORKSPACE/.github/scripts/e2e/wait-converged.sh"
+      # The operator omits a disabled module's objects entirely, so the proof
+      # is on the live cluster: the HelmRelease has to disappear.
+      - name: Disabling hello garbage-collects it
+        run: |
+          tofu apply -input=false -auto-approve \
+            -var "socle_version=$TAG" \
+            -var "cosign_identity=$COSIGN" \
+            -var artifact_pull_secret=ghcr-auth \
+            -var 'kube={hello={enabled=false}}'
+          # Absence only counts as garbage collection when kubectl says
+          # NotFound. An unreachable API server, a stale kubeconfig or a
+          # missing CRD also make the object "not there", and each would pass
+          # a plain `if ! kubectl get`. A vanished `hello` namespace reads as
+          # `namespaces "hello" not found` — that is a NotFound, and it means
+          # gone too.
+          for _ in $(seq 1 36); do
+            if out="$(kubectl -n hello get helmrelease podinfo 2>&1)"; then
+              sleep 5
+              continue
+            fi
+            case "$out" in
+              *NotFound*|*"not found"*)
+                echo "helmrelease hello/podinfo is gone: $out"
+                exit 0
+                ;;
+              *)
+                echo "::error::kubectl failed for a reason other than NotFound: $out"
+                exit 1
+                ;;
+            esac
+          done
+          echo "::error::helmrelease hello/podinfo still present after 180 s"
+          kubectl -n hello get helmrelease podinfo -o yaml || true
+          exit 1
+      - name: Re-enabling hello recreates it
+        run: |
+          tofu apply -input=false -auto-approve \
+            -var "socle_version=$TAG" \
+            -var "cosign_identity=$COSIGN" \
+            -var artifact_pull_secret=ghcr-auth \
+            -var 'kube={hello={replicas=1}}'
+          for _ in $(seq 1 60); do
+            status="$(kubectl -n flux-system get resourceset hello \
+              -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)"
+            if [ "$status" = True ] && [ "$(kubectl -n hello get deploy podinfo \
+              -o jsonpath='{.spec.replicas}' 2>/dev/null || true)" = 1 ]; then
+              echo "resourceset/hello Ready again, hello/podinfo back at 1 replica"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::hello never came back after re-enabling"
+          exit 1
+      - name: A second plan is empty
+        run: |
+          tofu plan -input=false -detailed-exitcode \
+            -var "socle_version=$TAG" \
+            -var "cosign_identity=$COSIGN" \
+            -var artifact_pull_secret=ghcr-auth \
+            -var 'kube={hello={replicas=1}}'
+      - name: What the cluster looked like when it failed
+        if: failure()
+        run: |
+          "$GITHUB_WORKSPACE/.github/scripts/e2e/dump-cluster.sh"
+      - name: Summary
+        if: always()
+        working-directory: .
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          if [ "$JOB_STATUS" != success ]; then
+            {
+              echo "### e2e-aws-catalog ❌"
+              echo "The run failed before the proof completed — see the failed step and the"
+              echo "\`What the cluster looked like when it failed\` step above."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "### e2e-aws-catalog"
+            echo "Applied \`opentofu/clusters/aws/tests/floci\` — a bare cluster plus the real"
+            echo "bootstrap module — on floci's real k3s against \`ghcr.io/do-now-io/socle:$TAG\`,"
+            echo "signed as \`$SUBJECT\`. Proven: the artifact pulled by tag with its signature"
+            echo "verified, \`socle-root\` and \`hello\` Ready with \`hello/podinfo\` at 1 replica,"
+            echo "then \`kube.hello.enabled=false\` garbage-collecting the HelmRelease off the"
+            echo "cluster, re-enabling bringing it back, and a second \`tofu plan\` empty."
+            echo ""
+            echo "This root exists because floci cannot re-apply the real one; the real root is"
+            echo "applied once, by \`e2e-aws-root\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # release-please keeps one release PR open against main: the next version
+  # from the conventional commits since the last release, the CHANGELOG, and
+  # every `# x-release-please-version` stamp. It runs after the proofs, so the
+  # PR only ever advances to a commit whose alpha converged on floci. On the
+  # push that merges that PR it tags the commit and publishes the GitHub
+  # release instead, and `promote` below gives the alpha its release tag.
+  # Needs the repository setting "Allow GitHub Actions to create and approve
+  # pull requests" (Settings → Actions → General).
+  release-please:
+    name: Release PR, or release
+    runs-on: ubuntu-latest
+    needs: [publish, e2e-aws-root, e2e-aws-catalog]
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    outputs:
+      release_created: ${{ steps.rp.outputs.release_created }}
+      tag_name: ${{ steps.rp.outputs.tag_name }}
+      sha: ${{ steps.rp.outputs.sha }}
+      html_url: ${{ steps.rp.outputs.html_url }}
+    steps:
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: rp
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+      - name: Summary
+        env:
+          CREATED: ${{ steps.rp.outputs.release_created }}
+          TAG: ${{ steps.rp.outputs.tag_name }}
+          PR: ${{ steps.rp.outputs.pr }}
+        run: |
+          if [ "$CREATED" = true ]; then
+            echo "### Release \`$TAG\` published — promoting its alpha below" >> "$GITHUB_STEP_SUMMARY"
+          elif [ -n "$PR" ]; then
+            url="$(printf '%s' "$PR" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("url",""))')"
+            echo "### Release PR refreshed: $url" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### No release PR: nothing user-facing since the last release" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # The release itself: no rebuild, no new signature. The alpha `publish`
+  # produced for this very commit gains the version release-please just
+  # tagged. release.sh refuses when the tag is not this commit's VERSION,
+  # when the version is already in the registry, and when no alpha was built
+  # from this commit.
+  promote:
+    name: Promote this commit's alpha to the release
+    runs-on: ubuntu-latest
+    needs: [publish, release-please]
+    if: needs.release-please.outputs.release_created == 'true'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - uses: imjasonh/setup-crane@feee3b6bb0d4c68370f256a4502498c9227e5c6b # v0.7
+      - name: Log in to GHCR
+        env:
+          TOKEN: ${{ github.token }}
+        run: printf '%s' "$TOKEN" | crane auth login "$REGISTRY" -u "$GITHUB_ACTOR" --password-stdin
+      - name: Tag the commit's alpha with the release version
+        id: release
+        env:
+          RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
+          SHA: ${{ needs.release-please.outputs.sha }}
+        run: .github/scripts/release.sh >> "$GITHUB_OUTPUT"
+      # The alpha was signed by this push to main, so the release carries
+      # main's identity — the one the bootstrap module trusts by default.
+      - name: The release still verifies as main
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          ALPHA: ${{ steps.release.outputs.alpha }}
+          DIGEST: ${{ steps.release.outputs.digest }}
+          SUBJECT: ${{ needs.publish.outputs.subject }}
+          RELEASE_URL: ${{ needs.release-please.outputs.html_url }}
+        run: |
+          cosign verify "$REGISTRY/$REPOSITORY:$TAG" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity "$SUBJECT" > /dev/null
+          {
+            echo "### Release ✅"
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Released | \`$TAG\` |"
+            echo "| Promoted from | \`$ALPHA\` |"
+            echo "| Digest | \`$DIGEST\` |"
+            echo "| Signed as | \`$SUBJECT\` |"
+            echo ""
+            echo "Release: $RELEASE_URL"
+          } >> "$GITHUB_STEP_SUMMARY"
