@@ -353,26 +353,35 @@ Rules for a module template, all measured:
 - **A module that needs a cloud service carries its own access.** Not the
   foundations: the module ships its `ServiceAccount` and the object that
   creates the role granting that access, as Crossplane managed resources
-  rendered by its own `ResourceSet`. `external_dns` needing Route 53, Cloud
-  DNS or Azure DNS is the case that decided it — the permission belongs with
-  the thing that needs it, so enabling a module is one decision rather than
-  one tfvars change here and an optional IAM block there.
+  rendered by its own `ResourceSet`, inside the artifact. `external_dns`
+  needing Route 53, Cloud DNS or Azure DNS is the case that decided it.
 
-  This puts Crossplane under the catalog rather than beside it, and it puts an
-  ordering chain under the socle: the foundations create the cluster **and the
-  one identity Crossplane's provider assumes**, then Cilium and CoreDNS, then
-  Flux, then Crossplane, then a module's role, then that module's workload. The
-  foundations keep exactly that one identity and nothing else — an identity
-  allowed to create roles is the most powerful thing in the cluster, so its
-  scope is argued per cloud, never widened by convenience.
+  The rule this enforces is an invariance: **a foundations module never
+  changes because of the catalog.** `opentofu/aws` describes a cluster, and it
+  describes the same cluster whether the client runs `external_dns`, ten
+  modules or none. The alternative — an optional IAM block per consumer,
+  wired through the client's tfvars — makes the cloud module a function of the
+  Helm modules chosen on top of it, which is exactly the coupling this
+  distribution exists to avoid. So: everything an in-cluster component needs
+  ships in the artifact and is delivered by Flux; OpenTofu stops at the
+  cluster.
+
+  One thing cannot live in the artifact, because it is what lets the artifact
+  act on the cloud at all: the credential Crossplane's own provider assumes.
+  It is constant — one per cloud, the same for every client, unchanged by any
+  catalog choice — so it does not break the invariance, and it is the only
+  cloud identity the foundations carry. Its scope is argued per cloud and
+  never widened by convenience: an identity allowed to create roles is the
+  most powerful thing in the cluster.
 
   Anything needed **before** Crossplane exists cannot use it: Cilium's own ENI
   permissions on AWS are on the node role, from the foundations, and that is
   the boundary rather than an exception to argue about.
 
-  The design, the ordering costs and the escape hatch for a cluster without
-  Crossplane are in `docs/catalog/crossplane.md`; each module's own note says
-  what access it declares.
+  The design, the ordering chain (foundations, Cilium and CoreDNS, Flux,
+  Crossplane, a module's role, that module's workload) and the escape hatch
+  for a cluster without Crossplane are in `docs/catalog/crossplane.md`; each
+  module's own note says what access it declares.
 
 Deleting a `ResourceSet` uninstalls everything it rendered — measured.
 
