@@ -13,7 +13,7 @@ what a client may change, and what was measured. The module's template is
 | aws, azure | **Envoy Gateway** v1.9.1 by default; **Cilium** the day the cilium PR enables `gatewayAPI` (then this module contributes the class only) |
 | scaleway | Envoy Gateway v1.9.1 — Kapsule's Cilium is Scaleway's and cannot be told to implement Gateway API |
 | gcp | **`managed`**: GKE's controller and GKE's CRDs (`gateway_api_enabled = true` in `opentofu/gcp`); the module installs nothing |
-| Client surface | `enabled`, `install_crds`, `implementation` — three attributes, all validated per cloud at plan |
+| Client surface | `enabled`, `install_crds`, `implementation`, validated per cloud at plan; plus `values` and `values_secret`, the Envoy Gateway chart's own values (§3.1) |
 | Gateways, HTTPRoutes, TLS | None in v1: no listener, no hostname, no certificate is configurable, so no `Gateway` object exists and no load balancer is provisioned |
 
 ## 1. What is installed, per cloud
@@ -140,15 +140,62 @@ as the root `ResourceSet`.
 | `enabled` | bool | `true` | not a bool |
 | `install_crds` | bool | `true`; `false` on gcp | `true` on gcp; not a bool |
 | `implementation` | string | `envoy-gateway`; `managed` on gcp | not in the cloud's list: aws, azure `cilium`, `envoy-gateway`; gcp `managed`; scaleway `envoy-gateway` |
+| `values` | object | `{}` | not an object; carries a refused path (§3.1); set while `implementation` is not `envoy-gateway` |
+| `values_secret` | string | `""` | not a Secret name; set while `implementation` is not `envoy-gateway` |
 
 Deliberately not configurable in v1: the Gateway API version, the chart
-versions, the class name, the controller's replicas or resources, the
-namespace, any `Gateway` (listeners, hostnames, addresses, TLS), any
+versions, the class name, the namespace, any `Gateway` (listeners, hostnames, addresses, TLS), any
 load-balancer annotation. Each of those is a socle decision or a follow-up
 module (a `Gateway` needs a hostname, which needs external-dns and a
 certificate, which is the next contract to write). On Scaleway a `Gateway`
 would get an LB-S load balancer from the cloud controller with no annotation;
 none is needed until a `Gateway` exists.
+
+### 3.1 The chart's own values — `values`, `values_secret`
+
+The catalog's convention (`docs/flux-catalog.md` §6): whatever the Envoy
+Gateway chart can do that the three named attributes do not cover — replicas,
+resources, logging level, extension APIs, pod annotations, topology — the
+client writes in `values`, or in a Secret he creates in
+`envoy-gateway-system` with a `values.yaml` key and names in `values_secret`.
+The module renders `values` into `ConfigMap/gateway-api-client-values` in
+`envoy-gateway-system`, next to the namespace itself. It adds a `valuesFrom`
+to `HelmRelease/envoy-gateway` listing that ConfigMap, then the Secret when
+named, `optional: true`. The `HelmRelease` is static in the artifact's
+`./envoy-gateway` folder, so the `valuesFrom` travels as a `patches` entry of
+the `gateway-api-envoy-gateway` Kustomization, which the operator templates.
+The namespace moved from that folder into the `ResourceSet` for the same
+reason: the ConfigMap must exist in it before the release reads it.
+
+Both apply to Envoy Gateway only. Cilium's chart is its bootstrap release's,
+and GKE's controller has no chart. So both are refused at plan when
+`implementation` is `cilium` or `managed`, rather than silently ignored.
+
+Refused inside `values`, at plan:
+
+| Path | Why |
+| --- | --- |
+| a literal `value` under `deployment.envoyGateway.extraEnv[]` | the chart's only path that takes secret material verbatim; `valueFrom` (a reference) is accepted, and a literal belongs in `values_secret` |
+| `crds` | the module's own decision: the chart's bundle is the experimental channel of an older release, and would compete with the pinned standard CRDs |
+| `config.envoyGateway.gateway.controllerName` | would leave `GatewayClass/socle` without a controller |
+
+Every other secret-shaped key of the chart is a reference by name
+(`imagePullSecrets`, `pullSecrets`, the certificates `certgen` generates in
+the cluster), so nothing else is refused. The Secret named in
+`values_secret` is not read by OpenTofu. A client's secret material goes
+there, and the refusals do not apply to it.
+
+**Precedence, as measured.** helm-controller merges the `valuesFrom` entries
+in order, then `spec.values` last, over them (`fluxcd/pkg`
+`chartutil.ChartValuesFromReferences`: "the values map is merged in last
+overwriting values from references"). With the three refusals above, the
+socle's only inline value in this module is `crds.enabled: false`. So every
+key a client can write is applied, with the Secret winning over the
+ConfigMap. Live, on a local k3s v1.34.1 with Flux: `values` with
+`deployment.replicas: 2` and a CPU request gave a 2-replica controller at
+`200m`. A Secret with `deployment.replicas: 3` and `crds.enabled: true` then
+gave 3 replicas and left `crds.enabled` at `false`. An absent optional Secret
+did not hold the release.
 
 The per-cloud defaults live in `catalog.tf`, not in overlay patches: the
 inputs then carry the truth (`kubectl -n flux-system get
