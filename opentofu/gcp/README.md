@@ -6,7 +6,7 @@ needs, then steps away.
 
 ```hcl
 module "socle" {
-  source = "oci://<registry>/<repo>//opentofu/gcp?tag=<version>"
+  source = "oci://ghcr.io/do-now-io/socle/opentofu-modules//opentofu/gcp?tag=${var.socle_version}"
 
   project_id   = "my-project"
   region       = "europe-west1"
@@ -28,8 +28,10 @@ A deployable version of that is in [`examples/minimal`](examples/minimal),
 which also lists the roles the apply needs and where remote state belongs.
 
 > **OpenTofu does not verify OCI signatures.** It will pull an unsigned or
-> tampered artifact without complaint. Run `cosign verify` in CI before
-> `tofu init`, or enforce it through registry policy, and pin by digest.
+> tampered artifact without complaint — Flux does, this does not. Run
+> `cosign verify` in CI before `tofu init`, or enforce it through registry
+> policy. The command, and the identity to pin:
+> [distribution](../../docs/distribution.md#who-verifies-and-who-does-not).
 
 ## What is decided for you
 

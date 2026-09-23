@@ -30,16 +30,24 @@ defaults:
 
 jobs:
   cleanup:
-    name: Delete pre-release tags
+    name: Delete pre-release tags (${{ matrix.package }})
     runs-on: ubuntu-latest
     if: github.event_name != 'delete' || github.event.ref_type == 'branch'
     permissions:
       packages: write
+    # Both packages are published by the same tag and deleted by the same
+    # rules; a release that cleans up only half of itself would leave the
+    # other half growing. fail-fast off, so one package's failure still lets
+    # the other be collected.
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [socle%2Fflux-modules, socle%2Fopentofu-modules]
     env:
       GH_TOKEN: ${{ github.token }}
       ORG: do-now-io
       # Nested package names travel %2F-encoded in the packages API path.
-      PACKAGE: socle%2Fflux-modules
+      PACKAGE: ${{ matrix.package }}
     steps:
       - name: Decide what to delete
         id: scope
@@ -70,10 +78,22 @@ jobs:
         env:
           RULES: ${{ steps.scope.outputs.rules }}
         run: |
+          # A package that has never been published 404s. That is "nothing to
+          # collect", not a failure — otherwise the nightly cron goes red for
+          # an artifact nobody has cut yet.
+          if ! versions="$(gh api --paginate "/orgs/$ORG/packages/container/$PACKAGE/versions?per_page=100" \
+              --jq '.[] | {id, created_at, tags: .metadata.container.tags}' 2>&1)"; then
+            if printf '%s' "$versions" | grep -qi 'not found'; then
+              echo "### Clean up pre-release artifacts — \`$PACKAGE\` ⏭️" >> "$GITHUB_STEP_SUMMARY"
+              echo "Never published — nothing to collect." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "::error::cannot list $PACKAGE: $versions"
+            exit 1
+          fi
           # List first, into a file: a pipeline would run the loop in a subshell,
           # where a failed DELETE aborts the batch and counters never escape.
-          gh api --paginate "/orgs/$ORG/packages/container/$PACKAGE/versions?per_page=100" \
-            --jq '.[] | {id, created_at, tags: .metadata.container.tags}' \
+          printf '%s\n' "$versions" \
           | python3 -c '
           import sys, json, re, os, datetime
           rules = [(re.compile(p), int(d)) for p, d in
@@ -104,7 +124,7 @@ jobs:
           done < "$RUNNER_TEMP/targets"
           matched="$(wc -l < "$RUNNER_TEMP/targets" | tr -d ' ')"
           {
-            echo "### Clean up pre-release artifacts"
+            echo "### Clean up pre-release artifacts — \`$PACKAGE\`"
             echo "Rules (pattern|min age in days):"
             while IFS= read -r rule; do echo "- \`$rule\`"; done <<< "$RULES"
             echo ""
