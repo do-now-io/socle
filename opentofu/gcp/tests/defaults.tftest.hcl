@@ -50,6 +50,11 @@ run "defaults_are_the_recommended_position" {
   }
 
   assert {
+    condition     = google_container_cluster.socle.gateway_api_config[0].channel == "CHANNEL_STANDARD"
+    error_message = "GKE's Gateway API controller and standard-channel CRDs must be on: the socle's gateway_api module installs nothing on GKE because of it."
+  }
+
+  assert {
     condition = (
       length(google_container_cluster.socle.monitoring_config[0].enable_components) == 1 &&
       contains(google_container_cluster.socle.monitoring_config[0].enable_components, "SYSTEM_COMPONENTS")
@@ -182,5 +187,18 @@ run "helm_kubernetes_is_credential_free_and_uses_the_gke_exec_plugin" {
   assert {
     condition     = output.helm_kubernetes.exec.command == "gke-gcloud-auth-plugin"
     error_message = "helm_kubernetes must obtain its token at call time through gke-gcloud-auth-plugin, never carry one."
+  }
+}
+
+run "gateway_api_can_be_switched_off" {
+  command = plan
+
+  variables {
+    gateway_api_enabled = false
+  }
+
+  assert {
+    condition     = google_container_cluster.socle.gateway_api_config[0].channel == "CHANNEL_DISABLED"
+    error_message = "gateway_api_enabled = false must disable the GKE Gateway API channel, not leave it at the default."
   }
 }
