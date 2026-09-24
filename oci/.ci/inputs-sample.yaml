@@ -20,6 +20,16 @@
             memory: 256Mi
       values_secret: crossplane-values
       permissions_boundary: arn:aws:iam::123456789012:policy/socle/t/crossplane-boundary
+    external_dns:
+      enabled: true
+      domain_filters: [acme.example]
+      policy: upsert-only
+      txt_owner_id: t
+      values:
+        logLevel: debug
+        extraArgs:
+          aws-zone-type: public
+      values_secret: external-dns-private-values
     hello:
       enabled: true
       replicas: 2

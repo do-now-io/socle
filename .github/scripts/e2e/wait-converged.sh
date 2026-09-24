@@ -2,6 +2,8 @@
 # The proof both e2e jobs share: socle-root, hello and gateway-api Ready, the
 # Gateway API CRDs established, the artifact pulled by the exact tag TAG with
 # its signature verified, podinfo at 1 replica.
+# The proof both e2e jobs share: socle-root, external-dns (disabled) and hello Ready, the artifact
+# pulled by the exact tag TAG with its signature verified, podinfo at 1 replica.
 set -euo pipefail
 wait_ready() {
   for _ in $(seq 1 60); do
@@ -14,6 +16,13 @@ wait_ready() {
   return 1
 }
 wait_ready socle-root
+# external-dns is off by default (it needs a zone and a credential): Ready
+# here proves the template renders on the real operator and that a disabled
+# module applies nothing.
+wait_ready external-dns
+if kubectl get namespace external-dns > /dev/null 2>&1; then
+  echo "::error::external-dns is disabled but its namespace exists"; exit 1
+fi
 wait_ready hello
 # Gateway API for every client: the gateway_api module brings the standard
 # CRDs from upstream, pinned by commit, through Flux — nothing is vendored.
