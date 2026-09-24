@@ -27,6 +27,20 @@ The [foundations prerequisites](../../../docs/aws/prerequisites.md), plus the
 token through `aws eks get-token` at call time, from the same credentials the
 aws provider uses. Nothing is stored.
 
+## The nodes it starts with
+
+The foundations create one node group, the bootstrap group: two 4 vCPU
+nodes on Spot, drawn from six Graviton families so they are not reclaimed
+together, untainted, about $84 a month in eu-west-3, $223 on demand. It carries the socle — Cilium's operator, CoreDNS,
+Flux, later Karpenter — and is not sized for your workloads, which
+Karpenter's nodes will carry. `aws.bootstrap_node_instance_types`,
+`aws.bootstrap_node_capacity_type` and `aws.bootstrap_node_count` change it.
+A reclaimed node is replaced by EKS; the other carries the socle meanwhile.
+
+Cilium is installed beside the group, not after it: its nodes are Ready only
+once Cilium runs on them. Everything else waits for the group, and a
+`bootstrap_node_count` of zero is refused at plan.
+
 ## A private registry
 
 While `ghcr.io/do-now-io/socle/flux-modules` is private, Flux needs a pull secret. Create it
@@ -61,7 +75,8 @@ reports whether they converged.
   refresh its releases: `tofu apply -var-file=prod.tfvars -target=module.foundations`,
   then the full apply.
 - **Destroying with the API unreachable.** Releases are deleted before the
-  cluster, which is the right order, but it needs the API: if the runner is no
+  cluster, and all but Cilium before the bootstrap nodes, which is the right
+  order, but it needs the API: if the runner is no
   longer in `cluster_endpoint_public_access_cidrs`, `tofu state rm module.socle`
   first.
 
@@ -89,10 +104,12 @@ No resources.
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
-| <a name="input_aws"></a> [aws](#input\_aws) | The foundations module's inputs, grouped, plus the region for the aws provider. Required keys are the ones the module leaves without a default; every other key is optional and passes through as-is. | <pre>object({<br/>    region                               = string<br/>    cluster_name                         = string<br/>    owner                                = string<br/>    environment                          = string<br/>    availability_zones                   = list(string)<br/>    cluster_endpoint_public_access_cidrs = list(string)<br/>    kubernetes_version                   = string<br/>    additional_tags                      = optional(map(string))<br/>    create_vpc                           = optional(bool)<br/>    vpc_id                               = optional(string)<br/>    private_subnet_ids                   = optional(list(string))<br/>    public_subnet_ids                    = optional(list(string))<br/>    vpc_cidr                             = optional(string)<br/>    create_nat_gateway                   = optional(bool)<br/>    vpc_flow_logs_enabled                = optional(bool)<br/>    secrets_encryption_enabled           = optional(bool)<br/>    secrets_encryption_kms_key_arn       = optional(string)<br/>    cluster_log_types                    = optional(list(string))<br/>    log_retention_days                   = optional(number)<br/>    force_update_version                 = optional(bool)<br/>  })</pre> | n/a | yes |
+| <a name="input_aws"></a> [aws](#input\_aws) | The foundations module's inputs, grouped, plus the region for the aws provider. Required keys are the ones the module leaves without a default; every other key is optional and passes through as-is. | <pre>object({<br/>    region                               = string<br/>    cluster_name                         = string<br/>    owner                                = string<br/>    environment                          = string<br/>    availability_zones                   = list(string)<br/>    cluster_endpoint_public_access_cidrs = list(string)<br/>    kubernetes_version                   = string<br/>    additional_tags                      = optional(map(string))<br/>    create_vpc                           = optional(bool)<br/>    vpc_id                               = optional(string)<br/>    private_subnet_ids                   = optional(list(string))<br/>    public_subnet_ids                    = optional(list(string))<br/>    vpc_cidr                             = optional(string)<br/>    create_nat_gateway                   = optional(bool)<br/>    vpc_flow_logs_enabled                = optional(bool)<br/>    secrets_encryption_enabled           = optional(bool)<br/>    secrets_encryption_kms_key_arn       = optional(string)<br/>    cluster_log_types                    = optional(list(string))<br/>    log_retention_days                   = optional(number)<br/>    force_update_version                 = optional(bool)<br/>    bootstrap_node_instance_types        = optional(list(string))<br/>    bootstrap_node_capacity_type         = optional(string)<br/>    bootstrap_node_count                 = optional(number)<br/>  })</pre> | n/a | yes |
 | <a name="input_socle_version"></a> [socle\_version](#input\_socle\_version) | The socle release this cluster runs. In a client's copy this variable is also in both module sources (?tag=), so this one line moves foundations, bootstrap and the artifact together. | `string` | n/a | yes |
 | <a name="input_artifact_pull_secret"></a> [artifact\_pull\_secret](#input\_artifact\_pull\_secret) | Name of an existing dockerconfigjson Secret in flux-system for a private registry. Empty for a public one; the Secret is created outside OpenTofu. | `string` | `""` | no |
 | <a name="input_artifact_url"></a> [artifact\_url](#input\_artifact\_url) | Override of the OCI repository the artifact is pulled from, for a mirror. Null keeps the socle registry. | `string` | `null` | no |
+| <a name="input_cilium"></a> [cilium](#input\_cilium) | The socle's Cilium, installed before Flux because EKS is created with no CNI: { enabled = true, hubble = false, gateway\_api = true, values = {} }, every key optional. values is any Cilium chart value, the client's winning; private keys are refused, name a Secret instead. Validated by the bootstrap module. enabled = false is for a cluster that brings its own CNI and DNS — the e2e test double, never a real EKS. | `any` | `{}` | no |
+| <a name="input_coredns"></a> [coredns](#input\_coredns) | The CoreDNS installed right after Cilium: { values = {} }. values is any CoreDNS chart value, the client's winning. Validated by the bootstrap module. | `any` | `{}` | no |
 | <a name="input_cosign_identity"></a> [cosign\_identity](#input\_cosign\_identity) | Override of the signature identity the cluster trusts. Null keeps the bootstrap module's default, the release workflow on main. Set it only on a dev cluster testing a branch build. | <pre>object({<br/>    issuer  = string<br/>    subject = string<br/>  })</pre> | `null` | no |
 | <a name="input_kube"></a> [kube](#input\_kube) | Catalog modules and their values, as { <module> = { <attribute> = <value> } }. Only what differs from the defaults; validated against the catalog by the bootstrap module. | `any` | `{}` | no |
 

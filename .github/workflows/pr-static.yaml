@@ -270,6 +270,8 @@ jobs:
         with:
           scan-type: config
           scan-ref: .
+          # Ignores for YAML manifests, which take no inline #trivy:ignore.
+          trivyignores: .trivyignore.yaml
           format: sarif
           output: trivy-results.sarif
           exit-code: '0'
@@ -284,6 +286,7 @@ jobs:
         with:
           scan-type: config
           scan-ref: .
+          trivyignores: .trivyignore.yaml
           format: table
           exit-code: '1'
           severity: HIGH,CRITICAL

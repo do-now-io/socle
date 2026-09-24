@@ -34,11 +34,26 @@ variable "aws" {
     cluster_log_types                    = optional(list(string))
     log_retention_days                   = optional(number)
     force_update_version                 = optional(bool)
+    bootstrap_node_instance_types        = optional(list(string))
+    bootstrap_node_capacity_type         = optional(string)
+    bootstrap_node_count                 = optional(number)
   })
 }
 
 variable "kube" {
   description = "Catalog modules and their values, as { <module> = { <attribute> = <value> } }. Only what differs from the defaults; validated against the catalog by the bootstrap module."
+  type        = any
+  default     = {}
+}
+
+variable "cilium" {
+  description = "The socle's Cilium, installed before Flux because EKS is created with no CNI: { enabled = true, hubble = false, gateway_api = true, values = {} }, every key optional. values is any Cilium chart value, the client's winning; private keys are refused, name a Secret instead. Validated by the bootstrap module. enabled = false is for a cluster that brings its own CNI and DNS — the e2e test double, never a real EKS."
+  type        = any
+  default     = {}
+}
+
+variable "coredns" {
+  description = "The CoreDNS installed right after Cilium: { values = {} }. values is any CoreDNS chart value, the client's winning. Validated by the bootstrap module."
   type        = any
   default     = {}
 }

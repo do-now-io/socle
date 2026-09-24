@@ -1,0 +1,88 @@
+# Cilium's operator checks for the Gateway API CRDs once, at start-up, and
+# never again: it started before Flux, so it runs with its Gateway controller
+# off. This Job restarts it once the CRDs are established (the Kustomization
+# that applies it depends on them). It completes and stays; Flux re-applies it
+# unchanged, so the operator restarts once per cluster. Restarting the
+# operator does not touch the datapath: the agents keep serving traffic.
+#
+# The Job and its service account live in flux-system, beside the rest of the
+# socle; only the grant sits in kube-system, where the operator is.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cilium-operator-restart
+  namespace: flux-system
+---
+# A rollout restart is a GET of the Deployment and one PATCH of its pod
+# template's restartedAt annotation, so the grant is those two verbs on the
+# one Deployment, by name. KSV-0048 flags any patch on deployments: it reads
+# resources and verbs, never resourceNames, so no narrower Role clears it.
+# Ignored in /.trivyignore.yaml: Trivy reads no inline ignore in YAML.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cilium-operator-restart
+  namespace: kube-system
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["cilium-operator"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cilium-operator-restart
+  namespace: kube-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cilium-operator-restart
+subjects:
+  - kind: ServiceAccount
+    name: cilium-operator-restart
+    namespace: flux-system
+---
+# kubectl from flux-cli: the Flux project's image, signed by its release
+# workflow, from the publisher whose controllers the socle already runs.
+# registry.k8s.io/kubectl carries no signature. Pinned by digest. KSV-0125
+# trusts only ACR, ECR and GCR, and one image has to serve aws and azure.
+# Ignored in /.trivyignore.yaml: Trivy reads no inline ignore in YAML.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cilium-operator-restart-for-gateway-api
+  namespace: flux-system
+spec:
+  backoffLimit: 6
+  template:
+    spec:
+      serviceAccountName: cilium-operator-restart
+      restartPolicy: OnFailure
+      tolerations:
+        - key: CriticalAddonsOnly
+          operator: Exists
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: restart
+          # v2.9.5
+          image: ghcr.io/fluxcd/flux-cli@sha256:704d5529535570a495249b643159c93a9aa88ffca07813c974a54b7ba6edbd86
+          command: ["kubectl"]
+          args: ["-n", "kube-system", "rollout", "restart", "deployment/cilium-operator"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi

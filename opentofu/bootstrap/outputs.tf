@@ -21,6 +21,17 @@ output "cosign_identity" {
   value       = var.cosign_identity
 }
 
+output "cilium" {
+  description = "Whether this module installed Cilium (aws, azure: the clouds whose foundations create a cluster with no CNI), with the chart versions it pinned. installed is false where the cloud operates Cilium, or when cilium.enabled is false."
+  value = {
+    installed       = local.cilium_installed
+    chart_version   = local.cilium_installed ? local.cilium_chart_version : null
+    coredns_version = length(helm_release.coredns) > 0 ? local.coredns_chart_version : null
+    hubble          = local.cilium_installed && local.cilium.hubble
+    gateway_api     = local.cilium_installed && local.cilium.gateway_api
+  }
+}
+
 output "namespace" {
   description = "Namespace holding the operator, the Flux controllers and the socle's inputs."
   value       = local.namespace
