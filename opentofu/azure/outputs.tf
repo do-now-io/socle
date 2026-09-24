@@ -38,6 +38,11 @@ output "vnet_name" {
   value       = local.vnet_name
 }
 
+output "pod_cidr" {
+  description = "Range the bootstrap module hands Cilium as its cluster pool. Passed through, never set on the cluster: azurerm refuses pod_cidr under BYO CNI."
+  value       = var.pod_cidr
+}
+
 output "node_subnet_id" {
   description = "ID of the node subnet."
   value       = local.node_subnet_id
