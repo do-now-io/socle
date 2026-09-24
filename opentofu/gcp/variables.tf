@@ -206,6 +206,17 @@ variable "control_plane_dns_allow_external_traffic" {
 # consumer's subnet or CI runner address changes.
 
 # ---------------------------------------------------------------------------
+# Exposure — docs/gcp/network-security.md, docs/catalog/cilium.md §4
+# ---------------------------------------------------------------------------
+
+variable "gateway_api_enabled" {
+  description = "Run GKE's Gateway API controller and let GKE install and upgrade the standard-channel Gateway API CRDs. On by default and stated rather than assumed: the socle installs nothing for Gateway API on GKE because of it, and its templates target GKE's classes. Off leaves the cluster without Gateway API at all."
+  type        = bool
+  default     = true
+  nullable    = false
+}
+
+# ---------------------------------------------------------------------------
 # Upgrades — docs/gcp/managed-scope.md
 # ---------------------------------------------------------------------------
 
