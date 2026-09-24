@@ -47,6 +47,12 @@ type, is an error at plan, with the allowed list in the message.
 | `external_dns` | `txt_owner_id` | the cluster name | Owner written into the TXT registry, so two clusters never fight over a zone |
 | `external_dns` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan |
 | `external_dns` | `values_secret` | `""` | Name of a Secret in `external-dns` with a `values.yaml` key, created by the client, merged last |
+| `argocd` | `enabled` | `true` | Deploy ArgoCD, the client's GitOps layer ([design note](../../docs/catalog/argocd.md)) |
+| `argocd` | `admin_enabled` | `true` | Keep the local `admin` account; `false` once SSO exists |
+| `argocd` | `domain` | `""` | Host ArgoCD is served at (`configs.cm.url`, later the HTTPRoute); empty means no URL |
+| `argocd` | `ha` | `false` | The chart's HA layout: Redis HA, two replicas of server, repo-server and applicationset |
+| `argocd` | `values` | `{}` | The client's own chart values (accounts, RBAC, repositories, SSO connectors, exclusions), merged over the socle's defaults, client wins. Secrets refused at plan |
+| `argocd` | `values_secret` | `""` | Name of a Secret in `argocd` with a `values.yaml` key, created by the client, merged last — where the private keys and client secrets go |
 | `hello` | `enabled` | `true` | Deploy podinfo as a proof the pipeline works |
 | `hello` | `replicas` | `1` | Replicas of the podinfo Deployment |
 | `hello` | `message` | `"hello from socle"` | Message podinfo serves |
