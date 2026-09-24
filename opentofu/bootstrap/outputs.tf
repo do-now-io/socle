@@ -1,38 +1,37 @@
+output "inputs" {
+  description = "What this module ships into the cluster as the ResourceSetInputProvider's defaultValues, after normalisation against the catalog. The catalog's templates read exactly these paths."
+  value       = local.inputs
+}
+
+output "socle_version" {
+  description = "Tag of the socle artifact the cluster pulls."
+  value       = local.version
+}
+
+output "artifact" {
+  description = "The socle artifact, as OCI URL and tag."
+  value = {
+    url = var.artifact_url
+    tag = local.version
+  }
+}
+
+output "cosign_identity" {
+  description = "Keyless identity the artifact's signature is verified against, on every reconciliation."
+  value       = var.cosign_identity
+}
+
 output "namespace" {
-  description = "Namespace holding the operator and the Flux controllers."
-  value       = helm_release.operator.namespace
+  description = "Namespace holding the operator, the Flux controllers and the socle's inputs."
+  value       = local.namespace
 }
 
 output "operator_version" {
-  description = "Version of flux-operator installed, which is also the chart version."
-  value       = helm_release.operator.version
+  description = "Version of flux-operator installed, which is also its chart version."
+  value       = var.operator_version
 }
 
 output "flux_version" {
   description = "Flux version the operator converges the controllers to."
   value       = var.flux_version
-}
-
-output "sync_name" {
-  description = "Name of the root source and Kustomization the operator creates. Immutable in the CRD."
-  value       = local.sync_name
-}
-
-output "sync_source" {
-  description = "What this cluster pulls, as kind, URL and pinned reference."
-  value = {
-    kind   = var.sync_kind
-    url    = var.sync_url
-    ref    = var.sync_ref
-    digest = var.sync_digest
-    path   = var.sync_path
-  }
-}
-
-output "cosign_verification" {
-  description = "Whether the root artifact's signature is verified, and against which identity. False means an unsigned or foreign artifact would be applied."
-  value = {
-    enabled  = var.cosign_verification_enabled
-    identity = var.cosign_identity
-  }
 }

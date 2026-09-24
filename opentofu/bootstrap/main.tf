@@ -1,30 +1,32 @@
-# Flux, installed once and then left alone.
+# Socle bootstrap: Flux, and the inputs the catalog renders from.
 #
-# Three releases, in order:
-#   1. the operator;
-#   2. a FluxInstance — which controllers run, and how they are configured —
-#      with a health check, so the release only returns once the operator has
-#      reconciled Flux and its CRDs exist;
-#   3. the root sync, a local chart of two objects: an OCIRepository and a
-#      Kustomization.
-#
-# The third release is not how this started. The FluxInstance has a sync block
-# of its own, and using it was the obvious design — until a real cluster
-# showed it cannot express two things this socle needs: a cosign verification,
-# and a target namespace for manifests carrying none. Its kustomize patches
-# reach the Flux components only, and a patch that misses stalls the whole
-# instance rather than degrading. Both findings are in docs/flux-bootstrap.md.
-#
-# Helm carries the two objects because it is the only provider here that
-# applies a custom resource without needing its CRD to exist at plan time.
-#
-# From the third release on, OpenTofu owns nothing: the operator converges the
-# controllers, and Flux converges everything the artifact contains.
+# Terraform ships inputs only. The socle OCI artifact ships the templates, one
+# ResourceSet per catalog module, and Flux Operator renders, reconciles and
+# garbage-collects. Three Helm releases, in order: the operator, a
+# FluxInstance with no sync block, and an envelope of two literal objects — a
+# ResourceSetInputProvider carrying the client's config and a ResourceSet
+# carrying the root source with its cosign verification. Helm is the applier,
+# never the templater: docs/flux-catalog.md §3.
 
 locals {
-  # Immutable in the Kustomization's own reconciliation, so fixed rather than
-  # derived: renaming a cluster must not mean recreating its sync.
-  sync_name = "socle"
+  # Bumped with the module's own tag. VERSION at the repo root is the source;
+  # .github/scripts/check-version.sh fails CI when this drifts from it.
+  socle_version = "0.0.0" # x-release-please-version
+
+  version = coalesce(var.socle_version, local.socle_version)
+
+  # Everything the operator and Flux install lives here. Fixed rather than a
+  # variable: the operator's own defaults, RBAC and network policies assume it.
+  namespace = "flux-system"
+
+  # The operator wires workload identity from this enum. Scaleway has none it
+  # knows, so it is a plain kubernetes cluster.
+  cluster_type = {
+    aws      = "aws"
+    gcp      = "gcp"
+    azure    = "azure"
+    scaleway = "kubernetes"
+  }[var.cloud]
 
   common_labels = {
     "app.kubernetes.io/part-of"   = "socle"
@@ -32,15 +34,34 @@ locals {
     "socle.do-now.io/environment" = var.environment
     "socle.do-now.io/owner"       = var.owner
   }
+
+  # What reaches the cluster, as the ResourceSetInputProvider's defaultValues.
+  # The catalog's templates read exactly these paths.
+  inputs = {
+    cloud = var.cloud
+    cluster = {
+      name        = var.cluster_name
+      environment = var.environment
+      owner       = var.owner
+    }
+    socle = {
+      url        = var.artifact_url
+      version    = local.version
+      pullSecret = var.artifact_pull_secret
+    }
+    cosign  = var.cosign_identity
+    modules = local.modules
+  }
 }
 
+# 1. The operator. The official chart, pinned exactly.
 resource "helm_release" "operator" {
   name       = "flux-operator"
   repository = "oci://ghcr.io/controlplaneio-fluxcd/charts"
   chart      = "flux-operator"
   version    = var.operator_version
 
-  namespace        = var.namespace
+  namespace        = local.namespace
   create_namespace = true
 
   wait    = true
@@ -51,13 +72,17 @@ resource "helm_release" "operator" {
   })]
 }
 
+# 2. The instance: which controllers run, how they are wired. No sync block —
+# the root source is the envelope below. The health check makes this release
+# return only once the operator has converged Flux and its CRDs exist, so the
+# envelope's custom resources do not race them.
 resource "helm_release" "instance" {
   name       = "flux-instance"
   repository = "oci://ghcr.io/controlplaneio-fluxcd/charts"
   chart      = "flux-instance"
   version    = var.operator_version
 
-  namespace = var.namespace
+  namespace = local.namespace
 
   wait    = true
   timeout = var.helm_timeout_seconds
@@ -70,17 +95,13 @@ resource "helm_release" "instance" {
       }
       components = var.flux_components
       cluster = {
-        type          = var.cluster_type
+        type          = local.cluster_type
         size          = var.instance_size
         networkPolicy = var.network_policy
-        multitenant   = var.multitenant
       }
       commonMetadata = { labels = local.common_labels }
       storage        = { class = var.storage_class }
-      # No sync block: the root source is the release below.
     }
-    # Helm's own wait does not wait for a custom resource to become ready, so
-    # without this the sync release would race the CRDs the operator installs.
     healthcheck = {
       enabled = true
       timeout = "${var.helm_timeout_seconds}s"
@@ -91,35 +112,21 @@ resource "helm_release" "instance" {
   depends_on = [helm_release.operator]
 }
 
-resource "helm_release" "sync" {
-  name  = "socle-sync"
-  chart = "${path.module}/chart"
+# 3. The envelope: the client's inputs and the root source, two literal
+# objects. Helm carries them because it is the only provider that applies a
+# custom resource without needing its CRD at plan time — the condition for
+# foundations and this module sharing one root.
+resource "helm_release" "socle" {
+  name  = "socle"
+  chart = "${path.module}/manifests"
 
-  namespace = var.namespace
+  namespace = local.namespace
 
   wait    = true
   timeout = var.helm_timeout_seconds
 
   values = [yamlencode({
-    commonLabels = local.common_labels
-    sync = {
-      name            = local.sync_name
-      kind            = var.sync_kind
-      url             = var.sync_url
-      ref             = var.sync_ref
-      digest          = var.sync_digest
-      path            = var.sync_path
-      interval        = var.sync_interval
-      targetNamespace = var.sync_target_namespace
-      pullSecret      = var.sync_pull_secret
-      prune           = var.sync_prune
-      wait            = var.sync_wait
-      timeout         = var.sync_timeout
-    }
-    verify = {
-      enabled  = var.cosign_verification_enabled
-      identity = var.cosign_identity
-    }
+    inputs = local.inputs
   })]
 
   depends_on = [helm_release.instance]

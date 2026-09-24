@@ -4,8 +4,11 @@
 # fork-friendly. A green plan proves the module resolves its providers,
 # data sources and inputs, and lists what it would create.
 #
-# The apply stops here: no floci emulator completes one for the modules
-# we ship, so it proved nothing beyond the plan.
+# These legs plan. Convergence on AWS is proven in publish-artifact.yaml's
+# e2e-aws-root and e2e-aws-catalog jobs, which apply on floci's real k3s
+# against the artifact the same commit published. floci applies the real
+# root once but cannot re-apply it (it does not read back several
+# attributes), which is why the mutation tests use a bare fixture root.
 #
 # Emulator coverage: AWS (floci), GCP (floci-gcp), Azure (floci-az).
 # Scaleway has no emulator, from floci or anyone else. Its leg plans the

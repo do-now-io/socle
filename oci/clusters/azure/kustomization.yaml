@@ -1,0 +1,16 @@
+# What the socle offers on azure: one ResourceSet per catalog module. The client
+# turns each on or off through kube.<module>.enabled; this list is the catalog,
+# and .github/scripts/check-catalog-clouds.sh keeps it in step with catalog.tf.
+#
+# A cloud-specific detail that is not a value the client sets lives here as a
+# Kustomize patch on the module's ResourceSet — the template stays the shared
+# case. hello-color.patch.yaml paints podinfo in this cloud's colour.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../catalog/hello/resourceset.yaml
+patches:
+  - path: hello-color.patch.yaml
+    target:
+      kind: ResourceSet
+      name: hello

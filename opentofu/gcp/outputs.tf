@@ -77,3 +77,17 @@ output "labels" {
   description = "The standard label set applied to every billable resource this module creates."
   value       = local.labels
 }
+
+output "helm_kubernetes" {
+  description = "Drop-in value for the helm provider's kubernetes attribute, so a root configures it in one line. Uses the DNS endpoint, the only one enabled by default. Carries no credential: gke-gcloud-auth-plugin obtains a short-lived token from the caller's ambient gcloud credentials at call time."
+  value = {
+    host                   = "https://${google_container_cluster.socle.control_plane_endpoints_config[0].dns_endpoint_config[0].endpoint}"
+    cluster_ca_certificate = base64decode(google_container_cluster.socle.master_auth[0].cluster_ca_certificate)
+    exec = {
+      api_version = "client.authentication.k8s.io/v1beta1"
+      command     = "gke-gcloud-auth-plugin"
+      args        = []
+    }
+  }
+  sensitive = true
+}

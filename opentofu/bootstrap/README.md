@@ -1,120 +1,84 @@
-# Socle bootstrap — Flux, on any of the four clouds
+# Socle bootstrap — Flux, and the inputs the catalog renders from
 
-One module, no cloud provider. It installs `flux-operator`, a `FluxInstance`
-saying which controllers run, and the root source the cluster pulls. After
-that OpenTofu owns nothing: the operator converges the Flux controllers, and
-Flux converges everything the artifact contains.
+One module for four clouds, `helm` as its only provider. It installs
+`flux-operator`, a `FluxInstance`, and two literal objects: the client's inputs
+and the root source. After that OpenTofu owns those three releases and nothing
+else: the operator renders the catalog from the inputs, Flux converges it.
 
 ```hcl
-module "bootstrap" {
-  source = "oci://ghcr.io/do-now-io/socle/modules//opentofu/bootstrap?digest=sha256:<digest>"
+module "socle" {
+  source = "oci://ghcr.io/do-now-io/socle/opentofu-modules//opentofu/bootstrap?tag=${var.socle_version}"
 
-  cluster_name = "socle-prod"
+  cloud        = "aws"
+  cluster_name = "acme-prod"
   environment  = "prod"
   owner        = "platform"
-  cluster_type = "kubernetes" # aws | azure | gcp | openshift
 
-  sync_url = "oci://ghcr.io/do-now-io/socle"
-  sync_ref = "1.4.0"
-
-  cosign_identity = {
-    issuer  = "https://token.actions.githubusercontent.com"
-    subject = "^https://github\\.com/do-now-io/socle/\\.github/workflows/"
+  kube = {
+    hello = { replicas = 2 }
   }
 }
 ```
 
-`sync_url` is the socle's own artifact, not the module package — a different
-name, a different shape, and published by its own workflow. The modules live
-at `…/socle/modules`; what a tag publishes there:
-[docs/distribution.md](../../docs/distribution.md).
-
-`subject` is a **regex**, matched by Flux against the certificate's SAN, not a
-literal. The one above pins the repository and leaves the workflow file open,
-because the socle's publishing pipeline is still being settled; narrow it to
-that one file once its name is fixed, and a release will keep verifying
-without this configuration being touched.
-
-Why the operator rather than `flux bootstrap` or the `flux` provider, and what
-its licence costs: [docs/flux-bootstrap.md](../../docs/flux-bootstrap.md).
+The design, and the measurements behind it: [docs/flux-catalog.md](../../docs/flux-catalog.md).
 
 ## Where it runs
 
-Second, always. The foundations module provisions an empty cluster and steps
-away; this one is applied against that cluster, from its own root
-configuration and its own state. It is deliberately not part of foundations:
-a provider configured from the same apply that creates the cluster it talks to
-plans badly and destroys worse, and foundations would go from one provider to
-three.
+In the same root as the foundations module, in one apply — see
+`opentofu/clusters/<cloud>/`. It configures no provider itself; the root passes
+the foundations module's `helm_kubernetes` output to the `helm` provider.
 
-It configures no provider itself, so one configuration can bootstrap several
-clusters.
+## The catalog schema
+
+`kube` is `{ <module> = { <attribute> = <value> } }`. Only what differs from a
+default needs writing; an unknown module or attribute, or a value of the wrong
+type, is an error at plan, with the allowed list in the message.
+
+| Module | Attribute | Default | Meaning |
+| --- | --- | --- | --- |
+| `hello` | `enabled` | `true` | Deploy podinfo as a proof the pipeline works |
+| `hello` | `replicas` | `1` | Replicas of the podinfo Deployment |
+| `hello` | `message` | `"hello from socle"` | Message podinfo serves |
+
+The schema lives in `catalog.tf`; the templates in `oci/catalog/<module>/`;
+each `oci/clusters/<cloud>/kustomization.yaml` lists the modules that cloud
+offers, and `catalog_clouds` in `catalog.tf` names the clouds a module is bound
+to (absent = every cloud). All of it changes in the same release, and CI
+(`.github/scripts/check-catalog-clouds.sh`) fails when the overlays and the
+schema disagree.
 
 ## What is decided for you
 
-| Decision | Position | Traces to |
-| --- | --- | --- |
-| Installer | `flux-operator`, not the CLI, not `flux_bootstrap_git` | [flux-bootstrap](../../docs/flux-bootstrap.md) |
-| Operator version | pinned exactly — it is pre-1.0 | [flux-bootstrap](../../docs/flux-bootstrap.md) |
-| Flux version | `2.x`, the operator converges it | [flux-bootstrap](../../docs/flux-bootstrap.md) |
-| Source kind | `OCIRepository` — the socle ships as an artifact, not a repository | [flux-bootstrap](../../docs/flux-bootstrap.md) |
-| The root source | Ours, not `instance.sync` — see below | [flux-bootstrap](../../docs/flux-bootstrap.md) |
-| Pruning | on — a dropped object must leave the cluster | [flux-bootstrap](../../docs/flux-bootstrap.md) |
-| Reference | required, and `latest`/`main`/`master`/`HEAD` refused | [flux-bootstrap](../../docs/flux-bootstrap.md) |
-| Signature | cosign, verified by Flux on every reconciliation | [flux-bootstrap](../../docs/flux-bootstrap.md) |
-| Image automation controllers | absent — the version moves through Git | [flux-bootstrap](../../docs/flux-bootstrap.md) |
-| Network policies | on | [flux-bootstrap](../../docs/flux-bootstrap.md) |
+| Decision | Position |
+| --- | --- |
+| Templating | Flux Operator `ResourceSet`s in the artifact — never Helm, never OpenTofu |
+| What OpenTofu ships | Inputs only: one `ResourceSetInputProvider`, one root `ResourceSet` |
+| Applier | `helm_release` over `manifests/`, the one provider that needs no CRD at plan |
+| Version | `socle_version` defaults to this module's own; one tag bump moves everything |
+| Signature | cosign keyless, verified by Flux on every reconciliation, cannot be disabled |
+| Default identity | the release workflow on `main` — a branch build needs an explicit override |
+| Source kind | OCI only |
+| Namespace | `flux-system`, fixed |
 
-## Why the root sync is a chart of our own
-
-The `FluxInstance` has a `sync` block, and using it was the first design. A
-real cluster showed it cannot express two things this socle needs:
-
-- **no `verify` field**, so no cosign verification;
-- **no `targetNamespace`**, so no home for manifests that declare none.
-
-Expressing the first as a kustomize patch was tried and **does not work**: the
-operator applies `instance.kustomize.patches` to the Flux components only, not
-to the objects it generates for the sync. The patch finds no target and the
-instance goes `Stalled` — nothing is deployed at all, while OpenTofu reports a
-clean apply. Measured 21 September 2026; see
-[docs/flux-bootstrap.md](../../docs/flux-bootstrap.md#cosign).
-
-So the module ships `chart/`, two objects it owns outright — an
-`OCIRepository` with its `verify` block and a `Kustomization` with `prune`,
-`wait` and an optional `targetNamespace`. Helm carries them because it is the
-only provider here that applies a custom resource without needing its CRD at
-plan time, and the instance release runs the chart's health check so the CRDs
-exist before the sync release starts.
-
-Worth checking on a new cluster all the same:
+## Reading the result
 
 ```sh
-kubectl -n flux-system get ocirepository socle -o jsonpath='{.spec.verify}'
+kubectl -n flux-system get resourcesetinputprovider socle -o yaml   # what the client declared
+kubectl -n flux-system get resourceset                              # socle-root and one per module, with Ready
+kubectl -n flux-system get ocirepository socle                      # the pulled digest, and SourceVerified
 ```
 
-## What is deliberately absent
+Helm's `wait` does not wait for a custom resource to be Ready, so a green
+apply proves the objects were deposited, not that they converged. The root
+`ResourceSet` (`wait: true`) is the convergence signal; CI reads it.
 
-- **A Git bootstrap.** `flux bootstrap` writes Flux's own manifests into a Git
-  repository and syncs from there. The socle is distributed as one signed OCI
-  artifact, so that would add a distribution channel the product does not have,
-  plus a write-scoped Git token per client to create, rotate and revoke.
-- **The image automation controllers.** They rewrite image tags in Git from
-  what they find in a registry. The socle's version moves by a human bumping a
-  tag, reviewed.
-- **A `kubernetes` or `kubectl` provider.** Every object here is a Helm value.
-  `kubernetes_manifest` needs the cluster reachable at plan time, which makes a
-  plan impossible before the cluster exists.
-- **Multitenancy, off by default.** It locks cross-namespace source references;
-  the catalog has not yet said whether it needs them.
+## Testing
 
-## Integration testing
-
-Plan-only, and not even that in CI: this module talks to a cluster, so a plan
-needs one. `tofu test` covers the interface — 20 runs, one per validation
-block — and runs in `pr-static.yaml` like every other module's.
-
-Convergence is proven by an apply against a real cluster, and nowhere else.
+`tofu test` covers the interface — one failing case per validation, and the
+defaults and normalisation with a mocked helm provider. Convergence is proven
+by `publish-artifact.yaml`'s `e2e-aws-root` and `e2e-aws-catalog` jobs, which
+apply on floci against the artifact the same commit published; the
+integration legs plan only.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
@@ -134,47 +98,38 @@ No modules.
 |------|------|
 | [helm_release.instance](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 | [helm_release.operator](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
-| [helm_release.sync](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
+| [helm_release.socle](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 
 ## Inputs
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
-| <a name="input_cluster_name"></a> [cluster\_name](#input\_cluster\_name) | Cluster this Flux instance serves. Stamped on every object the operator creates, so a fleet-wide query can tell them apart. | `string` | n/a | yes |
-| <a name="input_environment"></a> [environment](#input\_environment) | Environment this cluster serves. Stamped as a label, and the axis the upgrade ring order follows. | `string` | n/a | yes |
+| <a name="input_cloud"></a> [cloud](#input\_cloud) | Which cloud this cluster runs on. Selects the artifact's clusters/<cloud> overlay and the operator's workload identity wiring. Scaleway has no federation the operator knows, so it runs as a plain kubernetes cluster. | `string` | n/a | yes |
+| <a name="input_cluster_name"></a> [cluster\_name](#input\_cluster\_name) | Cluster this socle serves. Stamped on every object the operator creates, and exposed to the catalog as inputs.cluster.name. | `string` | n/a | yes |
+| <a name="input_environment"></a> [environment](#input\_environment) | Environment this cluster serves. Stamped as a label, exposed as inputs.cluster.environment, and the axis the upgrade rings follow. | `string` | n/a | yes |
 | <a name="input_owner"></a> [owner](#input\_owner) | Team accountable for the cluster. Stamped as a label on every object. | `string` | n/a | yes |
-| <a name="input_sync_ref"></a> [sync\_ref](#input\_sync\_ref) | The tag, digest or branch to pin. Required with no default: a floating reference would make "which version is deployed" unanswerable, which is the one question the distribution exists to answer. | `string` | n/a | yes |
-| <a name="input_sync_url"></a> [sync\_url](#input\_sync\_url) | Where the cluster pulls the socle from. An oci:// artifact by default — the socle is distributed as one signed OCI artifact, not as a Git repository per client. | `string` | n/a | yes |
-| <a name="input_cluster_type"></a> [cluster\_type](#input\_cluster\_type) | Which cloud this runs on. The operator uses it to wire workload identity for the controllers: aws, azure and gcp have federated identity, kubernetes covers Scaleway and anything else. | `string` | `"kubernetes"` | no |
-| <a name="input_cosign_identity"></a> [cosign\_identity](#input\_cosign\_identity) | Keyless identity the signature must match, as an object of issuer and subject regexes. Null verifies the signature without pinning who produced it, which is weaker and should be temporary. | <pre>object({<br/>    issuer  = string<br/>    subject = string<br/>  })</pre> | `null` | no |
-| <a name="input_cosign_verification_enabled"></a> [cosign\_verification\_enabled](#input\_cosign\_verification\_enabled) | Have Flux verify the artifact's cosign signature before applying it, and on every reconciliation after. This is why the root source is a chart of our own rather than the FluxInstance's sync block, which has no verify field. | `bool` | `true` | no |
-| <a name="input_flux_components"></a> [flux\_components](#input\_flux\_components) | Flux controllers to install. The image automation pair is absent by default: the socle's version moves through Git, not through a controller rewriting tags in the cluster. | `list(string)` | <pre>[<br/>  "source-controller",<br/>  "kustomize-controller",<br/>  "helm-controller",<br/>  "notification-controller"<br/>]</pre> | no |
-| <a name="input_flux_version"></a> [flux\_version](#input\_flux\_version) | Flux version the operator installs and keeps converged. "2.x" tracks the latest 2 series; an exact version pins it. | `string` | `"2.x"` | no |
-| <a name="input_helm_timeout_seconds"></a> [helm\_timeout\_seconds](#input\_helm\_timeout\_seconds) | How long to wait for each release to become ready. The operator reconciles the Flux controllers after its own install, so the instance release is the slow one. | `number` | `600` | no |
+| <a name="input_artifact_pull_secret"></a> [artifact\_pull\_secret](#input\_artifact\_pull\_secret) | Name of an existing kubernetes.io/dockerconfigjson Secret in flux-system that Flux uses to pull the artifact from a private registry. Empty for a public registry. The Secret is created outside this module — a credential never enters OpenTofu. | `string` | `""` | no |
+| <a name="input_artifact_url"></a> [artifact\_url](#input\_artifact\_url) | OCI repository the socle artifact is pulled from. Override for a mirror; the tag is socle\_version. | `string` | `"oci://ghcr.io/do-now-io/socle/flux-modules"` | no |
+| <a name="input_cosign_identity"></a> [cosign\_identity](#input\_cosign\_identity) | Keyless identity the artifact's signature must match, as issuer and subject regexes. Defaults to the socle's release workflow on main, so production never consumes a branch build by accident. Override on a dev cluster testing a branch. Null means this default. Verification cannot be disabled. | <pre>object({<br/>    issuer  = string<br/>    subject = string<br/>  })</pre> | <pre>{<br/>  "issuer": "^https://token\\.actions\\.githubusercontent\\.com$",<br/>  "subject": "^https://github\\.com/do-now-io/socle/\\.github/workflows/publish-artifact\\.yaml@refs/heads/main$"<br/>}</pre> | no |
+| <a name="input_flux_components"></a> [flux\_components](#input\_flux\_components) | Flux controllers to install. The image automation pair is absent by default: the socle's version moves through a reviewed tfvars change, not through a controller rewriting tags. | `list(string)` | <pre>[<br/>  "source-controller",<br/>  "kustomize-controller",<br/>  "helm-controller",<br/>  "notification-controller"<br/>]</pre> | no |
+| <a name="input_flux_version"></a> [flux\_version](#input\_flux\_version) | Flux version the operator installs and keeps converged. 2.x tracks the latest 2 series; an exact version pins it. | `string` | `"2.x"` | no |
+| <a name="input_helm_timeout_seconds"></a> [helm\_timeout\_seconds](#input\_helm\_timeout\_seconds) | How long to wait for each release to become ready. The instance release is the slow one: its health check waits for the operator to converge the controllers. | `number` | `600` | no |
 | <a name="input_instance_size"></a> [instance\_size](#input\_instance\_size) | Resource profile the operator applies to the controllers. Empty is the operator's own default; small, medium and large scale requests and limits together. | `string` | `""` | no |
-| <a name="input_multitenant"></a> [multitenant](#input\_multitenant) | Lock cross-namespace source references, so a tenant Kustomization cannot reference another tenant's source. Off until the catalog states what it needs. | `bool` | `false` | no |
-| <a name="input_namespace"></a> [namespace](#input\_namespace) | Namespace holding the operator and the Flux controllers. | `string` | `"flux-system"` | no |
-| <a name="input_network_policy"></a> [network\_policy](#input\_network\_policy) | Let the operator install network policies isolating the Flux namespace. On by default; Cilium and Dataplane V2 both enforce them. | `bool` | `true` | no |
+| <a name="input_kube"></a> [kube](#input\_kube) | The catalog modules this cluster enables and their values, as<br/>`{ <module> = { <attribute> = <value> } }`. List only what differs from<br/>the catalog's defaults; an absent module is at its default. Module names<br/>are snake\_case. Typed `any` on purpose: a map(any) refuses two modules with<br/>different attributes, and an object type silently drops a misspelt<br/>attribute — the validations below are what makes a typo an error at plan.<br/>The schema is catalog.tf; the README lists it module by module. | `any` | `{}` | no |
+| <a name="input_network_policy"></a> [network\_policy](#input\_network\_policy) | Let the operator install network policies isolating the Flux namespace. On by default; Cilium enforces them on every cloud we ship. | `bool` | `true` | no |
 | <a name="input_operator_version"></a> [operator\_version](#input\_operator\_version) | Chart version of flux-operator, which is also the operator's own version. Pinned exactly: the operator is pre-1.0 and its minors are not a stable contract. | `string` | `"0.60.0"` | no |
+| <a name="input_socle_version"></a> [socle\_version](#input\_socle\_version) | Tag of the socle artifact to pull. Null means this module's own version, so that one bump of the module tag moves module and artifact together. Set it only on a dev cluster testing a branch build, together with cosign\_identity. | `string` | `null` | no |
 | <a name="input_storage_class"></a> [storage\_class](#input\_storage\_class) | Storage class for the source-controller's artifact cache. Empty uses the cluster default. | `string` | `""` | no |
-| <a name="input_sync_digest"></a> [sync\_digest](#input\_sync\_digest) | Digest the tag must resolve to, pinning the artifact by content rather than by name. Empty trusts the tag, which a registry can move. | `string` | `""` | no |
-| <a name="input_sync_interval"></a> [sync\_interval](#input\_sync\_interval) | How often the root source is checked. One minute is the operator's own default and costs one registry HEAD request. | `string` | `"1m"` | no |
-| <a name="input_sync_kind"></a> [sync\_kind](#input\_sync\_kind) | Source kind the operator creates for the root sync. OCIRepository matches the socle's distribution; GitRepository exists for a client who insists on a repository. | `string` | `"OCIRepository"` | no |
-| <a name="input_sync_path"></a> [sync\_path](#input\_sync\_path) | Path inside the artifact the root Kustomization builds. | `string` | `"."` | no |
-| <a name="input_sync_prune"></a> [sync\_prune](#input\_sync\_prune) | Delete objects the artifact no longer contains. On: without it a version bump could only ever add, and a removed component would linger. | `bool` | `true` | no |
-| <a name="input_sync_pull_secret"></a> [sync\_pull\_secret](#input\_sync\_pull\_secret) | Name of an existing Kubernetes secret holding registry credentials for the artifact. Empty means the registry is public or the node identity is enough. | `string` | `""` | no |
-| <a name="input_sync_target_namespace"></a> [sync\_target\_namespace](#input\_sync\_target\_namespace) | Namespace for manifests that carry none of their own. Empty leaves each object where it declares itself, which is what a well-formed socle artifact does. | `string` | `""` | no |
-| <a name="input_sync_timeout"></a> [sync\_timeout](#input\_sync\_timeout) | How long the root Kustomization waits for health before failing a reconciliation. | `string` | `"5m"` | no |
-| <a name="input_sync_wait"></a> [sync\_wait](#input\_sync\_wait) | Have the root Kustomization report ready only once the objects it applied are themselves healthy. | `bool` | `true` | no |
 
 ## Outputs
 
 | Name | Description |
 |------|-------------|
-| <a name="output_cosign_verification"></a> [cosign\_verification](#output\_cosign\_verification) | Whether the root artifact's signature is verified, and against which identity. False means an unsigned or foreign artifact would be applied. |
+| <a name="output_artifact"></a> [artifact](#output\_artifact) | The socle artifact, as OCI URL and tag. |
+| <a name="output_cosign_identity"></a> [cosign\_identity](#output\_cosign\_identity) | Keyless identity the artifact's signature is verified against, on every reconciliation. |
 | <a name="output_flux_version"></a> [flux\_version](#output\_flux\_version) | Flux version the operator converges the controllers to. |
-| <a name="output_namespace"></a> [namespace](#output\_namespace) | Namespace holding the operator and the Flux controllers. |
-| <a name="output_operator_version"></a> [operator\_version](#output\_operator\_version) | Version of flux-operator installed, which is also the chart version. |
-| <a name="output_sync_name"></a> [sync\_name](#output\_sync\_name) | Name of the root source and Kustomization the operator creates. Immutable in the CRD. |
-| <a name="output_sync_source"></a> [sync\_source](#output\_sync\_source) | What this cluster pulls, as kind, URL and pinned reference. |
+| <a name="output_inputs"></a> [inputs](#output\_inputs) | What this module ships into the cluster as the ResourceSetInputProvider's defaultValues, after normalisation against the catalog. The catalog's templates read exactly these paths. |
+| <a name="output_namespace"></a> [namespace](#output\_namespace) | Namespace holding the operator, the Flux controllers and the socle's inputs. |
+| <a name="output_operator_version"></a> [operator\_version](#output\_operator\_version) | Version of flux-operator installed, which is also its chart version. |
+| <a name="output_socle_version"></a> [socle\_version](#output\_socle\_version) | Tag of the socle artifact the cluster pulls. |
 <!-- END_TF_DOCS -->

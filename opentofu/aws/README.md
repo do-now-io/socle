@@ -121,7 +121,7 @@ and tested, so these are refusals:
 ## Tests
 
 ```bash
-tofu test          # 12 runs: every validation, and the defaults
+tofu test          # 14 runs: every validation, and the defaults
 ```
 
 CI plans this module directly against the floci emulator — no fixture
@@ -130,10 +130,17 @@ directory, no cloud account, no secret. The `aws` provider already honors
 throwaway values from `TF_VAR_*`, both set in `integration.yaml`'s shared
 `env:` block rather than baked into the module itself.
 
-That leg **plans, it does not apply** — an apply run this way does create all
-34 resources, but fails as it closes out: `oidc_issuer_url` indexes into
-`identity`, which this image's `DescribeCluster` returns empty. Confirmed to
-be the emulator's gap, not the module's — the same sequence against a real
+That leg **plans, it does not apply** — no longer because the apply fails
+outright. It does not: `oidc_issuer_url` reads through `try()`, so the empty
+`identity` this image's `DescribeCluster` returns yields null and all 34
+resources converge. It is the *second* apply that cannot work, because the
+emulator does not read back what it stored — `DescribeCluster` returns
+`logging`, `encryptionConfig` and `upgradePolicy` as null, `GetRole` returns
+no tags, `DescribeLogGroups` no `kmsKeyId`, `DescribeFlowLogs` no
+`DeliverLogsPermissionArn`. A refresh therefore sees six resources as drifted
+however many times it runs, and the apply that follows dies on
+`UnsupportedOperation: Operation AssociateKmsKey is not supported`. Confirmed
+to be the emulator's gap, not the module's — the same sequence against a real
 EKS cluster showed zero drift. The reason is in the workflow's run summary
 rather than left to be rediscovered.
 
@@ -232,7 +239,8 @@ No modules.
 | <a name="output_cluster_ca_certificate"></a> [cluster\_ca\_certificate](#output\_cluster\_ca\_certificate) | Base64-encoded cluster CA certificate, for building a kubeconfig. |
 | <a name="output_cluster_endpoint"></a> [cluster\_endpoint](#output\_cluster\_endpoint) | The control plane's API endpoint — the access path the socle and its automation use. |
 | <a name="output_cluster_name"></a> [cluster\_name](#output\_cluster\_name) | Name of the EKS cluster. |
-| <a name="output_oidc_issuer_url"></a> [oidc\_issuer\_url](#output\_oidc\_issuer\_url) | The cluster's OIDC issuer. Checklist requirement, not this module's identity mechanism — Pod Identity is, IRSA is absent, and nothing here provisions an OIDC trust relationship against it. |
+| <a name="output_helm_kubernetes"></a> [helm\_kubernetes](#output\_helm\_kubernetes) | Drop-in value for the helm provider's kubernetes attribute, so a root configures it in one line. Carries no credential: the exec plugin obtains a short-lived token from the caller's ambient AWS credentials at call time, exactly as the aws provider itself authenticates. |
+| <a name="output_oidc_issuer_url"></a> [oidc\_issuer\_url](#output\_oidc\_issuer\_url) | The cluster's OIDC issuer. Checklist requirement, not this module's identity mechanism — Pod Identity is, IRSA is absent, and nothing here provisions an OIDC trust relationship against it. Null on an emulated cluster that reports no identity (floci), so an apply there still converges. |
 | <a name="output_private_subnet_ids"></a> [private\_subnet\_ids](#output\_private\_subnet\_ids) | Private subnet IDs, one per AZ. |
 | <a name="output_public_subnet_ids"></a> [public\_subnet\_ids](#output\_public\_subnet\_ids) | Public subnet IDs, one per AZ. |
 | <a name="output_region"></a> [region](#output\_region) | Region the cluster and VPC were created in, as resolved from the provider. |

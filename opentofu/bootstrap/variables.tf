@@ -1,16 +1,26 @@
-# One module for four clouds. Nothing here names a provider: what differs
-# between EKS, GKE, AKS and Kapsule is a single enum, cluster_type, which the
-# operator uses to wire cloud-specific workload identity.
+# One module for four clouds. Nothing here names a cloud provider; `cloud`
+# picks the artifact's overlay and the operator's cluster type, and that is
+# the only thing that differs between EKS, GKE, AKS and Kapsule.
 #
-# Every variable is typed, every constrained value carries a validation block,
-# and every default is the position docs/flux-bootstrap.md argues for.
+# Every variable is typed, every constraint is a validation block with a test
+# that trips it, and every default is the position docs/flux-catalog.md argues.
 
 # ---------------------------------------------------------------------------
 # Identity of the deployment
 # ---------------------------------------------------------------------------
 
+variable "cloud" {
+  description = "Which cloud this cluster runs on. Selects the artifact's clusters/<cloud> overlay and the operator's workload identity wiring. Scaleway has no federation the operator knows, so it runs as a plain kubernetes cluster."
+  type        = string
+
+  validation {
+    condition     = contains(["aws", "gcp", "azure", "scaleway"], var.cloud)
+    error_message = "cloud must be one of aws, gcp, azure or scaleway."
+  }
+}
+
 variable "cluster_name" {
-  description = "Cluster this Flux instance serves. Stamped on every object the operator creates, so a fleet-wide query can tell them apart."
+  description = "Cluster this socle serves. Stamped on every object the operator creates, and exposed to the catalog as inputs.cluster.name."
   type        = string
 
   validation {
@@ -20,7 +30,7 @@ variable "cluster_name" {
 }
 
 variable "environment" {
-  description = "Environment this cluster serves. Stamped as a label, and the axis the upgrade ring order follows."
+  description = "Environment this cluster serves. Stamped as a label, exposed as inputs.cluster.environment, and the axis the upgrade rings follow."
   type        = string
 
   validation {
@@ -39,25 +49,127 @@ variable "owner" {
   }
 }
 
-variable "cluster_type" {
-  description = "Which cloud this runs on. The operator uses it to wire workload identity for the controllers: aws, azure and gcp have federated identity, kubernetes covers Scaleway and anything else."
-  type        = string
-  default     = "kubernetes"
+# ---------------------------------------------------------------------------
+# The catalog — docs/flux-catalog.md §2 and §3
+# ---------------------------------------------------------------------------
+
+# nullable = false on every defaulted variable: a root that groups its
+# inputs in an object passes an omitted key as an explicit null, and
+# OpenTofu keeps that null unless the variable refuses it. Refusing it is
+# what makes the module's default the recommended position for every
+# caller.
+variable "kube" {
+  description = <<-EOT
+    The catalog modules this cluster enables and their values, as
+    `{ <module> = { <attribute> = <value> } }`. List only what differs from
+    the catalog's defaults; an absent module is at its default. Module names
+    are snake_case. Typed `any` on purpose: a map(any) refuses two modules with
+    different attributes, and an object type silently drops a misspelt
+    attribute — the validations below are what makes a typo an error at plan.
+    The schema is catalog.tf; the README lists it module by module.
+  EOT
+  type        = any
+  default     = {}
+  nullable    = false
 
   validation {
-    condition     = contains(["kubernetes", "aws", "azure", "gcp", "openshift"], var.cluster_type)
-    error_message = "cluster_type must be one of kubernetes, aws, azure, gcp or openshift. Scaleway has no workload identity federation, so it is kubernetes."
+    condition     = can(keys(var.kube)) && alltrue([for m, v in var.kube : can(keys(v))])
+    error_message = "kube must be a map of module name => object of attributes."
+  }
+
+  validation {
+    condition     = !can(keys(var.kube)) || alltrue([for m in keys(var.kube) : contains(keys(local.catalog), m)])
+    error_message = "kube: unknown module(s) ${join(", ", try(setsubtract(keys(var.kube), keys(local.catalog)), ["?"]))}. Catalog: ${join(", ", keys(local.catalog))}."
+  }
+
+  validation {
+    condition     = !can(keys(var.kube)) || alltrue(flatten([for m, v in var.kube : [for a in try(keys(v), []) : contains(keys(lookup(local.catalog, m, {})), a)]]))
+    error_message = "kube: unknown attribute. Allowed per module: ${jsonencode({ for m, d in local.catalog : m => keys(d) })}."
+  }
+
+  # Unknown module or attribute names are already refused above; this block
+  # ignores them so only one diagnostic fires per mistake. A null catalog
+  # default means "any type". `enabled` is covered here too: its catalog
+  # default is a bool, so anything but true or false is the wrong kind.
+  validation {
+    condition = !can(keys(var.kube)) || alltrue(flatten([
+      for m, v in var.kube : [
+        for a, x in try(v, {}) :
+        !contains(keys(lookup(local.catalog, m, {})), a)
+        || lookup(local.catalog, m, {})[a] == null
+        || lookup(local.json_kinds, substr(jsonencode(x), 0, 1), "number") == lookup(local.json_kinds, substr(jsonencode(lookup(local.catalog, m, {})[a]), 0, 1), "number")
+      ]
+    ]))
+    error_message = "kube: an attribute has the wrong type. Each value must have the type of its catalog default: ${jsonencode({ for m, d in local.catalog : m => { for a, x in d : a => lookup(local.json_kinds, substr(jsonencode(x), 0, 1), "number") } })}."
   }
 }
 
 # ---------------------------------------------------------------------------
-# Versions — docs/flux-bootstrap.md
+# What the cluster pulls — docs/flux-catalog.md §3 and §7
+# ---------------------------------------------------------------------------
+
+variable "socle_version" {
+  description = "Tag of the socle artifact to pull. Null means this module's own version, so that one bump of the module tag moves module and artifact together. Set it only on a dev cluster testing a branch build, together with cosign_identity."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.socle_version == null || can(regex("^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$", var.socle_version))
+    error_message = "socle_version must be a SemVer tag such as 1.4.2 or 0.0.0-feat-x.abc1234. latest, main and other moving heads are refused: a cluster pins a version."
+  }
+}
+
+variable "artifact_url" {
+  description = "OCI repository the socle artifact is pulled from. Override for a mirror; the tag is socle_version."
+  type        = string
+  default     = "oci://ghcr.io/do-now-io/socle/flux-modules"
+  nullable    = false
+
+  validation {
+    condition     = startswith(var.artifact_url, "oci://")
+    error_message = "artifact_url must start with oci://."
+  }
+}
+
+variable "artifact_pull_secret" {
+  description = "Name of an existing kubernetes.io/dockerconfigjson Secret in flux-system that Flux uses to pull the artifact from a private registry. Empty for a public registry. The Secret is created outside this module — a credential never enters OpenTofu."
+  type        = string
+  default     = ""
+  nullable    = false
+
+  validation {
+    condition     = var.artifact_pull_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.artifact_pull_secret))
+    error_message = "artifact_pull_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
+  }
+}
+
+variable "cosign_identity" {
+  description = "Keyless identity the artifact's signature must match, as issuer and subject regexes. Defaults to the socle's release workflow on main, so production never consumes a branch build by accident. Override on a dev cluster testing a branch. Null means this default. Verification cannot be disabled."
+  type = object({
+    issuer  = string
+    subject = string
+  })
+  default = {
+    issuer  = "^https://token\\.actions\\.githubusercontent\\.com$"
+    subject = "^https://github\\.com/do-now-io/socle/\\.github/workflows/publish-artifact\\.yaml@refs/heads/main$"
+  }
+  nullable = false
+
+  validation {
+    condition     = try(length(var.cosign_identity.issuer) > 0 && length(var.cosign_identity.subject) > 0, false)
+    error_message = "cosign_identity needs a non-empty issuer and subject. Verification cannot be turned off."
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Flux itself
 # ---------------------------------------------------------------------------
 
 variable "operator_version" {
   description = "Chart version of flux-operator, which is also the operator's own version. Pinned exactly: the operator is pre-1.0 and its minors are not a stable contract."
   type        = string
   default     = "0.60.0"
+  nullable    = false
 
   validation {
     condition     = can(regex("^[0-9]+\\.[0-9]+\\.[0-9]+$", var.operator_version))
@@ -66,9 +178,10 @@ variable "operator_version" {
 }
 
 variable "flux_version" {
-  description = "Flux version the operator installs and keeps converged. \"2.x\" tracks the latest 2 series; an exact version pins it."
+  description = "Flux version the operator installs and keeps converged. 2.x tracks the latest 2 series; an exact version pins it."
   type        = string
   default     = "2.x"
+  nullable    = false
 
   validation {
     condition     = can(regex("^2(\\.[0-9x]+){0,2}$", var.flux_version))
@@ -77,7 +190,7 @@ variable "flux_version" {
 }
 
 variable "flux_components" {
-  description = "Flux controllers to install. The image automation pair is absent by default: the socle's version moves through Git, not through a controller rewriting tags in the cluster."
+  description = "Flux controllers to install. The image automation pair is absent by default: the socle's version moves through a reviewed tfvars change, not through a controller rewriting tags."
   type        = list(string)
   default = [
     "source-controller",
@@ -85,6 +198,7 @@ variable "flux_components" {
     "helm-controller",
     "notification-controller",
   ]
+  nullable = false
 
   validation {
     condition = alltrue([for c in var.flux_components : contains([
@@ -105,175 +219,18 @@ variable "flux_components" {
   }
 }
 
-# ---------------------------------------------------------------------------
-# What the cluster pulls — docs/flux-bootstrap.md
-# ---------------------------------------------------------------------------
-
-variable "sync_url" {
-  description = "Where the cluster pulls the socle from. An oci:// artifact by default — the socle is distributed as one signed OCI artifact, not as a Git repository per client."
-  type        = string
-
-  validation {
-    condition     = can(regex("^(oci|https|ssh)://", var.sync_url))
-    error_message = "sync_url must start with oci://, https:// or ssh://."
-  }
-}
-
-variable "sync_kind" {
-  description = "Source kind the operator creates for the root sync. OCIRepository matches the socle's distribution; GitRepository exists for a client who insists on a repository."
-  type        = string
-  default     = "OCIRepository"
-
-  validation {
-    condition     = contains(["OCIRepository", "GitRepository", "Bucket"], var.sync_kind)
-    error_message = "sync_kind must be OCIRepository, GitRepository or Bucket."
-  }
-
-  validation {
-    condition     = var.sync_kind != "OCIRepository" || startswith(var.sync_url, "oci://")
-    error_message = "An OCIRepository sync needs an oci:// URL."
-  }
-}
-
-variable "sync_ref" {
-  description = "The tag, digest or branch to pin. Required with no default: a floating reference would make \"which version is deployed\" unanswerable, which is the one question the distribution exists to answer."
-  type        = string
-
-  validation {
-    condition     = length(var.sync_ref) > 0
-    error_message = "sync_ref must name a tag, a digest or a branch."
-  }
-
-  validation {
-    condition     = !contains(["latest", "main", "master", "HEAD"], var.sync_ref)
-    error_message = "latest, main, master and HEAD are refused: a cluster must pin a version, not follow a moving head."
-  }
-}
-
-variable "sync_interval" {
-  description = "How often the root source is checked. One minute is the operator's own default and costs one registry HEAD request."
-  type        = string
-  default     = "1m"
-
-  validation {
-    condition     = can(regex("^([0-9]+(\\.[0-9]+)?(ms|s|m|h))+$", var.sync_interval))
-    error_message = "sync_interval must be a Go duration, such as 1m or 30s."
-  }
-}
-
-variable "sync_digest" {
-  description = "Digest the tag must resolve to, pinning the artifact by content rather than by name. Empty trusts the tag, which a registry can move."
-  type        = string
-  default     = ""
-
-  validation {
-    condition     = var.sync_digest == "" || can(regex("^sha256:[0-9a-f]{64}$", var.sync_digest))
-    error_message = "sync_digest must be a sha256:<64 hex> digest, or empty."
-  }
-}
-
-variable "sync_path" {
-  description = "Path inside the artifact the root Kustomization builds."
-  type        = string
-  default     = "."
-}
-
-variable "sync_target_namespace" {
-  description = "Namespace for manifests that carry none of their own. Empty leaves each object where it declares itself, which is what a well-formed socle artifact does."
-  type        = string
-  default     = ""
-}
-
-variable "sync_prune" {
-  description = "Delete objects the artifact no longer contains. On: without it a version bump could only ever add, and a removed component would linger."
-  type        = bool
-  default     = true
-}
-
-variable "sync_wait" {
-  description = "Have the root Kustomization report ready only once the objects it applied are themselves healthy."
-  type        = bool
-  default     = true
-}
-
-variable "sync_timeout" {
-  description = "How long the root Kustomization waits for health before failing a reconciliation."
-  type        = string
-  default     = "5m"
-
-  validation {
-    condition     = can(regex("^([0-9]+(\\.[0-9]+)?(ms|s|m|h))+$", var.sync_timeout))
-    error_message = "sync_timeout must be a Go duration, such as 5m."
-  }
-}
-
-variable "sync_pull_secret" {
-  description = "Name of an existing Kubernetes secret holding registry credentials for the artifact. Empty means the registry is public or the node identity is enough."
-  type        = string
-  default     = ""
-}
-
-# ---------------------------------------------------------------------------
-# Supply chain — docs/flux-bootstrap.md#cosign
-# ---------------------------------------------------------------------------
-
-variable "cosign_verification_enabled" {
-  description = "Have Flux verify the artifact's cosign signature before applying it, and on every reconciliation after. This is why the root source is a chart of our own rather than the FluxInstance's sync block, which has no verify field."
-  type        = bool
-  default     = true
-
-  validation {
-    condition     = !var.cosign_verification_enabled || var.sync_kind == "OCIRepository"
-    error_message = "cosign verification only applies to an OCIRepository sync."
-  }
-}
-
-variable "cosign_identity" {
-  description = "Keyless identity the signature must match, as an object of issuer and subject regexes. Null verifies the signature without pinning who produced it, which is weaker and should be temporary."
-  type = object({
-    issuer  = string
-    subject = string
-  })
-  default = null
-
-  validation {
-    condition     = var.cosign_identity == null || try(length(var.cosign_identity.issuer) > 0 && length(var.cosign_identity.subject) > 0, false)
-    error_message = "cosign_identity needs a non-empty issuer and subject, or must be null."
-  }
-}
-
-# ---------------------------------------------------------------------------
-# Cluster shape
-# ---------------------------------------------------------------------------
-
-variable "namespace" {
-  description = "Namespace holding the operator and the Flux controllers."
-  type        = string
-  default     = "flux-system"
-}
-
 variable "network_policy" {
-  description = "Let the operator install network policies isolating the Flux namespace. On by default; Cilium and Dataplane V2 both enforce them."
+  description = "Let the operator install network policies isolating the Flux namespace. On by default; Cilium enforces them on every cloud we ship."
   type        = bool
   default     = true
-}
-
-variable "multitenant" {
-  description = "Lock cross-namespace source references, so a tenant Kustomization cannot reference another tenant's source. Off until the catalog states what it needs."
-  type        = bool
-  default     = false
-}
-
-variable "storage_class" {
-  description = "Storage class for the source-controller's artifact cache. Empty uses the cluster default."
-  type        = string
-  default     = ""
+  nullable    = false
 }
 
 variable "instance_size" {
   description = "Resource profile the operator applies to the controllers. Empty is the operator's own default; small, medium and large scale requests and limits together."
   type        = string
   default     = ""
+  nullable    = false
 
   validation {
     condition     = contains(["", "small", "medium", "large"], var.instance_size)
@@ -281,10 +238,18 @@ variable "instance_size" {
   }
 }
 
+variable "storage_class" {
+  description = "Storage class for the source-controller's artifact cache. Empty uses the cluster default."
+  type        = string
+  default     = ""
+  nullable    = false
+}
+
 variable "helm_timeout_seconds" {
-  description = "How long to wait for each release to become ready. The operator reconciles the Flux controllers after its own install, so the instance release is the slow one."
+  description = "How long to wait for each release to become ready. The instance release is the slow one: its health check waits for the operator to converge the controllers."
   type        = number
   default     = 600
+  nullable    = false
 
   validation {
     condition     = var.helm_timeout_seconds >= 60 && floor(var.helm_timeout_seconds) == var.helm_timeout_seconds

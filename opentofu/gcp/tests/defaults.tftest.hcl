@@ -175,3 +175,12 @@ run "private_nodes_without_egress_are_refused" {
 
   expect_failures = [var.create_nat]
 }
+
+run "helm_kubernetes_is_credential_free_and_uses_the_gke_exec_plugin" {
+  command = plan
+
+  assert {
+    condition     = output.helm_kubernetes.exec.command == "gke-gcloud-auth-plugin"
+    error_message = "helm_kubernetes must obtain its token at call time through gke-gcloud-auth-plugin, never carry one."
+  }
+}

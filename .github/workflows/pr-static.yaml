@@ -18,6 +18,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# `shell: bash` runs every step with -o pipefail: a failure on the left of a
+# pipe (`| tee`, `| python3`) fails the step instead of vanishing behind the
+# right-hand command's exit code. The unspecified default, `bash -e`, does not.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   yamllint:
     name: yamllint
@@ -59,6 +66,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: VERSION is stamped consistently
+        run: |
+          .github/scripts/check-version.sh
+          msg="VERSION \`$(tr -d '[:space:]' < VERSION)\` is stamped on every module and on the bootstrap envelope. ✅"
+          echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+      - name: The catalog and the per-cloud overlays agree
+        run: |
+          .github/scripts/check-catalog-clouds.sh | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Detect OpenTofu sources
         id: detect
         run: |
@@ -84,7 +99,8 @@ jobs:
             echo "| Root module | fmt | validate |"
             echo "|---|---|---|"
           } >> "$GITHUB_STEP_SUMMARY"
-          for dir in opentofu/*/; do
+          for dir in opentofu/*/ opentofu/clusters/*/; do
+            [ -n "$(ls "${dir}"*.tf 2>/dev/null)" ] || continue
             echo "==> ${dir}"
             (cd "${dir}" && tofu init -backend=false -input=false > /dev/null && tofu validate)
             echo "| \`${dir}\` | ✅ | ✅ |" >> "$GITHUB_STEP_SUMMARY"
@@ -92,7 +108,8 @@ jobs:
       - name: tofu test (every root module that has tests)
         if: steps.detect.outputs.found == 'true'
         run: |
-          for dir in opentofu/*/; do
+          for dir in opentofu/*/ opentofu/clusters/*/; do
+            [ -n "$(ls "${dir}"*.tf 2>/dev/null)" ] || continue
             if compgen -G "${dir}tests/*.tftest.hcl" > /dev/null; then
               echo "==> ${dir}"
               (cd "${dir}" && tofu test)
@@ -103,7 +120,7 @@ jobs:
         if: steps.detect.outputs.found == 'true'
         run: |
           image=quay.io/terraform-docs/terraform-docs:0.20.0@sha256:37329e2dc2518e7f719a986a3954b10771c3fe000f50f83fd4d98d489df2eae2
-          for cfg in opentofu/*/.terraform-docs.yml opentofu/*/examples/*/.terraform-docs.yml; do
+          for cfg in opentofu/*/.terraform-docs.yml opentofu/*/examples/*/.terraform-docs.yml opentofu/clusters/*/.terraform-docs.yml; do
             [ -f "${cfg}" ] || continue
             dir="$(dirname "${cfg}")"
             echo "==> ${dir}"
@@ -112,10 +129,15 @@ jobs:
           done
       - uses: terraform-linters/setup-tflint@6e1e0642c0289bd619021bf6b34e3c08ed1e005a # v6.3.0
         if: steps.detect.outputs.found == 'true'
+      # `tflint --init` fetches the AWS ruleset from GitHub releases; anonymous
+      # calls share one rate limit per runner IP and get 403 on a busy day.
       - name: tflint (every root module)
         if: steps.detect.outputs.found == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
-          for dir in opentofu/*/; do
+          for dir in opentofu/*/ opentofu/clusters/*/; do
+            [ -n "$(ls "${dir}"*.tf 2>/dev/null)" ] || continue
             echo "==> ${dir}"
             (cd "${dir}" && tflint --init > /dev/null && tflint --format compact)
             echo "tflint \`${dir}\` ✅" >> "$GITHUB_STEP_SUMMARY"
@@ -140,20 +162,87 @@ jobs:
               echo "No manifests under \`oci/\` yet — checks are dormant."
             } >> "$GITHUB_STEP_SUMMARY"
           fi
-      - name: Validate manifests with kubeconform
+      - name: Install flux-operator CLI
+        if: steps.detect.outputs.found == 'true'
+        env:
+          FLUX_OPERATOR_VERSION: 0.60.0
+        run: |
+          asset="flux-operator_${FLUX_OPERATOR_VERSION}_linux_amd64.tar.gz"
+          url="https://github.com/controlplaneio-fluxcd/flux-operator/releases/download/v${FLUX_OPERATOR_VERSION}/${asset}"
+          curl -sL "${url}" | tar xz -C /usr/local/bin flux-operator
+          flux-operator --version
+      - name: Render the catalog and the bootstrap envelope
         if: steps.detect.outputs.found == 'true'
         run: |
-          docker run --rm -v "${PWD}:/work" -w /work \
+          mkdir -p rendered
+          # One ResourceSet per catalog module, rendered with the committed
+          # sample inputs — the same shape OpenTofu deposits at bootstrap.
+          for rs in oci/catalog/*/resourceset.yaml; do
+            module="$(basename "$(dirname "${rs}")")"
+            flux-operator build rset -f "${rs}" --inputs-from oci/.ci/inputs-sample.yaml \
+              > "rendered/${module}.yaml"
+          done
+          # The bootstrap envelope Helm deposits: the literal templates (the
+          # << >> operator syntax stays as text — Helm never touches it) ...
+          helm template socle opentofu/bootstrap/manifests \
+            --values oci/.ci/envelope-values.yaml > rendered/envelope.yaml
+          # ... and, split so flux-operator can tell the two kinds apart, the
+          # root ResourceSet actually built from those inputs — the real
+          # Namespace/OCIRepository/Kustomization it would hand the cluster.
+          helm template socle opentofu/bootstrap/manifests \
+            --values oci/.ci/envelope-values.yaml --show-only templates/root.yaml \
+            > /tmp/envelope-root.yaml
+          helm template socle opentofu/bootstrap/manifests \
+            --values oci/.ci/envelope-values.yaml --show-only templates/inputs.yaml \
+            > /tmp/envelope-inputs.yaml
+          flux-operator build rset -f /tmp/envelope-root.yaml \
+            --inputs-from-provider /tmp/envelope-inputs.yaml \
+            > rendered/envelope-root-built.yaml
+      - name: kubeconform the render (strict)
+        if: steps.detect.outputs.found == 'true'
+        run: |
+          docker run --rm -v "${PWD}/rendered:/work/rendered" -w /work \
             ghcr.io/yannh/kubeconform:v0.7.0@sha256:85dbef6b4b312b99133decc9c6fc9495e9fc5f92293d4ff3b7e1b30f5611823c \
             -strict -summary \
             -schema-location default \
             -schema-location \
-            'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceVersion}}.json' \
-            oci/ | tee kubeconform.out
+            'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            rendered/ | tee kubeconform-rendered.out
+      - name: kubeconform the artifact templates
+        if: steps.detect.outputs.found == 'true'
+        run: |
+          # fluxcd.controlplane.io kinds (ResourceSet, ResourceSetInputProvider)
+          # are templates: `<< >>` is not YAML the operator has rendered yet,
+          # and they may be absent from the datree schema catalog — ignored if
+          # missing, but not exempt from -strict when a schema is found.
+          docker run --rm -v "${PWD}:/work" -w /work \
+            ghcr.io/yannh/kubeconform:v0.7.0@sha256:85dbef6b4b312b99133decc9c6fc9495e9fc5f92293d4ff3b7e1b30f5611823c \
+            -strict -summary \
+            -ignore-missing-schemas \
+            -schema-location default \
+            -schema-location \
+            'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            -ignore-filename-pattern '\.patch\.yaml$' \
+            oci/catalog oci/clusters | tee kubeconform-oci.out
+      - name: kustomize build every cluster overlay
+        if: steps.detect.outputs.found == 'true'
+        run: |
+          for dir in oci/clusters/*/; do
+            echo "==> ${dir}"
+            kubectl kustomize --load-restrictor LoadRestrictionsNone "${dir}" > /dev/null
+          done
+      - name: Summary
+        if: steps.detect.outputs.found == 'true'
+        run: |
           {
             echo "### kubeconform ✅"
+            echo "Rendered (\`flux-operator build rset\` + \`helm template\`, strict):"
             echo '```'
-            tail -1 kubeconform.out
+            tail -1 kubeconform-rendered.out
+            echo '```'
+            echo "Artifact templates (\`oci/catalog\`, \`oci/clusters\`, missing schemas ignored):"
+            echo '```'
+            tail -1 kubeconform-oci.out
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
