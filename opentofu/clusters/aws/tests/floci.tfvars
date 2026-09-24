@@ -12,6 +12,17 @@ aws = {
 }
 
 kube = {
+  # Client values merged over the socle's defaults, asserted by e2e-aws-root:
+  # a key the socle leaves unset (accounts.e2e, EXPECT_ARGOCD_ACCOUNT) and one
+  # the socle sets — server memory request, 64Mi in the socle's document —
+  # where the client must win (EXPECT_ARGOCD_SERVER_MEMORY) while the socle's
+  # sibling cpu request survives the deep merge.
+  argocd = {
+    values = {
+      configs = { cm = { "accounts.e2e" = "apiKey" } }
+      server  = { resources = { requests = { memory = "96Mi" } } }
+    }
+  }
   hello = {
     replicas = 1
   }

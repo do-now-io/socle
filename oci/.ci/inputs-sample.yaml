@@ -30,6 +30,19 @@
         extraArgs:
           aws-zone-type: public
       values_secret: external-dns-private-values
+    argocd:
+      enabled: true
+      admin_enabled: true
+      domain: argocd.example.com
+      ha: false
+      values:
+        configs:
+          cm:
+            accounts.ci: apiKey, login
+          rbac:
+            policy.csv: |
+              g, ci, role:readonly
+      values_secret: argocd-values
     hello:
       enabled: true
       replicas: 2
