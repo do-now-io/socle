@@ -56,6 +56,7 @@ locals {
       name        = var.cluster_name
       environment = var.environment
       owner       = var.owner
+      region      = var.region
     }
     socle = {
       url        = var.artifact_url
