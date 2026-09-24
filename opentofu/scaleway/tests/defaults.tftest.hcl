@@ -170,3 +170,12 @@ run "a_pl_waw_estate_can_span_three_zones" {
     error_message = "pl-waw is the one region where a homogeneous three-zone cluster is possible."
   }
 }
+
+run "helm_kubernetes_reads_the_secret_key_from_the_environment_at_call_time" {
+  command = plan
+
+  assert {
+    condition     = output.helm_kubernetes.exec.command == "sh" && can(regex("SCW_SECRET_KEY", join(" ", output.helm_kubernetes.exec.args)))
+    error_message = "Kapsule has no exec plugin; helm_kubernetes must emit an ExecCredential from SCW_SECRET_KEY at call time rather than carry the token."
+  }
+}

@@ -8,6 +8,11 @@
 # audit. There is no all-public escape hatch: the private tier is
 # structural here, whether or not a client's workloads use it.
 
+# AVD-AWS-0178 fires only through a root that passes vpc_flow_logs_enabled as
+# an explicit null (see cluster.tf for the mechanism): the variable is
+# nullable = false with default true, so flow logs are on. Scanned on its
+# own, this module carries no such finding.
+#trivy:ignore:AVD-AWS-0178
 resource "aws_vpc" "socle" {
   count = var.create_vpc ? 1 : 0
 

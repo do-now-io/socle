@@ -20,10 +20,16 @@ variable "environment" {
   type        = string
 }
 
+# nullable = false on every defaulted variable: a root that groups its
+# inputs in an object passes an omitted key as an explicit null, and
+# OpenTofu keeps that null unless the variable refuses it. Refusing it is
+# what makes the module's default the recommended position for every
+# caller.
 variable "additional_tags" {
   description = "Extra tags merged onto every resource this module creates, on top of owner/environment/socle-version."
   type        = map(string)
   default     = {}
+  nullable    = false
 }
 
 # --- Network — docs/aws/eks-network-security.md ---
@@ -36,6 +42,7 @@ variable "create_vpc" {
   description = "Create the VPC, or attach to one the consumer already manages."
   type        = bool
   default     = true
+  nullable    = false
 }
 
 variable "vpc_id" {
@@ -53,6 +60,7 @@ variable "private_subnet_ids" {
   description = "Existing private subnet IDs, one per AZ in availability_zones. Required when create_vpc is false — this module carves its own subnets out of vpc_cidr only when it also creates the VPC."
   type        = list(string)
   default     = []
+  nullable    = false
 
   validation {
     condition     = var.create_vpc || length(var.private_subnet_ids) == length(var.availability_zones)
@@ -64,6 +72,7 @@ variable "public_subnet_ids" {
   description = "Existing public subnet IDs, one per AZ in availability_zones. Required when create_vpc is false — same reasoning as private_subnet_ids."
   type        = list(string)
   default     = []
+  nullable    = false
 
   validation {
     condition     = var.create_vpc || length(var.public_subnet_ids) == length(var.availability_zones)
@@ -75,6 +84,7 @@ variable "vpc_cidr" {
   description = "CIDR for the VPC when this module creates it. Arbitrary default (not a research decision) — a /16 large enough for any socle estate."
   type        = string
   default     = "10.0.0.0/16"
+  nullable    = false
 }
 
 variable "availability_zones" {
@@ -103,6 +113,7 @@ variable "create_nat_gateway" {
   EOT
   type        = bool
   default     = true
+  nullable    = false
 
   validation {
     condition     = var.create_nat_gateway || !var.create_vpc
@@ -114,6 +125,7 @@ variable "vpc_flow_logs_enabled" {
   description = "Record accepted and rejected traffic on the VPC this module creates. On by default, aggregated over ten-minute windows to keep the volume down: it is the only record of who talked to whom, and the segmentation this VPC is built around is unauditable without it."
   type        = bool
   default     = true
+  nullable    = false
 }
 
 variable "cluster_endpoint_public_access_cidrs" {
@@ -145,6 +157,7 @@ variable "secrets_encryption_enabled" {
   description = "Envelope-encrypt Kubernetes Secrets via KMS. On by default: essentially free (~$1/month per key, negligible per-request cost), and standard on Kubernetes 1.28+ already."
   type        = bool
   default     = true
+  nullable    = false
 }
 
 variable "secrets_encryption_kms_key_arn" {
@@ -178,6 +191,7 @@ variable "cluster_log_types" {
   EOT
   type        = list(string)
   default     = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+  nullable    = false
 
   validation {
     condition = alltrue([
@@ -192,6 +206,7 @@ variable "log_retention_days" {
   description = "Retention for the log groups this module creates — the control plane's and the VPC flow logs'. Set explicitly because a log group left to AWS never expires."
   type        = number
   default     = 90
+  nullable    = false
 
   validation {
     condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653], var.log_retention_days)
@@ -239,6 +254,7 @@ variable "force_update_version" {
   EOT
   type        = bool
   default     = false
+  nullable    = false
 }
 
 # Pod Identity is the only workload-identity mechanism this module would use —

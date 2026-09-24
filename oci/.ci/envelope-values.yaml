@@ -1,0 +1,18 @@
+inputs:
+  cloud: aws
+  cluster:
+    name: ci
+    environment: dev
+    owner: platform
+  socle:
+    url: oci://ghcr.io/do-now-io/socle/flux-modules
+    version: 0.0.0-ci.0000000
+    pullSecret: ""
+  cosign:
+    issuer: ^https://token\.actions\.githubusercontent\.com$
+    subject: ^https://github\.com/do-now-io/socle/\.github/workflows/publish-artifact\.yaml@refs/heads/main$
+  modules:
+    hello:
+      enabled: true
+      replicas: 1
+      message: hello from socle

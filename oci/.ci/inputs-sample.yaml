@@ -1,0 +1,13 @@
+- cloud: aws
+  cluster:
+    name: t
+    environment: dev
+    owner: platform
+  socle:
+    url: oci://x/y
+    version: 0.0.0 # x-release-please-version
+  modules:
+    hello:
+      enabled: true
+      replicas: 2
+      message: hi
