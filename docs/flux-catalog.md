@@ -400,8 +400,9 @@ is read from the conventional commits since it.
   commit → `VERSION`, fix then feat after a release → `0.1.1` then `0.2.0`,
   breaking before 1.0.0 → minor, `Release-As` → forced, breaking after 1.0.0
   → major. `release.sh` likewise: promotion of a non-latest alpha by its
-  commit; a `v`-prefixed tag, a commit without alpha, no alpha at all and a
-  released version → refused. The release-please configuration is checked
+  commit; a version already released as this commit's alpha → accepted
+  without re-tagging; a `v`-prefixed tag, a commit without alpha, no alpha at
+  all and a version released as another digest → refused. The release-please configuration is checked
   with a `release-pr --dry-run` against this branch: 14 files updated, the
   first changelog spanning the whole history. The first real cycle is
   the merge of this PR: `0.1.0-alpha.1`, a release PR titled

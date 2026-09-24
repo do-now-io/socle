@@ -14,11 +14,16 @@ if [ "$RELEASE_TAG" != "$base" ]; then
   echo "::error::release tag '$RELEASE_TAG' is not the VERSION of the tagged commit ('$base') — tag the release '$base', or bump VERSION first"
   exit 1
 fi
-if err="$(crane manifest "$repo:$base" 2>&1 > /dev/null)"; then
-  echo "::error::$base is already released — a release tag is never overwritten"
-  exit 1
-elif ! printf '%s' "$err" | grep -qE 'MANIFEST_UNKNOWN|NAME_UNKNOWN'; then
-  echo "::error::cannot tell whether $repo:$base exists: $err"
+# An existing release tag is not an error by itself: the promote job tags two
+# packages, and a re-run after it failed between them finds the first one
+# done. It is checked against this commit's alpha below.
+released=""
+if released="$(crane digest "$repo:$base" 2>&1)"; then
+  :
+elif printf '%s' "$released" | grep -qE 'MANIFEST_UNKNOWN|NAME_UNKNOWN'; then
+  released=""
+else
+  echo "::error::cannot tell whether $repo:$base exists: $released"
   exit 1
 fi
 # The alpha to promote is the one built from this very commit: only pushes to
@@ -34,7 +39,16 @@ if [ -z "$alpha" ]; then
   exit 1
 fi
 digest="$(crane digest "$repo:$alpha")"
-crane tag "$repo@$digest" "$base"
+if [ -n "$released" ]; then
+  # Already this commit's alpha: the promotion happened, nothing to redo. Any
+  # other digest means the tag was cut elsewhere, and is never overwritten.
+  if [ "$released" != "$digest" ]; then
+    echo "::error::$base is already released as $released, not as $alpha ($digest) — a release tag is never overwritten"
+    exit 1
+  fi
+else
+  crane tag "$repo@$digest" "$base"
+fi
 echo "tag=$base"
 echo "alpha=$alpha"
 echo "digest=$digest"
