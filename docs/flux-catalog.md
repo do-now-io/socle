@@ -368,11 +368,20 @@ Rules for a module template, all measured:
   convenience, not a lock**: a client who sets both `domain` and the same key
   in `values` gets what `values` says, because it is merged later.
 
-- **A module that needs a cloud service carries its own access.** Not the
-  foundations: the module ships its `ServiceAccount` and the object that
-  creates the role granting that access, as Crossplane managed resources
-  rendered by its own `ResourceSet`, inside the artifact. `external_dns`
-  needing Route 53, Cloud DNS or Azure DNS is the case that decided it.
+- **A module that needs a cloud service carries its own access.** The module
+  ships its `ServiceAccount` and the object that creates the role granting
+  that access, as Crossplane managed resources rendered by its own
+  `ResourceSet`, inside the artifact. `external_dns` is the worked example:
+  its `ResourceSet` declares the IAM role, grants it Route 53, binds it to the
+  `ServiceAccount` it generated, and only then installs the release that runs
+  under it. One template, one module, one decision.
+
+  **OpenTofu never creates a role for a module. Never.** Not as a default, not
+  as an option, not as an escape hatch for a cluster without Crossplane. Five
+  modules times four clouds is twenty IAM blocks a foundations module would
+  have to carry and a client would have to wire through his tfvars, and each
+  new module would add four more. That is unlivable, and it is the reason
+  Crossplane is in the socle at all.
 
   The rule this enforces is an invariance: **a foundations module never
   changes because of the catalog.** `opentofu/aws` describes a cluster, and it
@@ -405,9 +414,9 @@ Rules for a module template, all measured:
   permissions on AWS are on the node role, from the foundations, and that is
   the boundary rather than an exception to argue about.
 
-  The design, the ordering chain (foundations, Cilium and CoreDNS, Flux,
-  Crossplane, a module's role, that module's workload) and the escape hatch
-  for a cluster without Crossplane are in `docs/catalog/crossplane.md`; each
+  The design and the ordering chain — foundations, Cilium and CoreDNS, Flux,
+  Crossplane, a module's role, that module's workload — are in
+  `docs/catalog/crossplane.md`; each
   module's own note says what access it declares.
 
 Deleting a `ResourceSet` uninstalls everything it rendered — measured.
