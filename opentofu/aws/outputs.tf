@@ -81,3 +81,20 @@ output "bootstrap_node_group" {
     capacity_type  = var.bootstrap_node_capacity_type
   }
 }
+
+output "crossplane_role_arn" {
+  description = "ARN of the IAM role the catalog's crossplane module's AWS providers run as, through Pod Identity. Null when crossplane is not set."
+  value       = one(aws_iam_role.crossplane[*].arn)
+}
+
+output "crossplane_permissions_boundary_arn" {
+  description = "ARN of the permissions boundary every role Crossplane creates must carry — what kube.crossplane.permissions_boundary takes, and what the client root passes for you. Null when crossplane is not set."
+  # Built from the policy's own deterministic name and path, not read off
+  # aws_iam_policy.crossplane_boundary.arn: on the apply that first creates
+  # it, that attribute is unknown until AWS assigns it, and the client
+  # root's kube.crossplane.permissions_boundary is checked by a validation
+  # block, which OpenTofu refuses to evaluate against an unknown value — the
+  # apply fails at plan rather than deferring. account_id and cluster_name
+  # are known immediately, so this ARN is too, on the very first apply.
+  value = var.crossplane == null ? null : "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy${local.crossplane_role_path}crossplane-boundary"
+}
