@@ -1,8 +1,9 @@
 # The cluster — docs/aws/eks-cluster-mode.md (EKS Standard, no Auto Mode)
 # and docs/aws/eks-managed-scope.md (add-ons, version policy, Upgrade
-# Insights). An empty-shell control plane: Karpenter, Cilium, CSI drivers
-# and the load balancer controller are factory components delivered
-# through the socle OCI artifact, not provisioned by this module.
+# Insights). A control plane and the bootstrap node group beside it
+# (nodes.tf), nothing more: Karpenter, Cilium, CSI drivers and the load
+# balancer controller are factory components delivered through the socle
+# OCI artifact, not provisioned by this module.
 #
 # Standard mode is the absence of a choice, not a variable: this resource
 # has no compute_config/storage_config blocks (those are what Auto Mode
@@ -113,7 +114,11 @@ resource "aws_eks_cluster" "socle" {
 
   # No self-managed VPC CNI, kube-proxy or CoreDNS installed at creation.
   # Socle runs Cilium, so the first two would exist only to be removed, and
-  # CoreDNS arrives later as a pinned managed add-on installed by the factory.
+  # CoreDNS comes with Cilium from the bootstrap module, as a Helm release
+  # right after it — not as a managed add-on: with no CNI the add-on's pods
+  # never schedule, it sits DEGRADED, and the provider waits for ACTIVE until
+  # it times out, here, before the module that installs the CNI ever runs.
+  # docs/catalog/cilium.md.
   bootstrap_self_managed_addons = false
 
   # Shipped to the log group below, which is created first so that its
@@ -184,12 +189,15 @@ resource "aws_eks_cluster" "socle" {
 }
 
 # No aws_eks_addon here, and that is the module's boundary rather than an
-# omission. CoreDNS and the EBS CSI controller are Deployments; on a cluster
-# with no nodes their pods cannot schedule, the add-on reports DEGRADED and
-# the apply fails. The Pod Identity Agent and the EFS CSI driver leave for the
+# omission. CoreDNS and the EBS CSI controller are Deployments; the bootstrap
+# nodes stay NotReady until the bootstrap module's Cilium runs, so here their
+# pods cannot schedule, the add-on reports DEGRADED and the apply fails. The Pod Identity Agent and the EFS CSI driver leave for the
 # same reason rather than because they would individually break: the rule is
 # that this module provisions nothing that needs a pod to run.
 #
-# All four stay EKS-managed add-ons — that decision is unchanged. They are
-# installed by the factory, once compute exists, at versions the socle
-# pipeline pins. What stays here is what they bind to: the roles in iam.tf.
+# EBS CSI, EFS CSI and the Pod Identity Agent stay EKS-managed add-ons — that
+# decision is unchanged. They are installed by the factory, once compute
+# exists, at versions the socle pipeline pins. CoreDNS is the exception: it
+# is needed before Flux and cannot be an add-on before a CNI exists, so the
+# bootstrap module installs it by Helm, after Cilium (docs/catalog/cilium.md).
+# What stays here is what the add-ons bind to: the roles in iam.tf.
