@@ -217,11 +217,12 @@ variable "log_retention_days" {
 # --- Add-ons and identity — docs/aws/eks-managed-scope.md ---
 
 # No add-on variable here at all. VPC CNI and kube-proxy are refused outright
-# — Cilium replaces both, and the cluster is created without them. CoreDNS,
-# EBS CSI, EFS CSI and the Pod Identity Agent remain EKS-managed add-ons, but
-# they are installed by the factory once compute exists, at versions the socle
-# pipeline pins. This module creates no node, so an add-on installed here
-# would have nowhere to run — see cluster.tf.
+# — Cilium replaces both, and the cluster is created without them. EBS CSI,
+# EFS CSI and the Pod Identity Agent remain EKS-managed add-ons, but they are
+# installed by the factory once compute exists, at versions the socle
+# pipeline pins. This module's nodes are NotReady until Cilium runs, so an
+# add-on installed here would have nowhere to run — see cluster.tf. CoreDNS is installed by the
+# bootstrap module, by Helm, right after Cilium (docs/catalog/cilium.md).
 
 variable "kubernetes_version" {
   description = <<-EOT
@@ -263,3 +264,69 @@ variable "force_update_version" {
 # here all the same, because every one of them would name a service account
 # that does not exist yet. The OIDC issuer URL is still exposed as an output
 # (checklist requirement) even though nothing here consumes it.
+
+# --- Bootstrap nodes ------------------------------------------------------------
+# The one node group this module creates — nodes.tf. Karpenter, installed
+# later by the catalog, provisions the rest.
+
+variable "bootstrap_node_instance_types" {
+  description = <<-EOT
+    Instance types of the bootstrap node group, which carries Cilium's
+    operator, CoreDNS, Flux and later Karpenter — not the client's
+    workloads, which Karpenter's nodes carry. Several on Spot, so the nodes
+    come from independent capacity pools; on demand, the first is used. The
+    default is six Graviton families of 4 vCPU and 8 to 32 GiB: each one
+    alone carries the whole socle, Karpenter included, with half its CPU
+    left, so losing a node to a reclaim is routine. All must share an
+    architecture, which the AMI follows.
+  EOT
+  type        = list(string)
+  default     = ["t4g.xlarge", "m7g.xlarge", "m6g.xlarge", "c7g.xlarge", "c6g.xlarge", "r6g.xlarge"]
+  nullable    = false
+
+  validation {
+    condition     = length(var.bootstrap_node_instance_types) >= 1 && alltrue([for t in var.bootstrap_node_instance_types : can(regex("^[a-z]+[0-9]+[a-z-]*\\.[0-9a-z]+$", t))])
+    error_message = "bootstrap_node_instance_types must list at least one EC2 instance type, each such as \"t4g.medium\" or \"m7i.large\"."
+  }
+
+  validation {
+    condition     = length(distinct([for t in var.bootstrap_node_instance_types : can(regex("^[a-z]+[0-9]+[a-z]*g[a-z]*\\.", t))])) <= 1
+    error_message = "bootstrap_node_instance_types must not mix Graviton and x86 types: one node group runs one AMI."
+  }
+}
+
+variable "bootstrap_node_capacity_type" {
+  description = <<-EOT
+    SPOT by default: the several instance types spread the two nodes over
+    independent pools, and EKS replaces a node at risk before draining it.
+    ON_DEMAND for a cluster that must not lose a bootstrap node to a
+    reclaim, at about two and a half times the price.
+  EOT
+  type        = string
+  default     = "SPOT"
+  nullable    = false
+
+  validation {
+    condition     = contains(["SPOT", "ON_DEMAND"], var.bootstrap_node_capacity_type)
+    error_message = "bootstrap_node_capacity_type must be SPOT or ON_DEMAND."
+  }
+}
+
+variable "bootstrap_node_count" {
+  description = <<-EOT
+    How many bootstrap nodes, spread over the private subnets' AZs. Two by
+    default: when one is reclaimed or lost the other carries the whole socle
+    until it is replaced, CoreDNS keeps a replica, and Karpenter's chart
+    places its two replicas on different nodes in different zones.
+    One is accepted on a cluster that can live with neither. Nothing scales
+    this group, so it is one number rather than min, max and desired.
+  EOT
+  type        = number
+  default     = 2
+  nullable    = false
+
+  validation {
+    condition     = var.bootstrap_node_count >= 1 && floor(var.bootstrap_node_count) == var.bootstrap_node_count
+    error_message = "bootstrap_node_count must be a whole number of at least 1: a cluster with no node runs nothing, the socle included."
+  }
+}
