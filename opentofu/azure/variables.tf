@@ -113,6 +113,26 @@ variable "dns_service_ip" {
   default     = "10.1.0.10"
 }
 
+variable "pod_cidr" {
+  description = <<-EOT
+    Range Cilium allocates pod addresses from, as the cluster pool of the
+    Cilium the bootstrap module installs (docs/catalog/cilium.md). Not set on
+    the cluster: azurerm refuses pod_cidr under network_plugin = "none" (see
+    cluster.tf), so this module only carries the value to the bootstrap
+    through its output. Must not overlap the VNet, service_cidr or any
+    connected network. The default is AKS's own pod range, which the chart's
+    default (10.0.0.0/8) would not be: that one contains the VNet.
+  EOT
+  type        = string
+  default     = "10.244.0.0/16"
+  nullable    = false
+
+  validation {
+    condition     = can(cidrhost(var.pod_cidr, 0)) && can(regex("/", var.pod_cidr))
+    error_message = "pod_cidr must be an IPv4 CIDR such as 10.244.0.0/16."
+  }
+}
+
 # --- Cluster — docs/azure/cluster-mode.md, docs/azure/managed-scope.md ---
 
 variable "kubernetes_version" {
