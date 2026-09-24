@@ -47,6 +47,14 @@ run "defaults_are_the_recommended_position" {
     error_message = "crossplane must default to off with no client values and no boundary: no module claims cloud access yet, and the boundary is wired by the root from the foundations."
   }
   assert {
+    condition     = output.inputs.modules.external_dns.enabled == false && output.inputs.modules.external_dns.policy == "upsert-only"
+    error_message = "external_dns must be off by default — it needs a zone — and upsert-only when enabled: it never deletes a record unless asked."
+  }
+  assert {
+    condition     = output.inputs.modules.external_dns.txt_owner_id == "socle-test" && output.inputs.modules.external_dns.values == {} && output.inputs.modules.external_dns.values_secret == ""
+    error_message = "external_dns.txt_owner_id must default to the cluster name, so two clusters never claim each other's records."
+  }
+  assert {
     condition     = can(regex("refs/heads/main\\$$", output.cosign_identity.subject))
     error_message = "the default cosign identity must trust the release workflow on main only."
   }
@@ -119,6 +127,55 @@ run "the_region_reaches_the_catalog" {
   assert {
     condition     = output.inputs.cluster.region == "eu-west-3"
     error_message = "the region must reach inputs.cluster.region: the crossplane module's Pod Identity associations are regional."
+  }
+}
+
+run "external_dns_enabled_with_every_required_value_passes_and_keeps_the_defaults" {
+  command = plan
+  variables {
+    kube = {
+      external_dns = {
+        enabled        = true
+        domain_filters = ["acme.example", "internal.acme.example."]
+      }
+    }
+  }
+
+  assert {
+    condition     = output.inputs.modules.external_dns.enabled == true && length(output.inputs.modules.external_dns.domain_filters) == 2
+    error_message = "the client's zones must reach the inputs as written."
+  }
+  assert {
+    condition     = output.inputs.modules.external_dns.policy == "upsert-only" && output.inputs.modules.external_dns.txt_owner_id == "socle-test"
+    error_message = "attributes the client did not set must keep the catalog defaults, the cluster name included."
+  }
+}
+
+run "external_dns_values_pass_through_and_a_credential_by_reference_is_allowed" {
+  command = plan
+  variables {
+    kube = {
+      external_dns = {
+        values = {
+          logLevel  = "debug"
+          extraArgs = { aws-zone-type = "public" }
+          env = [{
+            name      = "AWS_SECRET_ACCESS_KEY"
+            valueFrom = { secretKeyRef = { name = "mine", key = "k" } }
+          }]
+        }
+        values_secret = "external-dns-private-values"
+      }
+    }
+  }
+
+  assert {
+    condition     = output.inputs.modules.external_dns.values.logLevel == "debug" && output.inputs.modules.external_dns.values_secret == "external-dns-private-values"
+    error_message = "values and values_secret must reach the inputs as written."
+  }
+  assert {
+    condition     = output.inputs.modules.external_dns.policy == "upsert-only"
+    error_message = "setting values must leave the named attributes at their defaults."
   }
 }
 

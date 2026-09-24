@@ -239,6 +239,12 @@ jobs:
       SUBJECT: ${{ needs.publish.outputs.subject }}
       COSIGN: ${{ needs.publish.outputs.cosign_identity }}
       EXPECT_UI_COLOR: "#FF9900"   # oci/clusters/aws/hello-color.patch.yaml
+      # external_dns on, as a client would write it. The socle provides no
+      # cloud credential yet: floci's come from the external-dns-aws Secret.
+      EXTERNAL_DNS_KUBE: >-
+        {hello={replicas=1},external_dns={enabled=true,domain_filters=["e2e.socle.test"],values={txtOwnerId="socle-e2e-client"}}}
+      EXTERNAL_DNS_KUBE_SYNC: >-
+        {hello={replicas=1},external_dns={enabled=true,domain_filters=["e2e.socle.test"],policy="sync",values={txtOwnerId="socle-e2e-client"}}}
     defaults:
       run:
         working-directory: opentofu/clusters/aws/tests/floci
@@ -344,6 +350,70 @@ jobs:
             -var "cosign_identity=$COSIGN" \
             -var artifact_pull_secret=ghcr-auth \
             -var 'kube={hello={replicas=1}}'
+      # external-dns against floci's emulated Route 53: a fake zone, the
+      # overlay's optional external-dns-aws Secret carrying static test keys and
+      # floci's endpoint, then the module enabled through kube like a client
+      # would. The script's header says what each step proves.
+      - name: external-dns publishes an Ingress and a Service into a fake Route 53
+        env:
+          # kube.external_dns.values overrides the socle's txtOwnerId (the
+          # cluster name): the records must carry the client's owner.
+          OWNER: socle-e2e-client
+          SOCLE_OWNER: socle-e2e-catalog
+        run: |
+          "$GITHUB_WORKSPACE/.github/scripts/e2e/external-dns.sh" prepare
+          tofu apply -input=false -auto-approve \
+            -var "socle_version=$TAG" \
+            -var "cosign_identity=$COSIGN" \
+            -var artifact_pull_secret=ghcr-auth \
+            -var "kube=$EXTERNAL_DNS_KUBE"
+          "$GITHUB_WORKSPACE/.github/scripts/e2e/external-dns.sh" publish
+      - name: upsert-only keeps a record whose source is gone
+        env:
+          # kube.external_dns.values overrides the socle's txtOwnerId (the
+          # cluster name): the records must carry the client's owner.
+          OWNER: socle-e2e-client
+          SOCLE_OWNER: socle-e2e-catalog
+        run: |
+          "$GITHUB_WORKSPACE/.github/scripts/e2e/external-dns.sh" kept
+      - name: policy = "sync" deletes it
+        env:
+          # kube.external_dns.values overrides the socle's txtOwnerId (the
+          # cluster name): the records must carry the client's owner.
+          OWNER: socle-e2e-client
+          SOCLE_OWNER: socle-e2e-catalog
+        run: |
+          tofu apply -input=false -auto-approve \
+            -var "socle_version=$TAG" \
+            -var "cosign_identity=$COSIGN" \
+            -var artifact_pull_secret=ghcr-auth \
+            -var "kube=$EXTERNAL_DNS_KUBE_SYNC"
+          "$GITHUB_WORKSPACE/.github/scripts/e2e/external-dns.sh" deleted
+      - name: Disabling external-dns garbage-collects it
+        run: |
+          tofu apply -input=false -auto-approve \
+            -var "socle_version=$TAG" \
+            -var "cosign_identity=$COSIGN" \
+            -var artifact_pull_secret=ghcr-auth \
+            -var 'kube={hello={replicas=1}}'
+          for _ in $(seq 1 36); do
+            if out="$(kubectl get namespace external-dns 2>&1)"; then
+              sleep 5
+              continue
+            fi
+            case "$out" in
+              *NotFound*|*"not found"*)
+                echo "namespace external-dns is gone: $out"
+                exit 0
+                ;;
+              *)
+                echo "::error::kubectl failed for a reason other than NotFound: $out"
+                exit 1
+                ;;
+            esac
+          done
+          echo "::error::namespace external-dns still present after 180 s"
+          exit 1
       - name: What the cluster looked like when it failed
         if: failure()
         run: |

@@ -11,6 +11,24 @@
 # together because module and artifact share socle_version.
 locals {
   catalog = {
+    # external-dns: publishes DNS records for Services, Ingresses and Gateway
+    # API HTTPRoutes into the cloud's zone (Route 53, Cloud DNS, Azure DNS,
+    # Scaleway DNS — the template picks the provider). Off by default: it
+    # needs a zone to publish into, which has no default, and a credential the
+    # socle does not provide yet — see docs/catalog/external-dns.md. When
+    # enabled, domain_filters is required (variables.tf). txt_owner_id
+    # defaults to the cluster name so two clusters never fight over one zone.
+    external_dns = {
+      enabled        = false
+      domain_filters = []
+      policy         = "upsert-only"
+      txt_owner_id   = var.cluster_name
+      # docs/flux-catalog.md §6: free-form chart values, and the name of a
+      # Secret the client creates in the external-dns namespace for what must
+      # not reach the OpenTofu state.
+      values        = {}
+      values_secret = ""
+    }
     # v1: proves the pipeline end to end. A real module reads exactly like it.
     hello = {
       enabled  = true

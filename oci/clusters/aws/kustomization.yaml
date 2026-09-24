@@ -10,6 +10,7 @@ kind: Kustomization
 resources:
   - ../../catalog/gateway-api/resourceset.yaml
   - ../../catalog/crossplane/resourceset.yaml
+  - ../../catalog/external-dns/resourceset.yaml
   - ../../catalog/hello/resourceset.yaml
 patches:
   - path: hello-color.patch.yaml
