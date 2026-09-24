@@ -59,6 +59,8 @@ Socle is a multi-cloud Kubernetes factory. This document covers one decision: ho
 
 **Handled in-house by the factory.** Karpenter, Cilium, CSI drivers, and the load balancer controller are standard components of Socle.
 
+Karpenter is a pod and needs a node before it can provision one. The foundations therefore own exactly one node group, the bootstrap group (2 nodes of 4 vCPU on Spot over six Graviton families, on-demand one variable away), which carries the socle's own components and Karpenter; Karpenter owns every other node. Sizing and ordering: [the Cilium design note, §2](../catalog/cilium.md).
+
 ## Sources
 
 - [EKS Auto Mode](https://docs.aws.amazon.com/eks/latest/best-practices/automode.html#_faq)

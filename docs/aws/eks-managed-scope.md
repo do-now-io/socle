@@ -10,7 +10,7 @@ Arbitration rule: reliable provider ops at a reasonable surcharge → delegated.
 | ------------------- | ------------------- | --------------------------------- | ------------------------------------------------------------------------ |
 | VPC CNI            | **Refused**        | Never installed                  | `bootstrap_self_managed_addons = false` at creation; replaced by Cilium |
 | kube-proxy         | **Refused**        | Never installed                  | Same flag; replaced by Cilium `kubeProxyReplacement`                    |
-| CoreDNS            | **Delegated**      | AWS packages / factory triggers  | Cluster-internal resolution only; External-DNS (record publishing, cross-cloud) is separate |
+| CoreDNS            | **Factory** (revised) | Helm, in the bootstrap module, right after Cilium | Cluster-internal resolution only; External-DNS (record publishing, cross-cloud) is separate. Was *Delegated* as a managed add-on: an add-on cannot exist before the CNI it needs — see [catalog/cilium](../catalog/cilium.md) |
 | EBS CSI            | **Delegated**      | AWS packages / factory triggers  | Identity via `aws_eks_addon`'s own `pod_identity_association`           |
 | EFS CSI            | **Catalog option** | AWS packages / factory triggers  | RWX only; node component may need a separate association               |
 | Pod Identity Agent | **Delegated**      | AWS packages / factory triggers  | Prerequisite for all workload identity                                 |
