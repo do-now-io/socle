@@ -15,6 +15,13 @@ inputs:
   modules:
     gateway_api:
       enabled: true
+    external_dns:
+      enabled: false
+      domain_filters: []
+      policy: upsert-only
+      txt_owner_id: ci
+      values: {}
+      values_secret: ""
     hello:
       enabled: true
       replicas: 1
