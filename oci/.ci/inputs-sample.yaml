@@ -7,7 +7,15 @@
     url: oci://x/y
     version: 0.0.0 # x-release-please-version
   modules:
+    gateway_api:
+      enabled: true
     hello:
       enabled: true
       replicas: 2
       message: hi
+  cilium:
+    installed: true
+    gatewayApi: true
+    hubble: false
+  gateway:
+    className: cilium
