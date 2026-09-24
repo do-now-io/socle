@@ -180,6 +180,16 @@ run "kubernetes_version_rejects_a_patch_component" {
   expect_failures = [var.kubernetes_version]
 }
 
+run "pod_cidr_rejects_a_bare_address" {
+  command = plan
+
+  variables {
+    pod_cidr = "10.244.0.0"
+  }
+
+  expect_failures = [var.pod_cidr]
+}
+
 run "system_node_pool_node_count_rejects_zero" {
   command = plan
 

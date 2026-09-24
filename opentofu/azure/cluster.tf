@@ -151,10 +151,11 @@ resource "azurerm_kubernetes_cluster" "socle" {
     }
   }
 
-  # BYO CNI: Cilium is not installed by this module, same as Karpenter and
-  # the CSI drivers — a factory component delivered through the socle OCI
-  # artifact. Nodes stay NotReady until it lands. Pod IPAM is entirely
-  # Cilium's own from that point on.
+  # BYO CNI: Cilium is not installed by this module. It is the first Helm
+  # release of the bootstrap module, before Flux — nothing without
+  # hostNetwork starts until it runs, so the catalog cannot carry it
+  # (docs/catalog/cilium.md). Nodes stay NotReady until it lands. Pod IPAM
+  # is entirely Cilium's own from that point on, from var.pod_cidr.
   #
   # No pod_cidr here: azurerm only allows setting it when network_plugin is
   # kubenet or network_plugin_mode is overlay — not none. Microsoft's own
@@ -162,7 +163,8 @@ resource "azurerm_kubernetes_cluster" "socle" {
   # routing to pods, but the azurerm provider's schema doesn't expose that
   # field for this mode. A real gap between the ARM API's own surface and
   # this provider version, not a decision — flagged for the same reason
-  # Deployment Safeguards is, above.
+  # Deployment Safeguards is, above. var.pod_cidr therefore only reaches
+  # Cilium's cluster pool, through this module's output.
   #
   # outbound_type = userAssignedNATGateway: this module attaches its own
   # NAT Gateway directly to the node subnet (network.tf), not one AKS

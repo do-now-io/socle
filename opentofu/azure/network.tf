@@ -8,10 +8,10 @@
 # subnet's private IPs. Nothing here needs to sit in a publicly routable
 # subnet.
 #
-# The subnet is sized for nodes only, never pods: Cilium — installed later,
-# through the socle OCI artifact, not by this module — owns pod IPAM
-# entirely once it replaces the BYO CNI placeholder cluster.tf leaves nodes
-# with at creation.
+# The subnet is sized for nodes only, never pods: Cilium — installed by the
+# bootstrap module before Flux, not by this module — owns pod IPAM entirely,
+# from var.pod_cidr, once it replaces the BYO CNI placeholder cluster.tf
+# leaves nodes with at creation.
 
 resource "azurerm_resource_group" "socle" {
   count = var.create_resource_group ? 1 : 0
