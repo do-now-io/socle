@@ -11,6 +11,12 @@
 # together because module and artifact share socle_version.
 locals {
   catalog = {
+    # v1: proves the pipeline end to end. A real module reads exactly like it.
+    hello = {
+      enabled  = true
+      replicas = 1
+      message  = "hello from socle"
+    }
     # external-dns: publishes DNS records for Services, Ingresses and Gateway
     # API HTTPRoutes into the cloud's zone (Route 53, Cloud DNS, Azure DNS,
     # Scaleway DNS — the template picks the provider). Off by default: it
@@ -28,12 +34,6 @@ locals {
       # not reach the OpenTofu state.
       values        = {}
       values_secret = ""
-    }
-    # v1: proves the pipeline end to end. A real module reads exactly like it.
-    hello = {
-      enabled  = true
-      replicas = 1
-      message  = "hello from socle"
     }
     # The Gateway API standard CRDs, from upstream pinned by commit, and on
     # the clouds where the socle runs Cilium, the `cilium` GatewayClass and
@@ -70,6 +70,27 @@ locals {
       values               = {}
       values_secret        = ""
       permissions_boundary = ""
+    }
+    # The client's GitOps layer: the official argo-cd chart, non-HA, ClusterIP,
+    # no SSO. On by default: it is what a client gets a socle for, and it
+    # converges on floci's k3s (docs/catalog/argocd.md). domain is the host
+    # ArgoCD believes it is served at (configs.cm.url, later the HTTPRoute);
+    # empty means no URL. ha flips the chart's documented HA layout as one
+    # switch. admin_enabled=false removes the local admin once SSO exists.
+    # values is the client's own chart values — accounts, RBAC, repositories,
+    # SSO connectors, exclusions — deep-merged by helm-controller over the
+    # socle's defaults, the client's winning. Secrets are refused there (they
+    # would land in the state and in a plain ConfigMap): a private key or a
+    # client secret goes in values_secret, a Secret the client creates in the
+    # argocd namespace with a values.yaml key, merged the same way and never
+    # read by OpenTofu.
+    argocd = {
+      enabled       = true
+      admin_enabled = true
+      domain        = ""
+      ha            = false
+      values        = {}
+      values_secret = ""
     }
   }
 

@@ -364,3 +364,63 @@ run "region_refuses_a_display_name" {
   variables { region = "Europe (Paris)" }
   expect_failures = [var.region]
 }
+
+run "kube_refuses_argocd_ha_that_is_not_a_bool" {
+  command = plan
+  variables { kube = { argocd = { ha = "yes" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_argocd_admin_enabled_that_is_not_a_bool" {
+  command = plan
+  variables { kube = { argocd = { admin_enabled = 1 } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_argocd_domain_that_is_not_a_string" {
+  command = plan
+  variables { kube = { argocd = { domain = ["argocd.acme.example"] } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_argocd_domain_with_a_scheme" {
+  command = plan
+  variables { kube = { argocd = { domain = "https://argocd.acme.example" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_argocd_domain_that_is_a_bare_label" {
+  command = plan
+  variables { kube = { argocd = { domain = "argocd" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_argocd_values_that_are_not_an_object" {
+  command = plan
+  variables { kube = { argocd = { values = "configs: {}" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_argocd_values_carrying_the_argocd_secret" {
+  command = plan
+  variables { kube = { argocd = { values = { configs = { secret = { argocdServerAdminPassword = "x" } } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_argocd_values_carrying_credential_templates" {
+  command = plan
+  variables { kube = { argocd = { values = { configs = { credentialTemplates = { github = { url = "https://github.com/acme", password = "x" } } } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_argocd_values_carrying_a_repository_private_key" {
+  command = plan
+  variables { kube = { argocd = { values = { configs = { repositories = { app = { url = "https://github.com/acme/app", githubAppID = "1", githubAppPrivateKey = "-----BEGIN" } } } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_argocd_values_secret_that_is_not_a_secret_name" {
+  command = plan
+  variables { kube = { argocd = { values_secret = "ArgoCD_Values" } } }
+  expect_failures = [var.kube]
+}
