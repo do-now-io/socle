@@ -69,6 +69,77 @@ run "kube_refuses_an_attribute_of_the_wrong_type" {
   expect_failures = [var.kube]
 }
 
+run "socle_version_refuses_a_moving_head" {
+  command = plan
+  variables { socle_version = "latest" }
+  expect_failures = [var.socle_version]
+}
+
+run "socle_version_refuses_a_non_semver" {
+  command = plan
+  variables { socle_version = "v1" }
+  expect_failures = [var.socle_version]
+}
+
+run "artifact_url_refuses_a_non_oci_url" {
+  command = plan
+  variables { artifact_url = "https://ghcr.io/do-now-io/socle/flux-modules" }
+  expect_failures = [var.artifact_url]
+}
+
+run "artifact_pull_secret_refuses_an_invalid_secret_name" {
+  command = plan
+  variables { artifact_pull_secret = "Ghcr_Auth" }
+  expect_failures = [var.artifact_pull_secret]
+}
+
+run "cosign_identity_refuses_an_empty_subject" {
+  command = plan
+  variables {
+    cosign_identity = {
+      issuer  = "^https://token\\.actions\\.githubusercontent\\.com$"
+      subject = ""
+    }
+  }
+  expect_failures = [var.cosign_identity]
+}
+
+run "operator_version_refuses_a_range" {
+  command = plan
+  variables { operator_version = "0.60" }
+  expect_failures = [var.operator_version]
+}
+
+run "flux_version_refuses_a_major_that_is_not_two" {
+  command = plan
+  variables { flux_version = "3.0.0" }
+  expect_failures = [var.flux_version]
+}
+
+run "flux_components_refuses_an_unknown_controller" {
+  command = plan
+  variables { flux_components = ["source-controller", "kustomize-controller", "helm-controler"] }
+  expect_failures = [var.flux_components]
+}
+
+run "flux_components_refuses_dropping_the_reconciliation_path" {
+  command = plan
+  variables { flux_components = ["source-controller", "notification-controller"] }
+  expect_failures = [var.flux_components]
+}
+
+run "instance_size_refuses_an_invented_profile" {
+  command = plan
+  variables { instance_size = "xlarge" }
+  expect_failures = [var.instance_size]
+}
+
+run "helm_timeout_refuses_an_unrealistic_value" {
+  command = plan
+  variables { helm_timeout_seconds = 30 }
+  expect_failures = [var.helm_timeout_seconds]
+}
+
 run "cilium_refuses_a_value_that_is_not_an_object" {
   command = plan
   variables { cilium = "yes" }
@@ -190,73 +261,50 @@ run "kube_refuses_a_module_not_offered_on_this_cloud" {
   expect_failures = [var.kube]
 }
 
-run "socle_version_refuses_a_moving_head" {
+run "kube_refuses_crossplane_enabled_that_is_not_a_bool" {
   command = plan
-  variables { socle_version = "latest" }
-  expect_failures = [var.socle_version]
+  variables { kube = { crossplane = { enabled = "true" } } }
+  expect_failures = [var.kube]
 }
 
-run "socle_version_refuses_a_non_semver" {
+run "kube_refuses_crossplane_values_that_are_not_an_object" {
   command = plan
-  variables { socle_version = "v1" }
-  expect_failures = [var.socle_version]
+  variables { kube = { crossplane = { values = "metrics: {enabled: true}" } } }
+  expect_failures = [var.kube]
 }
 
-run "artifact_url_refuses_a_non_oci_url" {
+run "kube_refuses_crossplane_values_carrying_a_secret_in_extra_objects" {
   command = plan
-  variables { artifact_url = "https://ghcr.io/do-now-io/socle/flux-modules" }
-  expect_failures = [var.artifact_url]
+  variables { kube = { crossplane = { values = { extraObjects = [{ apiVersion = "v1", kind = "Secret", metadata = { name = "aws-creds" }, stringData = { credentials = "x" } }] } } } }
+  expect_failures = [var.kube]
 }
 
-run "artifact_pull_secret_refuses_an_invalid_secret_name" {
+run "kube_refuses_crossplane_values_carrying_a_token_in_an_env_var" {
   command = plan
-  variables { artifact_pull_secret = "Ghcr_Auth" }
-  expect_failures = [var.artifact_pull_secret]
+  variables { kube = { crossplane = { values = { extraEnvVarsRBACManager = { GITHUB_TOKEN = "x" } } } } }
+  expect_failures = [var.kube]
 }
 
-run "cosign_identity_refuses_an_empty_subject" {
+run "kube_refuses_crossplane_values_secret_that_is_not_a_secret_name" {
   command = plan
-  variables {
-    cosign_identity = {
-      issuer  = "^https://token\\.actions\\.githubusercontent\\.com$"
-      subject = ""
-    }
-  }
-  expect_failures = [var.cosign_identity]
+  variables { kube = { crossplane = { values_secret = "Crossplane_Values" } } }
+  expect_failures = [var.kube]
 }
 
-run "operator_version_refuses_a_range" {
+run "kube_refuses_crossplane_values_secret_that_is_not_a_string" {
   command = plan
-  variables { operator_version = "0.60" }
-  expect_failures = [var.operator_version]
+  variables { kube = { crossplane = { values_secret = ["crossplane-values"] } } }
+  expect_failures = [var.kube]
 }
 
-run "flux_version_refuses_a_major_that_is_not_two" {
+run "kube_refuses_crossplane_permissions_boundary_that_is_not_a_policy_arn" {
   command = plan
-  variables { flux_version = "3.0.0" }
-  expect_failures = [var.flux_version]
+  variables { kube = { crossplane = { permissions_boundary = "arn:aws:iam::123456789012:role/crossplane" } } }
+  expect_failures = [var.kube]
 }
 
-run "flux_components_refuses_an_unknown_controller" {
+run "region_refuses_a_display_name" {
   command = plan
-  variables { flux_components = ["source-controller", "kustomize-controller", "helm-controler"] }
-  expect_failures = [var.flux_components]
-}
-
-run "flux_components_refuses_dropping_the_reconciliation_path" {
-  command = plan
-  variables { flux_components = ["source-controller", "notification-controller"] }
-  expect_failures = [var.flux_components]
-}
-
-run "instance_size_refuses_an_invented_profile" {
-  command = plan
-  variables { instance_size = "xlarge" }
-  expect_failures = [var.instance_size]
-}
-
-run "helm_timeout_refuses_an_unrealistic_value" {
-  command = plan
-  variables { helm_timeout_seconds = 30 }
-  expect_failures = [var.helm_timeout_seconds]
+  variables { region = "Europe (Paris)" }
+  expect_failures = [var.region]
 }

@@ -49,6 +49,18 @@ variable "owner" {
   }
 }
 
+variable "region" {
+  description = "Region the cluster runs in, exposed to the catalog as inputs.cluster.region. Regional cloud APIs need it — on AWS the Pod Identity associations the crossplane module creates. Empty when the caller does not know it; a module that needs it says so."
+  type        = string
+  default     = ""
+  nullable    = false
+
+  validation {
+    condition     = var.region == "" || can(regex("^[a-z0-9-]{2,32}$", var.region))
+    error_message = "region must be empty or a cloud region name in lowercase, such as eu-west-3, europe-west1, westeurope or fr-par."
+  }
+}
+
 # ---------------------------------------------------------------------------
 # The catalog — docs/flux-catalog.md §2 and §3
 # ---------------------------------------------------------------------------
@@ -106,6 +118,41 @@ variable "kube" {
       ]
     ]))
     error_message = "kube: an attribute has the wrong type. Each value must have the type of its catalog default: ${jsonencode({ for m, d in local.catalog : m => { for a, x in d : a => lookup(local.json_kinds, substr(jsonencode(x), 0, 1), "number") } })}."
+  }
+
+  # values is free-form on purpose, minus one rule: no secret material. What a
+  # client writes there ends up in the OpenTofu state and in a ConfigMap on
+  # the cluster. The crossplane chart takes no credential of its own; the two
+  # places one could still be smuggled in are refused: a Secret among
+  # extraObjects, and an environment variable whose name says it carries one.
+  # Those go through values_secret instead.
+  validation {
+    condition = (
+      !can(var.kube.crossplane.values)
+      || !can(keys(var.kube.crossplane.values))
+      || (
+        !anytrue(try([for o in var.kube.crossplane.values.extraObjects : try(o.kind == "Secret", false)], []))
+        && !anytrue(flatten([
+          for e in ["extraEnvVarsCrossplane", "extraEnvVarsCrossplaneInit", "extraEnvVarsRBACManager"] : [
+            for k in try(keys(var.kube.crossplane.values[e]), []) :
+            can(regex("(?i)(password|passwd|secret|token|credential|private_?key|api_?key|access_?key)", k))
+          ]
+        ]))
+      )
+    )
+    error_message = "kube.crossplane.values must not carry secrets: a Secret in extraObjects, and an extraEnvVars* entry named like a password, token, secret, credential or key, are refused. Put them in a Secret in crossplane-system and name it in kube.crossplane.values_secret."
+  }
+
+  # The root wires it from the foundations' output; a client who writes it
+  # himself must write an IAM policy ARN.
+  validation {
+    condition     = !can(var.kube.crossplane.permissions_boundary) || try(var.kube.crossplane.permissions_boundary == "" || can(regex("^arn:aws[a-z-]*:iam::[0-9]{12}:policy/.+$", var.kube.crossplane.permissions_boundary)), true)
+    error_message = "kube.crossplane.permissions_boundary must be empty or an IAM policy ARN, such as arn:aws:iam::123456789012:policy/socle/acme-prod/crossplane-boundary."
+  }
+
+  validation {
+    condition     = !can(var.kube.crossplane.values_secret) || try(var.kube.crossplane.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.crossplane.values_secret)), true)
+    error_message = "kube.crossplane.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
   }
 }
 
