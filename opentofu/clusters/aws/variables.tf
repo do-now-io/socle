@@ -37,6 +37,7 @@ variable "aws" {
     bootstrap_node_instance_types        = optional(list(string))
     bootstrap_node_capacity_type         = optional(string)
     bootstrap_node_count                 = optional(number)
+    crossplane                           = optional(object({ allowed_services = optional(list(string), []) }))
   })
 }
 

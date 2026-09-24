@@ -4,6 +4,7 @@ inputs:
     name: ci
     environment: dev
     owner: platform
+    region: eu-west-3
   socle:
     url: oci://ghcr.io/do-now-io/socle/flux-modules
     version: 0.0.0-ci.0000000
