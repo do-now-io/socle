@@ -8,9 +8,9 @@
 # carrying the root source with its cosign verification. Helm is the applier,
 # never the templater: docs/flux-catalog.md §3.
 #
-# On aws and azure three more releases precede the operator — the Gateway API
-# CRDs, Cilium and (aws) CoreDNS — because those clusters are created with no
-# CNI and Flux cannot run, let alone render, without one: cilium.tf.
+# On aws and azure two more releases precede the operator — Cilium and (aws)
+# CoreDNS — because those clusters are created with no CNI and Flux cannot
+# run, let alone render, without one: cilium.tf.
 
 locals {
   # Bumped with the module's own tag. VERSION at the repo root is the source;
@@ -65,10 +65,10 @@ locals {
     cosign  = var.cosign_identity
     modules = local.modules
     # What the bootstrap decided about the network, for the templates that
-    # depend on it: `installed` — the socle's Cilium runs here, and with it
-    # the Gateway API CRDs; `gatewayApi` — it serves the `cilium`
-    # GatewayClass, so no other implementation is needed; `hubble` — Relay
-    # and UI exist. All false where the cloud operates Cilium.
+    # depend on it: `installed` — the socle's Cilium runs here; `gatewayApi`
+    # — it has Gateway API on, so the gateway_api module creates the `cilium`
+    # GatewayClass and restarts its operator once; `hubble` — Relay and UI
+    # exist. All false where the cloud operates Cilium.
     cilium = {
       installed  = local.cilium_installed
       gatewayApi = local.cilium_installed && local.cilium.gateway_api

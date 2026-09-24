@@ -36,6 +36,7 @@ type, is an error at plan, with the allowed list in the message.
 
 | Module | Attribute | Default | Meaning |
 | --- | --- | --- | --- |
+| `gateway_api` | `enabled` | `true` | Gateway API standard CRDs from upstream, pinned by commit, and Cilium's `cilium` class on aws and azure. Offered on aws, azure and scaleway; GKE owns its own. Disabling orphans the CRDs |
 | `hello` | `enabled` | `true` | Deploy podinfo as a proof the pipeline works |
 | `hello` | `replicas` | `1` | Replicas of the podinfo Deployment |
 | `hello` | `message` | `"hello from socle"` | Message podinfo serves |
@@ -51,10 +52,11 @@ schema disagree.
 
 On `aws` and `azure` the foundations create a cluster with no CNI, and
 nothing without `hostNetwork`, Flux included, starts until one runs. This
-module therefore installs, before `flux-operator`, the Gateway API CRDs
-(standard channel, vendored in `gateway-api-crds/`), Cilium, and on `aws`
-CoreDNS. On `gcp` and `scaleway` the cloud operates Cilium and none of this
-exists. The root passes `cluster_network` from the foundations' outputs:
+module therefore installs Cilium, and on `aws` CoreDNS, before
+`flux-operator`. On `gcp` and `scaleway` the cloud operates Cilium and none of
+this exists. The Gateway API CRDs are not installed here: the catalog's
+`gateway_api` module brings them from upstream once Flux runs. The root
+passes `cluster_network` from the foundations' outputs:
 
 ```hcl
 cilium  = { hubble = true }           # optional: enabled, hubble, gateway_api, values
@@ -126,7 +128,6 @@ No modules.
 |------|------|
 | [helm_release.cilium](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 | [helm_release.coredns](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
-| [helm_release.gateway_api_crds](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 | [helm_release.instance](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 | [helm_release.operator](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 | [helm_release.socle](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |

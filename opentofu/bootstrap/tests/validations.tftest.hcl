@@ -180,6 +180,16 @@ run "cluster_network_refuses_an_endpoint_that_is_not_a_host" {
   expect_failures = [var.cluster_network]
 }
 
+run "kube_refuses_a_module_not_offered_on_this_cloud" {
+  command = plan
+  variables {
+    cloud           = "gcp"
+    cluster_network = null
+    kube            = { gateway_api = { enabled = false } }
+  }
+  expect_failures = [var.kube]
+}
+
 run "socle_version_refuses_a_moving_head" {
   command = plan
   variables { socle_version = "latest" }

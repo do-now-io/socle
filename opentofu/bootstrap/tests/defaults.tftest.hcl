@@ -84,19 +84,23 @@ run "scaleway_is_a_plain_kubernetes_cluster_for_the_operator" {
     error_message = "inputs.cloud must carry the socle's own cloud name, which the artifact's clusters/<cloud> path uses."
   }
   assert {
-    condition     = length(helm_release.cilium) == 0 && length(helm_release.coredns) == 0 && length(helm_release.gateway_api_crds) == 0 && output.inputs.cilium.installed == false
+    condition     = length(helm_release.cilium) == 0 && length(helm_release.coredns) == 0 && output.inputs.cilium.installed == false
     error_message = "Kapsule operates Cilium: the socle must install nothing on scaleway, and the templates must be told so."
   }
 }
 
 # --- Cilium — cilium.tf, docs/catalog/cilium.md ---
 
-run "aws_installs_the_gateway_api_crds_cilium_and_coredns_before_flux" {
+run "aws_installs_cilium_and_coredns_before_flux" {
   command = plan
 
   assert {
-    condition     = length(helm_release.gateway_api_crds) == 1 && length(helm_release.cilium) == 1 && length(helm_release.coredns) == 1
-    error_message = "on aws the foundations create a cluster with no CNI, kube-proxy or CoreDNS: all three releases must exist by default."
+    condition     = length(helm_release.cilium) == 1 && length(helm_release.coredns) == 1
+    error_message = "on aws the foundations create a cluster with no CNI, kube-proxy or CoreDNS: both releases must exist by default."
+  }
+  assert {
+    condition     = yamldecode(helm_release.cilium[0].values[0]).gatewayAPI.gatewayClass.create == "false"
+    error_message = "the cilium GatewayClass belongs to the gateway_api catalog module: the chart's auto would render it into this release once the CRDs exist, and two owners would fight over it."
   }
   assert {
     condition     = yamldecode(helm_release.cilium[0].values[0]).eni.enabled == true
@@ -119,7 +123,7 @@ run "aws_installs_the_gateway_api_crds_cilium_and_coredns_before_flux" {
     error_message = "the templates must be told that the socle's Cilium runs here and serves the Gateway API."
   }
   assert {
-    condition     = output.cilium.chart_version == "1.20.2" && output.cilium.gateway_api_version == "1.6.1"
+    condition     = output.cilium.chart_version == "1.20.2" && output.cilium.coredns_version == "1.47.1"
     error_message = "the pinned versions must be visible to the root that consumes them."
   }
 }
@@ -135,8 +139,8 @@ run "azure_installs_cilium_in_byocni_mode_and_no_coredns" {
   }
 
   assert {
-    condition     = length(helm_release.gateway_api_crds) == 1 && length(helm_release.cilium) == 1 && length(helm_release.coredns) == 0
-    error_message = "AKS ships CoreDNS as a system pod even under BYO CNI: Cilium and the CRDs only."
+    condition     = length(helm_release.cilium) == 1 && length(helm_release.coredns) == 0
+    error_message = "AKS ships CoreDNS as a system pod even under BYO CNI: Cilium only."
   }
   assert {
     condition     = yamldecode(helm_release.cilium[0].values[0]).aksbyocni.enabled == true && !can(yamldecode(helm_release.cilium[0].values[0]).eni)
@@ -160,7 +164,7 @@ run "gcp_operates_its_own_cilium" {
   }
 
   assert {
-    condition     = length(helm_release.cilium) == 0 && length(helm_release.coredns) == 0 && length(helm_release.gateway_api_crds) == 0
+    condition     = length(helm_release.cilium) == 0 && length(helm_release.coredns) == 0
     error_message = "Autopilot's Dataplane V2 is Cilium: the socle must install nothing on gcp."
   }
   assert {
@@ -177,8 +181,8 @@ run "a_cluster_that_brings_its_own_cni_turns_cilium_off" {
   }
 
   assert {
-    condition     = length(helm_release.cilium) == 0 && length(helm_release.coredns) == 0 && length(helm_release.gateway_api_crds) == 0
-    error_message = "cilium.enabled = false must install none of the three releases: the cluster brings its own CNI and DNS — floci's k3s in the e2e jobs."
+    condition     = length(helm_release.cilium) == 0 && length(helm_release.coredns) == 0
+    error_message = "cilium.enabled = false must install neither release: the cluster brings its own CNI and DNS — floci's k3s in the e2e jobs."
   }
   assert {
     condition     = output.inputs.cilium.installed == false
@@ -197,8 +201,8 @@ run "hubble_and_gateway_api_toggles_reach_the_chart_and_the_templates" {
     error_message = "hubble = true must enable Relay and UI together."
   }
   assert {
-    condition     = yamldecode(helm_release.cilium[0].values[0]).gatewayAPI.enabled == false && length(helm_release.gateway_api_crds) == 1
-    error_message = "gateway_api = false turns Cilium's controller off but keeps the CRDs: the API exists on every cloud, only the implementation differs."
+    condition     = yamldecode(helm_release.cilium[0].values[0]).gatewayAPI.enabled == false
+    error_message = "gateway_api = false turns Cilium's Gateway API controller off."
   }
   assert {
     condition     = output.inputs.cilium.hubble == true && output.inputs.cilium.gatewayApi == false
@@ -300,5 +304,14 @@ run "no_gateway_class_where_nothing_implements_gateway_api" {
   assert {
     condition     = output.inputs.gateway.className == ""
     error_message = "with Cilium's Gateway API off, no class exists: templates must be told so, and render no Gateway."
+  }
+}
+
+run "gateway_api_is_a_catalog_module_on_by_default" {
+  command = plan
+
+  assert {
+    condition     = output.inputs.modules.gateway_api.enabled == true
+    error_message = "Gateway API is installed by default for every client: the module is on unless the client turns it off."
   }
 }

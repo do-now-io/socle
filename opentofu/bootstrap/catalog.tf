@@ -11,6 +11,15 @@
 # together because module and artifact share socle_version.
 locals {
   catalog = {
+    # The Gateway API standard CRDs, from upstream pinned by commit, and on
+    # the clouds where the socle runs Cilium, the `cilium` GatewayClass and
+    # the one operator restart that turns Cilium's controller on
+    # (docs/catalog/cilium.md §4). Not on gcp, where GKE owns the CRDs and
+    # the controller. No chart, so no values/values_secret. Disabling it
+    # removes the Flux objects and orphans the CRDs: every Gateway survives.
+    gateway_api = {
+      enabled = true
+    }
     # v1: proves the pipeline end to end. A real module reads exactly like it.
     hello = {
       enabled  = true
@@ -25,10 +34,10 @@ locals {
   # map disagree — the overlay is what deploys, this map is what the client
   # may configure, and they must say the same thing. The script reads this
   # block by shape: one `name = ["cloud", ...]` per line.
-  # Read by CI only until the first cloud-bound module lands; the plan-time
-  # validation of kube against it arrives then, with the test that trips it.
-  # tflint-ignore: terraform_unused_declarations
-  catalog_clouds = {}
+  # var.kube refuses at plan a module this map does not offer on var.cloud.
+  catalog_clouds = {
+    gateway_api = ["aws", "azure", "scaleway"]
+  }
 
   modules = { for m, d in local.catalog : m => merge(d, try(var.kube[m], {})) }
 

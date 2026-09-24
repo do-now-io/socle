@@ -7,6 +7,8 @@
     url: oci://x/y
     version: 0.0.0 # x-release-please-version
   modules:
+    gateway_api:
+      enabled: true
     hello:
       enabled: true
       replicas: 2

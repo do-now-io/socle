@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# The proof both e2e jobs share: socle-root and hello Ready, the artifact
-# pulled by the exact tag TAG with its signature verified, podinfo at 1 replica.
+# The proof both e2e jobs share: socle-root, hello and gateway-api Ready, the
+# Gateway API CRDs established, the artifact pulled by the exact tag TAG with
+# its signature verified, podinfo at 1 replica.
 set -euo pipefail
 wait_ready() {
   for _ in $(seq 1 60); do
@@ -14,6 +15,15 @@ wait_ready() {
 }
 wait_ready socle-root
 wait_ready hello
+# Gateway API for every client: the gateway_api module brings the standard
+# CRDs from upstream, pinned by commit, through Flux — nothing is vendored.
+wait_ready gateway-api
+for crd in gatewayclasses gateways httproutes grpcroutes referencegrants; do
+  established="$(kubectl get crd "$crd.gateway.networking.k8s.io" \
+    -o jsonpath='{.status.conditions[?(@.type=="Established")].status}')"
+  [ "$established" = True ] || { echo "::error::crd $crd.gateway.networking.k8s.io not established"; exit 1; }
+done
+echo "Gateway API standard CRDs established: $(kubectl get gitrepository -n flux-system gateway-api -o jsonpath='{.status.artifact.revision}')"
 rev="$(kubectl -n flux-system get ocirepository socle -o jsonpath='{.status.artifact.revision}')"
 verified="$(kubectl -n flux-system get ocirepository socle \
   -o jsonpath='{.status.conditions[?(@.type=="SourceVerified")].status}')"

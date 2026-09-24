@@ -12,6 +12,8 @@ inputs:
     issuer: ^https://token\.actions\.githubusercontent\.com$
     subject: ^https://github\.com/do-now-io/socle/\.github/workflows/publish-artifact\.yaml@refs/heads/main$
   modules:
+    gateway_api:
+      enabled: true
     hello:
       enabled: true
       replicas: 1

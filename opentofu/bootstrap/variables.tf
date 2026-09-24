@@ -87,6 +87,11 @@ variable "kube" {
     error_message = "kube: unknown attribute. Allowed per module: ${jsonencode({ for m, d in local.catalog : m => keys(d) })}."
   }
 
+  validation {
+    condition     = !can(keys(var.kube)) || alltrue([for m in keys(var.kube) : !contains(keys(local.catalog), m) || contains(lookup(local.catalog_clouds, m, [var.cloud]), var.cloud)])
+    error_message = "kube: a module is not offered on ${var.cloud}. Cloud-bound modules: ${jsonencode(local.catalog_clouds)}."
+  }
+
   # Unknown module or attribute names are already refused above; this block
   # ignores them so only one diagnostic fires per mistake. A null catalog
   # default means "any type". `enabled` is covered here too: its catalog

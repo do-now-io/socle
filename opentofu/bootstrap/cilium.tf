@@ -11,10 +11,7 @@
 # them on that cluster, before flux-operator. Helm is already the applier
 # here (docs/flux-catalog.md §3); this adds releases, not a mechanism.
 #
-# Three releases, in order, all `count`ed on the cloud:
-#   0. gateway-api-crds — the standard channel, vendored at the exact version
-#      Cilium documents. Cilium reads them at start-up and disables its
-#      Gateway API controller when they are absent, so they come first.
+# Two releases, in order, `count`ed on the cloud:
 #   1. cilium — ENI mode on aws, BYOCNI on azure, kube-proxy replacement on
 #      both with the API endpoint the foundations output.
 #   2. coredns — aws only. The same flag that removed the VPC CNI removed
@@ -24,7 +21,14 @@
 #      ACTIVE until it times out — inside the foundations module, which
 #      applies before this one. AKS ships CoreDNS as a system pod under BYO
 #      CNI, Pending until Cilium runs.
-# flux-operator then depends on all three.
+# flux-operator then depends on both.
+#
+# The Gateway API CRDs are not here. They reach the cluster through the
+# catalog's gateway_api module, from upstream pinned by commit, once Flux
+# runs. Cilium starts with gatewayAPI enabled and no CRDs: its operator stays
+# Ready and turns its Gateway controller off; the module then creates the
+# `cilium` GatewayClass and restarts the operator once, which turns it on.
+# Measured on Cilium 1.20.2, docs/catalog/cilium.md §4.
 #
 # The chart versions are pinned here, not variables: they move with the
 # socle release, like the operator's. The client's surface is `var.cilium`
@@ -37,12 +41,9 @@
 # an existing Secret instead (docs/catalog/cilium.md §5).
 
 locals {
-  # Chart versions. The Gateway API version is the one this Cilium minor
-  # documents; .github/scripts/check-gateway-api-crds.sh proves the vendored
-  # file is that release, byte for byte.
+  # Chart versions.
   cilium_chart_version  = "1.20.2"
   coredns_chart_version = "1.47.1"
-  gateway_api_version   = "1.6.1"
 
   # The client's surface, and its schema — the same convention as the
   # catalog: the defaults ARE the attribute names a client may set.
@@ -108,8 +109,14 @@ locals {
     }
 
     # Cilium serves the `cilium` GatewayClass. Needs kube-proxy replacement
-    # (set) and the CRDs (release 0).
-    gatewayAPI = { enabled = local.cilium.gateway_api }
+    # (set) and the CRDs, which the catalog brings after Flux. The class is
+    # the catalog's too: the chart's `auto` would render it into this
+    # release on the first apply after the CRDs exist, and two owners would
+    # fight over one object.
+    gatewayAPI = {
+      enabled      = local.cilium.gateway_api
+      gatewayClass = { create = "false" }
+    }
   }
 
   # What only one cloud needs. Measured against the 1.20.2 chart: eni.enabled
@@ -127,24 +134,6 @@ locals {
       ipam      = { operator = { clusterPoolIPv4PodCIDRList = compact([try(var.cluster_network.pod_cidr, null)]) } }
     }
   }
-}
-
-# 0. The Gateway API CRDs, standard channel, from the vendored chart. Before
-# Cilium: its operator looks for them once, at start-up. Present whenever
-# Cilium is, whatever the gateway_api toggle says — the API is the same on
-# every cloud the socle runs, only the implementation differs, and a Gateway
-# API module that also shipped them here would fight this release for the
-# same objects.
-resource "helm_release" "gateway_api_crds" {
-  count = local.cilium_installed ? 1 : 0
-
-  name  = "gateway-api-crds"
-  chart = "${path.module}/gateway-api-crds"
-
-  namespace = "kube-system"
-
-  wait    = true
-  timeout = var.helm_timeout_seconds
 }
 
 # 1. Cilium. kube-system, where every CNI lives and where the chart's own
@@ -170,8 +159,6 @@ resource "helm_release" "cilium" {
     yamlencode(merge(local.cilium_values_common, local.cilium_values_cloud[var.cloud])),
     yamlencode(local.cilium.values),
   ]
-
-  depends_on = [helm_release.gateway_api_crds]
 }
 
 # 2. CoreDNS, on aws only, after Cilium — its pods need a network. The
