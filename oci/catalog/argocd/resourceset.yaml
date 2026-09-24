@@ -1,0 +1,196 @@
+# The argocd module: the official argo-cd chart, cloud-agnostic, the second
+# layer of the socle's GitOps model — Flux converges the socle, ArgoCD ships
+# the client's applications. Design and measurements: docs/catalog/argocd.md.
+#
+# resourcesTemplate rather than resources: some values only exist under a
+# condition — global.domain when the client sets a domain, the redis-ha block
+# when he asks for HA, the Secret in valuesFrom — and the operator's block
+# `<< if >>`/`<< end >>` is text templating, which the structured resources
+# list cannot carry (see opentofu/bootstrap/manifests/templates/root.yaml).
+#
+# Values: no spec.values on the HelmRelease. The socle's defaults are a
+# ConfigMap listed first in valuesFrom, the client's second, his Secret last —
+# later wins, so the client overrides any socle default (docs/catalog/argocd.md).
+#
+# Every other rule is the hello module's: inputsFrom the one provider, the
+# reconcile toggle on each resource, values tested never presence.
+apiVersion: fluxcd.controlplane.io/v1
+kind: ResourceSet
+metadata:
+  name: argocd
+  namespace: flux-system
+spec:
+  inputsFrom:
+    - apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSetInputProvider
+      name: socle
+  wait: true
+  resourcesTemplate: |
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: argocd
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.argocd.enabled >>enabled<< else >>disabled<< end >>
+    ---
+    apiVersion: source.toolkit.fluxcd.io/v1
+    kind: OCIRepository
+    metadata:
+      name: argo-cd-chart
+      namespace: argocd
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.argocd.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 1h
+      url: oci://ghcr.io/argoproj/argo-helm/argo-cd
+      layerSelector:
+        mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+        operation: copy
+      ref:
+        tag: 10.9.2  # appVersion v3.5.3
+    ---
+    # The socle's own chart values, as a document rather than the HelmRelease's
+    # spec.values: helm-controller merges valuesFrom in order and then
+    # spec.values over the result (chartutil.ChartValuesFromReferences ends on
+    # MergeMaps(result, values)), so an inline socle default would beat the
+    # client on every key both set. Listed first in valuesFrom, it is the base
+    # the client's values and Secret are merged over. The if blocks are text
+    # templating and work inside the block scalar as anywhere else; per-cloud
+    # values go here too, under an if on eq inputs.cloud. (No template
+    # delimiters in these comments: the operator templates them too.)
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: argocd-socle-values
+      namespace: argocd
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.argocd.enabled >>enabled<< else >>disabled<< end >>
+    data:
+      values.yaml: |
+        << if inputs.modules.argocd.domain >>
+        # The chart derives configs.cm.url (and statusbadge.url) from it; the
+        # follow-up HTTPRoute reads its hostname from it too.
+        global:
+          domain: << inputs.modules.argocd.domain | quote >>
+        << end >>
+        configs:
+          cm:
+            << if not inputs.modules.argocd.domain >>
+            # No domain yet: no URL at all, rather than the chart's example.com.
+            url: ""
+            statusbadge.url: ""
+            << end >>
+            admin.enabled: << inputs.modules.argocd.admin_enabled >>
+          params:
+            # TLS terminates in front of ArgoCD — at the Gateway once the
+            # HTTPRoute exists — so the server speaks plain HTTP in-cluster.
+            server.insecure: true
+        << if inputs.modules.argocd.ha >>
+        # HA as the chart documents it without autoscaling: the Redis HA
+        # subchart (three sentinels behind haproxy) and two replicas of every
+        # stateless component; the controller stays at one — more would shard
+        # clusters, not add availability.
+        redis-ha:
+          enabled: true
+          redis:
+            resources:
+              requests:
+                cpu: 100m
+                memory: 128Mi
+          haproxy:
+            resources:
+              requests:
+                cpu: 50m
+                memory: 64Mi
+        << end >>
+        controller:
+          replicas: 1
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+        server:
+          replicas: << if inputs.modules.argocd.ha >>2<< else >>1<< end >>
+          service:
+            type: ClusterIP
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+        repoServer:
+          replicas: << if inputs.modules.argocd.ha >>2<< else >>1<< end >>
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+        applicationSet:
+          replicas: << if inputs.modules.argocd.ha >>2<< else >>1<< end >>
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+        redis:
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+        # SSO is a follow-up: no Dex until an identity provider is configured.
+        dex:
+          enabled: false
+        notifications:
+          enabled: false
+    ---
+    # The client's own chart values, as he wrote them in kube.argocd.values,
+    # merged over the socle's document above — the client wins wherever the
+    # two meet. OpenTofu refuses secrets in there.
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: argocd-client-values
+      namespace: argocd
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.argocd.enabled >>enabled<< else >>disabled<< end >>
+    data:
+      values.yaml: |<< toYaml inputs.modules.argocd.values | nindent 4 >>
+    ---
+    apiVersion: helm.toolkit.fluxcd.io/v2
+    kind: HelmRelease
+    metadata:
+      name: argocd
+      namespace: argocd
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.argocd.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 10m
+      # Five images to pull on a fresh node; the controller's default 5m is
+      # tight on a small cluster, and a transient failure is retried rather
+      # than left stalled.
+      timeout: 10m
+      releaseName: argocd
+      chartRef:
+        kind: OCIRepository
+        name: argo-cd-chart
+      # No spec.values, on purpose: it would be merged last and win. The
+      # order below is the precedence, later wins — the socle's defaults, the
+      # client's values from kube.argocd.values, then his Secret when he named
+      # one, created by him in argocd, never read by OpenTofu, optional so the
+      # release does not wait for it.
+      valuesFrom:
+        - kind: ConfigMap
+          name: argocd-socle-values
+          valuesKey: values.yaml
+        - kind: ConfigMap
+          name: argocd-client-values
+          valuesKey: values.yaml
+        << if inputs.modules.argocd.values_secret >>
+        - kind: Secret
+          name: << inputs.modules.argocd.values_secret | quote >>
+          valuesKey: values.yaml
+          optional: true
+        << end >>
+      install:
+        remediation:
+          retries: 3
+      upgrade:
+        remediation:
+          retries: 3

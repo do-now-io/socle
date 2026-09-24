@@ -426,3 +426,48 @@ run "gateway_api_is_a_catalog_module_on_by_default" {
     error_message = "Gateway API is installed by default for every client: the module is on unless the client turns it off."
   }
 }
+
+run "argocd_accepts_a_domain_and_the_ha_switch" {
+  command = plan
+  variables {
+    kube = { argocd = { domain = "argocd.acme.example", ha = true } }
+  }
+
+  assert {
+    condition     = output.inputs.modules.argocd.domain == "argocd.acme.example" && output.inputs.modules.argocd.ha == true
+    error_message = "a valid domain and ha=true must reach the inputs as set."
+  }
+  assert {
+    condition     = output.inputs.modules.argocd.enabled == true && output.inputs.modules.argocd.admin_enabled == true
+    error_message = "attributes the client did not set must keep the catalog default."
+  }
+}
+
+run "argocd_values_flow_through_untouched_and_a_repository_without_credentials_is_fine" {
+  command = plan
+  variables {
+    kube = {
+      argocd = {
+        values_secret = "argocd-values"
+        values = {
+          configs = {
+            cm   = { "accounts.alice" = "apiKey, login" }
+            rbac = { "policy.csv" = "g, platform, role:admin" }
+            repositories = {
+              app = { url = "https://github.com/acme/app", type = "git" }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  assert {
+    condition     = output.inputs.modules.argocd.values.configs.rbac["policy.csv"] == "g, platform, role:admin" && output.inputs.modules.argocd.values.configs.repositories.app.url == "https://github.com/acme/app"
+    error_message = "the client's chart values must reach the inputs as written: the template hands them to helm-controller, nothing rewrites them."
+  }
+  assert {
+    condition     = output.inputs.modules.argocd.values_secret == "argocd-values"
+    error_message = "the name of the client's values Secret must flow to the inputs."
+  }
+}

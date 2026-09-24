@@ -181,15 +181,6 @@ variable "kube" {
     condition     = !can(keys(var.kube)) || can(regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$", try(var.kube.external_dns.txt_owner_id, "x")))
     error_message = "kube.external_dns.txt_owner_id must be 1 to 63 characters of letters, digits, dots, dashes and underscores: it is written into every TXT record the module owns."
   }
-
-  # values is free-form on purpose, minus one rule: no secret material. What a
-  # client writes there ends up in the OpenTofu state and in a ConfigMap on the
-  # cluster. external-dns takes its provider credentials from the environment
-  # and a few flags, so those are the chart paths refused: secretConfiguration
-  # (the chart's deprecated Secret-from-values), an env entry of the pod or of
-  # the webhook sidecar whose name looks like a credential and carries a
-  # literal value (valueFrom is fine), and an extraArgs flag that looks like
-  # one (txt-encrypt-aes-key, pdns-api-key, rfc2136-tsig-secret…).
   validation {
     condition = (
       !can(var.kube.external_dns.values)
@@ -211,10 +202,44 @@ variable "kube" {
     )
     error_message = "kube.external_dns.values must not carry secrets: secretConfiguration, an env entry with a literal value whose name looks like a credential (AWS_SECRET_ACCESS_KEY, SCW_SECRET_KEY, …), and an extraArgs flag such as txt-encrypt-aes-key are refused. Put them in a Secret in the external-dns namespace and name it in kube.external_dns.values_secret."
   }
-
   validation {
     condition     = !can(var.kube.external_dns.values_secret) || try(var.kube.external_dns.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.external_dns.values_secret)), true)
     error_message = "kube.external_dns.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
+  }
+  validation {
+    condition = (
+      !can(var.kube.argocd.domain)
+      || lookup(local.json_kinds, substr(jsonencode(var.kube.argocd.domain), 0, 1), "number") != "string"
+      || var.kube.argocd.domain == ""
+      || can(regex("^([a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$", var.kube.argocd.domain))
+    )
+    error_message = "kube.argocd.domain must be empty or a fully qualified DNS name in lowercase, such as argocd.acme.example: no scheme, no port, no path."
+  }
+
+  # values is free-form on purpose, minus one rule: no secret material. What a
+  # client writes there ends up in the OpenTofu state and in a ConfigMap on
+  # the cluster; the chart's secret-bearing paths are refused so that a
+  # private key or a password has to go through values_secret instead.
+  validation {
+    condition = (
+      !can(var.kube.argocd.values)
+      || !can(keys(var.kube.argocd.values))
+      || (
+        !can(var.kube.argocd.values.configs.secret)
+        && !can(var.kube.argocd.values.configs.credentialTemplates)
+        && !can(var.kube.argocd.values.configs.clusterCredentials)
+        && alltrue([
+          for r in try(values(var.kube.argocd.values.configs.repositories), []) :
+          !anytrue([for k in ["password", "sshPrivateKey", "githubAppPrivateKey", "bearerToken", "tlsClientCertData", "tlsClientCertKey"] : can(r[k])])
+        ])
+      )
+    )
+    error_message = "kube.argocd.values must not carry secrets: configs.secret, configs.credentialTemplates, configs.clusterCredentials and a password, key or token under configs.repositories are refused. Put them in a Secret in the argocd namespace and name it in kube.argocd.values_secret."
+  }
+
+  validation {
+    condition     = !can(var.kube.argocd.values_secret) || try(var.kube.argocd.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.argocd.values_secret)), true)
+    error_message = "kube.argocd.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
   }
 }
 

@@ -35,6 +35,22 @@ kube = {
   # the permissions boundary for you. Before turning it off again, delete the
   # modules' claims.
   # crossplane = { enabled = true }
+  argocd = {
+    domain = "argocd.acme.example"
+    # Your ArgoCD, your values: merged over the socle's defaults, yours win.
+    values = {
+      configs = {
+        cm   = { "accounts.alice" = "apiKey, login" }
+        rbac = { "policy.csv" = "g, alice, role:admin" }
+        repositories = {
+          # The GitHub App's private key is NOT here: a Secret in the argocd
+          # namespace named below carries it, or a repo-creds Secret of ArgoCD's own.
+          acme = { url = "https://github.com/acme", type = "git", githubAppID = "12345", githubAppInstallationID = "67890" }
+        }
+      }
+    }
+    values_secret = "argocd-values"
+  }
   hello = {
     replicas = 2
   }

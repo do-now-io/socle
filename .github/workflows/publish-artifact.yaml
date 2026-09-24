@@ -155,6 +155,9 @@ jobs:
       SUBJECT: ${{ needs.publish.outputs.subject }}
       COSIGN: ${{ needs.publish.outputs.cosign_identity }}
       EXPECT_UI_COLOR: "#FF9900"   # oci/clusters/aws/hello-color.patch.yaml
+      EXPECT_ARGOCD: "true"        # catalog.tf: argocd.enabled defaults to true
+      EXPECT_ARGOCD_ACCOUNT: e2e   # tests/floci.tfvars: kube.argocd.values
+      EXPECT_ARGOCD_SERVER_MEMORY: 96Mi  # tests/floci.tfvars: overrides the socle's 64Mi
     defaults:
       run:
         working-directory: opentofu/clusters/aws
@@ -182,7 +185,7 @@ jobs:
           GHCR_TOKEN: ${{ github.token }}
         run: |
           "$GITHUB_WORKSPACE/.github/scripts/e2e/ghcr-auth.sh" socle-e2e
-      - name: The root ResourceSet and the hello module converge
+      - name: The root ResourceSet and the hello and argocd modules converge
         run: |
           "$GITHUB_WORKSPACE/.github/scripts/e2e/wait-converged.sh"
       - name: What the cluster looked like when it failed
@@ -208,8 +211,9 @@ jobs:
             echo "Applied \`opentofu/clusters/aws\` — the real root, foundations included —"
             echo "once on floci's real k3s against \`ghcr.io/do-now-io/socle/flux-modules:$TAG\`, signed as"
             echo "\`$SUBJECT\`. Proven: the artifact is pulled by that exact tag, its signature"
-            echo "verifies against the workflow identity, and both the \`socle-root\` and"
-            echo "\`hello\` ResourceSets reach Ready with \`hello/podinfo\` at 1 replica."
+            echo "verifies against the workflow identity, and the \`socle-root\`, \`hello\` and"
+            echo "\`argocd\` ResourceSets reach Ready with \`hello/podinfo\` at 1 replica and"
+            echo "\`argocd/argocd-server\` Available."
             echo ""
             echo "No idempotence check here: floci does not read back several EKS/CloudWatch"
             echo "attributes, so a refresh always re-discovers drift, and a second apply dies"
@@ -245,6 +249,7 @@ jobs:
         {hello={replicas=1},external_dns={enabled=true,domain_filters=["e2e.socle.test"],values={txtOwnerId="socle-e2e-client"}}}
       EXTERNAL_DNS_KUBE_SYNC: >-
         {hello={replicas=1},external_dns={enabled=true,domain_filters=["e2e.socle.test"],policy="sync",values={txtOwnerId="socle-e2e-client"}}}
+      EXPECT_ARGOCD: "true"        # catalog.tf: argocd.enabled defaults to true
     defaults:
       run:
         working-directory: opentofu/clusters/aws/tests/floci
@@ -269,44 +274,48 @@ jobs:
           GHCR_TOKEN: ${{ github.token }}
         run: |
           "$GITHUB_WORKSPACE/.github/scripts/e2e/ghcr-auth.sh" socle-e2e-catalog
-      - name: The root ResourceSet and the hello module converge
+      - name: The root ResourceSet and the hello and argocd modules converge
         run: |
           "$GITHUB_WORKSPACE/.github/scripts/e2e/wait-converged.sh"
       # The operator omits a disabled module's objects entirely, so the proof
       # is on the live cluster: the HelmRelease has to disappear.
-      - name: Disabling hello garbage-collects it
+      - name: Disabling hello and argocd garbage-collects them
         run: |
           tofu apply -input=false -auto-approve \
             -var "socle_version=$TAG" \
             -var "cosign_identity=$COSIGN" \
             -var artifact_pull_secret=ghcr-auth \
-            -var 'kube={hello={enabled=false}}'
+            -var 'kube={hello={enabled=false},argocd={enabled=false}}'
           # Absence only counts as garbage collection when kubectl says
           # NotFound. An unreachable API server, a stale kubeconfig or a
           # missing CRD also make the object "not there", and each would pass
-          # a plain `if ! kubectl get`. A vanished `hello` namespace reads as
+          # a plain `if ! kubectl get`. A vanished namespace reads as
           # `namespaces "hello" not found` — that is a NotFound, and it means
           # gone too.
-          for _ in $(seq 1 36); do
-            if out="$(kubectl -n hello get helmrelease podinfo 2>&1)"; then
-              sleep 5
-              continue
-            fi
-            case "$out" in
-              *NotFound*|*"not found"*)
-                echo "helmrelease hello/podinfo is gone: $out"
-                exit 0
-                ;;
-              *)
-                echo "::error::kubectl failed for a reason other than NotFound: $out"
-                exit 1
-                ;;
-            esac
-          done
-          echo "::error::helmrelease hello/podinfo still present after 180 s"
-          kubectl -n hello get helmrelease podinfo -o yaml || true
-          exit 1
-      - name: Re-enabling hello recreates it
+          gone() {  # gone <namespace> <helmrelease>
+            for _ in $(seq 1 36); do
+              if out="$(kubectl -n "$1" get helmrelease "$2" 2>&1)"; then
+                sleep 5
+                continue
+              fi
+              case "$out" in
+                *NotFound*|*"not found"*)
+                  echo "helmrelease $1/$2 is gone: $out"
+                  return 0
+                  ;;
+                *)
+                  echo "::error::kubectl failed for a reason other than NotFound: $out"
+                  return 1
+                  ;;
+              esac
+            done
+            echo "::error::helmrelease $1/$2 still present after 180 s"
+            kubectl -n "$1" get helmrelease "$2" -o yaml || true
+            return 1
+          }
+          gone hello podinfo
+          gone argocd argocd
+      - name: Re-enabling hello and argocd recreates them
         run: |
           tofu apply -input=false -auto-approve \
             -var "socle_version=$TAG" \
@@ -319,11 +328,25 @@ jobs:
             if [ "$status" = True ] && [ "$(kubectl -n hello get deploy podinfo \
               -o jsonpath='{.spec.replicas}' 2>/dev/null || true)" = 1 ]; then
               echo "resourceset/hello Ready again, hello/podinfo back at 1 replica"
+              break
+            fi
+            sleep 5
+          done
+          [ "$status" = True ] || { echo "::error::hello never came back after re-enabling"; exit 1; }
+          # The images are already on the node, so the second convergence is
+          # the operator's and Helm's own latency, not the network's.
+          SECONDS=0
+          for _ in $(seq 1 120); do
+            status="$(kubectl -n flux-system get resourceset argocd \
+              -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)"
+            if [ "$status" = True ]; then
+              kubectl -n argocd wait deploy/argocd-server --for=condition=Available --timeout=120s
+              echo "resourceset/argocd Ready again after ${SECONDS}s, argocd-server Available"
               exit 0
             fi
             sleep 5
           done
-          echo "::error::hello never came back after re-enabling"
+          echo "::error::argocd never came back after re-enabling"
           exit 1
       # crossplane is off by default (catalog.tf), so the default path above
       # proves nothing about it. Turned on here with one client value that
@@ -443,6 +466,10 @@ jobs:
             echo "Crossplane and its AWS provider with a client value beating the socle's, a"
             echo "module-shaped \`Role\` becoming an IAM role in floci and going when deleted,"
             echo "turning it off garbage-collecting its HelmRelease, and a second \`tofu plan\` empty."
+            echo "verified, \`socle-root\`, \`hello\` and \`argocd\` Ready with \`hello/podinfo\` at"
+            echo "1 replica and \`argocd-server\` Available, then \`enabled=false\` on both modules"
+            echo "garbage-collecting their HelmReleases off the cluster, re-enabling bringing"
+            echo "them back, and a second \`tofu plan\` empty."
             echo ""
             echo "This root exists because floci cannot re-apply the real one; the real root is"
             echo "applied once, by \`e2e-aws-root\`."
