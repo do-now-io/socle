@@ -1,0 +1,86 @@
+# The gateway_api module: the Gateway API standard CRDs on every cloud whose
+# provider does not own them, and on the clouds where the socle runs Cilium,
+# Cilium's Gateway API turned on. docs/catalog/cilium.md §4.
+#
+# Nothing is vendored. The CRDs come from upstream, kubernetes-sigs/
+# gateway-api, pinned by commit: the release tag's commit is content-
+# addressed, so what reaches the cluster cannot change under the socle. Only
+# config/crd/standard is fetched. Bumping Gateway API is this one commit and
+# the version beside it, to the release the pinned Cilium minor documents.
+#
+# Cilium starts before Flux with Gateway API enabled and no CRDs: its
+# operator is Ready and switches its Gateway controller off, and it never
+# looks again. So once the CRDs are established, on the Cilium clouds only,
+# a second Kustomization creates the `cilium` GatewayClass and restarts the
+# operator once (cilium/). Measured on Cilium 1.20.2.
+#
+# The CRDs are orphaned, not deleted, when the module is disabled: deleting a
+# CRD deletes every Gateway and route of every client with it.
+apiVersion: fluxcd.controlplane.io/v1
+kind: ResourceSet
+metadata:
+  name: gateway-api
+  namespace: flux-system
+spec:
+  inputsFrom:
+    - apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSetInputProvider
+      name: socle
+  wait: true
+  resourcesTemplate: |
+    apiVersion: source.toolkit.fluxcd.io/v1
+    kind: GitRepository
+    metadata:
+      name: gateway-api
+      namespace: flux-system
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.gateway_api.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 24h
+      url: https://github.com/kubernetes-sigs/gateway-api
+      ref:
+        # v1.6.1 — the Gateway API release Cilium 1.20 documents. The commit
+        # is the pin; the branch only keeps the clone to one branch.
+        branch: release-1.6
+        commit: 8bb74df00e56ec8f944d48c25e6c1c9c2f6848e3
+      sparseCheckout:
+        - config/crd/standard
+    ---
+    apiVersion: kustomize.toolkit.fluxcd.io/v1
+    kind: Kustomization
+    metadata:
+      name: gateway-api-crds
+      namespace: flux-system
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.gateway_api.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 1h
+      sourceRef:
+        kind: GitRepository
+        name: gateway-api
+      path: ./config/crd/standard
+      prune: true
+      deletionPolicy: Orphan
+      wait: true
+      timeout: 5m
+    << if inputs.cilium.gatewayApi >>
+    ---
+    apiVersion: kustomize.toolkit.fluxcd.io/v1
+    kind: Kustomization
+    metadata:
+      name: gateway-api-cilium
+      namespace: flux-system
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.gateway_api.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 1h
+      dependsOn:
+        - name: gateway-api-crds
+      sourceRef:
+        kind: OCIRepository
+        name: socle
+      path: ./catalog/gateway-api/cilium
+      prune: true
+      wait: true
+      timeout: 5m
+    << end >>
