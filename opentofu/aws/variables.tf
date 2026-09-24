@@ -217,11 +217,12 @@ variable "log_retention_days" {
 # --- Add-ons and identity — docs/aws/eks-managed-scope.md ---
 
 # No add-on variable here at all. VPC CNI and kube-proxy are refused outright
-# — Cilium replaces both, and the cluster is created without them. CoreDNS,
-# EBS CSI, EFS CSI and the Pod Identity Agent remain EKS-managed add-ons, but
-# they are installed by the factory once compute exists, at versions the socle
+# — Cilium replaces both, and the cluster is created without them. EBS CSI,
+# EFS CSI and the Pod Identity Agent remain EKS-managed add-ons, but they are
+# installed by the factory once compute exists, at versions the socle
 # pipeline pins. This module creates no node, so an add-on installed here
-# would have nowhere to run — see cluster.tf.
+# would have nowhere to run — see cluster.tf. CoreDNS is installed by the
+# bootstrap module, by Helm, right after Cilium (docs/catalog/cilium.md).
 
 variable "kubernetes_version" {
   description = <<-EOT
