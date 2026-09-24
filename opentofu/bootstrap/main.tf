@@ -7,6 +7,10 @@
 # ResourceSetInputProvider carrying the client's config and a ResourceSet
 # carrying the root source with its cosign verification. Helm is the applier,
 # never the templater: docs/flux-catalog.md §3.
+#
+# On aws and azure two more releases precede the operator — Cilium and (aws)
+# CoreDNS — because those clusters are created with no CNI and Flux cannot
+# run, let alone render, without one: cilium.tf.
 
 locals {
   # Bumped with the module's own tag. VERSION at the repo root is the source;
@@ -26,6 +30,15 @@ locals {
     gcp      = "gcp"
     azure    = "azure"
     scaleway = "kubernetes"
+  }[var.cloud]
+
+  # docs/catalog/cilium.md §4. A shared alias is not possible: GKE serves
+  # only its own GatewayClasses, so the name is the cloud's.
+  gateway_class_name = {
+    aws      = local.cilium_installed && local.cilium.gateway_api ? "cilium" : ""
+    azure    = local.cilium_installed && local.cilium.gateway_api ? "cilium" : ""
+    gcp      = "gke-l7-global-external-managed"
+    scaleway = ""
   }[var.cloud]
 
   common_labels = {
@@ -51,10 +64,29 @@ locals {
     }
     cosign  = var.cosign_identity
     modules = local.modules
+    # What the bootstrap decided about the network, for the templates that
+    # depend on it: `installed` — the socle's Cilium runs here; `gatewayApi`
+    # — it has Gateway API on, so the gateway_api module creates the `cilium`
+    # GatewayClass and restarts its operator once; `hubble` — Relay and UI
+    # exist. All false where the cloud operates Cilium.
+    cilium = {
+      installed  = local.cilium_installed
+      gatewayApi = local.cilium_installed && local.cilium.gateway_api
+      hubble     = local.cilium_installed && local.cilium.hubble
+    }
+    # The one GatewayClass a template targets for an internet-facing Gateway
+    # or HTTPRoute parent, whatever the cloud: Cilium's where the socle runs
+    # it, GKE's global external managed load balancer on gcp. Empty where
+    # nothing implements Gateway API yet — scaleway, or Cilium with
+    # gateway_api off — and a template must then render no Gateway.
+    gateway = {
+      className = local.gateway_class_name
+    }
   }
 }
 
-# 1. The operator. The official chart, pinned exactly.
+# 1. The operator. The official chart, pinned exactly. After the network:
+# its pod has no hostNetwork and its controllers resolve ghcr.io.
 resource "helm_release" "operator" {
   name       = "flux-operator"
   repository = "oci://ghcr.io/controlplaneio-fluxcd/charts"
@@ -70,6 +102,8 @@ resource "helm_release" "operator" {
   values = [yamlencode({
     commonLabels = local.common_labels
   })]
+
+  depends_on = [helm_release.cilium, helm_release.coredns]
 }
 
 # 2. The instance: which controllers run, how they are wired. No sync block —

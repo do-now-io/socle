@@ -1,0 +1,72 @@
+# Cilium's operator checks for the Gateway API CRDs once, at start-up, and
+# never again: it started before Flux, so it runs with its Gateway controller
+# off. This Job restarts it once the CRDs are established (the Kustomization
+# that applies it depends on them). It completes and stays; Flux re-applies it
+# unchanged, so the operator restarts once per cluster. Restarting the
+# operator does not touch the datapath: the agents keep serving traffic.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cilium-operator-restart
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cilium-operator-restart
+  namespace: kube-system
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["cilium-operator"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cilium-operator-restart
+  namespace: kube-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cilium-operator-restart
+subjects:
+  - kind: ServiceAccount
+    name: cilium-operator-restart
+    namespace: kube-system
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cilium-operator-restart-for-gateway-api
+  namespace: kube-system
+spec:
+  backoffLimit: 6
+  template:
+    spec:
+      serviceAccountName: cilium-operator-restart
+      restartPolicy: OnFailure
+      priorityClassName: system-cluster-critical
+      tolerations:
+        - key: CriticalAddonsOnly
+          operator: Exists
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: restart
+          image: registry.k8s.io/kubectl:v1.34.1
+          args: ["-n", "kube-system", "rollout", "restart", "deployment/cilium-operator"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi

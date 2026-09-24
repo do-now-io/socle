@@ -87,6 +87,11 @@ variable "kube" {
     error_message = "kube: unknown attribute. Allowed per module: ${jsonencode({ for m, d in local.catalog : m => keys(d) })}."
   }
 
+  validation {
+    condition     = !can(keys(var.kube)) || alltrue([for m in keys(var.kube) : !contains(keys(local.catalog), m) || contains(lookup(local.catalog_clouds, m, [var.cloud]), var.cloud)])
+    error_message = "kube: a module is not offered on ${var.cloud}. Cloud-bound modules: ${jsonencode(local.catalog_clouds)}."
+  }
+
   # Unknown module or attribute names are already refused above; this block
   # ignores them so only one diagnostic fires per mistake. A null catalog
   # default means "any type". `enabled` is covered here too: its catalog
@@ -101,6 +106,157 @@ variable "kube" {
       ]
     ]))
     error_message = "kube: an attribute has the wrong type. Each value must have the type of its catalog default: ${jsonencode({ for m, d in local.catalog : m => { for a, x in d : a => lookup(local.json_kinds, substr(jsonencode(x), 0, 1), "number") } })}."
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Cilium — cilium.tf and docs/catalog/cilium.md
+# ---------------------------------------------------------------------------
+
+variable "cilium" {
+  description = <<-EOT
+    The socle's Cilium, on the clouds whose foundations create a cluster with
+    no CNI — aws and azure — as `{ enabled, hubble, gateway_api }`, every key
+    optional: `enabled` (true) installs it before Flux; false means the
+    cluster brings its own CNI and DNS, which only a test double does.
+    `hubble` (false) adds Hubble Relay and UI. `gateway_api` (true) makes
+    Cilium serve the `cilium` GatewayClass. `values` ({}) is any Cilium chart
+    value, merged over the socle's so the client wins; private keys are
+    refused there, and the chart's `existingSecret` fields name a Secret
+    instead. Refused on gcp and scaleway, where the cloud operates Cilium.
+    Typed `any` and validated like `kube`, so a misspelt key is an error at
+    plan. Chart versions are pinned in cilium.tf.
+  EOT
+  type        = any
+  default     = {}
+  nullable    = false
+
+  validation {
+    condition     = can(keys(var.cilium))
+    error_message = "cilium must be an object of attributes."
+  }
+
+  validation {
+    condition     = !can(keys(var.cilium)) || alltrue([for a in keys(var.cilium) : contains(keys(local.cilium_schema), a)])
+    error_message = "cilium: unknown attribute. Allowed: ${join(", ", keys(local.cilium_schema))}."
+  }
+
+  validation {
+    condition = !can(keys(var.cilium)) || alltrue([
+      for a, x in var.cilium :
+      !contains(keys(local.cilium_schema), a)
+      || lookup(local.json_kinds, substr(jsonencode(x), 0, 1), "number") == lookup(local.json_kinds, substr(jsonencode(local.cilium_schema[a]), 0, 1), "number")
+    ])
+    error_message = "cilium: an attribute has the wrong type. Each value must have the type of its default: ${jsonencode({ for a, x in local.cilium_schema : a => lookup(local.json_kinds, substr(jsonencode(x), 0, 1), "number") })}."
+  }
+
+  validation {
+    condition     = !can(keys(var.cilium)) || contains(local.cilium_clouds, var.cloud) || length(keys(var.cilium)) == 0
+    error_message = "cilium is only configurable on ${join(" and ", local.cilium_clouds)}: on gcp (Dataplane V2) and scaleway (Kapsule) the cloud operates Cilium, and the socle installs nothing."
+  }
+
+  # values is free-form on purpose, minus one rule: no private key. A
+  # helm_release's values land in the OpenTofu state. These are the chart's
+  # (1.20.2) paths that take key material inline; each has a Secret-by-name
+  # alternative: `existingSecret` beside every Hubble TLS block, a `cilium-ca`
+  # Secret created before the apply (or `*.tls.auto.method = certmanager`),
+  # and clustermesh.config.enabled = false with the client's own
+  # `cilium-clustermesh` Secret.
+  validation {
+    condition = (
+      !can(var.cilium.values)
+      || !can(keys(var.cilium.values))
+      || (
+        !can(var.cilium.values.tls.ca.key)
+        && !can(var.cilium.values.hubble.tls.server.key)
+        && !can(var.cilium.values.hubble.relay.tls.client.key)
+        && !can(var.cilium.values.hubble.relay.tls.server.key)
+        && !can(var.cilium.values.hubble.ui.tls.client.key)
+        && !can(var.cilium.values.hubble.metrics.tls.server.key)
+        && alltrue([
+          for c in try(values(var.cilium.values.clustermesh.config.clusters), var.cilium.values.clustermesh.config.clusters, []) :
+          !can(c.tls.key)
+        ])
+      )
+    )
+    error_message = "cilium.values must not carry private keys: tls.ca.key, hubble.{tls.server,relay.tls.client,relay.tls.server,ui.tls.client,metrics.tls.server}.key and clustermesh.config.clusters[*].tls.key are refused — they would land in the OpenTofu state. Create the Secret in kube-system and name it: the Hubble blocks' existingSecret, a cilium-ca Secret, or clustermesh.config.enabled = false with your own cilium-clustermesh Secret."
+  }
+}
+
+variable "coredns" {
+  description = <<-EOT
+    The CoreDNS the socle installs on aws, right after Cilium, as
+    `{ values }`: `values` ({}) is any CoreDNS chart value, merged over the
+    socle's so the client wins — extra zones, forwarders, plugins. The chart
+    has no value that takes secret material inline; a Secret is mounted by
+    name through `extraSecrets`, or read through `env[].valueFrom`. Refused
+    where the socle installs no CoreDNS: every cloud but aws, and aws with
+    cilium.enabled = false. Chart version pinned in cilium.tf.
+  EOT
+  type        = any
+  default     = {}
+  nullable    = false
+
+  validation {
+    condition     = can(keys(var.coredns))
+    error_message = "coredns must be an object of attributes."
+  }
+
+  validation {
+    condition     = !can(keys(var.coredns)) || alltrue([for a in keys(var.coredns) : contains(keys(local.coredns_schema), a)])
+    error_message = "coredns: unknown attribute. Allowed: ${join(", ", keys(local.coredns_schema))}."
+  }
+
+  validation {
+    condition = !can(keys(var.coredns)) || alltrue([
+      for a, x in var.coredns :
+      !contains(keys(local.coredns_schema), a)
+      || lookup(local.json_kinds, substr(jsonencode(x), 0, 1), "number") == lookup(local.json_kinds, substr(jsonencode(local.coredns_schema[a]), 0, 1), "number")
+    ])
+    error_message = "coredns: an attribute has the wrong type. Each value must have the type of its default: ${jsonencode({ for a, x in local.coredns_schema : a => lookup(local.json_kinds, substr(jsonencode(x), 0, 1), "number") })}."
+  }
+
+  validation {
+    condition     = !can(keys(var.coredns)) || length(keys(var.coredns)) == 0 || local.coredns_installed
+    error_message = "coredns is only configurable where the socle installs it: aws, with cilium.enabled. AKS, GKE and Kapsule ship their own CoreDNS."
+  }
+}
+
+variable "cluster_network" {
+  description = <<-EOT
+    What Cilium needs to know about the cluster, from the foundations'
+    outputs, never from the client: `api_endpoint`, the API server as EKS
+    returns it (https://host) or AKS does (a bare FQDN), for kube-proxy
+    replacement; `service_cidr`, the service range, whose `.10` is CoreDNS's
+    address on aws; `pod_cidr`, Cilium's pool on azure, where the VNet holds
+    nodes only. Required wherever the socle installs Cilium, ignored
+    elsewhere.
+  EOT
+  type = object({
+    api_endpoint = string
+    service_cidr = optional(string)
+    pod_cidr     = optional(string)
+  })
+  default = null
+
+  validation {
+    condition     = !local.cilium_installed || var.cluster_network != null
+    error_message = "cluster_network is required where the socle installs Cilium (aws, azure): pass the foundations' cluster_endpoint as api_endpoint, and service_cidr (aws) or pod_cidr (azure)."
+  }
+
+  validation {
+    condition     = !(local.cilium_installed && var.cloud == "aws") || try(var.cluster_network.service_cidr != null, false)
+    error_message = "cluster_network.service_cidr is required on aws: CoreDNS takes the .10 address of the service range, the one every node's kubelet is told to use."
+  }
+
+  validation {
+    condition     = !(local.cilium_installed && var.cloud == "azure") || try(var.cluster_network.pod_cidr != null, false)
+    error_message = "cluster_network.pod_cidr is required on azure: Cilium's cluster pool must not default to 10.0.0.0/8, which contains the VNet."
+  }
+
+  validation {
+    condition     = !local.cilium_installed || var.cluster_network == null || can(regex("^(https://)?[A-Za-z0-9.-]+(:[0-9]+)?/?$", var.cluster_network.api_endpoint))
+    error_message = "cluster_network.api_endpoint must be a host name, with or without https:// and a port — what the foundations' cluster_endpoint output is."
   }
 }
 
