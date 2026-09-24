@@ -214,3 +214,19 @@ run "a_capacity_type_other_than_spot_or_on_demand_is_refused" {
 
   expect_failures = [var.bootstrap_node_capacity_type]
 }
+
+run "crossplane_rejects_an_action_instead_of_a_service" {
+  command = plan
+  variables {
+    crossplane = { allowed_services = ["route53:ChangeResourceRecordSets"] }
+  }
+  expect_failures = [var.crossplane]
+}
+
+run "crossplane_rejects_iam_in_the_boundary" {
+  command = plan
+  variables {
+    crossplane = { allowed_services = ["route53", "iam"] }
+  }
+  expect_failures = [var.crossplane]
+}
