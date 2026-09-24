@@ -12,6 +12,9 @@ what the other catalog modules can rely on. Part of issue #32.
 | CoreDNS on Azure | AKS's own, which BYO CNI keeps; nothing installed |
 | Gateway API CRDs | Standard channel v1.6.1, installed by the bootstrap module before Cilium, on AWS and Azure |
 | Gateway API implementation on AWS and Azure | Cilium's `cilium` GatewayClass, on by default |
+| Gateway API on GCP | GKE's controller and CRDs, stated in `opentofu/gcp` (`gateway_api_enabled`, standard channel) |
+| Gateway API on Scaleway | Nothing yet: Kapsule's Cilium cannot serve it — open question 6 |
+| The class templates target | `inputs.gateway.className`: `cilium` on aws and azure, `gke-l7-global-external-managed` on gcp, empty on scaleway |
 | Client surface | `cilium = { enabled, hubble, gateway_api, values }` and, on AWS, `coredns = { values }`, on the bootstrap module and the AWS root |
 | Versions | Cilium chart 1.20.2, CoreDNS chart 1.47.1, pinned in `opentofu/bootstrap/cilium.tf` |
 
@@ -53,8 +56,8 @@ same Helm release would be worse than none.
 | Cilium | ENI IPAM, native routing | cluster-pool IPAM, VXLAN overlay | Dataplane V2, Google's | `cni = "cilium"`, Scaleway's |
 | kube-proxy | none; Cilium replaces it | AKS's own, Cilium replaces it too | Google's | Scaleway's |
 | CoreDNS | socle, by Helm | AKS's own | Google's | Scaleway's |
-| Gateway API CRDs | socle, v1.6.1 | socle, v1.6.1 | gateway-api worktree | gateway-api worktree |
-| GatewayClass `cilium` | yes, default | yes, default | no | no |
+| Gateway API CRDs | socle, v1.6.1 | socle, v1.6.1 | GKE's, standard channel | none yet |
+| GatewayClass | `cilium`, default | `cilium`, default | GKE's `gke-l7-*` | none yet |
 
 **AWS values** (rendered by `tofu test`, then `helm template` of the real
 chart, which read back the agent configuration):
@@ -145,38 +148,57 @@ plugin. Microsoft's BYO CNI page documents `NotReady` nodes until a CNI is
 installed. Azure's and Cilium's BYO CNI guides both install Cilium only, with
 no DNS step. *Not measured on a real AKS cluster: there is no Azure root yet.*
 
-## 4. Gateway API: what the gateway-api worktree can rely on
+## 4. Gateway API on every cloud
 
-- **The CRDs are installed here, on `aws` and `azure`.** They come from the
-  standard channel at the exact version Cilium 1.20 documents, v1.6.1. They
-  are the upstream `standard-install.yaml`, vendored verbatim;
+The goal is Gateway API installed by default for every client, and no
+Ingress anywhere. The socle ships no Ingress object and no Ingress
+controller. The gateway-api PR (#35) was closed and its scope moved here.
+
+- **aws, azure: the CRDs are installed here, by the bootstrap module.** They
+  come from the standard channel at the exact version Cilium 1.20 documents,
+  v1.6.1. They are the upstream `standard-install.yaml`, vendored verbatim;
   `.github/scripts/check-gateway-api-crds.sh` fails when the file is not
   that release byte for byte, or when the chart and `cilium.tf` disagree.
   The CRDs stay in place when `gateway_api` is false, because the API is the
-  same on every cloud and only the implementation differs.
+  same on every cloud and only the implementation differs. Cilium serves the
+  `cilium` GatewayClass.
 - **Ordering constraint.** Cilium's operator looks for the CRDs once, at
   start-up, and disables its Gateway API controller if they are absent
   (Cilium docs: "Required GatewayAPI resources are not found"). The CRD
   release therefore precedes Cilium. Installing the CRDs later from the
   catalog would leave Cilium's controller off until the operator restarts.
-- **The contract with the templates** is a new block in the inputs every
-  `ResourceSet` sees:
+- **gcp: GKE's own.** GKE installs and upgrades the standard-channel CRDs and
+  runs the managed controller, with classes `gke-l7-global-external-managed`,
+  `gke-l7-regional-external-managed` and `gke-l7-rilb`. Autopilot does this
+  by default. The foundations now state it rather than inherit it:
+  `gateway_api_enabled`, default true, sets `gateway_api_config` to
+  `CHANNEL_STANDARD`, and `tofu test` covers both states. This is Hugo's
+  commit from the closed PR, cherry-picked. The socle installs nothing for
+  Gateway API on GKE.
+- **scaleway: nothing yet.** Kapsule's Cilium is operated by Scaleway and
+  cannot enable Gateway API, so no class exists there. The closed PR's
+  answer was the standard CRDs plus Envoy Gateway as a neutral controller.
+  It is not built here until Scaleway's scope is confirmed (question 6).
+- **One class name for the templates.** A shared alias is not possible,
+  because GKE serves only its own GatewayClasses. The bootstrap module
+  therefore tells every template which class to target:
 
   ```yaml
+  gateway:
+    className: cilium   # gke-l7-global-external-managed on gcp; "" where nothing serves Gateway API
   cilium:
-    installed: true    # the socle's Cilium runs here, and so do the Gateway API CRDs
-    gatewayApi: true   # the `cilium` GatewayClass exists; no other implementation is needed
-    hubble: false      # Hubble Relay and UI exist
+    installed: true     # the socle's Cilium runs here, and so do the Gateway API CRDs
+    gatewayApi: true    # Cilium serves the `cilium` class
+    hubble: false       # Hubble Relay and UI exist
   ```
 
-  All three are false on `gcp` and `scaleway`. On those clouds the
-  gateway-api module owns the CRDs and the implementation. On `aws` and
-  `azure` it should install neither while `inputs.cilium.installed` is true,
-  or two owners will fight over the same CRDs. The block is outside
-  `modules` on purpose: it is a bootstrap fact, not something `kube` sets.
-- **Assumption, easy to adjust:** the gateway-api worktree names Cilium's
-  `GatewayClass` `cilium`, the chart's default. Changing it is one value in
-  `cilium.tf`.
+  A template that exposes something, such as an ArgoCD `HTTPRoute` or
+  external-dns's Gateway source, reads `inputs.gateway.className` and
+  renders no `Gateway` when it is empty. On gcp the value is the global
+  external managed class, the internet-facing default. It assumes the
+  foundations kept `gateway_api_enabled`, because the bootstrap module
+  cannot see that variable. A regional or internal class is a template's
+  choice, not a second input.
 - Not implemented here: any `Gateway`, `HTTPRoute`, or exposure of Hubble UI.
 
 ## 5. What the client may set
@@ -313,8 +335,7 @@ not this design.
 2. **The node role on EKS**: who creates it, and whether it or a Pod Identity
    association carries the Cilium operator's policy.
 3. **Gateway API ownership**: the CRDs belong to the bootstrap module on
-   aws/azure and to the gateway-api module elsewhere, keyed on
-   `inputs.cilium.installed`. The gateway-api worktree must follow this.
+   aws and azure, and to GKE on gcp. Templates target `inputs.gateway.className`.
 4. **Removing the CRDs removes every Gateway.** Setting `enabled = false` on
    a live cluster uninstalls the `gateway-api-crds` release. The file is
    vendored verbatim, so it cannot carry `helm.sh/resource-policy: keep`.
@@ -323,3 +344,11 @@ not this design.
 5. **Azure kube-proxy** keeps running beside Cilium's replacement until
    azurerm can disable it, or the azapi provider is accepted for this one
    property.
+6. **Scaleway and Gateway API.** "Every client" includes Kapsule only if the
+   socle installs the standard CRDs plus a neutral controller there. The
+   closed PR measured Envoy Gateway: its CRDs chart exceeds Helm's 1 MiB
+   release Secret, so the release asset must be vendored. The controller
+   chart `oci://docker.io/envoyproxy/gateway-helm` v1.9.1 then runs with
+   `crds.enabled=false`. That is a catalog module, keyed on
+   `inputs.cloud == "scaleway"`, setting `inputs.gateway.className` to
+   `envoy-gateway`. Confirm the scope before it is built.

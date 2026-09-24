@@ -51,7 +51,7 @@ run "defaults_are_the_recommended_position" {
 
   assert {
     condition     = google_container_cluster.socle.gateway_api_config[0].channel == "CHANNEL_STANDARD"
-    error_message = "GKE's Gateway API controller and standard-channel CRDs must be on: the socle's gateway_api module installs nothing on GKE because of it."
+    error_message = "GKE's Gateway API controller and standard-channel CRDs must be on: the socle installs nothing for Gateway API on GKE because of it."
   }
 
   assert {

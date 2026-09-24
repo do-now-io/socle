@@ -55,7 +55,7 @@ resource "google_container_cluster" "socle" {
   # Gateway API is GKE's: its controller, and the standard-channel CRDs it
   # installs and upgrades with the cluster. Explicit so that the position is
   # enforced, not inherited from Autopilot's default, and so that the catalog
-  # module may rely on it (docs/catalog/gateway-api.md).
+  # module may rely on it (docs/catalog/cilium.md §4).
   gateway_api_config {
     channel = var.gateway_api_enabled ? "CHANNEL_STANDARD" : "CHANNEL_DISABLED"
   }

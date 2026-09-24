@@ -268,3 +268,37 @@ run "no_client_values_is_an_empty_last_layer" {
     error_message = "absent client values must merge as an empty map, changing nothing."
   }
 }
+
+run "every_cloud_names_the_gateway_class_templates_target" {
+  command = plan
+
+  assert {
+    condition     = output.inputs.gateway.className == "cilium"
+    error_message = "on aws the socle's Cilium serves Gateway API: templates target the cilium class."
+  }
+}
+
+run "gcp_targets_gkes_managed_gateway_class" {
+  command = plan
+  variables {
+    cloud           = "gcp"
+    cluster_network = null
+  }
+
+  assert {
+    condition     = output.inputs.gateway.className == "gke-l7-global-external-managed"
+    error_message = "on gcp GKE's controller serves Gateway API (gateway_api_config in opentofu/gcp): templates target its global external managed class."
+  }
+}
+
+run "no_gateway_class_where_nothing_implements_gateway_api" {
+  command = plan
+  variables {
+    cilium = { gateway_api = false }
+  }
+
+  assert {
+    condition     = output.inputs.gateway.className == ""
+    error_message = "with Cilium's Gateway API off, no class exists: templates must be told so, and render no Gateway."
+  }
+}

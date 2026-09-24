@@ -20,3 +20,5 @@ inputs:
     installed: true
     gatewayApi: true
     hubble: false
+  gateway:
+    className: cilium

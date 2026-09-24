@@ -32,6 +32,15 @@ locals {
     scaleway = "kubernetes"
   }[var.cloud]
 
+  # docs/catalog/cilium.md §4. A shared alias is not possible: GKE serves
+  # only its own GatewayClasses, so the name is the cloud's.
+  gateway_class_name = {
+    aws      = local.cilium_installed && local.cilium.gateway_api ? "cilium" : ""
+    azure    = local.cilium_installed && local.cilium.gateway_api ? "cilium" : ""
+    gcp      = "gke-l7-global-external-managed"
+    scaleway = ""
+  }[var.cloud]
+
   common_labels = {
     "app.kubernetes.io/part-of"   = "socle"
     "socle.do-now.io/cluster"     = var.cluster_name
@@ -64,6 +73,14 @@ locals {
       installed  = local.cilium_installed
       gatewayApi = local.cilium_installed && local.cilium.gateway_api
       hubble     = local.cilium_installed && local.cilium.hubble
+    }
+    # The one GatewayClass a template targets for an internet-facing Gateway
+    # or HTTPRoute parent, whatever the cloud: Cilium's where the socle runs
+    # it, GKE's global external managed load balancer on gcp. Empty where
+    # nothing implements Gateway API yet — scaleway, or Cilium with
+    # gateway_api off — and a template must then render no Gateway.
+    gateway = {
+      className = local.gateway_class_name
     }
   }
 }
