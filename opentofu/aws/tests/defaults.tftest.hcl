@@ -201,3 +201,78 @@ run "a_null_input_takes_the_module_default" {
     error_message = "a root that passes an omitted optional key as null must get the module's recommended position, not a null: nullable = false is what makes that true."
   }
 }
+
+run "crossplane_gets_no_identity_unless_asked" {
+  command = plan
+
+  assert {
+    condition     = length(aws_iam_role.crossplane) == 0 && length(aws_iam_policy.crossplane_boundary) == 0 && length(aws_eks_pod_identity_association.crossplane) == 0
+    error_message = "crossplane defaults to null: no role, no boundary, no association — the most powerful identity in the cluster exists only when the client asks for it."
+  }
+  assert {
+    condition     = output.crossplane_permissions_boundary_arn == null && output.crossplane_role_arn == null
+    error_message = "both crossplane outputs must be null when crossplane is not set."
+  }
+}
+
+run "crossplane_identity_creates_only_bounded_roles" {
+  command = plan
+  variables {
+    crossplane = { allowed_services = ["route53"] }
+  }
+
+  # The role policy names the boundary's and the cluster's ARNs, unknown at
+  # plan; pinned here so the document can be read.
+  override_resource {
+    target = aws_iam_policy.crossplane_boundary
+    values = { arn = "arn:aws:iam::000000000000:policy/socle/socle-test/crossplane-boundary" }
+  }
+  override_resource {
+    target = aws_eks_cluster.socle
+    values = {
+      arn                   = "arn:aws:eks:eu-west-3:000000000000:cluster/socle-test"
+      certificate_authority = [{ data = "Y2E=" }]
+    }
+  }
+
+  assert {
+    condition     = aws_eks_pod_identity_association.crossplane[0].namespace == "crossplane-system" && aws_eks_pod_identity_association.crossplane[0].service_account == "provider-aws"
+    error_message = "the association must name crossplane-system/provider-aws, the ServiceAccount the socle artifact fixes for every AWS provider pod."
+  }
+  assert {
+    condition     = jsondecode(aws_iam_role.crossplane[0].assume_role_policy).Statement[0].Principal.Service == "pods.eks.amazonaws.com"
+    error_message = "the Crossplane role must be trusted by EKS Pod Identity, not IRSA."
+  }
+  assert {
+    condition     = aws_iam_policy.crossplane_boundary[0].path == "/socle/socle-test/" && jsondecode(aws_iam_policy.crossplane_boundary[0].policy).Statement[0].Action == "route53:*" && length(jsondecode(aws_iam_policy.crossplane_boundary[0].policy).Statement) == 2
+    error_message = "the boundary must live under /socle/<cluster>/ and allow exactly the listed services, plus its deny."
+  }
+  assert {
+    condition     = one([for st in jsondecode(aws_iam_policy.crossplane_boundary[0].policy).Statement : st.Effect == "Deny" && contains(st.Action, "iam:*") && contains(st.Action, "sts:*") if st.Sid == "NeverIdentityNorAccount"])
+    error_message = "the boundary must always deny identity and account services."
+  }
+  assert {
+    condition     = alltrue([for st in jsondecode(aws_iam_role_policy.crossplane[0].policy).Statement : st.Resource == "arn:aws:iam::000000000000:role/socle/socle-test/*" if st.Sid != "PodIdentityAssociationsOnThisCluster"])
+    error_message = "every IAM statement of the Crossplane identity must be scoped to roles under /socle/<cluster>/."
+  }
+  assert {
+    condition     = one([for st in jsondecode(aws_iam_role_policy.crossplane[0].policy).Statement : contains(st.Action, "iam:CreateRole") if st.Sid == "CreateAndWriteRolesUnderTheBoundary"]) && one([for st in jsondecode(aws_iam_role_policy.crossplane[0].policy).Statement : keys(st.Condition.StringEquals) if st.Sid == "CreateAndWriteRolesUnderTheBoundary"]) == ["iam:PermissionsBoundary"]
+    error_message = "CreateRole must be conditioned on the permissions boundary."
+  }
+  assert {
+    condition     = !anytrue(flatten([for st in jsondecode(aws_iam_role_policy.crossplane[0].policy).Statement : [for a in flatten([st.Action]) : contains(["iam:AttachRolePolicy", "iam:DeleteRolePermissionsBoundary", "iam:CreatePolicy", "iam:CreatePolicyVersion", "iam:*", "*"], a)]]))
+    error_message = "the Crossplane identity must not attach managed policies, remove a boundary or write policies."
+  }
+}
+
+run "crossplane_without_a_service_gets_a_boundary_that_grants_nothing" {
+  command = plan
+  variables {
+    crossplane = {}
+  }
+
+  assert {
+    condition     = alltrue([for st in jsondecode(aws_iam_policy.crossplane_boundary[0].policy).Statement : st.Effect == "Deny"])
+    error_message = "with no service allowed, the boundary must allow nothing: a role Crossplane creates then grants nothing."
+  }
+}

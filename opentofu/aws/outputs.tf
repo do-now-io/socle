@@ -71,3 +71,13 @@ output "helm_kubernetes" {
   }
   sensitive = true
 }
+
+output "crossplane_role_arn" {
+  description = "ARN of the IAM role the catalog's crossplane module's AWS providers run as, through Pod Identity. Null when crossplane is not set."
+  value       = one(aws_iam_role.crossplane[*].arn)
+}
+
+output "crossplane_permissions_boundary_arn" {
+  description = "ARN of the permissions boundary every role Crossplane creates must carry — what kube.crossplane.permissions_boundary takes, and what the client root passes for you. Null when crossplane is not set."
+  value       = one(aws_iam_policy.crossplane_boundary[*].arn)
+}
