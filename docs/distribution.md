@@ -28,8 +28,10 @@ installs is Flux.
 ## One version for both
 
 `socle_version` in a client's tfvars pins the module source *and* the
-`OCIRepository` tag. That only holds if one calculation names both, so both
-jobs run `.github/scripts/compute-tag.sh`, which differs only by `REPOSITORY`:
+`OCIRepository` tag. That only holds if one calculation names both, so
+`.github/scripts/compute-tag.sh` runs once, in the `publish` job, and
+`publish-modules` pushes under the tag it hands over. Two jobs counting their
+own alphas would drift apart on the first partial re-run.
 
 - **a push to `main`** publishes `<next>-alpha.N`, where `<next>` is what the
   conventional commits since the last release call for — computed exactly as
@@ -44,7 +46,9 @@ jobs run `.github/scripts/compute-tag.sh`, which differs only by `REPOSITORY`:
 
 Both artifacts are promoted in the same job, from the same commit. A release
 where only one of them carried the version would leave `socle_version` pinning
-half a socle.
+half a socle. If the job fails between the two tags, re-running it finishes the
+job: `release.sh` accepts a release tag that already points at this commit's
+alpha, and still refuses one that points anywhere else.
 
 A release tag is never overwritten, and when the registry answers neither yes
 nor no the job **fails** instead of publishing on doubt — guessing "it does not
