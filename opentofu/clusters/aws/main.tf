@@ -45,6 +45,8 @@ module "foundations" {
   bootstrap_node_instance_types = var.aws.bootstrap_node_instance_types
   bootstrap_node_capacity_type  = var.aws.bootstrap_node_capacity_type
   bootstrap_node_count          = var.aws.bootstrap_node_count
+
+  crossplane = var.aws.crossplane
 }
 
 # One line, identical on every cloud. No credential: the exec plugin inside
@@ -62,7 +64,8 @@ module "socle" {
   environment  = var.aws.environment
   owner        = var.aws.owner
 
-  kube                 = var.kube
+  kube                 = local.kube
+  region               = var.aws.region
   socle_version        = var.socle_version
   cosign_identity      = var.cosign_identity
   artifact_url         = var.artifact_url
@@ -83,4 +86,34 @@ module "socle" {
   # the rest follow the node group through this value, which is also why
   # they are uninstalled before it on a destroy.
   schedulable_nodes = module.foundations.bootstrap_node_group.node_count
+}
+
+# The one value the root derives for the crossplane module: when the
+# foundations mint Crossplane's identity (aws.crossplane), the boundary every
+# role it creates must carry is what kube.crossplane.permissions_boundary
+# takes, so the client does not copy an ARN from one output into another
+# input. A value the client wrote wins. Both branches are maps of strings so
+# the conditional type-checks, and the try() hands a kube that is not an
+# object to the bootstrap module untouched, for its validations to refuse
+# with their own message.
+locals {
+  crossplane_boundary = { permissions_boundary = var.aws.crossplane == null ? "" : module.foundations.crossplane_permissions_boundary_arn }
+  # var.kube is `any`: merging an unknown-at-plan value (the boundary's ARN,
+  # not created yet) into it erases the whole result's static type, and the
+  # bootstrap module's kind check then sees "known after apply" instead of a
+  # kind. jsondecode(jsonencode(...)) rebuilds a concrete type from the
+  # client's literal values first, so only the one new key stays unknown.
+  kube = try(
+    merge(jsondecode(jsonencode(var.kube)), { crossplane = merge(local.crossplane_boundary, try(var.kube.crossplane, {})) }),
+    var.kube,
+  )
+}
+
+# A warning, not an error: Crossplane without its identity still installs and
+# converges, but every CloudAccess it is given fails at the AWS API.
+check "crossplane_has_an_identity" {
+  assert {
+    condition     = !try(var.kube.crossplane.enabled, false) || var.aws.crossplane != null
+    error_message = "kube.crossplane.enabled is set without aws.crossplane: the AWS provider runs with no identity, and every CloudAccess will fail. Set aws.crossplane, or keep Crossplane off."
+  }
 }

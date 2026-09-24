@@ -39,6 +39,14 @@ run "defaults_are_the_recommended_position" {
     error_message = "a module absent from kube must be at its catalog defaults."
   }
   assert {
+    condition     = output.inputs.cluster.region == ""
+    error_message = "region defaults to empty: a caller that does not know it passes nothing."
+  }
+  assert {
+    condition     = output.inputs.modules.crossplane.enabled == false && output.inputs.modules.crossplane.values == {} && output.inputs.modules.crossplane.values_secret == "" && output.inputs.modules.crossplane.permissions_boundary == ""
+    error_message = "crossplane must default to off with no client values and no boundary: no module claims cloud access yet, and the boundary is wired by the root from the foundations."
+  }
+  assert {
     condition     = can(regex("refs/heads/main\\$$", output.cosign_identity.subject))
     error_message = "the default cosign identity must trust the release workflow on main only."
   }
@@ -65,6 +73,52 @@ run "client_values_are_merged_over_catalog_defaults" {
   assert {
     condition     = output.inputs.modules.hello.enabled == true && output.inputs.modules.hello.message == "hello from socle"
     error_message = "attributes the client did not set must keep the catalog default: templates test values, never presence."
+  }
+}
+
+run "crossplane_turns_on_and_its_values_flow_through_untouched" {
+  command = plan
+  variables {
+    kube = {
+      crossplane = {
+        enabled              = true
+        values_secret        = "crossplane-values"
+        permissions_boundary = "arn:aws:iam::123456789012:policy/socle/socle-test/crossplane-boundary"
+        values = {
+          metrics                = { enabled = true }
+          resourcesCrossplane    = { requests = { memory = "256Mi" } }
+          extraObjects           = [{ apiVersion = "v1", kind = "ConfigMap", metadata = { name = "x" } }]
+          extraEnvVarsCrossplane = { HTTPS_PROXY = "http://proxy.acme.example:3128" }
+        }
+      }
+    }
+  }
+
+  assert {
+    condition     = output.inputs.modules.crossplane.enabled == true
+    error_message = "enabled=true must reach the inputs."
+  }
+  assert {
+    condition     = output.inputs.modules.crossplane.values.resourcesCrossplane.requests.memory == "256Mi" && output.inputs.modules.crossplane.values.metrics.enabled == true && output.inputs.modules.crossplane.values.extraEnvVarsCrossplane.HTTPS_PROXY == "http://proxy.acme.example:3128"
+    error_message = "the client's chart values must reach the inputs as written: the template hands them to helm-controller, nothing rewrites them."
+  }
+  assert {
+    condition     = output.inputs.modules.crossplane.permissions_boundary == "arn:aws:iam::123456789012:policy/socle/socle-test/crossplane-boundary"
+    error_message = "the permissions boundary the root wires must reach the inputs."
+  }
+  assert {
+    condition     = output.inputs.modules.crossplane.values_secret == "crossplane-values"
+    error_message = "the name of the client's values Secret must flow to the inputs."
+  }
+}
+
+run "the_region_reaches_the_catalog" {
+  command = plan
+  variables { region = "eu-west-3" }
+
+  assert {
+    condition     = output.inputs.cluster.region == "eu-west-3"
+    error_message = "the region must reach inputs.cluster.region: the crossplane module's Pod Identity associations are regional."
   }
 }
 

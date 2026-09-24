@@ -3,12 +3,23 @@
     name: t
     environment: dev
     owner: platform
+    region: eu-west-3
   socle:
     url: oci://x/y
     version: 0.0.0 # x-release-please-version
   modules:
     gateway_api:
       enabled: true
+    crossplane:
+      enabled: true
+      values:
+        metrics:
+          enabled: true
+        resourcesCrossplane:
+          requests:
+            memory: 256Mi
+      values_secret: crossplane-values
+      permissions_boundary: arn:aws:iam::123456789012:policy/socle/t/crossplane-boundary
     hello:
       enabled: true
       replicas: 2

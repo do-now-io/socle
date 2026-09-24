@@ -423,6 +423,8 @@ Rules for a module template, all measured:
 
 Deleting a `ResourceSet` uninstalls everything it rendered — measured.
 
+Module design notes: [`crossplane`](catalog/crossplane.md).
+
 ## 7. Publishing the artifact, and releasing
 
 One workflow, `publish-artifact.yaml`, on every push. Nobody types a version:
