@@ -424,6 +424,7 @@ Rules for a module template, all measured:
 Deleting a `ResourceSet` uninstalls everything it rendered — measured.
 
 Module design notes: [`crossplane`](catalog/crossplane.md).
+Catalog modules, one design note each: [external-dns](catalog/external-dns.md).
 
 ## 7. Publishing the artifact, and releasing
 
