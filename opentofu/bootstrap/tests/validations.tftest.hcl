@@ -69,6 +69,62 @@ run "kube_refuses_an_attribute_of_the_wrong_type" {
   expect_failures = [var.kube]
 }
 
+# --- external_dns — docs/catalog/external-dns.md ---------------------------
+
+run "external_dns_refuses_enabling_without_a_domain_filter" {
+  command = plan
+  variables { kube = { external_dns = { enabled = true } } }
+  expect_failures = [var.kube]
+}
+
+run "external_dns_refuses_a_domain_filter_that_is_not_a_dns_name" {
+  command = plan
+  variables { kube = { external_dns = { domain_filters = [".acme.example"] } } }
+  expect_failures = [var.kube]
+}
+
+run "external_dns_refuses_a_policy_outside_the_two_offered" {
+  command = plan
+  variables { kube = { external_dns = { policy = "create-only" } } }
+  expect_failures = [var.kube]
+}
+
+run "external_dns_refuses_a_credential_in_values_env" {
+  command = plan
+  variables { kube = { external_dns = { values = { env = [{ name = "AWS_SECRET_ACCESS_KEY", value = "wJalrXUtnFEMI" }] } } } }
+  expect_failures = [var.kube]
+}
+
+run "external_dns_refuses_a_secret_flag_in_values_extra_args" {
+  command = plan
+  variables { kube = { external_dns = { values = { extraArgs = { txt-encrypt-aes-key = "0123456789abcdef0123456789abcdef" } } } } }
+  expect_failures = [var.kube]
+}
+
+run "external_dns_refuses_the_charts_secret_configuration" {
+  command = plan
+  variables { kube = { external_dns = { values = { secretConfiguration = { enabled = true, data = { "credentials" = "x" } } } } } }
+  expect_failures = [var.kube]
+}
+
+run "external_dns_refuses_values_that_are_not_an_object" {
+  command = plan
+  variables { kube = { external_dns = { values = "logLevel: debug" } } }
+  expect_failures = [var.kube]
+}
+
+run "external_dns_refuses_an_invalid_values_secret_name" {
+  command = plan
+  variables { kube = { external_dns = { values_secret = "My_Values" } } }
+  expect_failures = [var.kube]
+}
+
+run "external_dns_refuses_a_txt_owner_id_with_a_space" {
+  command = plan
+  variables { kube = { external_dns = { txt_owner_id = "acme prod" } } }
+  expect_failures = [var.kube]
+}
+
 run "socle_version_refuses_a_moving_head" {
   command = plan
   variables { socle_version = "latest" }

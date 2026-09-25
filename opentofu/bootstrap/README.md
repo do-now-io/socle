@@ -41,6 +41,12 @@ type, is an error at plan, with the allowed list in the message.
 | `crossplane` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan |
 | `crossplane` | `values_secret` | `""` | Name of a Secret in `crossplane-system` with a `values.yaml` key, created by the client, merged last |
 | `crossplane` | `permissions_boundary` | `""` | AWS: the boundary every module's role carries. The client root wires it from the foundations' `crossplane_permissions_boundary_arn` |
+| `external_dns` | `enabled` | `false` | Publish DNS records for Services, Ingresses and HTTPRoutes into the cloud's zone — needs `domain_filters`, and a credential the client brings ([design note](../../docs/catalog/external-dns.md)) |
+| `external_dns` | `domain_filters` | `[]` | Zones it may write to, as DNS names; required when enabled |
+| `external_dns` | `policy` | `"upsert-only"` | `upsert-only` never deletes a record; `sync` also deletes what it owns |
+| `external_dns` | `txt_owner_id` | the cluster name | Owner written into the TXT registry, so two clusters never fight over a zone |
+| `external_dns` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan |
+| `external_dns` | `values_secret` | `""` | Name of a Secret in `external-dns` with a `values.yaml` key, created by the client, merged last |
 | `hello` | `enabled` | `true` | Deploy podinfo as a proof the pipeline works |
 | `hello` | `replicas` | `1` | Replicas of the podinfo Deployment |
 | `hello` | `message` | `"hello from socle"` | Message podinfo serves |

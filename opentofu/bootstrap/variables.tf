@@ -154,6 +154,68 @@ variable "kube" {
     condition     = !can(var.kube.crossplane.values_secret) || try(var.kube.crossplane.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.crossplane.values_secret)), true)
     error_message = "kube.crossplane.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
   }
+  # --- external_dns — docs/catalog/external-dns.md -------------------------
+  # Per-attribute rules. They read var.kube with the catalog default as the
+  # fallback — not local.modules, which depends on var.kube and would be a
+  # cycle — so a client who writes only `enabled = true` is told what else is
+  # missing. Each is guarded so an unknown module or attribute, refused above,
+  # does not also fire here.
+
+  validation {
+    condition     = !can(keys(var.kube)) || !try(var.kube.external_dns.enabled, false) || length(try(var.kube.external_dns.domain_filters, [])) > 0
+    error_message = "kube.external_dns: domain_filters must name at least one zone when the module is enabled. external-dns publishes nothing outside its filters, so an empty list is a module that does nothing."
+  }
+
+  validation {
+    condition     = !can(keys(var.kube)) || alltrue([for d in try(var.kube.external_dns.domain_filters, []) : can(regex("^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}\\.?$", d))])
+    error_message = "kube.external_dns: every domain_filters entry must be a DNS name such as acme.example, lowercase, without a leading dot or a wildcard."
+  }
+
+  validation {
+    condition     = !can(keys(var.kube)) || contains(["upsert-only", "sync"], try(var.kube.external_dns.policy, "upsert-only"))
+    error_message = "kube.external_dns.policy must be upsert-only (never deletes a record: the safe default) or sync (also deletes what it owns)."
+  }
+
+
+  validation {
+    condition     = !can(keys(var.kube)) || can(regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$", try(var.kube.external_dns.txt_owner_id, "x")))
+    error_message = "kube.external_dns.txt_owner_id must be 1 to 63 characters of letters, digits, dots, dashes and underscores: it is written into every TXT record the module owns."
+  }
+
+  # values is free-form on purpose, minus one rule: no secret material. What a
+  # client writes there ends up in the OpenTofu state and in a ConfigMap on the
+  # cluster. external-dns takes its provider credentials from the environment
+  # and a few flags, so those are the chart paths refused: secretConfiguration
+  # (the chart's deprecated Secret-from-values), an env entry of the pod or of
+  # the webhook sidecar whose name looks like a credential and carries a
+  # literal value (valueFrom is fine), and an extraArgs flag that looks like
+  # one (txt-encrypt-aes-key, pdns-api-key, rfc2136-tsig-secret…).
+  validation {
+    condition = (
+      !can(var.kube.external_dns.values)
+      || !can(keys(var.kube.external_dns.values))
+      || (
+        !can(var.kube.external_dns.values.secretConfiguration)
+        && alltrue([
+          for e in concat(try(tolist(var.kube.external_dns.values.env), []), try(tolist(var.kube.external_dns.values.provider.webhook.env), [])) :
+          !(can(e.value) && can(regex("(?i)(secret|password|passwd|token|api_?key|access_?key|private_?key)", try(e.name, ""))))
+        ])
+        && alltrue([
+          for a in concat(
+            try(keys(var.kube.external_dns.values.extraArgs), []),
+            try([for x in tolist(var.kube.external_dns.values.extraArgs) : tostring(x)], []),
+          ) :
+          !can(regex("(?i)(secret|password|passwd|token|api-?key|aes-key|private-?key)", a))
+        ])
+      )
+    )
+    error_message = "kube.external_dns.values must not carry secrets: secretConfiguration, an env entry with a literal value whose name looks like a credential (AWS_SECRET_ACCESS_KEY, SCW_SECRET_KEY, …), and an extraArgs flag such as txt-encrypt-aes-key are refused. Put them in a Secret in the external-dns namespace and name it in kube.external_dns.values_secret."
+  }
+
+  validation {
+    condition     = !can(var.kube.external_dns.values_secret) || try(var.kube.external_dns.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.external_dns.values_secret)), true)
+    error_message = "kube.external_dns.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
+  }
 }
 
 # ---------------------------------------------------------------------------
