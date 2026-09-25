@@ -6,7 +6,7 @@ provisions an empty shell, then steps away.
 
 ```hcl
 module "socle" {
-  source = "oci://<registry>/<repo>//opentofu/scaleway?tag=<version>"
+  source = "oci://ghcr.io/do-now-io/socle/opentofu-modules//opentofu/scaleway?tag=${var.socle_version}"
 
   project_id   = "22222222-2222-2222-2222-222222222222"
   region       = "fr-par"
@@ -32,8 +32,10 @@ belongs. What has to exist on the Scaleway account before any of it runs is in
 [prerequisites](../../docs/scaleway/prerequisites.md).
 
 > **OpenTofu does not verify OCI signatures.** It will pull an unsigned or
-> tampered artifact without complaint. Run `cosign verify` in CI before
-> `tofu init`, or enforce it through registry policy, and pin by digest.
+> tampered artifact without complaint — Flux does, this does not. Run
+> `cosign verify` in CI before `tofu init`, or enforce it through registry
+> policy. The command, and the identity to pin:
+> [distribution](../../docs/distribution.md#who-verifies-and-who-does-not).
 
 ## What is decided for you
 
