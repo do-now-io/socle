@@ -323,6 +323,102 @@ Rules for a module template, all measured:
   rendered several times with different values; the operator supports it
   without changing this design.
 
+- **Every module takes the client's own chart values**, through two
+  attributes the catalog schema gives each of them:
+
+  | Attribute | Default | What it is |
+  | --- | --- | --- |
+  | `values` | `{}` | free-form chart values, written in the tfvars |
+  | `values_secret` | `""` | the name of a Secret the client creates in the module's namespace, with a `values.yaml` key |
+
+  The `HelmRelease` carries **no inline `values:` block at all**. Its
+  `valuesFrom` lists three entries, in this order: `<module>-socle-values`,
+  the socle's own defaults rendered by the template; `<module>-client-values`,
+  the client's `values` rendered the same way
+  (`data: { values.yaml: << toYaml inputs.modules.<m>.values | nindent 4 >> }`);
+  and the Secret when the client named one, `optional: true`. Both ConfigMaps
+  live in the module's namespace and carry the same reconcile toggle as every
+  other resource.
+
+  **The empty `values:` block is the whole trick, and it was measured.**
+  helm-controller merges the `valuesFrom` entries in order and then merges
+  `spec.values` over the result — `chartutil.ChartValuesFromReferences` ends
+  on `MergeMaps(result, values)`. So a socle default written inline silently
+  beats the client on every key both set, and the client could only ever add
+  keys the socle had not thought of. Moving the socle's defaults into the
+  first reference is what makes the promise true: a module's named attributes
+  are the curated surface the socle keeps working, `values` is everything else
+  the chart can do, and where the two meet the client wins. Each module proves
+  it in the e2e, by overriding one socle default and asserting the client's
+  value on the live object — a test on a key the socle leaves unset proves
+  nothing, which is how this went unnoticed at first.
+
+  A consequence worth knowing: a `clusters/<cloud>/` overlay can no longer
+  JSON-patch one value by path, because the values are now a YAML document
+  inside a ConfigMap string. Per-cloud values go in the template instead,
+  under `<< if eq inputs.cloud "aws" >>` inside the socle-values document —
+  a mechanism §6 already allows, and one place rather than two. An overlay
+  that must still act replaces the whole document.
+
+  Two rules make it safe. **Secrets never go in `values`** — it lands in the
+  OpenTofu state and in a plain `ConfigMap` — so each module refuses its
+  chart's secret-bearing paths at plan (`kube.argocd.values.configs.secret`
+  and friends: see `opentofu/bootstrap/variables.tf`) and the client puts them
+  in `values_secret`, which OpenTofu never reads. And **a named attribute is a
+  convenience, not a lock**: a client who sets both `domain` and the same key
+  in `values` gets what `values` says, because it is merged later.
+
+- **A module that needs a cloud service carries its own access.** The module
+  ships its `ServiceAccount` and the object that creates the role granting
+  that access, as Crossplane managed resources rendered by its own
+  `ResourceSet`, inside the artifact. `external_dns` is the worked example:
+  its `ResourceSet` declares the IAM role, grants it Route 53, binds it to the
+  `ServiceAccount` it generated, and only then installs the release that runs
+  under it. One template, one module, one decision.
+
+  **OpenTofu never creates a role for a module. Never.** Not as a default, not
+  as an option, not as an escape hatch for a cluster without Crossplane. Five
+  modules times four clouds is twenty IAM blocks a foundations module would
+  have to carry and a client would have to wire through his tfvars, and each
+  new module would add four more. That is unlivable, and it is the reason
+  Crossplane is in the socle at all.
+
+  The rule this enforces is an invariance: **a foundations module never
+  changes because of the catalog.** `opentofu/aws` describes a cluster, and it
+  describes the same cluster whether the client runs `external_dns`, ten
+  modules or none. The alternative — an optional IAM block per consumer,
+  wired through the client's tfvars — makes the cloud module a function of the
+  Helm modules chosen on top of it, which is exactly the coupling this
+  distribution exists to avoid. So: everything an in-cluster component needs
+  ships in the artifact and is delivered by Flux; OpenTofu stops at the
+  cluster.
+
+  One thing cannot live in the artifact, because it is what lets the artifact
+  act on the cloud at all: the credential Crossplane's own provider assumes.
+  The foundations grant it **expressly and once**, per cloud, and it is broad
+  by design — Crossplane creates whatever role a module declares, and the
+  foundations cannot know that list without becoming a function of the
+  catalog again. It is constant, the same for every client and unchanged by
+  any catalog choice, so it does not break the invariance, and it is the only
+  cloud identity the foundations carry.
+
+  That grant is the socle's most powerful object, and it is written down as
+  such rather than left implicit: a credential that can create roles can
+  create one that can do anything. What keeps it honest is a bound on shape,
+  not on list — on AWS a permissions boundary plus a name and path prefix the
+  socle owns, so Crossplane can mint roles freely inside its own namespace and
+  nowhere else. The equivalent per cloud is `docs/catalog/crossplane.md`'s job
+  to state.
+
+  Anything needed **before** Crossplane exists cannot use it: Cilium's own ENI
+  permissions on AWS are on the node role, from the foundations, and that is
+  the boundary rather than an exception to argue about.
+
+  The design and the ordering chain — foundations, Cilium and CoreDNS, Flux,
+  Crossplane, a module's role, that module's workload — are in
+  `docs/catalog/crossplane.md`; each
+  module's own note says what access it declares.
+
 Deleting a `ResourceSet` uninstalls everything it rendered — measured.
 
 ## 7. Publishing the artifact, and releasing
