@@ -102,7 +102,7 @@ run "defaults_are_the_recommended_position" {
 
   assert {
     condition     = aws_iam_role.cluster.name == "socle-test-cluster"
-    error_message = "The cluster's service role is one of the only two roles left: EKS assumes it directly, so it cannot belong to the layer above."
+    error_message = "The cluster's service role is one of the three roles left: EKS assumes it directly, so it cannot belong to the layer above."
   }
 
   assert {
@@ -175,6 +175,19 @@ run "helm_kubernetes_is_credential_free_and_uses_the_aws_exec_plugin" {
   }
 }
 
+run "cilium_operator_policy_grants_eni_ipam_and_nothing_more" {
+  command = plan
+
+  assert {
+    condition     = contains(jsondecode(output.cilium_operator_policy_json).Statement[0].Action, "ec2:CreateNetworkInterface") && contains(jsondecode(output.cilium_operator_policy_json).Statement[0].Action, "ec2:AssignPrivateIpAddresses")
+    error_message = "the policy must carry what Cilium's operator calls to allocate ENIs and addresses."
+  }
+  assert {
+    condition     = alltrue([for a in jsondecode(output.cilium_operator_policy_json).Statement[0].Action : startswith(a, "ec2:")])
+    error_message = "the policy must stay within EC2: the operator manages network interfaces, nothing else."
+  }
+}
+
 run "a_null_input_takes_the_module_default" {
   command = plan
   variables {
@@ -186,5 +199,98 @@ run "a_null_input_takes_the_module_default" {
   assert {
     condition     = length(aws_vpc.socle) == 1 && length(aws_flow_log.socle) == 1
     error_message = "a root that passes an omitted optional key as null must get the module's recommended position, not a null: nullable = false is what makes that true."
+  }
+}
+
+run "the_bootstrap_node_group_is_two_graviton_nodes_on_spot_over_six_families" {
+  command = plan
+
+  assert {
+    condition     = aws_eks_node_group.bootstrap.ami_type == "AL2023_ARM_64_STANDARD"
+    error_message = "the default types are Graviton: the AMI must follow their architecture."
+  }
+  assert {
+    condition     = one(aws_eks_node_group.bootstrap.scaling_config).min_size == 2 && one(aws_eks_node_group.bootstrap.scaling_config).max_size == 2 && one(aws_eks_node_group.bootstrap.scaling_config).desired_size == 2
+    error_message = "two nodes, and nothing scales them: min, max and desired are the one number."
+  }
+  assert {
+    condition     = aws_eks_node_group.bootstrap.capacity_type == "SPOT"
+    error_message = "Spot by default: the list of types spreads the two nodes over independent pools."
+  }
+  assert {
+    condition     = length(aws_eks_node_group.bootstrap.instance_types) == 6 && length(distinct([for t in aws_eks_node_group.bootstrap.instance_types : split(".", t)[0]])) == 6
+    error_message = "six instance families, not six sizes of one: distinct Spot pools are the reason for the list."
+  }
+  assert {
+    condition     = aws_launch_template.bootstrap.instance_type == null
+    error_message = "a Spot group takes its types through the node group, never one type through the launch template."
+  }
+  assert {
+    condition     = length(aws_eks_node_group.bootstrap.taint) == 0
+    error_message = "untainted: until Karpenter exists this group is the only compute, and every catalog module must schedule on it."
+  }
+  assert {
+    condition     = one(aws_launch_template.bootstrap.metadata_options).http_tokens == "required" && one(aws_launch_template.bootstrap.metadata_options).http_put_response_hop_limit == 1
+    error_message = "IMDSv2 only, one hop: a pod that is not hostNetwork must not reach the node's role."
+  }
+  assert {
+    condition     = one(aws_launch_template.bootstrap.block_device_mappings).ebs[0].encrypted == "true"
+    error_message = "the nodes' root volumes must be encrypted."
+  }
+  assert {
+    condition     = !contains(keys(aws_iam_role_policy_attachment.node), "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy") && contains(keys(aws_iam_role_policy_attachment.node), "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy")
+    error_message = "the node role carries what a node needs to join, and not the VPC CNI's policy: this cluster runs Cilium."
+  }
+  assert {
+    condition     = aws_iam_role_policy.node_ecr_pull.name == "ecr-pull"
+    error_message = "the nodes pull EKS's own images from ECR: their role must be allowed to."
+  }
+  assert {
+    condition     = aws_iam_role_policy.node_cilium_operator.name == "cilium-operator-eni"
+    error_message = "Cilium's operator runs hostNetwork on these nodes: their role must carry its ENI policy."
+  }
+  assert {
+    condition     = alltrue([for t in aws_eks_node_group.bootstrap.instance_types : endswith(t, ".xlarge")])
+    error_message = "4 vCPU types: one node alone must carry the whole socle, Karpenter included, with room left."
+  }
+  assert {
+    condition     = output.bootstrap_node_group.node_count == 2
+    error_message = "the bootstrap module orders itself on node_count: it must be the group's size."
+  }
+}
+
+run "the_ami_follows_the_architecture_of_the_instance_type" {
+  command = plan
+  variables {
+    bootstrap_node_instance_types = ["m7i.large", "m6i.large"]
+  }
+
+  assert {
+    condition     = aws_eks_node_group.bootstrap.ami_type == "AL2023_x86_64_STANDARD"
+    error_message = "m7i is Intel: the x86_64 AMI."
+  }
+}
+
+run "a_gpu_family_starting_with_g_is_not_mistaken_for_graviton" {
+  command = plan
+  variables {
+    bootstrap_node_instance_types = ["g5.xlarge"]
+  }
+
+  assert {
+    condition     = aws_eks_node_group.bootstrap.ami_type == "AL2023_x86_64_STANDARD"
+    error_message = "g5 is an x86 GPU family: only a g after the generation marks Graviton."
+  }
+}
+
+run "on_demand_is_one_variable_away" {
+  command = plan
+  variables {
+    bootstrap_node_capacity_type = "ON_DEMAND"
+  }
+
+  assert {
+    condition     = aws_eks_node_group.bootstrap.capacity_type == "ON_DEMAND" && aws_eks_node_group.bootstrap.instance_types[0] == "t4g.xlarge"
+    error_message = "on demand, EKS takes the list's first type: t4g.xlarge, the cheapest of the six."
   }
 }

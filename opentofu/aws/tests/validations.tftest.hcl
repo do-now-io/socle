@@ -152,3 +152,65 @@ run "kubernetes_version_rejects_a_patch_component" {
 
   expect_failures = [var.kubernetes_version]
 }
+
+# --- Bootstrap nodes ----------------------------------------------------------
+
+run "a_bootstrap_node_group_of_zero_is_refused" {
+  command = plan
+
+  variables {
+    bootstrap_node_count = 0
+  }
+
+  expect_failures = [var.bootstrap_node_count]
+}
+
+run "a_fractional_bootstrap_node_count_is_refused" {
+  command = plan
+
+  variables {
+    bootstrap_node_count = 1.5
+  }
+
+  expect_failures = [var.bootstrap_node_count]
+}
+
+run "a_bootstrap_instance_type_must_look_like_one" {
+  command = plan
+
+  variables {
+    bootstrap_node_instance_types = ["t4g.medium", "t4g"]
+  }
+
+  expect_failures = [var.bootstrap_node_instance_types]
+}
+
+run "an_empty_list_of_bootstrap_instance_types_is_refused" {
+  command = plan
+
+  variables {
+    bootstrap_node_instance_types = []
+  }
+
+  expect_failures = [var.bootstrap_node_instance_types]
+}
+
+run "graviton_and_x86_types_do_not_mix_in_one_group" {
+  command = plan
+
+  variables {
+    bootstrap_node_instance_types = ["t4g.medium", "t3.medium"]
+  }
+
+  expect_failures = [var.bootstrap_node_instance_types]
+}
+
+run "a_capacity_type_other_than_spot_or_on_demand_is_refused" {
+  command = plan
+
+  variables {
+    bootstrap_node_capacity_type = "CAPACITY_BLOCK"
+  }
+
+  expect_failures = [var.bootstrap_node_capacity_type]
+}

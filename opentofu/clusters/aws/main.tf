@@ -41,6 +41,10 @@ module "foundations" {
   log_retention_days                   = var.aws.log_retention_days
   kubernetes_version                   = var.aws.kubernetes_version
   force_update_version                 = var.aws.force_update_version
+
+  bootstrap_node_instance_types = var.aws.bootstrap_node_instance_types
+  bootstrap_node_capacity_type  = var.aws.bootstrap_node_capacity_type
+  bootstrap_node_count          = var.aws.bootstrap_node_count
 }
 
 # One line, identical on every cloud. No credential: the exec plugin inside
@@ -64,5 +68,19 @@ module "socle" {
   artifact_url         = var.artifact_url
   artifact_pull_secret = var.artifact_pull_secret
 
-  depends_on = [module.foundations]
+  # Cilium, and CoreDNS with it, before Flux: EKS is created with no CNI.
+  # What Cilium needs to know comes from the foundations, not from the tfvars.
+  cilium  = var.cilium
+  coredns = var.coredns
+  cluster_network = {
+    api_endpoint = module.foundations.cluster_endpoint
+    service_cidr = module.foundations.service_cidr
+  }
+
+  # No depends_on on the whole foundations module: that would hold Cilium
+  # until the bootstrap nodes are Ready, and they are Ready only once
+  # Cilium runs on them. Cilium follows the cluster alone; CoreDNS, Flux and
+  # the rest follow the node group through this value, which is also why
+  # they are uninstalled before it on a destroy.
+  schedulable_nodes = module.foundations.bootstrap_node_group.node_count
 }

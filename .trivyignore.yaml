@@ -1,0 +1,22 @@
+# Trivy misconfiguration ignores for files that cannot carry an inline
+# #trivy:ignore. Trivy honours those in HCL, not in Kubernetes YAML, so a
+# manifest's ignores live here, scoped to its path, with the reason as the
+# statement. The manifest says why beside the resource too.
+misconfigurations:
+  - id: KSV-0048
+    paths:
+      - oci/catalog/gateway-api/cilium/operator-restart.yaml
+    statement: >-
+      Role cilium-operator-restart grants get and patch on one Deployment,
+      kube-system/cilium-operator, by resourceNames: what kubectl rollout
+      restart performs and nothing more. KSV-0048 reads resources and verbs
+      and never resourceNames, so no narrower Role that can restart the
+      operator passes it.
+  - id: KSV-0125
+    paths:
+      - oci/catalog/gateway-api/cilium/operator-restart.yaml
+    statement: >-
+      The restart Job runs ghcr.io/fluxcd/flux-cli, pinned by digest: the
+      Flux project's image, signed by its release workflow, from the
+      publisher whose controllers the socle already runs. KSV-0125 trusts
+      only ACR, ECR and GCR, and this one image serves aws and azure.

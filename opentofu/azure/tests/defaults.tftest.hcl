@@ -139,6 +139,11 @@ run "defaults_are_the_recommended_position" {
   }
 
   assert {
+    condition     = output.pod_cidr == "10.244.0.0/16"
+    error_message = "pod_cidr must default to AKS's own pod range: it is Cilium's cluster pool, and the chart's own default (10.0.0.0/8) contains the VNet."
+  }
+
+  assert {
     condition     = azurerm_kubernetes_cluster.socle.automatic_upgrade_channel == "stable"
     error_message = "The stable channel is hardcoded, not a variable."
   }

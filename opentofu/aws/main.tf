@@ -1,13 +1,13 @@
 # Socle foundations for AWS.
 #
-# One flat root module: VPC, EKS cluster and identities. It provisions an
-# empty-shell EKS Standard cluster and the identities the Flux-pulled socle
-# needs, then steps away. Everything above that — the catalog, the
+# One flat root module: VPC, EKS cluster, its bootstrap nodes and identities.
+# It provisions an EKS Standard cluster with just enough compute for the
+# socle to start, and the identities it needs, then steps away. Everything above that — the catalog, the
 # observability stack, application infrastructure — arrives through the
 # socle OCI artifact and Crossplane.
 #
 # Every default here traces back to a research document under docs/aws/.
-# Resources live in network.tf, cluster.tf and iam.tf.
+# Resources live in network.tf, cluster.tf, nodes.tf and iam.tf.
 
 # The region comes from the provider, never from a variable of our own. A
 # variable would be a second source of truth the module cannot enforce

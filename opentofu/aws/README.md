@@ -1,8 +1,9 @@
 # Socle foundations — AWS
 
-One flat root module: VPC, EKS Standard cluster, identities. It provisions an
-empty-shell control plane and the identities the Flux-pulled socle needs,
-then steps away.
+One flat root module: VPC, EKS Standard cluster, its bootstrap nodes,
+identities. It provisions a control plane with just enough compute for the
+socle to start, and the identities the Flux-pulled socle needs, then steps
+away.
 
 ```hcl
 module "socle" {
@@ -40,6 +41,7 @@ Every default traces back to a research document. The short version:
 | --- | --- | --- |
 | EKS Standard, no Auto Mode option | enforced | [cluster mode](../../docs/aws/eks-cluster-mode.md) |
 | Karpenter, Cilium, CSI drivers, LB controller are factory components, not provisioned here | enforced | [cluster mode](../../docs/aws/eks-cluster-mode.md) |
+| One bootstrap node group — 2 nodes of 4 vCPU on Spot over six Graviton families, untainted, not autoscaled — the only compute this module owns | default | [Cilium design note §2](../../docs/catalog/cilium.md) |
 | VPC gets at least one public and one private subnet per AZ, no all-public escape hatch | enforced | [network & security](../../docs/aws/eks-network-security.md) |
 | NAT Gateway per AZ | default | [network & security](../../docs/aws/eks-network-security.md) |
 | S3 Gateway endpoint always on; ECR/STS/EC2/CloudWatch Logs Interface endpoints standard | enforced | [network & security](../../docs/aws/eks-network-security.md) |
@@ -49,7 +51,7 @@ Every default traces back to a research document. The short version:
 | Pod Identity exclusively, IRSA absent | enforced | [managed scope](../../docs/aws/eks-managed-scope.md) |
 | VPC CNI and kube-proxy refused — never installed at all (`bootstrap_self_managed_addons = false`) | enforced | [managed scope](../../docs/aws/eks-managed-scope.md) |
 | End of standard support: AWS upgrades the cluster rather than billing extended support (`STANDARD`) | enforced | [managed scope](../../docs/aws/eks-managed-scope.md) |
-| CoreDNS, EBS CSI, EFS CSI and the Pod Identity Agent stay EKS-managed add-ons — installed by the factory, not here | absent | [managed scope](../../docs/aws/eks-managed-scope.md) |
+| EBS CSI, EFS CSI and the Pod Identity Agent stay EKS-managed add-ons — installed by the factory, not here; CoreDNS is installed by the bootstrap module after Cilium | absent | [managed scope](../../docs/aws/eks-managed-scope.md), [catalog/cilium](../../docs/catalog/cilium.md) |
 | Workload identities (Crossplane, EBS CSI) belong to the layer that installs their pods | absent | [managed scope](../../docs/aws/eks-managed-scope.md) |
 
 ## Also decided, not from research
@@ -121,7 +123,7 @@ and tested, so these are refusals:
 ## Tests
 
 ```bash
-tofu test          # 14 runs: every validation, and the defaults
+tofu test          # 15 runs: every validation, and the defaults
 ```
 
 CI plans this module directly against the floci emulator — no fixture
@@ -146,20 +148,23 @@ rather than left to be rediscovered.
 
 ## What an apply does not give you
 
-This module provisions **nothing that needs a pod to run**. That is the rule,
-not a list of exceptions: no node group, no Fargate profile, no Karpenter, and
-no EKS add-on either. What comes out is a VPC, a control plane, log groups and
-identities — every one of which exists without a single node.
+This module provisions **nothing that needs a pod to run**, with one
+exception it cannot do without: the bootstrap node group. Its nodes boot with
+no CNI and are Ready — and the group ACTIVE — only once Cilium's agent runs on
+them, so a root must install Cilium beside the group rather than after it
+(`opentofu/clusters/aws` does). Otherwise: no Fargate profile, no Karpenter,
+and no EKS add-on. What comes out is a VPC, a control plane, two nodes, log
+groups and identities.
 
 The add-ons left for that reason. CoreDNS and the EBS CSI controller are
-Deployments; on a cluster with no nodes their pods cannot schedule, the add-on
-health goes `DEGRADED`, and the apply fails. Keeping them while refusing nodes
-was the one combination that could not converge.
+Deployments; while the nodes wait for a CNI their pods cannot schedule, the
+add-on health goes `DEGRADED`, and the apply fails before Cilium exists.
 
-So an apply gives you a cluster that nothing runs on yet — and no identity
-waiting for it either. Compute, the CNI, the add-ons and the workload
-identities all arrive with the layer above, because each of those identities
-has to name a Kubernetes service account that this module cannot see.
+So an apply gives you a cluster with the nodes the socle starts on, and no
+workload identity waiting for it. The capacity for workloads (Karpenter), the
+CNI, the add-ons and the workload identities all arrive with the layer above,
+because each of those identities has to name a Kubernetes service account
+that this module cannot see.
 
 That leaves one conformance checklist item unsatisfiable: outputs are required
 to cover "the in-cluster provider's identity", and there is no longer one to
@@ -186,14 +191,20 @@ No modules.
 | [aws_cloudwatch_log_group.flow_logs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_log_group) | resource |
 | [aws_eip.nat](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eip) | resource |
 | [aws_eks_cluster.socle](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_cluster) | resource |
+| [aws_eks_node_group.bootstrap](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_node_group) | resource |
 | [aws_flow_log.socle](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/flow_log) | resource |
 | [aws_iam_role.cluster](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
 | [aws_iam_role.flow_logs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
+| [aws_iam_role.node](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
 | [aws_iam_role_policy.flow_logs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
+| [aws_iam_role_policy.node_cilium_operator](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
+| [aws_iam_role_policy.node_ecr_pull](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
 | [aws_iam_role_policy_attachment.cluster](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
+| [aws_iam_role_policy_attachment.node](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_internet_gateway.socle](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/internet_gateway) | resource |
 | [aws_kms_key.logs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/kms_key) | resource |
 | [aws_kms_key.secrets](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/kms_key) | resource |
+| [aws_launch_template.bootstrap](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/launch_template) | resource |
 | [aws_nat_gateway.socle](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/nat_gateway) | resource |
 | [aws_route_table.private](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route_table) | resource |
 | [aws_route_table.public](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route_table) | resource |
@@ -206,6 +217,8 @@ No modules.
 | [aws_vpc_endpoint.interface](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_endpoint) | resource |
 | [aws_vpc_endpoint.s3](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_endpoint) | resource |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
+| [aws_iam_policy_document.cilium_operator](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.node_ecr_pull](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/region) | data source |
 
 ## Inputs
@@ -219,6 +232,9 @@ No modules.
 | <a name="input_kubernetes_version"></a> [kubernetes\_version](#input\_kubernetes\_version) | EKS control plane version. Required, no default: the module accepts<br/>whatever version it is given rather than enforcing the policy ceiling<br/>itself. The n-1 policy ceiling / n-2 compatibility floor is decided and<br/>bumped by the socle Kargo pipelines, not by this module — a `validation`<br/>block cannot call the AWS API to know what "current" is, and the<br/>decoupled socle-release/Kubernetes-version pipelines are the actual<br/>owners of that decision. | `string` | n/a | yes |
 | <a name="input_owner"></a> [owner](#input\_owner) | Stamped on every billable resource so cost can be attributed and orphans can be found. | `string` | n/a | yes |
 | <a name="input_additional_tags"></a> [additional\_tags](#input\_additional\_tags) | Extra tags merged onto every resource this module creates, on top of owner/environment/socle-version. | `map(string)` | `{}` | no |
+| <a name="input_bootstrap_node_capacity_type"></a> [bootstrap\_node\_capacity\_type](#input\_bootstrap\_node\_capacity\_type) | SPOT by default: the several instance types spread the two nodes over<br/>independent pools, and EKS replaces a node at risk before draining it.<br/>ON\_DEMAND for a cluster that must not lose a bootstrap node to a<br/>reclaim, at about two and a half times the price. | `string` | `"SPOT"` | no |
+| <a name="input_bootstrap_node_count"></a> [bootstrap\_node\_count](#input\_bootstrap\_node\_count) | How many bootstrap nodes, spread over the private subnets' AZs. Two by<br/>default: when one is reclaimed or lost the other carries the whole socle<br/>until it is replaced, CoreDNS keeps a replica, and Karpenter's chart<br/>places its two replicas on different nodes in different zones.<br/>One is accepted on a cluster that can live with neither. Nothing scales<br/>this group, so it is one number rather than min, max and desired. | `number` | `2` | no |
+| <a name="input_bootstrap_node_instance_types"></a> [bootstrap\_node\_instance\_types](#input\_bootstrap\_node\_instance\_types) | Instance types of the bootstrap node group, which carries Cilium's<br/>operator, CoreDNS, Flux and later Karpenter — not the client's<br/>workloads, which Karpenter's nodes carry. Several on Spot, so the nodes<br/>come from independent capacity pools; on demand, the first is used. The<br/>default is six Graviton families of 4 vCPU and 8 to 32 GiB: each one<br/>alone carries the whole socle, Karpenter included, with half its CPU<br/>left, so losing a node to a reclaim is routine. All must share an<br/>architecture, which the AMI follows. | `list(string)` | <pre>[<br/>  "t4g.xlarge",<br/>  "m7g.xlarge",<br/>  "m6g.xlarge",<br/>  "c7g.xlarge",<br/>  "c6g.xlarge",<br/>  "r6g.xlarge"<br/>]</pre> | no |
 | <a name="input_cluster_log_types"></a> [cluster\_log\_types](#input\_cluster\_log\_types) | Control plane log types shipped to CloudWatch Logs. All five by default:<br/>the audit and authenticator streams are the only record of who did what<br/>to the API server, which ISO 27001 A.8.15 and SOC 2 CC7 both expect, and<br/>the same argument that puts a private subnet tier in every VPC applies<br/>here. Trim the list to cut ingestion cost; an empty list turns control<br/>plane logging off entirely. | `list(string)` | <pre>[<br/>  "api",<br/>  "audit",<br/>  "authenticator",<br/>  "controllerManager",<br/>  "scheduler"<br/>]</pre> | no |
 | <a name="input_create_nat_gateway"></a> [create\_nat\_gateway](#input\_create\_nat\_gateway) | Create one NAT Gateway per AZ. One per AZ, never a single shared one, to<br/>avoid cross-AZ data transfer charges — not a toggle for disabling NAT<br/>outright, which the private-subnet decision above rules out. Exists<br/>only for the create\_vpc = false case, where the consumer's existing VPC<br/>already manages its own NAT. | `bool` | `true` | no |
 | <a name="input_create_vpc"></a> [create\_vpc](#input\_create\_vpc) | Create the VPC, or attach to one the consumer already manages. | `bool` | `true` | no |
@@ -236,6 +252,8 @@ No modules.
 
 | Name | Description |
 |------|-------------|
+| <a name="output_bootstrap_node_group"></a> [bootstrap\_node\_group](#output\_bootstrap\_node\_group) | The bootstrap node group, once its nodes have joined. node\_count is what the bootstrap module checks before it installs anything that needs a node; referencing it is also what orders those releases after the group. |
+| <a name="output_cilium_operator_policy_json"></a> [cilium\_operator\_policy\_json](#output\_cilium\_operator\_policy\_json) | IAM policy the Cilium operator needs in ENI mode — the bootstrap module installs Cilium on this cluster before Flux. The bootstrap nodes' role already carries it; any other node role the operator may be scheduled on needs it too. |
 | <a name="output_cluster_ca_certificate"></a> [cluster\_ca\_certificate](#output\_cluster\_ca\_certificate) | Base64-encoded cluster CA certificate, for building a kubeconfig. |
 | <a name="output_cluster_endpoint"></a> [cluster\_endpoint](#output\_cluster\_endpoint) | The control plane's API endpoint — the access path the socle and its automation use. |
 | <a name="output_cluster_name"></a> [cluster\_name](#output\_cluster\_name) | Name of the EKS cluster. |
@@ -244,6 +262,7 @@ No modules.
 | <a name="output_private_subnet_ids"></a> [private\_subnet\_ids](#output\_private\_subnet\_ids) | Private subnet IDs, one per AZ. |
 | <a name="output_public_subnet_ids"></a> [public\_subnet\_ids](#output\_public\_subnet\_ids) | Public subnet IDs, one per AZ. |
 | <a name="output_region"></a> [region](#output\_region) | Region the cluster and VPC were created in, as resolved from the provider. |
+| <a name="output_service_cidr"></a> [service\_cidr](#output\_service\_cidr) | The Kubernetes service range EKS chose for this cluster (172.20.0.0/16 or 10.100.0.0/16, by VPC CIDR). The bootstrap module gives CoreDNS its .10 address, the one every node's kubelet is told to use. Null on an emulated cluster that reports none (floci). |
 | <a name="output_tags"></a> [tags](#output\_tags) | The standard tag set applied to every billable resource this module creates. |
 | <a name="output_vpc_id"></a> [vpc\_id](#output\_vpc\_id) | ID of the VPC the cluster is attached to, whether this module created it or not. |
 <!-- END_TF_DOCS -->

@@ -19,6 +19,13 @@ aws = {
 
   # No good default exists for who may reach the API endpoint.
   cluster_endpoint_public_access_cidrs = ["203.0.113.0/24"]
+
+  # The bootstrap node group carries the socle itself, not your workloads:
+  # two 4 vCPU nodes on Spot by default, over six Graviton families, about
+  # $84 a month in eu-west-3. ON_DEMAND takes the first type, about $223.
+  # bootstrap_node_capacity_type  = "ON_DEMAND"
+  # bootstrap_node_instance_types = ["t4g.xlarge", "m7g.xlarge", "m6g.xlarge", "c7g.xlarge", "c6g.xlarge", "r6g.xlarge"]
+  # bootstrap_node_count          = 2
 }
 
 # Only what differs from the catalog's defaults. An unknown module or
@@ -28,3 +35,18 @@ kube = {
     replicas = 2
   }
 }
+
+# Cilium is installed before Flux with these defaults; list only what
+# differs. hubble adds Hubble Relay and UI; gateway_api = false stops Cilium
+# serving the Gateway API (the CRDs stay). values takes any Cilium chart
+# value and wins over the socle's; a private key is refused there — name a
+# Secret you created in kube-system instead (existingSecret).
+# cilium = {
+#   hubble = true
+#   values = { bandwidthManager = { enabled = true } }
+# }
+#
+# The same for the CoreDNS installed with it:
+# coredns = {
+#   values = { replicaCount = 3 }
+# }
