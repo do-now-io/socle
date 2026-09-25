@@ -36,6 +36,7 @@ type, is an error at plan, with the allowed list in the message.
 
 | Module | Attribute | Default | Meaning |
 | --- | --- | --- | --- |
+| `gateway_api` | `enabled` | `true` | Gateway API standard CRDs from upstream, pinned by commit, and Cilium's `cilium` class on aws and azure. Offered on aws, azure and scaleway; GKE owns its own. Disabling orphans the CRDs |
 | `hello` | `enabled` | `true` | Deploy podinfo as a proof the pipeline works |
 | `hello` | `replicas` | `1` | Replicas of the podinfo Deployment |
 | `hello` | `message` | `"hello from socle"` | Message podinfo serves |
@@ -46,6 +47,33 @@ offers, and `catalog_clouds` in `catalog.tf` names the clouds a module is bound
 to (absent = every cloud). All of it changes in the same release, and CI
 (`.github/scripts/check-catalog-clouds.sh`) fails when the overlays and the
 schema disagree.
+
+## Cilium, before Flux
+
+On `aws` and `azure` the foundations create a cluster with no CNI, and
+nothing without `hostNetwork`, Flux included, starts until one runs. This
+module therefore installs Cilium, and on `aws` CoreDNS, before
+`flux-operator`. On `gcp` and `scaleway` the cloud operates Cilium and none of
+this exists. The Gateway API CRDs are not installed here: the catalog's
+`gateway_api` module brings them from upstream once Flux runs. The root
+passes `cluster_network` from the foundations' outputs:
+
+```hcl
+cilium  = { hubble = true }           # optional: enabled, hubble, gateway_api, values
+coredns = { values = { replicaCount = 3 } }         # aws: any CoreDNS chart value
+cluster_network = {
+  api_endpoint = module.foundations.cluster_endpoint
+  service_cidr = module.foundations.service_cidr   # aws
+  # pod_cidr   = module.foundations.pod_cidr       # azure
+}
+```
+
+`values` takes any chart value and is merged after the socle's, so the
+client wins. Private keys are refused there, because they would land in the
+state: name a Secret through the chart's `existingSecret` fields instead. The
+templates see what was decided as `inputs.cilium.{installed, gatewayApi,
+hubble}`. The design and what was measured are in
+[docs/catalog/cilium.md](../../docs/catalog/cilium.md).
 
 ## What is decided for you
 
@@ -59,6 +87,8 @@ schema disagree.
 | Default identity | the release workflow on `main` — a branch build needs an explicit override |
 | Source kind | OCI only |
 | Namespace | `flux-system`, fixed |
+| CNI on aws and azure | Cilium 1.20.2, pinned here: ENI IPAM on aws, BYOCNI overlay on azure, kube-proxy replacement on both |
+| DNS on aws | CoreDNS by Helm after Cilium; the EKS add-on cannot exist before a CNI |
 
 ## Reading the result
 
@@ -96,6 +126,8 @@ No modules.
 
 | Name | Type |
 |------|------|
+| [helm_release.cilium](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
+| [helm_release.coredns](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 | [helm_release.instance](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 | [helm_release.operator](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 | [helm_release.socle](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
@@ -110,6 +142,9 @@ No modules.
 | <a name="input_owner"></a> [owner](#input\_owner) | Team accountable for the cluster. Stamped as a label on every object. | `string` | n/a | yes |
 | <a name="input_artifact_pull_secret"></a> [artifact\_pull\_secret](#input\_artifact\_pull\_secret) | Name of an existing kubernetes.io/dockerconfigjson Secret in flux-system that Flux uses to pull the artifact from a private registry. Empty for a public registry. The Secret is created outside this module — a credential never enters OpenTofu. | `string` | `""` | no |
 | <a name="input_artifact_url"></a> [artifact\_url](#input\_artifact\_url) | OCI repository the socle artifact is pulled from. Override for a mirror; the tag is socle\_version. | `string` | `"oci://ghcr.io/do-now-io/socle/flux-modules"` | no |
+| <a name="input_cilium"></a> [cilium](#input\_cilium) | The socle's Cilium, on the clouds whose foundations create a cluster with<br/>no CNI — aws and azure — as `{ enabled, hubble, gateway_api }`, every key<br/>optional: `enabled` (true) installs it before Flux; false means the<br/>cluster brings its own CNI and DNS, which only a test double does.<br/>`hubble` (false) adds Hubble Relay and UI. `gateway_api` (true) makes<br/>Cilium serve the `cilium` GatewayClass. `values` ({}) is any Cilium chart<br/>value, merged over the socle's so the client wins; private keys are<br/>refused there, and the chart's `existingSecret` fields name a Secret<br/>instead. Refused on gcp and scaleway, where the cloud operates Cilium.<br/>Typed `any` and validated like `kube`, so a misspelt key is an error at<br/>plan. Chart versions are pinned in cilium.tf. | `any` | `{}` | no |
+| <a name="input_cluster_network"></a> [cluster\_network](#input\_cluster\_network) | What Cilium needs to know about the cluster, from the foundations'<br/>outputs, never from the client: `api_endpoint`, the API server as EKS<br/>returns it (https://host) or AKS does (a bare FQDN), for kube-proxy<br/>replacement; `service_cidr`, the service range, whose `.10` is CoreDNS's<br/>address on aws; `pod_cidr`, Cilium's pool on azure, where the VNet holds<br/>nodes only. Required wherever the socle installs Cilium, ignored<br/>elsewhere. | <pre>object({<br/>    api_endpoint = string<br/>    service_cidr = optional(string)<br/>    pod_cidr     = optional(string)<br/>  })</pre> | `null` | no |
+| <a name="input_coredns"></a> [coredns](#input\_coredns) | The CoreDNS the socle installs on aws, right after Cilium, as<br/>`{ values }`: `values` ({}) is any CoreDNS chart value, merged over the<br/>socle's so the client wins — extra zones, forwarders, plugins. The chart<br/>has no value that takes secret material inline; a Secret is mounted by<br/>name through `extraSecrets`, or read through `env[].valueFrom`. Refused<br/>where the socle installs no CoreDNS: every cloud but aws, and aws with<br/>cilium.enabled = false. Chart version pinned in cilium.tf. | `any` | `{}` | no |
 | <a name="input_cosign_identity"></a> [cosign\_identity](#input\_cosign\_identity) | Keyless identity the artifact's signature must match, as issuer and subject regexes. Defaults to the socle's release workflow on main, so production never consumes a branch build by accident. Override on a dev cluster testing a branch. Null means this default. Verification cannot be disabled. | <pre>object({<br/>    issuer  = string<br/>    subject = string<br/>  })</pre> | <pre>{<br/>  "issuer": "^https://token\\.actions\\.githubusercontent\\.com$",<br/>  "subject": "^https://github\\.com/do-now-io/socle/\\.github/workflows/publish-artifact\\.yaml@refs/heads/main$"<br/>}</pre> | no |
 | <a name="input_flux_components"></a> [flux\_components](#input\_flux\_components) | Flux controllers to install. The image automation pair is absent by default: the socle's version moves through a reviewed tfvars change, not through a controller rewriting tags. | `list(string)` | <pre>[<br/>  "source-controller",<br/>  "kustomize-controller",<br/>  "helm-controller",<br/>  "notification-controller"<br/>]</pre> | no |
 | <a name="input_flux_version"></a> [flux\_version](#input\_flux\_version) | Flux version the operator installs and keeps converged. 2.x tracks the latest 2 series; an exact version pins it. | `string` | `"2.x"` | no |
@@ -126,6 +161,7 @@ No modules.
 | Name | Description |
 |------|-------------|
 | <a name="output_artifact"></a> [artifact](#output\_artifact) | The socle artifact, as OCI URL and tag. |
+| <a name="output_cilium"></a> [cilium](#output\_cilium) | Whether this module installed Cilium (aws, azure: the clouds whose foundations create a cluster with no CNI), with the chart versions it pinned. installed is false where the cloud operates Cilium, or when cilium.enabled is false. |
 | <a name="output_cosign_identity"></a> [cosign\_identity](#output\_cosign\_identity) | Keyless identity the artifact's signature is verified against, on every reconciliation. |
 | <a name="output_flux_version"></a> [flux\_version](#output\_flux\_version) | Flux version the operator converges the controllers to. |
 | <a name="output_inputs"></a> [inputs](#output\_inputs) | What this module ships into the cluster as the ResourceSetInputProvider's defaultValues, after normalisation against the catalog. The catalog's templates read exactly these paths. |

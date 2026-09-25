@@ -113,7 +113,11 @@ resource "aws_eks_cluster" "socle" {
 
   # No self-managed VPC CNI, kube-proxy or CoreDNS installed at creation.
   # Socle runs Cilium, so the first two would exist only to be removed, and
-  # CoreDNS arrives later as a pinned managed add-on installed by the factory.
+  # CoreDNS comes with Cilium from the bootstrap module, as a Helm release
+  # right after it — not as a managed add-on: with no CNI the add-on's pods
+  # never schedule, it sits DEGRADED, and the provider waits for ACTIVE until
+  # it times out, here, before the module that installs the CNI ever runs.
+  # docs/catalog/cilium.md.
   bootstrap_self_managed_addons = false
 
   # Shipped to the log group below, which is created first so that its
@@ -190,6 +194,9 @@ resource "aws_eks_cluster" "socle" {
 # same reason rather than because they would individually break: the rule is
 # that this module provisions nothing that needs a pod to run.
 #
-# All four stay EKS-managed add-ons — that decision is unchanged. They are
-# installed by the factory, once compute exists, at versions the socle
-# pipeline pins. What stays here is what they bind to: the roles in iam.tf.
+# EBS CSI, EFS CSI and the Pod Identity Agent stay EKS-managed add-ons — that
+# decision is unchanged. They are installed by the factory, once compute
+# exists, at versions the socle pipeline pins. CoreDNS is the exception: it
+# is needed before Flux and cannot be an add-on before a CNI exists, so the
+# bootstrap module installs it by Helm, after Cilium (docs/catalog/cilium.md).
+# What stays here is what the add-ons bind to: the roles in iam.tf.

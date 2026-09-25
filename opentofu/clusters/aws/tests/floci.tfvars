@@ -16,3 +16,10 @@ kube = {
     replicas = 1
   }
 }
+
+# floci's EKS is a k3s with its own CNI (flannel), kube-proxy and CoreDNS. The
+# production default installs Cilium and CoreDNS before Flux, which here would
+# fight the CNI already in place; this is the one case the toggle exists for.
+cilium = {
+  enabled = false
+}

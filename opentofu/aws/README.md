@@ -49,7 +49,7 @@ Every default traces back to a research document. The short version:
 | Pod Identity exclusively, IRSA absent | enforced | [managed scope](../../docs/aws/eks-managed-scope.md) |
 | VPC CNI and kube-proxy refused — never installed at all (`bootstrap_self_managed_addons = false`) | enforced | [managed scope](../../docs/aws/eks-managed-scope.md) |
 | End of standard support: AWS upgrades the cluster rather than billing extended support (`STANDARD`) | enforced | [managed scope](../../docs/aws/eks-managed-scope.md) |
-| CoreDNS, EBS CSI, EFS CSI and the Pod Identity Agent stay EKS-managed add-ons — installed by the factory, not here | absent | [managed scope](../../docs/aws/eks-managed-scope.md) |
+| EBS CSI, EFS CSI and the Pod Identity Agent stay EKS-managed add-ons — installed by the factory, not here; CoreDNS is installed by the bootstrap module after Cilium | absent | [managed scope](../../docs/aws/eks-managed-scope.md), [catalog/cilium](../../docs/catalog/cilium.md) |
 | Workload identities (Crossplane, EBS CSI) belong to the layer that installs their pods | absent | [managed scope](../../docs/aws/eks-managed-scope.md) |
 
 ## Also decided, not from research
@@ -121,7 +121,7 @@ and tested, so these are refusals:
 ## Tests
 
 ```bash
-tofu test          # 14 runs: every validation, and the defaults
+tofu test          # 15 runs: every validation, and the defaults
 ```
 
 CI plans this module directly against the floci emulator — no fixture
@@ -206,6 +206,7 @@ No modules.
 | [aws_vpc_endpoint.interface](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_endpoint) | resource |
 | [aws_vpc_endpoint.s3](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_endpoint) | resource |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
+| [aws_iam_policy_document.cilium_operator](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/region) | data source |
 
 ## Inputs
@@ -236,6 +237,7 @@ No modules.
 
 | Name | Description |
 |------|-------------|
+| <a name="output_cilium_operator_policy_json"></a> [cilium\_operator\_policy\_json](#output\_cilium\_operator\_policy\_json) | IAM policy the Cilium operator needs in ENI mode — the bootstrap module installs Cilium on this cluster before Flux. For the node role, which this module does not create: whoever creates it attaches this document. |
 | <a name="output_cluster_ca_certificate"></a> [cluster\_ca\_certificate](#output\_cluster\_ca\_certificate) | Base64-encoded cluster CA certificate, for building a kubeconfig. |
 | <a name="output_cluster_endpoint"></a> [cluster\_endpoint](#output\_cluster\_endpoint) | The control plane's API endpoint — the access path the socle and its automation use. |
 | <a name="output_cluster_name"></a> [cluster\_name](#output\_cluster\_name) | Name of the EKS cluster. |
@@ -244,6 +246,7 @@ No modules.
 | <a name="output_private_subnet_ids"></a> [private\_subnet\_ids](#output\_private\_subnet\_ids) | Private subnet IDs, one per AZ. |
 | <a name="output_public_subnet_ids"></a> [public\_subnet\_ids](#output\_public\_subnet\_ids) | Public subnet IDs, one per AZ. |
 | <a name="output_region"></a> [region](#output\_region) | Region the cluster and VPC were created in, as resolved from the provider. |
+| <a name="output_service_cidr"></a> [service\_cidr](#output\_service\_cidr) | The Kubernetes service range EKS chose for this cluster (172.20.0.0/16 or 10.100.0.0/16, by VPC CIDR). The bootstrap module gives CoreDNS its .10 address, the one every node's kubelet is told to use. Null on an emulated cluster that reports none (floci). |
 | <a name="output_tags"></a> [tags](#output\_tags) | The standard tag set applied to every billable resource this module creates. |
 | <a name="output_vpc_id"></a> [vpc\_id](#output\_vpc\_id) | ID of the VPC the cluster is attached to, whether this module created it or not. |
 <!-- END_TF_DOCS -->

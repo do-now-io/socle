@@ -62,4 +62,7 @@ module "socle" {
   socle_version        = var.socle_version
   cosign_identity      = var.cosign_identity
   artifact_pull_secret = var.artifact_pull_secret
+  # k3s brings its own CNI, kube-proxy and CoreDNS; the production default
+  # would install Cilium over them. See tests/floci.tfvars.
+  cilium = { enabled = false }
 }
