@@ -15,7 +15,7 @@ run "defaults_are_the_recommended_position" {
   command = plan
 
   assert {
-    condition     = output.socle_version == "0.0.0" # x-release-please-version
+    condition     = output.socle_version == "0.1.0" # x-release-please-version
     error_message = "socle_version must default to the module's own version, so one tag bump moves module and artifact together."
   }
   assert {

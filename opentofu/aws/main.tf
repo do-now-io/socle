@@ -23,7 +23,7 @@ data "aws_caller_identity" "current" {}
 locals {
   # Stamped onto every billable resource so cost can be attributed and
   # orphans can be found. Bumped with the module's own tag.
-  socle_version = "0.0.0" # x-release-please-version
+  socle_version = "0.1.0" # x-release-please-version
 
   # The standard tag set. AWS tags take any UTF-8, so no normalisation is
   # needed here.

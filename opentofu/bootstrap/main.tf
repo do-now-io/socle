@@ -11,7 +11,7 @@
 locals {
   # Bumped with the module's own tag. VERSION at the repo root is the source;
   # .github/scripts/check-version.sh fails CI when this drifts from it.
-  socle_version = "0.0.0" # x-release-please-version
+  socle_version = "0.1.0" # x-release-please-version
 
   version = coalesce(var.socle_version, local.socle_version)
 

@@ -2,7 +2,7 @@
 #   tofu init && tofu apply -var-file=prod.tfvars
 
 # The only line an upgrade touches.
-socle_version = "0.0.0" # x-release-please-version
+socle_version = "0.1.0" # x-release-please-version
 
 # While the registry is private, name the pull secret created outside OpenTofu
 # (see README, "A private registry"):
