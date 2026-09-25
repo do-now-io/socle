@@ -258,9 +258,39 @@ variable "force_update_version" {
   nullable    = false
 }
 
-# Pod Identity is the only workload-identity mechanism this module would use —
-# IRSA is absent, not toggled off: AWS's own recommendation, and its EC2-only
-# restriction matches Socle's EC2-only scope exactly. No association is created
-# here all the same, because every one of them would name a service account
-# that does not exist yet. The OIDC issuer URL is still exposed as an output
-# (checklist requirement) even though nothing here consumes it.
+# Pod Identity is the only workload-identity mechanism this module uses — IRSA
+# is absent, not toggled off: AWS's own recommendation, and its EC2-only
+# restriction matches Socle's EC2-only scope exactly. One association is
+# created here, Crossplane's, because its service account name is fixed by
+# the socle artifact; every other identity is Crossplane's to create. The OIDC
+# issuer URL is still exposed as an output (checklist requirement) even though
+# nothing here consumes it.
+
+variable "crossplane" {
+  description = <<-EOT
+    Give the catalog's crossplane module its AWS identity — the one the socle
+    cannot make for itself: an IAM role, bound through EKS Pod Identity to
+    crossplane-system/provider-aws, allowed to create roles under
+    /socle/<cluster_name>/ only, and only carrying the permissions boundary
+    this module writes. allowed_services is that boundary: the AWS services
+    (IAM action prefixes, such as route53 or s3) any module's role may be
+    granted. Empty grants nothing; iam, sts, organizations, account, sso and
+    identitystore are refused. Which resources of those services a module
+    reaches is its own role's policy. Null, the default, creates nothing. The
+    client root passes the boundary's ARN into kube.crossplane.
+  EOT
+  type = object({
+    allowed_services = optional(list(string), [])
+  })
+  default = null
+
+  validation {
+    condition     = var.crossplane == null || try(alltrue([for s in var.crossplane.allowed_services : can(regex("^[a-z0-9-]{2,40}$", s))]), false)
+    error_message = "crossplane.allowed_services must be AWS service prefixes as IAM actions write them, such as route53 or s3 — lowercase, no colon, no wildcard."
+  }
+
+  validation {
+    condition     = var.crossplane == null || try(length(setintersection(var.crossplane.allowed_services, ["iam", "sts", "organizations", "account", "sso", "identitystore"])) == 0, true)
+    error_message = "crossplane.allowed_services must not name iam, sts, organizations, account, sso or identitystore: a role Crossplane creates never mints identities, chains into other roles or touches the account."
+  }
+}

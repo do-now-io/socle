@@ -34,6 +34,7 @@ variable "aws" {
     cluster_log_types                    = optional(list(string))
     log_retention_days                   = optional(number)
     force_update_version                 = optional(bool)
+    crossplane                           = optional(object({ allowed_services = optional(list(string), []) }))
   })
 }
 

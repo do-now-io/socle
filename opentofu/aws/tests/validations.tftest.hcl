@@ -152,3 +152,19 @@ run "kubernetes_version_rejects_a_patch_component" {
 
   expect_failures = [var.kubernetes_version]
 }
+
+run "crossplane_rejects_an_action_instead_of_a_service" {
+  command = plan
+  variables {
+    crossplane = { allowed_services = ["route53:ChangeResourceRecordSets"] }
+  }
+  expect_failures = [var.crossplane]
+}
+
+run "crossplane_rejects_iam_in_the_boundary" {
+  command = plan
+  variables {
+    crossplane = { allowed_services = ["route53", "iam"] }
+  }
+  expect_failures = [var.crossplane]
+}
