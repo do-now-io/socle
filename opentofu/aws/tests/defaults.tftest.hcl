@@ -136,7 +136,7 @@ run "defaults_are_the_recommended_position" {
   }
 
   assert {
-    condition     = aws_eks_cluster.socle.tags["socle-version"] == "0.0.0" # x-release-please-version
+    condition     = aws_eks_cluster.socle.tags["socle-version"] == "0.1.0" # x-release-please-version
     error_message = "Every billable resource must carry the socle version that created it."
   }
 }

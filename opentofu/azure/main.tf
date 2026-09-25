@@ -12,7 +12,7 @@
 locals {
   # Stamped onto every billable resource so cost can be attributed and
   # orphans can be found. Bumped with the module's own tag.
-  socle_version = "0.0.0" # x-release-please-version
+  socle_version = "0.1.0" # x-release-please-version
 
   # The standard tag set. Azure tags take any UTF-8 key/value, so no
   # normalisation is needed here.
