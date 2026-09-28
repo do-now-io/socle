@@ -68,7 +68,7 @@ without complaint. The verification is the consumer's to run, in CI, before
 
 ```sh
 cosign verify ghcr.io/do-now-io/socle/opentofu-modules:<version> \
-  --certificate-identity-regexp '^https://github\.com/do-now-io/socle/\.github/workflows/publish-artifact\.yaml@' \
+  --certificate-identity-regexp '^https://github\.com/do-now-io/socle/\.github/workflows/publish-artifact\.yaml@refs/heads/main$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
