@@ -56,6 +56,11 @@ the maintenance window — dev Tuesday, staging Wednesday, prod Saturday.**
 
 **Decision: delegate to Managed Service for Prometheus.**
 
+> **Superseded** by [`docs/monitoring.md`](../monitoring.md) (#43): workload
+> metrics go to the socle's in-cluster VictoriaMetrics on every cloud, GKE
+> included. The free system metrics below are unaffected. The figures here
+> stay as the comparison that decision was made against.
+
 - Crossover is ~850 samples/s per cluster; a filtered cluster sits at a third
   of it.
 - Monarch keeps 24 months where a self-hosted Prometheus keeps fifteen days.
