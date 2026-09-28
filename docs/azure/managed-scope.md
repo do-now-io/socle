@@ -63,6 +63,11 @@ would extend a support window this module never lets a cluster need.
 explicitly; Deployment Safeguards is turned on at Baseline/Enforce — what
 Automatic would have forced, chosen here instead of inherited.
 
+> **Monitoring superseded** by [`docs/monitoring.md`](../monitoring.md)
+> (#43): the socle's in-cluster OpenTelemetry + Victoria stack replaces
+> Managed Prometheus and Container Insights; a separate PR removes both from
+> `opentofu/azure`. Until then a cluster pays for both paths.
+
 - Disk and File CSI have no cross-cloud equivalent worth keeping uniform —
   same logic as any provider-native component with nothing to replace it
   with.

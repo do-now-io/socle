@@ -427,6 +427,7 @@ Module design notes: [`crossplane`](catalog/crossplane.md).
 Catalog modules, one design note each: [external-dns](catalog/external-dns.md).
 Design notes of the real modules, one per folder under `oci/catalog/`:
 `argocd` — [docs/catalog/argocd.md](catalog/argocd.md).
+The monitoring stack, six modules designed together — [docs/monitoring.md](monitoring.md).
 
 ## 7. Publishing the artifact, and releasing
 
