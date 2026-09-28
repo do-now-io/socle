@@ -17,13 +17,15 @@ fi
 # An existing release tag is not an error by itself: the promote job tags two
 # packages, and a re-run after it failed between them finds the first one
 # done. It is checked against this commit's alpha below.
+# stderr is kept apart so a warning never ends up in the digest compared below.
 released=""
-if released="$(crane digest "$repo:$base" 2>&1)"; then
+err="$(mktemp)"
+if released="$(crane digest "$repo:$base" 2>"$err")"; then
   :
-elif printf '%s' "$released" | grep -qE 'MANIFEST_UNKNOWN|NAME_UNKNOWN'; then
+elif grep -qE 'MANIFEST_UNKNOWN|NAME_UNKNOWN' "$err"; then
   released=""
 else
-  echo "::error::cannot tell whether $repo:$base exists: $released"
+  echo "::error::cannot tell whether $repo:$base exists: $(cat "$err")"
   exit 1
 fi
 # The alpha to promote is the one built from this very commit: only pushes to
