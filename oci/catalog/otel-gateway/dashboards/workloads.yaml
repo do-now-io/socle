@@ -1,0 +1,638 @@
+# The workloads dashboard, shipped by the otel_gateway module because it reads
+# that module's metrics (docs/monitoring.md §5). Written on the names
+# VictoriaMetrics stores k8s_cluster and the scraped endpoints under
+# -opentelemetry.usePrometheusNaming; the e2e parses this JSON and asserts that
+# every metric an expression names has series in VictoriaMetrics. Edit it in
+# place and keep it valid JSON.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-gateway-dashboard-workloads
+  labels:
+    # The grafana module's sidecar picks up every ConfigMap carrying it.
+    grafana_dashboard: "1"
+data:
+  workloads.json: |
+    {
+      "uid": "socle-otel-workloads",
+      "title": "Kubernetes / Workloads",
+      "description": "Shipped by the socle's otel_gateway module: object state and scrape targets, in VictoriaMetrics.",
+      "tags": [
+        "socle",
+        "kubernetes",
+        "opentelemetry"
+      ],
+      "editable": true,
+      "schemaVersion": 39,
+      "version": 1,
+      "time": {
+        "from": "now-1h",
+        "to": "now"
+      },
+      "refresh": "30s",
+      "timezone": "browser",
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "label": "Data source",
+            "type": "datasource",
+            "query": "prometheus",
+            "refresh": 1,
+            "current": {},
+            "hide": 0
+          },
+          {
+            "name": "namespace",
+            "label": "Namespace",
+            "type": "query",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${datasource}"
+            },
+            "query": {
+              "query": "label_values(k8s_pod_phase, k8s_namespace_name)",
+              "refId": "namespace-var"
+            },
+            "definition": "label_values(k8s_pod_phase, k8s_namespace_name)",
+            "refresh": 2,
+            "includeAll": true,
+            "multi": true,
+            "allValue": ".*",
+            "current": {
+              "selected": true,
+              "text": [
+                "All"
+              ],
+              "value": [
+                "$__all"
+              ]
+            },
+            "sort": 1
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "row",
+          "title": "Cluster",
+          "collapsed": false,
+          "gridPos": {
+            "x": 0,
+            "y": 0,
+            "w": 24,
+            "h": 1
+          },
+          "panels": []
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "Nodes ready",
+          "description": "Nodes whose Ready condition is true (k8s_cluster k8s.node.condition_ready).",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 1,
+            "w": 6,
+            "h": 4
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum(k8s_node_condition_ready == 1)",
+              "legendFormat": ""
+            }
+          ],
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "value"
+          }
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Pods running",
+          "description": "k8s.pod.phase: 1 pending, 2 running, 3 succeeded, 4 failed.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "x": 6,
+            "y": 1,
+            "w": 6,
+            "h": 4
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "count(k8s_pod_phase{k8s_namespace_name=~\"$namespace\"} == 2)",
+              "legendFormat": ""
+            }
+          ],
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "value"
+          }
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "Pods neither running nor done",
+          "description": "",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 1,
+            "w": 6,
+            "h": 4
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "count(k8s_pod_phase{k8s_namespace_name=~\"$namespace\"} != 2 != 3) or vector(0)",
+              "legendFormat": ""
+            }
+          ],
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "value"
+          }
+        },
+        {
+          "id": 5,
+          "type": "stat",
+          "title": "Scrape targets up",
+          "description": "Annotated pods and the collector itself, as the gateway scrapes them.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "x": 18,
+            "y": 1,
+            "w": 6,
+            "h": 4
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum(up)",
+              "legendFormat": ""
+            }
+          ],
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "value"
+          }
+        },
+        {
+          "id": 6,
+          "type": "row",
+          "title": "Workloads",
+          "collapsed": false,
+          "gridPos": {
+            "x": 0,
+            "y": 5,
+            "w": 24,
+            "h": 1
+          },
+          "panels": []
+        },
+        {
+          "id": 7,
+          "type": "timeseries",
+          "title": "Deployments missing replicas",
+          "description": "Desired minus available; empty when every Deployment is whole.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 6,
+            "w": 12,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "k8s_deployment_desired{k8s_namespace_name=~\"$namespace\"} - k8s_deployment_available > 0",
+              "legendFormat": "{{k8s_namespace_name}}/{{k8s_deployment_name}}"
+            }
+          ],
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "right",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 8,
+          "type": "timeseries",
+          "title": "DaemonSets missing nodes",
+          "description": "",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 6,
+            "w": 12,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "k8s_daemonset_desired_scheduled_nodes{k8s_namespace_name=~\"$namespace\"} - k8s_daemonset_ready_nodes > 0",
+              "legendFormat": "{{k8s_namespace_name}}/{{k8s_daemonset_name}}"
+            }
+          ],
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "right",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 9,
+          "type": "timeseries",
+          "title": "StatefulSets missing pods",
+          "description": "",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 14,
+            "w": 12,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "k8s_statefulset_desired_pods{k8s_namespace_name=~\"$namespace\"} - k8s_statefulset_ready_pods > 0",
+              "legendFormat": "{{k8s_namespace_name}}/{{k8s_statefulset_name}}"
+            }
+          ],
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "right",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 10,
+          "type": "timeseries",
+          "title": "Container restarts, top 10",
+          "description": "Restart count since each container's pod started.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 14,
+            "w": 12,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "topk(10, k8s_container_restarts{k8s_namespace_name=~\"$namespace\"})",
+              "legendFormat": "{{k8s_namespace_name}}/{{k8s_pod_name}}/{{k8s_container_name}}"
+            }
+          ],
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "right",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 11,
+          "type": "row",
+          "title": "Requests",
+          "collapsed": false,
+          "gridPos": {
+            "x": 0,
+            "y": 22,
+            "w": 24,
+            "h": 1
+          },
+          "panels": []
+        },
+        {
+          "id": 12,
+          "type": "timeseries",
+          "title": "CPU requested, by namespace",
+          "description": "Cores requested; compare with CPU used on the nodes and pods dashboard.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 23,
+            "w": 12,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (k8s_namespace_name) (k8s_container_cpu_request{k8s_namespace_name=~\"$namespace\"})",
+              "legendFormat": "{{k8s_namespace_name}}"
+            }
+          ],
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "right",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 13,
+          "type": "timeseries",
+          "title": "Memory requested, by namespace",
+          "description": "",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 23,
+            "w": 12,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes"
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (k8s_namespace_name) (k8s_container_memory_request_bytes{k8s_namespace_name=~\"$namespace\"})",
+              "legendFormat": "{{k8s_namespace_name}}"
+            }
+          ],
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "right",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 14,
+          "type": "row",
+          "title": "Scraping",
+          "collapsed": false,
+          "gridPos": {
+            "x": 0,
+            "y": 31,
+            "w": 24,
+            "h": 1
+          },
+          "panels": []
+        },
+        {
+          "id": 15,
+          "type": "timeseries",
+          "title": "Scrape targets",
+          "description": "1 when the gateway scraped the target, 0 when it failed.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 32,
+            "w": 24,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "up",
+              "legendFormat": "{{k8s_namespace_name}}/{{k8s_pod_name}} {{service_name}}"
+            }
+          ],
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "right",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        }
+      ]
+    }

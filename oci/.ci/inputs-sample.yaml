@@ -59,6 +59,13 @@
           requests:
             memory: 160Mi
       values_secret: otel-agent-values
+    otel_gateway:
+      enabled: true
+      values:
+        resources:
+          requests:
+            memory: 320Mi
+      values_secret: otel-gateway-values
     hello:
       enabled: true
       replicas: 2
