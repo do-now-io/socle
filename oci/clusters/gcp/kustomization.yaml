@@ -11,6 +11,7 @@ resources:
   - ../../catalog/crossplane/resourceset.yaml
   - ../../catalog/external-dns/resourceset.yaml
   - ../../catalog/argocd/resourceset.yaml
+  - ../../catalog/victoria-metrics/resourceset.yaml
   - ../../catalog/hello/resourceset.yaml
 patches:
   - path: hello-color.patch.yaml

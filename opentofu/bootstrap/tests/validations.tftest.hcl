@@ -490,3 +490,81 @@ run "kube_refuses_gateway_api_gateways_that_is_not_a_bool" {
   variables { kube = { gateway_api = { gateways = "yes" } } }
   expect_failures = [var.kube]
 }
+
+run "kube_refuses_victoria_metrics_enabled_that_is_not_a_bool" {
+  command = plan
+  variables { kube = { victoria_metrics = { enabled = "true" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_victoria_metrics_retention_that_is_not_a_string" {
+  command = plan
+  variables { kube = { victoria_metrics = { retention = 15 } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_victoria_metrics_retention_spelt_out" {
+  command = plan
+  variables { kube = { victoria_metrics = { retention = "15days" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_victoria_metrics_retention_under_a_day" {
+  command = plan
+  variables { kube = { victoria_metrics = { retention = "12h" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_victoria_metrics_retention_of_zero" {
+  command = plan
+  variables { kube = { victoria_metrics = { retention = "0d" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_victoria_metrics_storage_size_that_is_not_a_string" {
+  command = plan
+  variables { kube = { victoria_metrics = { storage_size = 20 } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_victoria_metrics_storage_size_in_decimal_units" {
+  command = plan
+  variables { kube = { victoria_metrics = { storage_size = "20GB" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_victoria_metrics_values_that_are_not_an_object" {
+  command = plan
+  variables { kube = { victoria_metrics = { values = "server: {}" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_victoria_metrics_values_carrying_an_auth_password_flag" {
+  command = plan
+  variables { kube = { victoria_metrics = { values = { server = { extraArgs = { "httpAuth.password" = "x" } } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_victoria_metrics_values_carrying_an_auth_key_flag" {
+  command = plan
+  variables { kube = { victoria_metrics = { values = { server = { extraArgs = { deleteAuthKey = "x" } } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_victoria_metrics_values_carrying_a_literal_credential_env" {
+  command = plan
+  variables { kube = { victoria_metrics = { values = { server = { env = [{ name = "VM_httpAuth_password", value = "x" }] } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_victoria_metrics_values_carrying_a_secret_among_extra_objects" {
+  command = plan
+  variables { kube = { victoria_metrics = { values = { extraObjects = [{ apiVersion = "v1", kind = "Secret", metadata = { name = "vm-auth" } }] } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_victoria_metrics_values_secret_that_is_not_a_secret_name" {
+  command = plan
+  variables { kube = { victoria_metrics = { values_secret = "VM_Values" } } }
+  expect_failures = [var.kube]
+}

@@ -58,6 +58,11 @@ type, is an error at plan, with the allowed list in the message.
 | `argocd` | `ha` | `false` | The chart's HA layout: Redis HA, two replicas of server, repo-server and applicationset |
 | `argocd` | `values` | `{}` | The client's own chart values (accounts, RBAC, repositories, SSO connectors, exclusions), merged over the socle's defaults, client wins. Secrets refused at plan |
 | `argocd` | `values_secret` | `""` | Name of a Secret in `argocd` with a `values.yaml` key, created by the client, merged last — where the private keys and client secrets go |
+| `victoria_metrics` | `enabled` | `true` | Deploy VictoriaMetrics single-node, the monitoring stack's metrics storage: OTLP in, PromQL out, no cloud access ([design note](../../docs/catalog/victoria-metrics.md), [stack](../../docs/monitoring.md)) |
+| `victoria_metrics` | `retention` | `"15d"` | How long samples are kept: whole hours, days, weeks or years, at least a day |
+| `victoria_metrics` | `storage_size` | `"20Gi"` | Size of the claim on the cluster's default StorageClass, in `Gi` or `Ti`; `""` means no claim, an `emptyDir` — what a socle EKS needs until the EBS CSI driver exists |
+| `victoria_metrics` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan; numeric flags written as strings |
+| `victoria_metrics` | `values_secret` | `""` | Name of a Secret in `victoria-metrics` with a `values.yaml` key, created by the client, merged last |
 | `hello` | `enabled` | `true` | Deploy podinfo as a proof the pipeline works |
 | `hello` | `replicas` | `1` | Replicas of the podinfo Deployment |
 | `hello` | `message` | `"hello from socle"` | Message podinfo serves |

@@ -1,0 +1,165 @@
+# The victoria_metrics module: VictoriaMetrics single-node, the monitoring
+# stack's metrics storage — OTLP in from the collectors, PromQL out to Grafana.
+# Design: docs/monitoring.md; this module: docs/catalog/victoria-metrics.md.
+#
+# resourcesTemplate rather than resources: the persistence block and the
+# Secret in valuesFrom only exist under a condition, and the operator's block
+# `<< if >>`/`<< end >>` is text templating, which the structured resources
+# list cannot carry (see opentofu/bootstrap/manifests/templates/root.yaml).
+#
+# Values: no spec.values on the HelmRelease. The socle's defaults are a
+# ConfigMap listed first in valuesFrom, the client's second, his Secret last —
+# later wins, so the client overrides any socle default (docs/flux-catalog.md §6).
+#
+# Every other rule is the hello module's: inputsFrom the one provider, the
+# reconcile toggle on each resource, values tested never presence.
+apiVersion: fluxcd.controlplane.io/v1
+kind: ResourceSet
+metadata:
+  name: victoria-metrics
+  namespace: flux-system
+spec:
+  inputsFrom:
+    - apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSetInputProvider
+      name: socle
+  wait: true
+  resourcesTemplate: |
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: victoria-metrics
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.victoria_metrics.enabled >>enabled<< else >>disabled<< end >>
+    ---
+    apiVersion: source.toolkit.fluxcd.io/v1
+    kind: OCIRepository
+    metadata:
+      name: victoria-metrics-chart
+      namespace: victoria-metrics
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.victoria_metrics.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 1h
+      url: oci://ghcr.io/victoriametrics/helm-charts/victoria-metrics-single
+      layerSelector:
+        mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+        operation: copy
+      ref:
+        tag: 0.48.0  # appVersion v1.153.0
+    ---
+    # The socle's own chart values, as a document rather than the HelmRelease's
+    # spec.values: helm-controller merges valuesFrom in order and then
+    # spec.values over the result, so an inline socle default would beat the
+    # client on every key both set. Listed first in valuesFrom, it is the base
+    # the client's values and Secret are merged over. (No template delimiters
+    # in these comments: the operator templates them too.)
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: victoria-metrics-socle-values
+      namespace: victoria-metrics
+      # helm-controller re-reconciles the release the moment a labelled
+      # valuesFrom ConfigMap changes, instead of at its next interval.
+      labels:
+        reconcile.fluxcd.io/watch: Enabled
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.victoria_metrics.enabled >>enabled<< else >>disabled<< end >>
+    data:
+      values.yaml: |
+        server:
+          # A constant name: the Service the collectors write to and Grafana
+          # reads from is victoria-metrics.victoria-metrics.svc:8428, never a
+          # chart-derived one. A client who overrides it breaks that wiring.
+          fullnameOverride: victoria-metrics
+          # A Deployment and a standalone PVC rather than the chart's default
+          # StatefulSet: Helm cannot change a volumeClaimTemplate after
+          # install, so a new storage_size would fail every upgrade. Recreate
+          # (the chart's strategy in this mode) because the volume is RWO.
+          mode: deployment
+          retentionPeriod: << inputs.modules.victoria_metrics.retention | quote >>
+          persistentVolume:
+            << if inputs.modules.victoria_metrics.storage_size >>
+            enabled: true
+            size: << inputs.modules.victoria_metrics.storage_size | quote >>
+            << else >>
+            # storage_size empty: no claim, the chart's emptyDir. For a
+            # cluster with no default StorageClass; the data goes with the pod.
+            enabled: false
+            << end >>
+          extraArgs:
+            # OTLP names become the Prometheus ones (dots to underscores, unit
+            # and _total suffixes), so a metric that crossed the collector reads
+            # as its upstream dashboards expect.
+            opentelemetry.usePrometheusNaming: true
+            # The cardinality guard: past this many new series in an hour, new
+            # series are dropped with a log line instead of filling memory and
+            # disk. Open source, the single-node build's own storage flag.
+            # A string, as every numeric flag should be: Helm renders a
+            # number from a million up as 1e+06, which the flag refuses.
+            storage.maxHourlySeries: "100000"
+          # Scraped by the otel_gateway module, which reads these annotations.
+          podAnnotations:
+            prometheus.io/scrape: "true"
+            prometheus.io/port: "8428"
+          # Measured idle on floci: 1-2m CPU, 12Mi. The requests leave room
+          # for the collectors' ingest, which the otel_agent e2e measures.
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+    ---
+    # The client's own chart values, as he wrote them in
+    # kube.victoria_metrics.values, merged over the socle's document above — the
+    # client wins wherever the two meet. OpenTofu refuses secrets in there.
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: victoria-metrics-client-values
+      namespace: victoria-metrics
+      # helm-controller re-reconciles the release the moment a labelled
+      # valuesFrom ConfigMap changes, instead of at its next interval.
+      labels:
+        reconcile.fluxcd.io/watch: Enabled
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.victoria_metrics.enabled >>enabled<< else >>disabled<< end >>
+    data:
+      values.yaml: |<< toYaml inputs.modules.victoria_metrics.values | nindent 4 >>
+    ---
+    apiVersion: helm.toolkit.fluxcd.io/v2
+    kind: HelmRelease
+    metadata:
+      name: victoria-metrics
+      namespace: victoria-metrics
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.victoria_metrics.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 10m
+      releaseName: victoria-metrics
+      chartRef:
+        kind: OCIRepository
+        name: victoria-metrics-chart
+      # No spec.values, on purpose: it would be merged last and win. The
+      # order below is the precedence, later wins — the socle's defaults, the
+      # client's values from kube.victoria_metrics.values, then his Secret when
+      # he named one, created by him in victoria-metrics, never read by
+      # OpenTofu, optional so the release does not wait for it.
+      valuesFrom:
+        - kind: ConfigMap
+          name: victoria-metrics-socle-values
+          valuesKey: values.yaml
+        - kind: ConfigMap
+          name: victoria-metrics-client-values
+          valuesKey: values.yaml
+        << if inputs.modules.victoria_metrics.values_secret >>
+        - kind: Secret
+          name: << inputs.modules.victoria_metrics.values_secret | quote >>
+          valuesKey: values.yaml
+          optional: true
+        << end >>
+      install:
+        remediation:
+          retries: 3
+      upgrade:
+        remediation:
+          retries: 3
