@@ -58,6 +58,9 @@ type, is an error at plan, with the allowed list in the message.
 | `victoria_metrics` | `storage_size` | `"20Gi"` | Size of the claim on the cluster's default StorageClass, in `Gi` or `Ti`; `""` means no claim, an `emptyDir` — what a socle EKS needs until the EBS CSI driver exists |
 | `victoria_metrics` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan; numeric flags written as strings |
 | `victoria_metrics` | `values_secret` | `""` | Name of a Secret in `victoria-metrics` with a `values.yaml` key, created by the client, merged last |
+| `otel_agent` | `enabled` | `true` | Deploy the OpenTelemetry Collector as a DaemonSet: kubelet metrics for every node, pod and container, to `victoria_metrics` when it is on, and the nodes and pods dashboard ([design note](../../docs/catalog/otel-agent.md)) |
+| `otel_agent` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Literal credentials refused at plan; `${env:NAME}` read from a Secret is fine |
+| `otel_agent` | `values_secret` | `""` | Name of a Secret in `otel-agent` with a `values.yaml` key, created by the client, merged last |
 | `hello` | `enabled` | `true` | Deploy podinfo as a proof the pipeline works |
 | `hello` | `replicas` | `1` | Replicas of the podinfo Deployment |
 | `hello` | `message` | `"hello from socle"` | Message podinfo serves |

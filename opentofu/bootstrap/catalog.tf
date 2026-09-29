@@ -111,6 +111,18 @@ locals {
       values        = {}
       values_secret = ""
     }
+    # The node-level collector of the monitoring stack (docs/monitoring.md):
+    # the OpenTelemetry Collector as a DaemonSet, kubelet metrics for every
+    # node, pod and container, exported to victoria_metrics when it is on —
+    # nowhere otherwise. Ships the nodes and pods dashboard. No port on the
+    # node: applications speak to otel_gateway. No named attribute yet; the
+    # logs switch arrives with victoria_logs. values and values_secret as every
+    # module, secrets refused there (docs/catalog/otel-agent.md).
+    otel_agent = {
+      enabled       = true
+      values        = {}
+      values_secret = ""
+    }
   }
 
   # Which clouds a module exists on. Absent = every cloud. A module listed

@@ -12,6 +12,7 @@ resources:
   - ../../catalog/external-dns/resourceset.yaml
   - ../../catalog/argocd/resourceset.yaml
   - ../../catalog/victoria-metrics/resourceset.yaml
+  - ../../catalog/otel-agent/resourceset.yaml
   - ../../catalog/hello/resourceset.yaml
 patches:
   - path: hello-color.patch.yaml
