@@ -43,6 +43,15 @@
             policy.csv: |
               g, ci, role:readonly
       values_secret: argocd-values
+    victoria_metrics:
+      enabled: true
+      retention: 15d
+      storage_size: 20Gi
+      values:
+        server:
+          extraArgs:
+            storage.maxHourlySeries: "50000"
+      values_secret: victoria-metrics-values
     hello:
       enabled: true
       replicas: 2

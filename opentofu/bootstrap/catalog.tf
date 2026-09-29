@@ -94,6 +94,23 @@ locals {
       values        = {}
       values_secret = ""
     }
+    # The monitoring stack's metrics storage (docs/monitoring.md):
+    # VictoriaMetrics single-node, OTLP in from the collectors, PromQL out to
+    # Grafana, no cloud access. On by default, like every monitoring module but
+    # traces. retention is a VictoriaMetrics duration, at least a day.
+    # storage_size sizes the PVC on the cluster's default StorageClass; empty
+    # means no claim at all, an emptyDir — the escape for a cluster with no
+    # default class, which a socle EKS is until the EBS CSI driver exists
+    # (docs/catalog/victoria-metrics.md). values and values_secret as every
+    # module: the client's chart values, his winning, secrets refused there
+    # and put in a Secret he creates in victoria-metrics instead.
+    victoria_metrics = {
+      enabled       = true
+      retention     = "15d"
+      storage_size  = "20Gi"
+      values        = {}
+      values_secret = ""
+    }
   }
 
   # Which clouds a module exists on. Absent = every cloud. A module listed
