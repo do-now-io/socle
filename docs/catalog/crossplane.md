@@ -92,7 +92,7 @@ kube = {
 | Object | What it is |
 | --- | --- |
 | variable `crossplane` | `object({ allowed_services = optional(list(string), []) })`, default `null` — nothing is created |
-| `aws_iam_policy.crossplane_boundary` | `/socle/<cluster>/crossplane-boundary`: `<service>:*` allowed for each listed service, and **always** an explicit deny of `iam:*`, `sts:*`, `organizations:*`, `account:*`, `sso:*`, `identitystore:*`. Empty list: only the deny — a module role grants nothing |
+| `aws_iam_policy.crossplane_boundary` | `/socle/<cluster>/<cluster>-crossplane-boundary` (the name carries the cluster: policy names are unique per account, whatever the path): `<service>:*` allowed for each listed service, and **always** an explicit deny of `iam:*`, `sts:*`, `organizations:*`, `account:*`, `sso:*`, `identitystore:*`. Empty list: only the deny — a module role grants nothing |
 | `aws_iam_role.crossplane` | `<cluster>-crossplane`, at `/`, trusted by `pods.eks.amazonaws.com` |
 | `aws_iam_role_policy.crossplane` | what it may do, below |
 | `aws_eks_pod_identity_association.crossplane` | `crossplane-system/provider-aws` |

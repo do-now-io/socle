@@ -99,7 +99,7 @@ run "crossplane_turns_on_and_its_values_flow_through_untouched" {
       crossplane = {
         enabled              = true
         values_secret        = "crossplane-values"
-        permissions_boundary = "arn:aws:iam::123456789012:policy/socle/socle-test/crossplane-boundary"
+        permissions_boundary = "arn:aws:iam::123456789012:policy/socle/socle-test/socle-test-crossplane-boundary"
         values = {
           metrics                = { enabled = true }
           resourcesCrossplane    = { requests = { memory = "256Mi" } }
@@ -119,7 +119,7 @@ run "crossplane_turns_on_and_its_values_flow_through_untouched" {
     error_message = "the client's chart values must reach the inputs as written: the template hands them to helm-controller, nothing rewrites them."
   }
   assert {
-    condition     = output.inputs.modules.crossplane.permissions_boundary == "arn:aws:iam::123456789012:policy/socle/socle-test/crossplane-boundary"
+    condition     = output.inputs.modules.crossplane.permissions_boundary == "arn:aws:iam::123456789012:policy/socle/socle-test/socle-test-crossplane-boundary"
     error_message = "the permissions boundary the root wires must reach the inputs."
   }
   assert {
@@ -562,8 +562,8 @@ run "the_ebs_csi_controller_runs_as_its_own_role_through_pod_identity" {
     error_message = "the EBS CSI controller's identity must be bound through the add-on's own pod_identity_association, on the controller's ServiceAccount."
   }
   assert {
-    condition     = aws_iam_role_policy_attachment.ebs_csi[0].policy_arn == "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicyV2"
-    error_message = "the EBS CSI role must carry AWS's managed driver policy, the tag-scoped V2, and nothing else."
+    condition     = aws_iam_role_policy_attachment.ebs_csi[0].policy_arn == "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+    error_message = "the EBS CSI role must carry AWS's managed driver policy, and nothing else."
   }
   assert {
     condition     = aws_iam_role.ebs_csi[0].name == "socle-test-ebs-csi" && aws_iam_role.ebs_csi[0].path == "/"

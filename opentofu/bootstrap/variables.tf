@@ -147,7 +147,7 @@ variable "kube" {
   # himself must write an IAM policy ARN.
   validation {
     condition     = !can(var.kube.crossplane.permissions_boundary) || try(var.kube.crossplane.permissions_boundary == "" || can(regex("^arn:aws[a-z-]*:iam::[0-9]{12}:policy/.+$", var.kube.crossplane.permissions_boundary)), true)
-    error_message = "kube.crossplane.permissions_boundary must be empty or an IAM policy ARN, such as arn:aws:iam::123456789012:policy/socle/acme-prod/crossplane-boundary."
+    error_message = "kube.crossplane.permissions_boundary must be empty or an IAM policy ARN, such as arn:aws:iam::123456789012:policy/socle/acme-prod/acme-prod-crossplane-boundary."
   }
 
   validation {

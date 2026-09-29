@@ -109,8 +109,9 @@ data "aws_iam_policy_document" "cilium_operator" {
 # touch the organisation.
 
 locals {
-  crossplane_role_path = "/socle/${var.cluster_name}/"
-  crossplane_roles_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/socle/${var.cluster_name}/*"
+  crossplane_role_path     = "/socle/${var.cluster_name}/"
+  crossplane_boundary_name = "${var.cluster_name}-crossplane-boundary"
+  crossplane_roles_arn     = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/socle/${var.cluster_name}/*"
 
   # What a module's role may never do: create or change identities, assume
   # other roles, reach the organisation or the account settings.
@@ -140,7 +141,10 @@ locals {
 resource "aws_iam_policy" "crossplane_boundary" {
   count = var.crossplane == null ? 0 : 1
 
-  name        = "crossplane-boundary"
+  # Named after the cluster, not only placed under its path: IAM policy
+  # names are unique per account whatever the path, so a bare
+  # crossplane-boundary collides with the next cluster in the same account.
+  name        = local.crossplane_boundary_name
   path        = local.crossplane_role_path
   description = "Permissions boundary of every role the ${var.cluster_name} socle's Crossplane creates."
 

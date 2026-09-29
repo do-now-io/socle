@@ -11,7 +11,7 @@ Arbitration rule: reliable provider ops at a reasonable surcharge → delegated.
 | VPC CNI            | **Refused**        | Never installed                  | `bootstrap_self_managed_addons = false` at creation; replaced by Cilium |
 | kube-proxy         | **Refused**        | Never installed                  | Same flag; replaced by Cilium `kubeProxyReplacement`                    |
 | CoreDNS            | **Factory** (revised) | Helm, in the bootstrap module, right after Cilium | Cluster-internal resolution only; External-DNS (record publishing, cross-cloud) is separate. Was *Delegated* as a managed add-on: an add-on cannot exist before the CNI it needs — see [catalog/cilium](../catalog/cilium.md) |
-| EBS CSI            | **Delegated**      | AWS packages / factory triggers  | `aws_eks_addon` in the bootstrap module, after CoreDNS, on by default. Identity via the add-on's own `pod_identity_association`, policy `AmazonEBSCSIDriverPolicyV2` |
+| EBS CSI            | **Delegated**      | AWS packages / factory triggers  | `aws_eks_addon` in the bootstrap module, after CoreDNS, on by default. Identity via the add-on's own `pod_identity_association`, policy `AmazonEBSCSIDriverPolicy` |
 | EFS CSI            | **Catalog option** | AWS packages / factory triggers  | RWX only; `aws_eks_addon` in the bootstrap module, off by default (`eks_addons.efs_csi`). Only the controller is associated: the node SA needs one for S3 Files alone |
 | Pod Identity Agent | **Delegated**      | AWS packages / factory triggers  | Prerequisite for all workload identity. `aws_eks_addon` in the bootstrap module, before flux-operator: without it every association hangs silently (#48) |
 

@@ -326,7 +326,7 @@ run "crossplane_identity_creates_only_bounded_roles" {
   # plan; pinned here so the document can be read.
   override_resource {
     target = aws_iam_policy.crossplane_boundary
-    values = { arn = "arn:aws:iam::000000000000:policy/socle/socle-test/crossplane-boundary" }
+    values = { arn = "arn:aws:iam::000000000000:policy/socle/socle-test/socle-test-crossplane-boundary" }
   }
   override_resource {
     target = aws_eks_cluster.socle
@@ -430,5 +430,21 @@ run "a_subdomain_certificate_is_validated_in_its_parent_zone" {
   assert {
     condition     = data.aws_route53_zone.gateway[0].name == "acme.example" && aws_acm_certificate.gateway[0].domain_name == "sbx.acme.example" && contains(aws_acm_certificate.gateway[0].subject_alternative_names, "*.sbx.acme.example")
     error_message = "zone must name the parent zone the subdomain's certificate is validated in."
+  }
+}
+
+run "the_crossplane_boundary_is_named_after_its_cluster" {
+  command = plan
+  variables {
+    crossplane = { allowed_services = ["route53"] }
+  }
+
+  assert {
+    condition     = aws_iam_policy.crossplane_boundary[0].name == "socle-test-crossplane-boundary" && aws_iam_policy.crossplane_boundary[0].path == "/socle/socle-test/"
+    error_message = "IAM policy names are unique per account whatever the path: the boundary must carry the cluster's name, or a second cluster in the account fails with EntityAlreadyExists."
+  }
+  assert {
+    condition     = output.crossplane_permissions_boundary_arn == "arn:aws:iam::000000000000:policy/socle/socle-test/socle-test-crossplane-boundary"
+    error_message = "the boundary's ARN, built without waiting for AWS, must name the policy as it is created."
   }
 }

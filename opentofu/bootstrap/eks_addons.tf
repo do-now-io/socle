@@ -99,9 +99,9 @@ resource "aws_eks_addon" "pod_identity_agent" {
   depends_on = [helm_release.cilium]
 }
 
-# 2. EBS CSI, and its identity. AWS's managed policy, in its V2 form: the
-# driver's own list, scoped to the volumes and snapshots the driver tags
-# rather than to every EBS resource in the account.
+# 2. EBS CSI, and its identity. AWS's managed policy, the driver's own list;
+# its write actions are conditioned on the tags the driver puts on the
+# volumes and snapshots it creates.
 resource "aws_iam_role" "ebs_csi" {
   count = local.eks_addon_installed.ebs_csi ? 1 : 0
 
@@ -117,7 +117,7 @@ resource "aws_iam_role_policy_attachment" "ebs_csi" {
   count = local.eks_addon_installed.ebs_csi ? 1 : 0
 
   role       = aws_iam_role.ebs_csi[0].name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicyV2"
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
 }
 
 resource "aws_eks_addon" "ebs_csi" {
