@@ -26,7 +26,7 @@ gathered in [By command line](#by-command-line) at the end.
 | EKS (cluster, Pod Identity association, add-on) | the cluster itself; the bootstrap module, in the same apply, creates the EKS-managed add-ons (`CreateAddon`, `DescribeAddon`, `UpdateAddon`, `DeleteAddon`) and their Pod Identity associations |
 | IAM (role, role policy attachment, inline role policy, `PassRole` to `pods.eks.amazonaws.com`) | the cluster's service role and the flow logs' delivery role; the bootstrap module adds the EBS and EFS CSI drivers' roles, passed to EKS Pod Identity — every other workload identity belongs to the layer above |
 | KMS (key, key rotation, `DescribeKey`) | secrets encryption, and the log groups' own key — `CreateLogGroup` with a `kmsKeyId` fails with `AccessDeniedException` without `kms:DescribeKey` on that key |
-| ACM (certificate, `DescribeCertificate`, `ListTagsForCertificate`) and Route 53 (`ChangeResourceRecordSets`, `GetChange`, `ListResourceRecordSets` on the zone) | only with `gateway_certificate`: the shared Gateways' certificate and its DNS validation records |
+| ACM (certificate, `DescribeCertificate`, `ListTagsForCertificate`) and Route 53 (`ListHostedZones`, `GetHostedZone`, `ChangeResourceRecordSets`, `GetChange`, `ListResourceRecordSets` on the zone) | only with `gateway_certificate`: the shared Gateways' certificate and its DNS validation records |
 | STS (`GetCallerIdentity`) | the provider's own credential check |
 
 Every service above is reachable the moment the account exists — nothing

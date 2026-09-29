@@ -34,9 +34,11 @@ aws = {
 
   # The ACM certificate of the two shared Gateways, public (internet-facing)
   # and private (internal): acme.example and *.acme.example, validated in
-  # this public Route 53 zone. TLS terminates at their load balancers; without
-  # it no Gateway is created, and ArgoCD gets no route.
-  # gateway_certificate = { domain = "acme.example", zone_id = "Z0123456789ABCDEFGHIJ" }
+  # the public Route 53 zone of that name, found for you. zone names the
+  # parent zone when the domain is a subdomain of it. TLS terminates at their
+  # load balancers; without it no Gateway is created, and ArgoCD gets no route.
+  # gateway_certificate = { domain = "acme.example" }
+  # gateway_certificate = { domain = "sbx.acme.example", zone = "acme.example" }
 }
 
 # Only what differs from the catalog's defaults. An unknown module or

@@ -13,8 +13,16 @@
 # validation records from the internet, including for a name only the
 # internal Gateway serves.
 #
-# Null, the default, creates nothing, and the bootstrap module then creates
+# The zone is looked up by name, public only: a private zone of the same name
+# cannot answer ACM. Null, the default, creates nothing, and the bootstrap module then creates
 # no Gateway on aws: the socle never serves a route in clear text.
+
+data "aws_route53_zone" "gateway" {
+  count = var.gateway_certificate == null ? 0 : 1
+
+  name         = coalesce(var.gateway_certificate.zone, var.gateway_certificate.domain)
+  private_zone = false
+}
 
 resource "aws_acm_certificate" "gateway" {
   count = var.gateway_certificate == null ? 0 : 1
@@ -42,7 +50,7 @@ resource "aws_route53_record" "gateway_certificate_validation" {
     for o in aws_acm_certificate.gateway[0].domain_validation_options : o.domain_name => o
   }
 
-  zone_id = var.gateway_certificate.zone_id
+  zone_id = data.aws_route53_zone.gateway[0].zone_id
   name    = each.value.resource_record_name
   type    = each.value.resource_record_type
   records = [each.value.resource_record_value]

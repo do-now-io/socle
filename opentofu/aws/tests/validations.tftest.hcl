@@ -234,15 +234,15 @@ run "crossplane_rejects_iam_in_the_boundary" {
 run "gateway_certificate_refuses_a_wildcard_domain" {
   command = plan
   variables {
-    gateway_certificate = { domain = "*.acme.example", zone_id = "Z0123456789ABCDEFGHIJ" }
+    gateway_certificate = { domain = "*.acme.example" }
   }
   expect_failures = [var.gateway_certificate]
 }
 
-run "gateway_certificate_refuses_a_zone_that_is_not_a_zone_id" {
+run "gateway_certificate_refuses_a_zone_that_is_not_a_parent_of_the_domain" {
   command = plan
   variables {
-    gateway_certificate = { domain = "acme.example", zone_id = "acme.example" }
+    gateway_certificate = { domain = "acme.example", zone = "other.example" }
   }
   expect_failures = [var.gateway_certificate]
 }

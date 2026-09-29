@@ -38,7 +38,7 @@ variable "aws" {
     bootstrap_node_capacity_type         = optional(string)
     bootstrap_node_count                 = optional(number)
     crossplane                           = optional(object({ allowed_services = optional(list(string), []) }))
-    gateway_certificate                  = optional(object({ domain = string, zone_id = string }))
+    gateway_certificate                  = optional(object({ domain = string, zone = optional(string) }))
   })
 }
 

@@ -381,14 +381,16 @@ variable "gateway_certificate" {
   description = <<-EOT
     The ACM certificate the socle's two Gateways terminate TLS with, at the
     load balancer: `domain` and `*.domain`, validated by DNS in the public
-    Route 53 zone `zone_id`, which must serve `domain`. Every route published
-    through a Gateway — ArgoCD's included — is then `<name>.<domain>`. Null,
-    the default, creates nothing, and the bootstrap module creates no
-    Gateway: the socle never serves a route in clear text.
+    Route 53 zone named `domain` — found by name, no zone ID to copy. `zone`
+    names that zone instead when `domain` is a subdomain of it, such as
+    domain = "sbx.acme.example" in zone = "acme.example". Every route
+    published through a Gateway — ArgoCD's included — is then
+    `<name>.<domain>`. Null, the default, creates nothing, and the bootstrap
+    module creates no Gateway: the socle never serves a route in clear text.
   EOT
   type = object({
-    domain  = string
-    zone_id = string
+    domain = string
+    zone   = optional(string)
   })
   default = null
 
@@ -398,7 +400,7 @@ variable "gateway_certificate" {
   }
 
   validation {
-    condition     = var.gateway_certificate == null || try(can(regex("^Z[A-Z0-9]{1,31}$", var.gateway_certificate.zone_id)), false)
-    error_message = "gateway_certificate.zone_id must be a Route 53 hosted zone ID, such as Z0123456789ABCDEFGHIJ."
+    condition     = var.gateway_certificate == null || try(var.gateway_certificate.zone == null || var.gateway_certificate.domain == var.gateway_certificate.zone || endswith(var.gateway_certificate.domain, ".${var.gateway_certificate.zone}"), false)
+    error_message = "gateway_certificate.zone must be the domain itself or a parent of it: the validation records are written under the domain, in that zone."
   }
 }

@@ -15,7 +15,7 @@ their routes to:
 | Where | aws and azure, where the socle's Cilium serves the `cilium` class. Not on gcp, where GKE owns Gateway API and the module is not offered. Not on scaleway, where no controller serves a class yet |
 | Default | On (`kube.gateway_api.gateways = true`). On aws only once the foundations have issued the certificate (`aws.gateway_certificate`), because the socle never serves a route in clear text |
 | Listeners | `http` on 80, where a single `HTTPRoute` redirects everything to https with a 301. `https` on 443, where routes attach from every namespace |
-| TLS on aws | Terminated at the NLB with an ACM certificate for `domain` and `*.domain`, issued and DNS-validated by the foundations. The NLB forwards plain HTTP, so `https` is an `HTTP` listener on 443. No private key ever exists in the cluster, in a Secret or in the OpenTofu state, and ACM renews the certificate by itself |
+| TLS on aws | Terminated at the NLB with an ACM certificate for `domain` and `*.domain`, issued and DNS-validated by the foundations in the public Route 53 zone of that name, found by name (`aws.gateway_certificate = { domain }`). The NLB forwards plain HTTP, so `https` is an `HTTP` listener on 443. No private key ever exists in the cluster, in a Secret or in the OpenTofu state, and ACM renews the certificate by itself |
 | TLS on azure | Azure's load balancer is L4 only, so Envoy terminates TLS with the `gateway-system/gateway-tls` Secret, which the client creates. Until it exists, the `https` listener is not programmed and the redirect still answers |
 | Who routes | `argocd` attaches to `private` by default (`kube.argocd.gateway`). A client's route names a Gateway and `sectionName: https` |
 

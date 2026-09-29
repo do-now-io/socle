@@ -17,6 +17,14 @@ provider "aws" {
 # API: the log encryption key's policy names the account root, and a key policy
 # that omits it is unmanageable. Stubbed rather than reached, so these runs stay
 # credential-free. data.aws_region resolves from provider config and needs none.
+# The shared Gateways' zone is looked up by name; stubbed the same way.
+override_data {
+  target = data.aws_route53_zone.gateway
+  values = {
+    zone_id = "Z0123456789ABCDEFGHIJ"
+  }
+}
+
 override_data {
   target = data.aws_caller_identity.current
   values = {
@@ -392,7 +400,7 @@ run "no_gateway_certificate_by_default" {
 run "the_gateway_certificate_covers_the_domain_and_its_wildcard" {
   command = plan
   variables {
-    gateway_certificate = { domain = "acme.example", zone_id = "Z0123456789ABCDEFGHIJ" }
+    gateway_certificate = { domain = "acme.example" }
   }
 
   assert {
@@ -406,5 +414,21 @@ run "the_gateway_certificate_covers_the_domain_and_its_wildcard" {
   assert {
     condition     = alltrue([for r in aws_route53_record.gateway_certificate_validation : r.zone_id == "Z0123456789ABCDEFGHIJ" && r.allow_overwrite])
     error_message = "the validation records must go to the client's zone, and tolerate the one the domain and its wildcard share."
+  }
+  assert {
+    condition     = data.aws_route53_zone.gateway[0].name == "acme.example" && data.aws_route53_zone.gateway[0].private_zone == false
+    error_message = "the zone must be found by the domain's name, public only: ACM cannot read a private zone."
+  }
+}
+
+run "a_subdomain_certificate_is_validated_in_its_parent_zone" {
+  command = plan
+  variables {
+    gateway_certificate = { domain = "sbx.acme.example", zone = "acme.example" }
+  }
+
+  assert {
+    condition     = data.aws_route53_zone.gateway[0].name == "acme.example" && aws_acm_certificate.gateway[0].domain_name == "sbx.acme.example" && contains(aws_acm_certificate.gateway[0].subject_alternative_names, "*.sbx.acme.example")
+    error_message = "zone must name the parent zone the subdomain's certificate is validated in."
   }
 }
