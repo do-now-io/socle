@@ -138,6 +138,19 @@ locals {
       values        = {}
       values_secret = ""
     }
+    # The cluster-level collector of the monitoring stack: the OpenTelemetry
+    # Collector as a one-replica Deployment — Kubernetes object state
+    # (k8s_cluster), the Prometheus endpoints of pods annotated
+    # prometheus.io/scrape, and the applications' OTLP on
+    # otel-gateway.otel-gateway.svc:4317/4318 — exported to victoria_metrics
+    # when it is on. Ships the workloads dashboard. No named attribute: every
+    # knob is chart configuration, which values is for; secrets refused there
+    # as in otel_agent (docs/catalog/otel-gateway.md).
+    otel_gateway = {
+      enabled       = true
+      values        = {}
+      values_secret = ""
+    }
   }
 
   # Which clouds a module exists on. Absent = every cloud. A module listed
