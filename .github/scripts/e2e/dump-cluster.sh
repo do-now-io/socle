@@ -10,6 +10,8 @@ kubectl -n victoria-metrics get helmrelease,ocirepository,deploy,pod,pvc -o wide
 kubectl -n otel-agent get helmrelease,ocirepository,daemonset,pod,configmap -o wide || true
 kubectl -n flux-system get kustomization otel-agent-dashboards -o wide || true
 kubectl -n otel-agent logs daemonset/otel-agent-agent --tail=40 || true
+kubectl -n otel-gateway get helmrelease,ocirepository,deploy,pod,configmap -o wide || true
+kubectl -n otel-gateway logs deployment/otel-gateway --tail=40 || true
 kubectl get storageclass || true
 kubectl -n flux-system get ocirepository socle \
   -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}: {.message}{"\n"}{end}' || true

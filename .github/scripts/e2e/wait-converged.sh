@@ -5,9 +5,9 @@
 # The proof both e2e jobs share: socle-root, external-dns (disabled) and hello Ready, the artifact
 # pulled by the exact tag TAG with its signature verified, podinfo at 1 replica.
 # Optional expectations come from the environment, one variable per module
-# (EXPECT_UI_COLOR, EXPECT_ARGOCD, EXPECT_VICTORIA_METRICS, EXPECT_OTEL_AGENT):
-# the job says what the catalog defaults and its tfvars make true, the script
-# checks it.
+# (EXPECT_UI_COLOR, EXPECT_ARGOCD, EXPECT_VICTORIA_METRICS, EXPECT_OTEL_AGENT,
+# EXPECT_OTEL_GATEWAY): the job says what the catalog defaults and its tfvars
+# make true, the script checks it.
 set -euo pipefail
 # wait_ready <resourceset> [attempts of 5 s, default 60]
 wait_ready() {
@@ -19,6 +19,49 @@ wait_ready() {
   done
   echo "::error::resourceset $1 never became Ready"
   return 1
+}
+# VictoriaMetrics, through the API server's service proxy: no port-forward, no
+# client image on the runner.
+vm=/api/v1/namespaces/victoria-metrics/services/victoria-metrics:http/proxy
+urlq() { python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$1"; }
+# series <promql>: how many series an instant query returns, 0 on any error.
+series() {
+  kubectl get --raw "$vm/api/v1/query?query=$(urlq "count($1)")" 2>/dev/null \
+    | python3 -c 'import sys,json; r=json.load(sys.stdin)["data"]["result"]; print(r[0]["value"][1] if r else 0)' \
+    2>/dev/null || echo 0
+}
+# wait_series <promql> [attempts of 5 s, default 36]: until it has series.
+wait_series() {
+  n=0
+  for _ in $(seq 1 "${2:-36}"); do
+    kubectl get --raw "$vm/internal/force_flush" > /dev/null 2>&1 || true
+    n="$(series "$1")"
+    [ "$n" != 0 ] && return 0
+    sleep 5
+  done
+  return 1
+}
+# check_dashboard <namespace> <configmap> <key> <metric regex>: every metric an
+# expression or a variable of the dashboard names has series. Label names are
+# the tokens ending in _name (k8s_node_name, k8s_deployment_name…); no metric
+# the collectors store ends that way. A dashboard is written on the names
+# VictoriaMetrics stores, and this is what keeps it honest.
+check_dashboard() {
+  metrics="$(kubectl -n "$1" get configmap "$2" -o json | python3 -c '
+import sys, json, re
+key, pattern = sys.argv[1], sys.argv[2]
+d = json.loads(json.load(sys.stdin)["data"][key])
+exprs = [t["expr"] for p in d["panels"] for t in p.get("targets", [])]
+exprs += [v["query"]["query"] for v in d["templating"]["list"] if isinstance(v.get("query"), dict)]
+names = {m for e in exprs for m in re.findall(pattern, e) if not m.endswith("_name")}
+print(" ".join(sorted(names)))' "$3" "$4")"
+  missing=""
+  for m in $metrics; do
+    c="$(series "$m")"
+    echo "dashboard $2 metric $m: $c series"
+    [ "$c" != 0 ] || missing="$missing $m"
+  done
+  [ -z "$missing" ] || { echo "::error::dashboard $2 reads metrics victoria-metrics does not have:$missing"; return 1; }
 }
 # argocd first when expected: socle-root only turns Ready once every module
 # has, and ArgoCD is the slow one (five images on a fresh node), so it gets the
@@ -65,7 +108,6 @@ if [ "${EXPECT_VICTORIA_METRICS:-}" = true ]; then
   pvc="$(kubectl -n victoria-metrics get pvc victoria-metrics -o jsonpath='{.status.phase}')"
   echo "victoria-metrics pvc phase=$pvc ($(kubectl -n victoria-metrics get pvc victoria-metrics -o jsonpath='{.spec.storageClassName} {.status.capacity.storage}'))"
   [ "$pvc" = Bound ] || { echo "::error::the victoria-metrics claim is '$pvc', expected Bound"; exit 1; }
-  vm=/api/v1/namespaces/victoria-metrics/services/victoria-metrics:http/proxy
   # A minute in the past: newer samples sit inside -search.latencyOffset (30 s)
   # and an instant query would not return them yet.
   probe="$(mktemp)"
@@ -113,44 +155,14 @@ if [ "${EXPECT_OTEL_AGENT:-}" = true ]; then
   wait_ready otel-agent 120
   kubectl -n otel-agent rollout status daemonset/otel-agent-agent --timeout=180s
   echo "otel-agent converged: resourceset Ready and the DaemonSet rolled out after ${SECONDS}s"
-  vm=/api/v1/namespaces/victoria-metrics/services/victoria-metrics:http/proxy
-  urlq() { python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$1"; }
-  # series <promql>: how many series an instant query returns, 0 on any error.
-  series() {
-    kubectl get --raw "$vm/api/v1/query?query=$(urlq "count($1)")" 2>/dev/null \
-      | python3 -c 'import sys,json; r=json.load(sys.stdin)["data"]["result"]; print(r[0]["value"][1] if r else 0)' \
-      2>/dev/null || echo 0
-  }
   SECONDS=0
-  n=0
-  for _ in $(seq 1 36); do
-    kubectl get --raw "$vm/internal/force_flush" > /dev/null 2>&1 || true
-    n="$(series k8s_pod_cpu_usage)"
-    [ "$n" != 0 ] && break
-    sleep 5
-  done
+  wait_series k8s_pod_cpu_usage \
+    || { echo "::error::no kubelet metric from otel_agent reached victoria-metrics"; exit 1; }
   echo "k8s_pod_cpu_usage: $n series in victoria-metrics, ${SECONDS}s after the agent rolled out"
-  [ "$n" != 0 ] || { echo "::error::no kubelet metric from otel_agent reached victoria-metrics"; exit 1; }
   # What the agent's metrics are called once stored, for the record.
   kubectl get --raw "$vm/api/v1/label/__name__/values" \
     | python3 -c 'import sys,json; print("stored k8s/container names: " + " ".join(n for n in json.load(sys.stdin)["data"] if n.startswith(("k8s_", "container_"))))'
-  # Every metric an expression of the dashboard names. Label names are the
-  # tokens ending in _name (k8s_node_name, k8s_namespace_name, k8s_pod_name);
-  # no metric of the agent's ends that way.
-  metrics="$(kubectl -n otel-agent get configmap otel-agent-dashboard-nodes-pods -o json | python3 -c '
-import sys, json, re
-d = json.loads(json.load(sys.stdin)["data"]["nodes-pods.json"])
-exprs = [t["expr"] for p in d["panels"] for t in p.get("targets", [])]
-exprs += [v["query"]["query"] for v in d["templating"]["list"] if isinstance(v.get("query"), dict)]
-names = {m for e in exprs for m in re.findall(r"\b(?:k8s|container)_[a-z0-9_]+\b", e) if not m.endswith("_name")}
-print(" ".join(sorted(names)))')"
-  missing=""
-  for m in $metrics; do
-    c="$(series "$m")"
-    echo "dashboard metric $m: $c series"
-    [ "$c" != 0 ] || missing="$missing $m"
-  done
-  [ -z "$missing" ] || { echo "::error::the nodes and pods dashboard reads metrics victoria-metrics does not have:$missing"; exit 1; }
+  check_dashboard otel-agent otel-agent-dashboard-nodes-pods nodes-pods.json '\b(?:k8s|container)_[a-z0-9_]+\b'
   # Precedence, on a request the socle itself sets (128Mi): the client's value
   # must be on the live DaemonSet, the socle's sibling cpu request and memory
   # limit intact.
@@ -169,6 +181,65 @@ assert r["limits"]["memory"] == "512Mi", "the socle memory limit did not survive
     | awk '{print "otel-agent: " $1 " cpu=" $2 " memory=" $3}' || true
   kubectl -n victoria-metrics top pod --no-headers 2>/dev/null \
     | awk '{print "victoria-metrics under the agent: " $1 " cpu=" $2 " memory=" $3}' || true
+fi
+# otel_gateway when expected, after victoria_metrics: the Deployment is
+# Available, and each of its three inputs reaches storage — Kubernetes object
+# state from k8s_cluster, a scraped endpoint (victoria-metrics' own, which its
+# module annotates prometheus.io/scrape), and an application's OTLP, sent by an
+# application: podinfo (the hello module, on in both jobs) posts it to the
+# gateway's Service, and it must come back enriched by k8s_attributes with the
+# sender's workload. Neither the API server's service proxy (kubectl create
+# --raw sends a content type the receiver refuses, 415) nor a port-forward
+# (the chart binds the receivers to the pod IP, and port-forward dials the
+# pod's localhost) can carry it — both measured. Then the workloads
+# dashboard, and EXPECT_OTEL_GATEWAY_MEMORY on a request the socle sets
+# (128Mi).
+if [ "${EXPECT_OTEL_GATEWAY:-}" = true ]; then
+  SECONDS=0
+  wait_ready otel-gateway 120
+  kubectl -n otel-gateway rollout status deployment/otel-gateway --timeout=180s
+  echo "otel-gateway converged: resourceset Ready and the Deployment rolled out after ${SECONDS}s"
+  SECONDS=0
+  wait_series k8s_deployment_available \
+    || { echo "::error::no k8s_cluster metric from otel_gateway reached victoria-metrics"; exit 1; }
+  echo "k8s_deployment_available: $n series, ${SECONDS}s after the gateway rolled out"
+  wait_series 'vm_app_version{k8s_namespace_name="victoria-metrics"}' \
+    || { echo "::error::the gateway did not scrape victoria-metrics' annotated pod"; exit 1; }
+  echo "scraped: vm_app_version from the annotated victoria-metrics pod, ${SECONDS}s after the gateway rolled out"
+  kubectl get --raw "$vm/api/v1/query?query=$(urlq 'up')" \
+    | python3 -c 'import sys,json; print("scrape targets: " + " ".join("%s/%s=%s" % (r["metric"].get("k8s_namespace_name", "-"), r["metric"].get("k8s_pod_name", r["metric"].get("service_name", "?")), r["value"][1]) for r in json.load(sys.stdin)["data"]["result"]))'
+  # An application's OTLP: one gauge point, a minute old so an instant query
+  # sees it past -search.latencyOffset, as OTLP/JSON to /v1/metrics, from
+  # podinfo's own curl.
+  payload="$(printf '{"resourceMetrics":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"socle-e2e"}}]},"scopeMetrics":[{"metrics":[{"name":"socle.e2e.otlp_probe","gauge":{"dataPoints":[{"asDouble":7,"timeUnixNano":"%s"}]}}]}]}]}' \
+    "$(( ($(date +%s) - 60) * 1000000000 ))")"
+  kubectl -n hello exec deploy/podinfo -- curl -sSf -H 'Content-Type: application/json' \
+    --data-binary "$payload" http://otel-gateway.otel-gateway.svc:4318/v1/metrics > /dev/null
+  wait_series 'socle_e2e_otlp_probe{service_name="socle-e2e"}' 24 \
+    || { echo "::error::an OTLP metric pushed to the gateway did not reach victoria-metrics"; exit 1; }
+  echo "otlp: socle.e2e.otlp_probe sent by hello/podinfo, read back as socle_e2e_otlp_probe"
+  # k8s_attributes matched the sender by its connection IP.
+  wait_series 'socle_e2e_otlp_probe{k8s_namespace_name="hello",k8s_deployment_name="podinfo"}' 6 \
+    || { echo "::error::the gateway's k8s_attributes did not tag the OTLP with its sender's workload"; exit 1; }
+  echo "otlp: enriched by k8s_attributes with k8s_namespace_name=hello, k8s_deployment_name=podinfo"
+  kubectl get --raw "$vm/api/v1/label/__name__/values" \
+    | python3 -c 'import sys,json; print("stored k8s names now: " + " ".join(n for n in json.load(sys.stdin)["data"] if n.startswith("k8s_")))'
+  check_dashboard otel-gateway otel-gateway-dashboard-workloads workloads.json '\b(?:k8s_[a-z0-9_]+|up)\b'
+  res="$(kubectl -n otel-gateway get deployment otel-gateway -o jsonpath='{.spec.template.spec.containers[0].resources}')"
+  echo "otel-gateway resources: $res"
+  if [ -n "${EXPECT_OTEL_GATEWAY_MEMORY:-}" ]; then
+    printf '%s' "$res" | python3 -c '
+import sys, json
+r = json.load(sys.stdin); want = sys.argv[1]
+assert r["requests"]["memory"] == want, "client value lost to the socle default: memory %s, expected %s" % (r["requests"]["memory"], want)
+assert r["requests"]["cpu"] == "100m", "the socle cpu request did not survive the merge: %s" % r["requests"]["cpu"]
+assert r["limits"]["memory"] == "1Gi", "the socle memory limit did not survive the merge: %s" % r["limits"].get("memory")
+' "$EXPECT_OTEL_GATEWAY_MEMORY" || { echo "::error::otel_gateway precedence"; exit 1; }
+  fi
+  kubectl -n otel-gateway top pod --no-headers 2>/dev/null \
+    | awk '{print "otel-gateway: " $1 " cpu=" $2 " memory=" $3}' || true
+  kubectl -n victoria-metrics top pod --no-headers 2>/dev/null \
+    | awk '{print "victoria-metrics under both collectors: " $1 " cpu=" $2 " memory=" $3}' || true
 fi
 wait_ready socle-root
 # external-dns is off by default (it needs a zone and a credential): Ready
