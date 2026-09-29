@@ -616,3 +616,33 @@ run "kube_refuses_gateway_api_gateways_that_is_not_a_bool" {
   variables { kube = { gateway_api = { gateways = "yes" } } }
   expect_failures = [var.kube]
 }
+
+run "kube_refuses_otel_gateway_enabled_that_is_not_a_bool" {
+  command = plan
+  variables { kube = { otel_gateway = { enabled = 1 } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_otel_gateway_values_that_are_not_an_object" {
+  command = plan
+  variables { kube = { otel_gateway = { values = ["mode: deployment"] } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_otel_gateway_values_carrying_a_literal_oauth2_client_secret" {
+  command = plan
+  variables { kube = { otel_gateway = { values = { config = { extensions = { oauth2client = { client_id = "id", client_secret = "s3cr3t" } } } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_otel_gateway_values_carrying_a_literal_api_key_header" {
+  command = plan
+  variables { kube = { otel_gateway = { values = { config = { exporters = { "otlp_http/saas" = { endpoint = "https://otlp.example", headers = { "X-API-Key" = "abc123" } } } } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_otel_gateway_values_secret_that_is_not_a_secret_name" {
+  command = plan
+  variables { kube = { otel_gateway = { values_secret = "gateway values" } } }
+  expect_failures = [var.kube]
+}
