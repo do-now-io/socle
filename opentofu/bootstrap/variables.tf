@@ -319,6 +319,46 @@ variable "kube" {
     condition     = !can(var.kube.victoria_metrics.values_secret) || try(var.kube.victoria_metrics.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.victoria_metrics.values_secret)), true)
     error_message = "kube.victoria_metrics.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
   }
+
+  # --- otel_agent — docs/catalog/otel-agent.md -----------------------------
+  # values is free-form on purpose, minus one rule: no secret material. The
+  # collector takes credentials in its own config — an authenticator
+  # extension's token or password, an exporter's Authorization header — and
+  # from the environment. A value written as an environment reference,
+  # ${env:NAME}, is the collector's own way to read a Secret and is accepted;
+  # a literal is refused, as are an extraEnvs entry with a literal value named
+  # like a credential (valueFrom is fine) and a Secret among extraManifests.
+  validation {
+    condition = (
+      !can(var.kube.otel_agent.values)
+      || !can(keys(var.kube.otel_agent.values))
+      || (
+        !anytrue(flatten([
+          for n, e in try(var.kube.otel_agent.values.config.extensions, {}) : [
+            for v in [try(e.token, null), try(e.client_auth.password, null), try(e.htpasswd.inline, null), try(e.client_secret, null)] :
+            v != null && !can(regex("^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*\\}$", v))
+          ]
+        ]))
+        && !anytrue(flatten([
+          for n, x in try(var.kube.otel_agent.values.config.exporters, {}) : [
+            for h, v in try(x.headers, {}) :
+            can(regex("(?i)^(authorization|proxy-authorization|x-api-key|api-key|x-auth-token)$", h)) && !can(regex("^[A-Za-z]* ?\\$\\{env:[A-Za-z_][A-Za-z0-9_]*\\}$", v))
+          ]
+        ]))
+        && alltrue([
+          for e in try(tolist(var.kube.otel_agent.values.extraEnvs), []) :
+          !(can(e.value) && can(regex("(?i)(secret|password|passwd|token|api_?key|access_?key|private_?key)", try(e.name, ""))))
+        ])
+        && !anytrue(try([for o in var.kube.otel_agent.values.extraManifests : try(o.kind == "Secret", false)], []))
+      )
+    )
+    error_message = "kube.otel_agent.values must not carry secrets: a literal token, password or client secret in a config.extensions authenticator, a literal Authorization or API-key header in a config.exporters entry, an extraEnvs entry with a literal value named like a credential, and a Secret in extraManifests are refused. Read them from the environment instead — $${env:NAME}, the variable set by extraEnvs valueFrom a Secret — or put them in a Secret in the otel-agent namespace named in kube.otel_agent.values_secret."
+  }
+
+  validation {
+    condition     = !can(var.kube.otel_agent.values_secret) || try(var.kube.otel_agent.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.otel_agent.values_secret)), true)
+    error_message = "kube.otel_agent.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
+  }
 }
 
 # ---------------------------------------------------------------------------

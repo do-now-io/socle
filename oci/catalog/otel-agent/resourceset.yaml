@@ -1,0 +1,234 @@
+# The otel_agent module: the OpenTelemetry Collector as a DaemonSet, one pod
+# per node, for what lives on a node — node, pod and container metrics from the
+# kubelet, with Kubernetes metadata on every point. Design: docs/monitoring.md;
+# this module: docs/catalog/otel-agent.md.
+#
+# resourcesTemplate rather than resources: the exporter depends on whether the
+# victoria_metrics module is on, and the Secret in valuesFrom only exists when
+# named — the operator's block `<< if >>`/`<< end >>` is text templating, which
+# the structured resources list cannot carry.
+#
+# Values: no spec.values on the HelmRelease. The socle's defaults are a
+# ConfigMap listed first in valuesFrom, the client's second, his Secret last —
+# later wins, so the client overrides any socle default (docs/flux-catalog.md §6).
+#
+# The nodes and pods dashboard ships here, not in Grafana: the module whose
+# metrics a dashboard reads carries it (docs/monitoring.md §5). It is a plain
+# ConfigMap under dashboards/, applied by a Flux Kustomization from the socle
+# artifact, as gateway-api applies its cilium/ folder.
+#
+# Every other rule is the hello module's: inputsFrom the one provider, the
+# reconcile toggle on each resource, values tested never presence.
+apiVersion: fluxcd.controlplane.io/v1
+kind: ResourceSet
+metadata:
+  name: otel-agent
+  namespace: flux-system
+spec:
+  inputsFrom:
+    - apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSetInputProvider
+      name: socle
+  wait: true
+  resourcesTemplate: |
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: otel-agent
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.otel_agent.enabled >>enabled<< else >>disabled<< end >>
+    ---
+    apiVersion: source.toolkit.fluxcd.io/v1
+    kind: OCIRepository
+    metadata:
+      name: opentelemetry-collector-chart
+      namespace: otel-agent
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.otel_agent.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 1h
+      url: oci://ghcr.io/open-telemetry/opentelemetry-helm-charts/opentelemetry-collector
+      layerSelector:
+        mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+        operation: copy
+      ref:
+        tag: 0.173.1  # appVersion 0.160.0
+    ---
+    # The socle's own chart values, as a document rather than the HelmRelease's
+    # spec.values: helm-controller merges valuesFrom in order and then
+    # spec.values over the result, so an inline socle default would beat the
+    # client on every key both set. (No template delimiters in these
+    # comments: the operator templates them too.)
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: otel-agent-socle-values
+      namespace: otel-agent
+      # helm-controller re-reconciles the release the moment a labelled
+      # valuesFrom ConfigMap changes, instead of at its next interval.
+      labels:
+        reconcile.fluxcd.io/watch: Enabled
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.otel_agent.enabled >>enabled<< else >>disabled<< end >>
+    data:
+      values.yaml: |
+        mode: daemonset
+        # A constant name for the DaemonSet and its ConfigMap, never a
+        # chart-derived one.
+        fullnameOverride: otel-agent
+        # otelcol-k8s: the upstream distribution for Kubernetes, 74
+        # components rather than contrib's 251. It has otlp_http but no
+        # Prometheus remote-write, which is why every signal crosses as OTLP.
+        image:
+          repository: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-k8s
+        command:
+          name: otelcol-k8s
+        presets:
+          # kubeletstats: node, pod and container CPU, memory, filesystem and
+          # network, from this node's kubelet, every 20 seconds.
+          kubeletMetrics:
+            enabled: true
+          # k8s_attributes: the pod's workload, labels and namespace on every
+          # point, watching this node's pods only.
+          kubernetesAttributes:
+            enabled: true
+        # The agent receives nothing: applications send OTLP to the
+        # otel_gateway module. So no receiver port and, above all, none of the
+        # chart's six hostPorts on every node.
+        ports:
+          otlp:
+            enabled: false
+          otlp-http:
+            enabled: false
+          jaeger-compact:
+            enabled: false
+          jaeger-thrift:
+            enabled: false
+          jaeger-grpc:
+            enabled: false
+          zipkin:
+            enabled: false
+        config:
+          receivers:
+            otlp: null
+            jaeger: null
+            zipkin: null
+            kubeletstats:
+              # Kubelet serving certificates are self-signed on EKS, and on
+              # most managed clusters not signed by the CA a pod is given, so
+              # the scrape could not verify them. The call still carries the
+              # ServiceAccount token, which the kubelet authorizes.
+              insecure_skip_verify: true
+          exporters:
+            debug: null
+            << if inputs.modules.victoria_metrics.enabled >>
+            otlp_http/victoria-metrics:
+              metrics_endpoint: http://victoria-metrics.victoria-metrics.svc:8428/opentelemetry/v1/metrics
+            << else >>
+            # No metrics backend: the pipeline must still end somewhere, and a
+            # collector left retrying into a Service that is gone would only
+            # fill its queue and its log.
+            nop: {}
+            << end >>
+          service:
+            pipelines:
+              logs: null
+              traces: null
+              metrics:
+                # The collector's own telemetry, scraped from itself; the
+                # kubeletMetrics preset adds kubeletstats to this list and the
+                # kubernetesAttributes preset k8s_attributes to the processors.
+                receivers:
+                  - prometheus
+                exporters:
+                  << if inputs.modules.victoria_metrics.enabled >>
+                  - otlp_http/victoria-metrics
+                  << else >>
+                  - nop
+                  << end >>
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          # A limit here, unlike the other modules: the chart derives
+          # GOMEMLIMIT from it and the memory_limiter processor its 80 per cent,
+          # and without one both would read the node's whole memory. The agent
+          # refuses data before it reaches the limit instead of being killed.
+          limits:
+            memory: 512Mi
+    ---
+    # The client's own chart values, as he wrote them in kube.otel_agent.values,
+    # merged over the socle's document above — the client wins wherever the two
+    # meet. OpenTofu refuses secrets in there.
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: otel-agent-client-values
+      namespace: otel-agent
+      # helm-controller re-reconciles the release the moment a labelled
+      # valuesFrom ConfigMap changes, instead of at its next interval.
+      labels:
+        reconcile.fluxcd.io/watch: Enabled
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.otel_agent.enabled >>enabled<< else >>disabled<< end >>
+    data:
+      values.yaml: |<< toYaml inputs.modules.otel_agent.values | nindent 4 >>
+    ---
+    apiVersion: helm.toolkit.fluxcd.io/v2
+    kind: HelmRelease
+    metadata:
+      name: otel-agent
+      namespace: otel-agent
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.otel_agent.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 10m
+      releaseName: otel-agent
+      chartRef:
+        kind: OCIRepository
+        name: opentelemetry-collector-chart
+      # No spec.values, on purpose: it would be merged last and win. The
+      # order below is the precedence, later wins — the socle's defaults, the
+      # client's values from kube.otel_agent.values, then his Secret when he
+      # named one, created by him in otel-agent, never read by OpenTofu,
+      # optional so the release does not wait for it.
+      valuesFrom:
+        - kind: ConfigMap
+          name: otel-agent-socle-values
+          valuesKey: values.yaml
+        - kind: ConfigMap
+          name: otel-agent-client-values
+          valuesKey: values.yaml
+        << if inputs.modules.otel_agent.values_secret >>
+        - kind: Secret
+          name: << inputs.modules.otel_agent.values_secret | quote >>
+          valuesKey: values.yaml
+          optional: true
+        << end >>
+      install:
+        remediation:
+          retries: 3
+      upgrade:
+        remediation:
+          retries: 3
+    ---
+    # The nodes and pods dashboard, a ConfigMap the grafana module's sidecar
+    # picks up by its grafana_dashboard label in any namespace. Applied from
+    # the socle artifact itself, so the JSON stays a file of its own.
+    apiVersion: kustomize.toolkit.fluxcd.io/v1
+    kind: Kustomization
+    metadata:
+      name: otel-agent-dashboards
+      namespace: flux-system
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.otel_agent.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 1h
+      sourceRef:
+        kind: OCIRepository
+        name: socle
+      path: ./catalog/otel-agent/dashboards
+      targetNamespace: otel-agent
+      prune: true
+      wait: true
+      timeout: 2m

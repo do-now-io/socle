@@ -247,6 +247,8 @@ jobs:
       EXPECT_ARGOCD_SERVER_MEMORY: 96Mi  # tests/floci.tfvars: overrides the socle's 64Mi
       EXPECT_VICTORIA_METRICS: "true"    # catalog.tf: victoria_metrics.enabled defaults to true
       EXPECT_VM_MAX_HOURLY_SERIES: "50000"  # tests/floci.tfvars: overrides the socle's 100000
+      EXPECT_OTEL_AGENT: "true"          # catalog.tf: otel_agent.enabled defaults to true
+      EXPECT_OTEL_AGENT_MEMORY: 160Mi    # tests/floci.tfvars: overrides the socle's 128Mi
     defaults:
       run:
         working-directory: opentofu/clusters/aws
@@ -274,7 +276,7 @@ jobs:
           GHCR_TOKEN: ${{ github.token }}
         run: |
           "$GITHUB_WORKSPACE/.github/scripts/e2e/ghcr-auth.sh" socle-e2e
-      - name: The root ResourceSet and the hello, argocd and victoria_metrics modules converge
+      - name: The root ResourceSet and the hello, argocd, victoria_metrics and otel_agent modules converge
         run: |
           "$GITHUB_WORKSPACE/.github/scripts/e2e/wait-converged.sh"
       - name: What the cluster looked like when it failed
@@ -302,8 +304,9 @@ jobs:
             echo "\`$SUBJECT\`. Proven: the artifact is pulled by that exact tag, its signature"
             echo "verifies against the workflow identity, and the \`socle-root\`, \`hello\`,"
             echo "\`argocd\` and \`victoria-metrics\` ResourceSets reach Ready with \`hello/podinfo\`"
-            echo "at 1 replica, \`argocd/argocd-server\` Available, and a sample written to"
-            echo "VictoriaMetrics on its bound claim read back through PromQL."
+            echo "at 1 replica, \`argocd/argocd-server\` Available, a sample written to"
+            echo "VictoriaMetrics on its bound claim read back through PromQL, and every metric"
+            echo "the \`otel_agent\` nodes and pods dashboard reads stored there by the agent."
             echo ""
             echo "No idempotence check here: floci does not read back several EKS/CloudWatch"
             echo "attributes, so a refresh always re-discovers drift, and a second apply dies"
@@ -348,6 +351,7 @@ jobs:
       EXPECT_ARGOCD: "true"        # catalog.tf: argocd.enabled defaults to true
       EXPECT_VICTORIA_METRICS: "true"    # catalog.tf: victoria_metrics.enabled defaults to true
       EXPECT_VM_MAX_HOURLY_SERIES: "100000"  # no client value here: the socle's own default
+      EXPECT_OTEL_AGENT: "true"          # catalog.tf: otel_agent.enabled defaults to true
     defaults:
       run:
         working-directory: opentofu/clusters/aws/tests/floci
@@ -372,7 +376,7 @@ jobs:
           GHCR_TOKEN: ${{ github.token }}
         run: |
           "$GITHUB_WORKSPACE/.github/scripts/e2e/ghcr-auth.sh" socle-e2e-catalog
-      - name: The root ResourceSet and the hello, argocd and victoria_metrics modules converge
+      - name: The root ResourceSet and the hello, argocd, victoria_metrics and otel_agent modules converge
         run: |
           "$GITHUB_WORKSPACE/.github/scripts/e2e/wait-converged.sh"
       # The operator omits a disabled module's objects entirely, so the proof
@@ -414,6 +418,25 @@ jobs:
           gone hello podinfo
           gone argocd argocd
           gone victoria-metrics victoria-metrics
+          # otel_agent stays on while its backend goes: its pipeline must end
+          # in nop, not in an exporter retrying into a Service that is gone
+          # (docs/monitoring.md §2). The socle-values ConfigMap carries
+          # reconcile.fluxcd.io/watch, so the release follows at once.
+          SECONDS=0
+          relay=""
+          for _ in $(seq 1 36); do
+            relay="$(kubectl -n otel-agent get configmap otel-agent-agent -o jsonpath='{.data.relay}' 2>/dev/null || true)"
+            case "$relay" in
+              *otlp_http/victoria-metrics*|"") sleep 5 ;;
+              *nop*) break ;;
+              *) sleep 5 ;;
+            esac
+          done
+          case "$relay" in
+            *otlp_http/victoria-metrics*|"") echo "::error::otel_agent still exports to victoria-metrics after it was disabled"; exit 1 ;;
+          esac
+          kubectl -n otel-agent rollout status daemonset/otel-agent-agent --timeout=180s
+          echo "otel-agent's pipeline ends in nop ${SECONDS}s after victoria_metrics went, DaemonSet rolled out"
       - name: Re-enabling hello, argocd and victoria_metrics recreates them
         run: |
           tofu apply -input=false -auto-approve \
@@ -450,6 +473,24 @@ jobs:
             sleep 5
           done
           [ "$back" = true ] || { echo "::error::victoria-metrics never came back with a Bound claim after re-enabling"; exit 1; }
+          # And otel_agent writes to it again: its exporter is back, and a
+          # kubelet metric reaches the new, empty storage.
+          SECONDS=0
+          vm=/api/v1/namespaces/victoria-metrics/services/victoria-metrics:http/proxy
+          back=false
+          for _ in $(seq 1 48); do
+            relay="$(kubectl -n otel-agent get configmap otel-agent-agent -o jsonpath='{.data.relay}' 2>/dev/null || true)"
+            kubectl get --raw "$vm/internal/force_flush" > /dev/null 2>&1 || true
+            n="$(kubectl get --raw "$vm/api/v1/query?query=count(k8s_pod_cpu_usage)" 2>/dev/null \
+              | python3 -c 'import sys,json; r=json.load(sys.stdin)["data"]["result"]; print(r[0]["value"][1] if r else 0)' \
+              2>/dev/null || echo 0)"
+            case "$relay" in
+              *otlp_http/victoria-metrics*) [ "$n" != 0 ] && { back=true; break; } ;;
+            esac
+            sleep 5
+          done
+          [ "$back" = true ] || { echo "::error::otel_agent did not resume writing to victoria-metrics"; exit 1; }
+          echo "otel-agent exports to victoria-metrics again, k8s_pod_cpu_usage back with $n series after ${SECONDS}s"
           # The images are already on the node, so the second convergence is
           # the operator's and Helm's own latency, not the network's.
           SECONDS=0
@@ -464,6 +505,49 @@ jobs:
             sleep 5
           done
           echo "::error::argocd never came back after re-enabling"
+          exit 1
+      # otel_agent on its own: off garbage-collects the DaemonSet and the
+      # dashboard its Kustomization applied, on brings both back.
+      - name: Disabling otel_agent garbage-collects it and its dashboard, re-enabling brings them back
+        run: |
+          apply() {
+            tofu apply -input=false -auto-approve \
+              -var "socle_version=$TAG" \
+              -var "cosign_identity=$COSIGN" \
+              -var artifact_pull_secret=ghcr-auth \
+              -var "kube=$1"
+          }
+          apply '{hello={replicas=1},otel_agent={enabled=false}}'
+          for _ in $(seq 1 36); do
+            out="$(kubectl -n otel-agent get helmrelease otel-agent 2>&1)" || break
+            sleep 5
+          done
+          case "$out" in
+            *NotFound*|*"not found"*) echo "helmrelease otel-agent/otel-agent is gone: $out" ;;
+            *) echo "::error::otel-agent's HelmRelease still there, or kubectl failed otherwise: $out"; exit 1 ;;
+          esac
+          # Its finalizer prunes the dashboard ConfigMap first, so give it time.
+          for _ in $(seq 1 24); do
+            out="$(kubectl -n flux-system get kustomization otel-agent-dashboards 2>&1)" || break
+            sleep 5
+          done
+          case "$out" in
+            *NotFound*|*"not found"*) echo "kustomization otel-agent-dashboards is gone: $out" ;;
+            *) echo "::error::the dashboards Kustomization survived the module: $out"; exit 1 ;;
+          esac
+          apply '{hello={replicas=1}}'
+          SECONDS=0
+          for _ in $(seq 1 60); do
+            status="$(kubectl -n flux-system get resourceset otel-agent \
+              -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)"
+            if [ "$status" = True ] && kubectl -n otel-agent get configmap otel-agent-dashboard-nodes-pods > /dev/null 2>&1; then
+              kubectl -n otel-agent rollout status daemonset/otel-agent-agent --timeout=180s
+              echo "resourceset/otel-agent Ready again after ${SECONDS}s, the dashboard ConfigMap back"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::otel_agent never came back after re-enabling"
           exit 1
       # crossplane is off by default (catalog.tf), so the default path above
       # proves nothing about it. Turned on here with one client value that

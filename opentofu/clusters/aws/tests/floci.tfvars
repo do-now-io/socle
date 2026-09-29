@@ -32,6 +32,14 @@ kube = {
       server = { extraArgs = { "storage.maxHourlySeries" = "50000" } }
     }
   }
+  # And for otel_agent: the socle requests 128Mi for the DaemonSet's
+  # container; the client's 160Mi must win (EXPECT_OTEL_AGENT_MEMORY) while
+  # the socle's cpu request and memory limit survive the merge.
+  otel_agent = {
+    values = {
+      resources = { requests = { memory = "160Mi" } }
+    }
+  }
   hello = {
     replicas = 1
   }
