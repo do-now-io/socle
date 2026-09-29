@@ -218,9 +218,9 @@ variable "log_retention_days" {
 
 # No add-on variable here at all. VPC CNI and kube-proxy are refused outright
 # — Cilium replaces both, and the cluster is created without them. EBS CSI,
-# EFS CSI and the Pod Identity Agent remain EKS-managed add-ons, but they are
-# installed by the factory once compute exists, at versions the socle
-# pipeline pins. This module's nodes are NotReady until Cilium runs, so an
+# EFS CSI and the Pod Identity Agent remain EKS-managed add-ons, but the
+# bootstrap module installs them once compute exists, at versions it pins
+# (opentofu/bootstrap/eks_addons.tf). This module's nodes are NotReady until Cilium runs, so an
 # add-on installed here would have nowhere to run — see cluster.tf. CoreDNS is installed by the
 # bootstrap module, by Helm, right after Cilium (docs/catalog/cilium.md).
 
@@ -372,5 +372,33 @@ variable "crossplane" {
   validation {
     condition     = var.crossplane == null || try(length(setintersection(var.crossplane.allowed_services, ["iam", "sts", "organizations", "account", "sso", "identitystore"])) == 0, true)
     error_message = "crossplane.allowed_services must not name iam, sts, organizations, account, sso or identitystore: a role Crossplane creates never mints identities, chains into other roles or touches the account."
+  }
+}
+
+# --- The shared Gateways' certificate — certificate.tf ---
+
+variable "gateway_certificate" {
+  description = <<-EOT
+    The ACM certificate the socle's two Gateways terminate TLS with, at the
+    load balancer: `domain` and `*.domain`, validated by DNS in the public
+    Route 53 zone `zone_id`, which must serve `domain`. Every route published
+    through a Gateway — ArgoCD's included — is then `<name>.<domain>`. Null,
+    the default, creates nothing, and the bootstrap module creates no
+    Gateway: the socle never serves a route in clear text.
+  EOT
+  type = object({
+    domain  = string
+    zone_id = string
+  })
+  default = null
+
+  validation {
+    condition     = var.gateway_certificate == null || try(can(regex("^([a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$", var.gateway_certificate.domain)), false)
+    error_message = "gateway_certificate.domain must be a lowercase DNS name such as acme.example, without a wildcard: the certificate covers it and *.<domain>."
+  }
+
+  validation {
+    condition     = var.gateway_certificate == null || try(can(regex("^Z[A-Z0-9]{1,31}$", var.gateway_certificate.zone_id)), false)
+    error_message = "gateway_certificate.zone_id must be a Route 53 hosted zone ID, such as Z0123456789ABCDEFGHIJ."
   }
 }

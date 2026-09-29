@@ -10,6 +10,7 @@
   modules:
     gateway_api:
       enabled: true
+      gateways: true
     crossplane:
       enabled: true
       values:
@@ -34,6 +35,7 @@
       enabled: true
       admin_enabled: true
       domain: argocd.example.com
+      gateway: private
       ha: false
       values:
         configs:
@@ -53,3 +55,6 @@
     hubble: false
   gateway:
     className: cilium
+    shared: true
+    namespace: gateway-system
+    certificateArn: arn:aws:acm:eu-west-3:123456789012:certificate/00000000-0000-0000-0000-000000000000

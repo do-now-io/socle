@@ -47,6 +47,9 @@ module "foundations" {
   bootstrap_node_count          = var.aws.bootstrap_node_count
 
   crossplane = var.aws.crossplane
+
+  # The certificate the shared Gateways' load balancers terminate TLS with.
+  gateway_certificate = var.aws.gateway_certificate
 }
 
 # One line, identical on every cloud. No credential: the exec plugin inside
@@ -79,6 +82,13 @@ module "socle" {
     api_endpoint = module.foundations.cluster_endpoint
     service_cidr = module.foundations.service_cidr
   }
+
+  # The EKS-managed add-ons, after the network: the Pod Identity Agent
+  # before Flux, the storage drivers after CoreDNS.
+  eks_addons = var.eks_addons
+
+  # The shared Gateways exist only with it: TLS terminates at their NLBs.
+  gateway_certificate_arn = module.foundations.gateway_certificate_arn
 
   # No depends_on on the whole foundations module: that would hold Cilium
   # until the bootstrap nodes are Ready, and they are Ready only once

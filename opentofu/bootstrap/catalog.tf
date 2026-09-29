@@ -43,8 +43,17 @@ locals {
     # (docs/catalog/cilium.md §4). Not on gcp, where GKE owns the CRDs and
     # the controller. No chart, so no values/values_secret. Disabling it
     # removes the Flux objects and orphans the CRDs: every Gateway survives.
+    #
+    # gateways: the two shared Gateways every module and the client route
+    # through, `public` (internet-facing) and `private` (internal), in
+    # gateway-system — HTTP on 80 redirecting to HTTPS on 443. Created where
+    # the socle's Cilium serves Gateway API (aws, azure), and on aws only
+    # once the foundations issued their certificate: TLS terminates at the
+    # load balancer (docs/catalog/gateway-api.md). false keeps the CRDs and
+    # the class, and no Gateway.
     gateway_api = {
-      enabled = true
+      enabled  = true
+      gateways = true
     }
     # The tooling through which every catalog module carries its own cloud
     # IAM: Crossplane and, per cloud, the IAM providers and their
@@ -86,10 +95,15 @@ locals {
     # client secret goes in values_secret, a Secret the client creates in the
     # argocd namespace with a values.yaml key, merged the same way and never
     # read by OpenTofu.
+    # gateway is the shared Gateway its HTTPRoute attaches to, `private` by
+    # default — ArgoCD is an operator's tool, not an internet service —
+    # `public`, or "" for no route. The route exists only with a domain and
+    # the shared Gateways (inputs.gateway.shared).
     argocd = {
       enabled       = true
       admin_enabled = true
       domain        = ""
+      gateway       = "private"
       ha            = false
       values        = {}
       values_secret = ""

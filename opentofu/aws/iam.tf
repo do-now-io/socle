@@ -82,8 +82,8 @@ data "aws_iam_policy_document" "cilium_operator" {
 # serviceAccountTemplate name in its DeploymentRuntimeConfig) — so the role
 # and its Pod Identity association are written here, and only when asked.
 # Credentials reach the pods through the Pod Identity Agent add-on, which the
-# factory installs with the other managed add-ons (docs/aws/eks-managed-scope.md
-# §1).
+# bootstrap module installs with the other managed add-ons, before Flux
+# (opentofu/bootstrap/eks_addons.tf, docs/aws/eks-managed-scope.md §1).
 #
 # An identity that can create IAM roles is the most powerful thing in the
 # cluster. What bounds it, statement by statement below:

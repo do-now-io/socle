@@ -11,15 +11,16 @@ Arbitration rule: reliable provider ops at a reasonable surcharge → delegated.
 | VPC CNI            | **Refused**        | Never installed                  | `bootstrap_self_managed_addons = false` at creation; replaced by Cilium |
 | kube-proxy         | **Refused**        | Never installed                  | Same flag; replaced by Cilium `kubeProxyReplacement`                    |
 | CoreDNS            | **Factory** (revised) | Helm, in the bootstrap module, right after Cilium | Cluster-internal resolution only; External-DNS (record publishing, cross-cloud) is separate. Was *Delegated* as a managed add-on: an add-on cannot exist before the CNI it needs — see [catalog/cilium](../catalog/cilium.md) |
-| EBS CSI            | **Delegated**      | AWS packages / factory triggers  | Identity via `aws_eks_addon`'s own `pod_identity_association`           |
-| EFS CSI            | **Catalog option** | AWS packages / factory triggers  | RWX only; node component may need a separate association               |
-| Pod Identity Agent | **Delegated**      | AWS packages / factory triggers  | Prerequisite for all workload identity                                 |
+| EBS CSI            | **Delegated**      | AWS packages / factory triggers  | `aws_eks_addon` in the bootstrap module, after CoreDNS, on by default. Identity via the add-on's own `pod_identity_association`, policy `AmazonEBSCSIDriverPolicyV2` |
+| EFS CSI            | **Catalog option** | AWS packages / factory triggers  | RWX only; `aws_eks_addon` in the bootstrap module, off by default (`eks_addons.efs_csi`). Only the controller is associated: the node SA needs one for S3 Files alone |
+| Pod Identity Agent | **Delegated**      | AWS packages / factory triggers  | Prerequisite for all workload identity. `aws_eks_addon` in the bootstrap module, before flux-operator: without it every association hangs silently (#48) |
 
 **Decision.** AWS-only components stay EKS add-ons; anything with a multi-cloud equivalent is the socle's.
 
 - EBS CSI, EFS CSI, Pod Identity Agent: no cross-cloud equivalent to keep uniform.
 - CoreDNS: the add-on already tracks the Kubernetes version AWS validated it against — redoing that buys nothing.
 - AWS never auto-updates an add-on — the trigger is always ours, so versions are pinned in the module, never resolved via `most_recent`.
+- **Where.** In `opentofu/bootstrap/eks_addons.tf`, not in the foundations: the foundations provision nothing that needs a pod to run, and the drivers' controllers are Deployments that need Cilium and CoreDNS first. The bootstrap module already waits for the nodes (`schedulable_nodes`) and the network, so the add-ons follow the same gate, and each driver's role is written beside the add-on that runs its pods — outside `/socle/<cluster>/`, the path Crossplane may rewrite.
 
 **Decision.** VPC CNI / kube-proxy never installed at all: the cluster is created with `bootstrap_self_managed_addons = false`.
 

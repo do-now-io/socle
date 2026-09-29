@@ -377,3 +377,34 @@ run "crossplane_without_a_service_gets_a_boundary_that_grants_nothing" {
     error_message = "with no service allowed, the boundary must allow nothing: a role Crossplane creates then grants nothing."
   }
 }
+
+# --- The shared Gateways' certificate — certificate.tf ---
+
+run "no_gateway_certificate_by_default" {
+  command = plan
+
+  assert {
+    condition     = length(aws_acm_certificate.gateway) == 0 && length(aws_route53_record.gateway_certificate_validation) == 0 && output.gateway_certificate_arn == null
+    error_message = "without gateway_certificate nothing is issued, and the bootstrap module must be told so by a null ARN."
+  }
+}
+
+run "the_gateway_certificate_covers_the_domain_and_its_wildcard" {
+  command = plan
+  variables {
+    gateway_certificate = { domain = "acme.example", zone_id = "Z0123456789ABCDEFGHIJ" }
+  }
+
+  assert {
+    condition     = aws_acm_certificate.gateway[0].domain_name == "acme.example" && contains(aws_acm_certificate.gateway[0].subject_alternative_names, "*.acme.example")
+    error_message = "one certificate must cover the domain and *.domain: every route on either Gateway is <name>.<domain>."
+  }
+  assert {
+    condition     = aws_acm_certificate.gateway[0].validation_method == "DNS" && length(aws_acm_certificate_validation.gateway) == 1
+    error_message = "the certificate must be validated by DNS, and the ARN handed on only once ACM has issued it."
+  }
+  assert {
+    condition     = alltrue([for r in aws_route53_record.gateway_certificate_validation : r.zone_id == "Z0123456789ABCDEFGHIJ" && r.allow_overwrite])
+    error_message = "the validation records must go to the client's zone, and tolerate the one the domain and its wildcard share."
+  }
+}
