@@ -54,6 +54,13 @@
           extraArgs:
             storage.maxHourlySeries: "50000"
       values_secret: victoria-metrics-values
+    otel_agent:
+      enabled: true
+      values:
+        resources:
+          requests:
+            memory: 160Mi
+      values_secret: otel-agent-values
     hello:
       enabled: true
       replicas: 2

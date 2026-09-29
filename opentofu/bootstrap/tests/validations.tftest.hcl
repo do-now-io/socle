@@ -559,3 +559,51 @@ run "kube_refuses_victoria_metrics_values_secret_that_is_not_a_secret_name" {
   variables { kube = { victoria_metrics = { values_secret = "VM_Values" } } }
   expect_failures = [var.kube]
 }
+
+run "kube_refuses_otel_agent_enabled_that_is_not_a_bool" {
+  command = plan
+  variables { kube = { otel_agent = { enabled = "yes" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_otel_agent_values_that_are_not_an_object" {
+  command = plan
+  variables { kube = { otel_agent = { values = "mode: daemonset" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_otel_agent_values_carrying_a_literal_bearer_token" {
+  command = plan
+  variables { kube = { otel_agent = { values = { config = { extensions = { bearertokenauth = { token = "abc123" } } } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_otel_agent_values_carrying_a_literal_basic_auth_password" {
+  command = plan
+  variables { kube = { otel_agent = { values = { config = { extensions = { "basicauth/client" = { client_auth = { username = "u", password = "p" } } } } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_otel_agent_values_carrying_a_literal_authorization_header" {
+  command = plan
+  variables { kube = { otel_agent = { values = { config = { exporters = { "otlp_http/saas" = { endpoint = "https://otlp.example", headers = { Authorization = "Bearer abc123" } } } } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_otel_agent_values_carrying_a_literal_credential_env" {
+  command = plan
+  variables { kube = { otel_agent = { values = { extraEnvs = [{ name = "SAAS_API_KEY", value = "abc123" }] } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_otel_agent_values_carrying_a_secret_among_extra_manifests" {
+  command = plan
+  variables { kube = { otel_agent = { values = { extraManifests = [{ apiVersion = "v1", kind = "Secret", metadata = { name = "saas" } }] } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_otel_agent_values_secret_that_is_not_a_secret_name" {
+  command = plan
+  variables { kube = { otel_agent = { values_secret = "Otel_Values" } } }
+  expect_failures = [var.kube]
+}
