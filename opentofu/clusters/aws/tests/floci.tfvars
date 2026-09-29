@@ -23,6 +23,15 @@ kube = {
       server  = { resources = { requests = { memory = "96Mi" } } }
     }
   }
+  # The same proof for victoria_metrics, asserted by e2e-aws-root: a flag the
+  # socle sets — -storage.maxHourlySeries, 100000 in its document — where the
+  # client must win (EXPECT_VM_MAX_HOURLY_SERIES) while the socle's sibling
+  # flags survive the merge.
+  victoria_metrics = {
+    values = {
+      server = { extraArgs = { "storage.maxHourlySeries" = "50000" } }
+    }
+  }
   hello = {
     replicas = 1
   }

@@ -6,6 +6,8 @@ kubectl -n crossplane-system get helmrelease,helmrepository,helmchart,deploy,pod
 kubectl get provider.pkg.crossplane.io || true
 kubectl -n e2e-probe get managed -o wide || true
 kubectl -n argocd get helmrelease,ocirepository,deploy,pod -o wide || true
+kubectl -n victoria-metrics get helmrelease,ocirepository,deploy,pod,pvc -o wide || true
+kubectl get storageclass || true
 kubectl -n flux-system get ocirepository socle \
   -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}: {.message}{"\n"}{end}' || true
 kubectl -n flux-system logs deploy/flux-operator --tail=80 || true

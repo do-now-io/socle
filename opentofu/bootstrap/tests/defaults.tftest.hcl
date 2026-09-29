@@ -55,6 +55,14 @@ run "defaults_are_the_recommended_position" {
     error_message = "external_dns.txt_owner_id must default to the cluster name, so two clusters never claim each other's records."
   }
   assert {
+    condition     = output.inputs.modules.victoria_metrics.enabled == true && output.inputs.modules.victoria_metrics.retention == "15d" && output.inputs.modules.victoria_metrics.storage_size == "20Gi"
+    error_message = "victoria_metrics must default to on, 15 days of retention on a 20Gi claim (docs/monitoring.md §3)."
+  }
+  assert {
+    condition     = output.inputs.modules.victoria_metrics.values == {} && output.inputs.modules.victoria_metrics.values_secret == ""
+    error_message = "victoria_metrics must default to no client values and no values Secret."
+  }
+  assert {
     condition     = can(regex("refs/heads/main\\$$", output.cosign_identity.subject))
     error_message = "the default cosign identity must trust the release workflow on main only."
   }
@@ -516,5 +524,51 @@ run "argocd_values_flow_through_untouched_and_a_repository_without_credentials_i
   assert {
     condition     = output.inputs.modules.argocd.values_secret == "argocd-values"
     error_message = "the name of the client's values Secret must flow to the inputs."
+  }
+}
+
+run "victoria_metrics_accepts_no_volume_and_a_retention_in_hours" {
+  command = plan
+  variables {
+    kube = { victoria_metrics = { storage_size = "", retention = "48h" } }
+  }
+
+  assert {
+    condition     = output.inputs.modules.victoria_metrics.storage_size == "" && output.inputs.modules.victoria_metrics.retention == "48h"
+    error_message = "an empty storage_size (the emptyDir escape) and a retention of at least a day in hours must reach the inputs as set."
+  }
+  assert {
+    condition     = output.inputs.modules.victoria_metrics.enabled == true
+    error_message = "attributes the client did not set must keep the catalog default."
+  }
+}
+
+run "victoria_metrics_values_flow_through_and_a_credential_from_a_secret_ref_is_fine" {
+  command = plan
+  variables {
+    kube = {
+      victoria_metrics = {
+        storage_size  = "1Ti"
+        values_secret = "victoria-metrics-values"
+        values = {
+          server = {
+            extraArgs = { "storage.maxHourlySeries" = "50000" }
+            env = [{
+              name      = "VM_httpAuth_password"
+              valueFrom = { secretKeyRef = { name = "vm-auth", key = "password" } }
+            }]
+          }
+        }
+      }
+    }
+  }
+
+  assert {
+    condition     = output.inputs.modules.victoria_metrics.values.server.extraArgs["storage.maxHourlySeries"] == "50000" && output.inputs.modules.victoria_metrics.values.server.env[0].valueFrom.secretKeyRef.name == "vm-auth"
+    error_message = "the client's chart values must reach the inputs as written, a credential read from a Secret included: only a literal value is refused."
+  }
+  assert {
+    condition     = output.inputs.modules.victoria_metrics.values_secret == "victoria-metrics-values" && output.inputs.modules.victoria_metrics.storage_size == "1Ti"
+    error_message = "the values Secret's name and a size in Ti must flow to the inputs."
   }
 }
