@@ -245,6 +245,8 @@ jobs:
       EXPECT_ARGOCD: "true"        # catalog.tf: argocd.enabled defaults to true
       EXPECT_ARGOCD_ACCOUNT: e2e   # tests/floci.tfvars: kube.argocd.values
       EXPECT_ARGOCD_SERVER_MEMORY: 96Mi  # tests/floci.tfvars: overrides the socle's 64Mi
+      EXPECT_VICTORIA_METRICS: "true"    # catalog.tf: victoria_metrics.enabled defaults to true
+      EXPECT_VM_MAX_HOURLY_SERIES: "50000"  # tests/floci.tfvars: overrides the socle's 100000
     defaults:
       run:
         working-directory: opentofu/clusters/aws
@@ -272,7 +274,7 @@ jobs:
           GHCR_TOKEN: ${{ github.token }}
         run: |
           "$GITHUB_WORKSPACE/.github/scripts/e2e/ghcr-auth.sh" socle-e2e
-      - name: The root ResourceSet and the hello and argocd modules converge
+      - name: The root ResourceSet and the hello, argocd and victoria_metrics modules converge
         run: |
           "$GITHUB_WORKSPACE/.github/scripts/e2e/wait-converged.sh"
       - name: What the cluster looked like when it failed
@@ -298,9 +300,10 @@ jobs:
             echo "Applied \`opentofu/clusters/aws\` — the real root, foundations included —"
             echo "once on floci's real k3s against \`ghcr.io/do-now-io/socle/flux-modules:$TAG\`, signed as"
             echo "\`$SUBJECT\`. Proven: the artifact is pulled by that exact tag, its signature"
-            echo "verifies against the workflow identity, and the \`socle-root\`, \`hello\` and"
-            echo "\`argocd\` ResourceSets reach Ready with \`hello/podinfo\` at 1 replica and"
-            echo "\`argocd/argocd-server\` Available."
+            echo "verifies against the workflow identity, and the \`socle-root\`, \`hello\`,"
+            echo "\`argocd\` and \`victoria-metrics\` ResourceSets reach Ready with \`hello/podinfo\`"
+            echo "at 1 replica, \`argocd/argocd-server\` Available, and a sample written to"
+            echo "VictoriaMetrics on its bound claim read back through PromQL."
             echo ""
             echo "No idempotence check here: floci does not read back several EKS/CloudWatch"
             echo "attributes, so a refresh always re-discovers drift, and a second apply dies"
@@ -343,6 +346,8 @@ jobs:
         {hello={replicas=1},crossplane={enabled=true,values={resourcesRBACManager={requests={memory="48Mi"}}}},
         external_dns={enabled=true,domain_filters=["e2e.socle.test"]}}
       EXPECT_ARGOCD: "true"        # catalog.tf: argocd.enabled defaults to true
+      EXPECT_VICTORIA_METRICS: "true"    # catalog.tf: victoria_metrics.enabled defaults to true
+      EXPECT_VM_MAX_HOURLY_SERIES: "100000"  # no client value here: the socle's own default
     defaults:
       run:
         working-directory: opentofu/clusters/aws/tests/floci
@@ -367,18 +372,18 @@ jobs:
           GHCR_TOKEN: ${{ github.token }}
         run: |
           "$GITHUB_WORKSPACE/.github/scripts/e2e/ghcr-auth.sh" socle-e2e-catalog
-      - name: The root ResourceSet and the hello and argocd modules converge
+      - name: The root ResourceSet and the hello, argocd and victoria_metrics modules converge
         run: |
           "$GITHUB_WORKSPACE/.github/scripts/e2e/wait-converged.sh"
       # The operator omits a disabled module's objects entirely, so the proof
       # is on the live cluster: the HelmRelease has to disappear.
-      - name: Disabling hello and argocd garbage-collects them
+      - name: Disabling hello, argocd and victoria_metrics garbage-collects them
         run: |
           tofu apply -input=false -auto-approve \
             -var "socle_version=$TAG" \
             -var "cosign_identity=$COSIGN" \
             -var artifact_pull_secret=ghcr-auth \
-            -var 'kube={hello={enabled=false},argocd={enabled=false}}'
+            -var 'kube={hello={enabled=false},argocd={enabled=false},victoria_metrics={enabled=false}}'
           # Absence only counts as garbage collection when kubectl says
           # NotFound. An unreachable API server, a stale kubeconfig or a
           # missing CRD also make the object "not there", and each would pass
@@ -408,7 +413,8 @@ jobs:
           }
           gone hello podinfo
           gone argocd argocd
-      - name: Re-enabling hello and argocd recreates them
+          gone victoria-metrics victoria-metrics
+      - name: Re-enabling hello, argocd and victoria_metrics recreates them
         run: |
           tofu apply -input=false -auto-approve \
             -var "socle_version=$TAG" \
@@ -426,6 +432,24 @@ jobs:
             sleep 5
           done
           [ "$status" = True ] || { echo "::error::hello never came back after re-enabling"; exit 1; }
+          # The namespace went with the module, and its claim with it: coming
+          # back means a new claim bound on the default class, not the old
+          # volume reattached.
+          SECONDS=0
+          back=false
+          for _ in $(seq 1 60); do
+            status="$(kubectl -n flux-system get resourceset victoria-metrics \
+              -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)"
+            if [ "$status" = True ] && [ "$(kubectl -n victoria-metrics get pvc victoria-metrics \
+              -o jsonpath='{.status.phase}' 2>/dev/null || true)" = Bound ]; then
+              kubectl -n victoria-metrics wait deploy/victoria-metrics --for=condition=Available --timeout=120s
+              echo "resourceset/victoria-metrics Ready again after ${SECONDS}s, a new claim Bound"
+              back=true
+              break
+            fi
+            sleep 5
+          done
+          [ "$back" = true ] || { echo "::error::victoria-metrics never came back with a Bound claim after re-enabling"; exit 1; }
           # The images are already on the node, so the second convergence is
           # the operator's and Helm's own latency, not the network's.
           SECONDS=0

@@ -67,6 +67,17 @@ kube = {
     }
     values_secret = "argocd-values"
   }
+  # Metrics storage, on by default: 15 days on a 20Gi claim of the cluster's
+  # default StorageClass. EKS has none until the EBS CSI driver is installed
+  # (docs/catalog/victoria-metrics.md), so the claim would stay Pending: until
+  # then, an empty storage_size keeps the data in an emptyDir, lost when the
+  # pod moves.
+  victoria_metrics = {
+    storage_size = ""
+    # retention  = "30d"
+    # Flag values as strings: Helm renders a number from a million up as 1e+06.
+    # values     = { server = { extraArgs = { "storage.maxHourlySeries" = "300000" } } }
+  }
   hello = {
     replicas = 2
   }

@@ -5,8 +5,8 @@
 # The proof both e2e jobs share: socle-root, external-dns (disabled) and hello Ready, the artifact
 # pulled by the exact tag TAG with its signature verified, podinfo at 1 replica.
 # Optional expectations come from the environment, one variable per module
-# (EXPECT_UI_COLOR, EXPECT_ARGOCD): the job says what the catalog defaults and
-# its tfvars make true, the script checks it.
+# (EXPECT_UI_COLOR, EXPECT_ARGOCD, EXPECT_VICTORIA_METRICS): the job says what
+# the catalog defaults and its tfvars make true, the script checks it.
 set -euo pipefail
 # wait_ready <resourceset> [attempts of 5 s, default 60]
 wait_ready() {
@@ -49,6 +49,57 @@ if [ "${EXPECT_ARGOCD:-}" = true ]; then
     [ "$mem" = "$EXPECT_ARGOCD_SERVER_MEMORY" ] || { echo "::error::client value lost to the socle default: memory '$mem', expected '$EXPECT_ARGOCD_SERVER_MEMORY'"; exit 1; }
     [ "$cpu" = 50m ] || { echo "::error::the socle's cpu request did not survive the merge: '$cpu'"; exit 1; }
   fi
+fi
+# victoria_metrics when expected, before socle-root for the same reason as
+# argocd: the module converges, its claim is Bound on the cluster's default
+# class (local-path on floci), and a sample written through the import API is
+# read back through PromQL — storage proven end to end before any collector
+# exists. Reached through the API server's service proxy, so no port-forward
+# and no client image on the runner.
+if [ "${EXPECT_VICTORIA_METRICS:-}" = true ]; then
+  SECONDS=0
+  wait_ready victoria-metrics 120
+  kubectl -n victoria-metrics wait deploy/victoria-metrics --for=condition=Available --timeout=120s
+  echo "victoria-metrics converged: resourceset Ready and the server Available after ${SECONDS}s"
+  pvc="$(kubectl -n victoria-metrics get pvc victoria-metrics -o jsonpath='{.status.phase}')"
+  echo "victoria-metrics pvc phase=$pvc ($(kubectl -n victoria-metrics get pvc victoria-metrics -o jsonpath='{.spec.storageClassName} {.status.capacity.storage}'))"
+  [ "$pvc" = Bound ] || { echo "::error::the victoria-metrics claim is '$pvc', expected Bound"; exit 1; }
+  vm=/api/v1/namespaces/victoria-metrics/services/victoria-metrics:http/proxy
+  # A minute in the past: newer samples sit inside -search.latencyOffset (30 s)
+  # and an instant query would not return them yet.
+  probe="$(mktemp)"
+  printf '{"metric":{"__name__":"socle_e2e_probe","job":"e2e"},"values":[42],"timestamps":[%s]}\n' \
+    "$(( ($(date +%s) - 60) * 1000 ))" > "$probe"
+  kubectl create --raw "$vm/api/v1/import" -f "$probe" > /dev/null
+  got=""
+  for _ in $(seq 1 12); do
+    kubectl get --raw "$vm/internal/force_flush" > /dev/null || true
+    got="$(kubectl get --raw "$vm/api/v1/query?query=socle_e2e_probe" 2>/dev/null \
+      | python3 -c 'import sys,json; r=json.load(sys.stdin)["data"]["result"]; print(r[0]["value"][1] if r else "")' \
+      2>/dev/null || true)"
+    [ "$got" = 42 ] && break
+    sleep 5
+  done
+  echo "victoria-metrics read back socle_e2e_probe=$got"
+  [ "$got" = 42 ] || { echo "::error::a sample written to victoria-metrics was not read back"; exit 1; }
+  # Precedence, on a flag the socle itself sets: -storage.maxHourlySeries is
+  # 100000 in the socle's document, and the job says what the tfvars make it.
+  # The socle's sibling flags must survive the merge.
+  args="$(kubectl -n victoria-metrics get deploy victoria-metrics \
+    -o jsonpath='{range .spec.template.spec.containers[0].args[*]}{@}{"\n"}{end}')"
+  echo "victoria-metrics args: $(printf '%s' "$args" | tr '\n' ' ')"
+  if [ -n "${EXPECT_VM_MAX_HOURLY_SERIES:-}" ]; then
+    printf '%s\n' "$args" | grep -qx -- "--storage.maxHourlySeries=$EXPECT_VM_MAX_HOURLY_SERIES" \
+      || { echo "::error::expected --storage.maxHourlySeries=$EXPECT_VM_MAX_HOURLY_SERIES on the live Deployment"; exit 1; }
+  fi
+  printf '%s\n' "$args" | grep -qx -- "--opentelemetry.usePrometheusNaming" \
+    || { echo "::error::the socle's --opentelemetry.usePrometheusNaming did not survive the merge"; exit 1; }
+  printf '%s\n' "$args" | grep -qx -- "--retentionPeriod=15d" \
+    || { echo "::error::expected the catalog's default --retentionPeriod=15d"; exit 1; }
+  # The idle figure docs/catalog/victoria-metrics.md quotes. Best effort: it
+  # needs metrics-server, which k3s ships.
+  kubectl -n victoria-metrics top pod --no-headers 2>/dev/null \
+    | awk '{print "victoria-metrics idle: " $1 " cpu=" $2 " memory=" $3}' || true
 fi
 wait_ready socle-root
 # external-dns is off by default (it needs a zone and a credential): Ready
