@@ -1,0 +1,6 @@
+# Applied by the otel-agent-dashboards Kustomization the module's ResourceSet
+# renders, into the otel-agent namespace, and pruned with it.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - nodes-pods.yaml
