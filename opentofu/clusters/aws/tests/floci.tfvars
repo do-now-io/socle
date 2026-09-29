@@ -40,6 +40,13 @@ kube = {
       resources = { requests = { memory = "160Mi" } }
     }
   }
+  # And for otel_gateway: 320Mi over the socle's 128Mi
+  # (EXPECT_OTEL_GATEWAY_MEMORY), its 100m and 1Gi limit intact.
+  otel_gateway = {
+    values = {
+      resources = { requests = { memory = "320Mi" } }
+    }
+  }
   hello = {
     replicas = 1
   }

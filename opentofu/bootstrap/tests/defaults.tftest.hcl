@@ -67,6 +67,10 @@ run "defaults_are_the_recommended_position" {
     error_message = "otel_agent must default to on, with no client values and no values Secret (docs/monitoring.md §4)."
   }
   assert {
+    condition     = output.inputs.modules.otel_gateway.enabled == true && output.inputs.modules.otel_gateway.values == {} && output.inputs.modules.otel_gateway.values_secret == ""
+    error_message = "otel_gateway must default to on, with no client values and no values Secret (docs/monitoring.md §4)."
+  }
+  assert {
     condition     = can(regex("refs/heads/main\\$$", output.cosign_identity.subject))
     error_message = "the default cosign identity must trust the release workflow on main only."
   }
@@ -606,5 +610,25 @@ run "otel_agent_values_flow_through_and_credentials_read_from_the_environment_ar
   assert {
     condition     = output.inputs.modules.otel_agent.values_secret == "otel-agent-values"
     error_message = "the name of the client's values Secret must flow to the inputs."
+  }
+}
+
+run "otel_gateway_values_flow_through_and_a_header_read_from_the_environment_is_fine" {
+  command = plan
+  variables {
+    kube = {
+      otel_gateway = {
+        values = {
+          config = {
+            exporters = { "otlp_http/saas" = { endpoint = "https://otlp.example", headers = { "X-API-Key" = "$${env:SAAS_KEY}" } } }
+          }
+        }
+      }
+    }
+  }
+
+  assert {
+    condition     = output.inputs.modules.otel_gateway.values.config.exporters["otlp_http/saas"].headers["X-API-Key"] == "$${env:SAAS_KEY}"
+    error_message = "a header the collector reads from its environment must reach the inputs as written: only a literal is refused."
   }
 }
