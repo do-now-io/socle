@@ -71,6 +71,10 @@ run "defaults_are_the_recommended_position" {
     error_message = "victoria_metrics must default to no client values and no values Secret."
   }
   assert {
+    condition     = output.inputs.modules.otel_agent.enabled == true && output.inputs.modules.otel_agent.values == {} && output.inputs.modules.otel_agent.values_secret == ""
+    error_message = "otel_agent must default to on, with no client values and no values Secret (docs/monitoring.md §4)."
+  }
+  assert {
     condition     = can(regex("refs/heads/main\\$$", output.cosign_identity.subject))
     error_message = "the default cosign identity must trust the release workflow on main only."
   }
@@ -539,6 +543,84 @@ run "argocd_values_flow_through_untouched_and_a_repository_without_credentials_i
   }
 }
 
+run "victoria_metrics_accepts_no_volume_and_a_retention_in_hours" {
+  command = plan
+  variables {
+    kube = { victoria_metrics = { storage_size = "", retention = "48h" } }
+  }
+
+  assert {
+    condition     = output.inputs.modules.victoria_metrics.storage_size == "" && output.inputs.modules.victoria_metrics.retention == "48h"
+    error_message = "an empty storage_size (the emptyDir escape) and a retention of at least a day in hours must reach the inputs as set."
+  }
+  assert {
+    condition     = output.inputs.modules.victoria_metrics.enabled == true
+    error_message = "attributes the client did not set must keep the catalog default."
+  }
+}
+
+run "victoria_metrics_values_flow_through_and_a_credential_from_a_secret_ref_is_fine" {
+  command = plan
+  variables {
+    kube = {
+      victoria_metrics = {
+        storage_size  = "1Ti"
+        values_secret = "victoria-metrics-values"
+        values = {
+          server = {
+            extraArgs = { "storage.maxHourlySeries" = "50000" }
+            env = [{
+              name      = "VM_httpAuth_password"
+              valueFrom = { secretKeyRef = { name = "vm-auth", key = "password" } }
+            }]
+          }
+        }
+      }
+    }
+  }
+
+  assert {
+    condition     = output.inputs.modules.victoria_metrics.values.server.extraArgs["storage.maxHourlySeries"] == "50000" && output.inputs.modules.victoria_metrics.values.server.env[0].valueFrom.secretKeyRef.name == "vm-auth"
+    error_message = "the client's chart values must reach the inputs as written, a credential read from a Secret included: only a literal value is refused."
+  }
+  assert {
+    condition     = output.inputs.modules.victoria_metrics.values_secret == "victoria-metrics-values" && output.inputs.modules.victoria_metrics.storage_size == "1Ti"
+    error_message = "the values Secret's name and a size in Ti must flow to the inputs."
+  }
+}
+
+run "otel_agent_values_flow_through_and_credentials_read_from_the_environment_are_fine" {
+  command = plan
+  variables {
+    kube = {
+      otel_agent = {
+        values_secret = "otel-agent-values"
+        values = {
+          extraEnvs = [{
+            name      = "SAAS_TOKEN"
+            valueFrom = { secretKeyRef = { name = "saas", key = "token" } }
+          }]
+          config = {
+            extensions = { bearertokenauth = { token = "$${env:SAAS_TOKEN}" } }
+            exporters = {
+              "otlp_http/saas" = { endpoint = "https://otlp.example", headers = { Authorization = "Bearer $${env:SAAS_TOKEN}" } }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  assert {
+    condition     = output.inputs.modules.otel_agent.values.config.extensions.bearertokenauth.token == "$${env:SAAS_TOKEN}" && output.inputs.modules.otel_agent.values.extraEnvs[0].valueFrom.secretKeyRef.name == "saas"
+    error_message = "a credential the collector reads from its environment, set from a Secret, must reach the inputs as written: only a literal is refused."
+  }
+  assert {
+    condition     = output.inputs.modules.otel_agent.values_secret == "otel-agent-values"
+    error_message = "the name of the client's values Secret must flow to the inputs."
+  }
+}
+
 # --- EKS-managed add-ons — eks_addons.tf, docs/aws/eks-managed-scope.md ---
 
 run "aws_installs_the_pod_identity_agent_and_ebs_csi_by_default" {
@@ -685,51 +767,5 @@ run "no_shared_gateway_where_cilium_does_not_serve_gateway_api" {
   assert {
     condition     = output.inputs.gateway.shared == false
     error_message = "without the socle's Cilium there is no class to create a Gateway on — the e2e test double's case."
-  }
-}
-
-run "victoria_metrics_accepts_no_volume_and_a_retention_in_hours" {
-  command = plan
-  variables {
-    kube = { victoria_metrics = { storage_size = "", retention = "48h" } }
-  }
-
-  assert {
-    condition     = output.inputs.modules.victoria_metrics.storage_size == "" && output.inputs.modules.victoria_metrics.retention == "48h"
-    error_message = "an empty storage_size (the emptyDir escape) and a retention of at least a day in hours must reach the inputs as set."
-  }
-  assert {
-    condition     = output.inputs.modules.victoria_metrics.enabled == true
-    error_message = "attributes the client did not set must keep the catalog default."
-  }
-}
-
-run "victoria_metrics_values_flow_through_and_a_credential_from_a_secret_ref_is_fine" {
-  command = plan
-  variables {
-    kube = {
-      victoria_metrics = {
-        storage_size  = "1Ti"
-        values_secret = "victoria-metrics-values"
-        values = {
-          server = {
-            extraArgs = { "storage.maxHourlySeries" = "50000" }
-            env = [{
-              name      = "VM_httpAuth_password"
-              valueFrom = { secretKeyRef = { name = "vm-auth", key = "password" } }
-            }]
-          }
-        }
-      }
-    }
-  }
-
-  assert {
-    condition     = output.inputs.modules.victoria_metrics.values.server.extraArgs["storage.maxHourlySeries"] == "50000" && output.inputs.modules.victoria_metrics.values.server.env[0].valueFrom.secretKeyRef.name == "vm-auth"
-    error_message = "the client's chart values must reach the inputs as written, a credential read from a Secret included: only a literal value is refused."
-  }
-  assert {
-    condition     = output.inputs.modules.victoria_metrics.values_secret == "victoria-metrics-values" && output.inputs.modules.victoria_metrics.storage_size == "1Ti"
-    error_message = "the values Secret's name and a size in Ti must flow to the inputs."
   }
 }
