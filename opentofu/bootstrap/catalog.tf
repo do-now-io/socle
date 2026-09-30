@@ -46,7 +46,8 @@ locals {
     #
     # gateways: the two shared Gateways every module and the client route
     # through, `public` (internet-facing) and `private` (internal), in
-    # gateway-system — HTTP on 80 redirecting to HTTPS on 443. Created where
+    # gateway-system — HTTPS on 443 (on azure also HTTP on 80, redirecting;
+    # not on aws yet, docs/catalog/gateway-api.md). Created where
     # the socle's Cilium serves Gateway API (aws, azure), and on aws only
     # once the foundations issued their certificate: TLS terminates at the
     # load balancer (docs/catalog/gateway-api.md). false keeps the CRDs and

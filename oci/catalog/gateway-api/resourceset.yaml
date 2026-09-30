@@ -21,14 +21,17 @@
 # module and the client route through: `public`, internet-facing, and
 # `private`, internal, in gateway-system (docs/catalog/gateway-api.md). A
 # child ResourceSet, because a Gateway can only be applied once its CRD and
-# class exist: it dependsOn gateway-api-cilium being Ready. Each has two
-# listeners — `http` on 80, where one HTTPRoute redirects everything to
-# https, and `https` on 443, where routes attach. On aws the NLB in front
-# of each Gateway terminates TLS with the foundations' ACM certificate and
-# forwards plain HTTP, so `https` is an HTTP listener on 443 and no key
-# exists in the cluster; on azure, whose load balancer is L4 only, Envoy
-# terminates with the certificate in the Secret gateway-system/gateway-tls,
-# which the client creates. Unlike the CRDs, the Gateways are the socle's
+# class exist: it dependsOn gateway-api-cilium being Ready. Routes attach to
+# `https` on 443. On aws the NLB in front of each Gateway terminates TLS
+# with the foundations' ACM certificate and forwards plain HTTP, so `https`
+# is an HTTP listener on 443 and no key exists in the cluster — and there is
+# no port 80: Cilium serves every HTTP listener of a Gateway from one Envoy
+# route table whatever the port, so a redirect on 80 would also answer on
+# 443 and loop, and the routes on 443 would answer in clear on 80 (measured
+# on EKS, docs/catalog/gateway-api.md). On azure, whose load balancer is L4
+# only, Envoy terminates with the certificate in the Secret
+# gateway-system/gateway-tls, which the client creates; 443 is HTTPS there,
+# a separate route table, so `http` on 80 redirects everything to https. Unlike the CRDs, the Gateways are the socle's
 # own: disabling the module or kube.gateway_api.gateways deletes them, and
 # their load balancers with them.
 apiVersion: fluxcd.controlplane.io/v1
@@ -147,6 +150,7 @@ spec:
                 << end >>
                 socle.do-now.io/gateway: << $gw >>
             listeners:
+              << if ne inputs.cloud "aws" >>
               # Only the redirect below attaches here.
               - name: http
                 protocol: HTTP
@@ -154,6 +158,7 @@ spec:
                 allowedRoutes:
                   namespaces:
                     from: Same
+              << end >>
               - name: https
                 port: 443
                 << if eq inputs.cloud "aws" >>
@@ -171,6 +176,7 @@ spec:
                   namespaces:
                     from: All
         << end >>
+        << if ne inputs.cloud "aws" >>
         - apiVersion: gateway.networking.k8s.io/v1
           kind: HTTPRoute
           metadata:
@@ -188,4 +194,5 @@ spec:
                     requestRedirect:
                       scheme: https
                       statusCode: 301
+        << end >>
     << end >>

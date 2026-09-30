@@ -40,7 +40,7 @@ type, is an error at plan, with the allowed list in the message.
 | Module | Attribute | Default | Meaning |
 | --- | --- | --- | --- |
 | `gateway_api` | `enabled` | `true` | Gateway API standard CRDs from upstream, pinned by commit, and Cilium's `cilium` class on aws and azure. Offered on aws, azure and scaleway; GKE owns its own. Disabling orphans the CRDs |
-| `gateway_api` | `gateways` | `true` | The shared Gateways `gateway-system/public` (internet-facing) and `private` (internal), HTTP redirecting to HTTPS, on aws and azure — on aws once the foundations issued `gateway_certificate` ([design note](../../docs/catalog/gateway-api.md)) |
+| `gateway_api` | `gateways` | `true` | The shared Gateways `gateway-system/public` (internet-facing) and `private` (internal), HTTPS on 443, on aws and azure — on aws once the foundations issued `gateway_certificate`, with no port 80 yet; on azure HTTP on 80 redirects to HTTPS ([design note](../../docs/catalog/gateway-api.md)) |
 | `crossplane` | `enabled` | `false` | Deploy Crossplane and, per cloud, its IAM providers — the tooling through which each catalog module declares its own cloud role ([design note](../../docs/catalog/crossplane.md)). Turning it off leaves the CRDs and orphans every module role still declared |
 | `crossplane` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan |
 | `crossplane` | `values_secret` | `""` | Name of a Secret in `crossplane-system` with a `values.yaml` key, created by the client, merged last |
