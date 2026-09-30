@@ -206,3 +206,43 @@ spec:
       upgrade:
         remediation:
           retries: 3
+    << if and inputs.modules.grafana.domain inputs.modules.grafana.gateway inputs.gateway.shared >>
+    ---
+    # Exposure, argocd's shape: an HTTPRoute of the socle's own on the shared
+    # Gateway kube.grafana.gateway names, for the domain, in a child
+    # ResourceSet that waits for that Gateway to be Accepted. TLS is the
+    # Gateway's; Grafana speaks plain HTTP behind it.
+    apiVersion: fluxcd.controlplane.io/v1
+    kind: ResourceSet
+    metadata:
+      name: grafana-route
+      namespace: flux-system
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.grafana.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      dependsOn:
+        - apiVersion: gateway.networking.k8s.io/v1
+          kind: Gateway
+          name: << inputs.modules.grafana.gateway >>
+          namespace: << inputs.gateway.namespace >>
+          ready: true
+          readyExpr: status.conditions.exists(c, c.type == 'Accepted' && c.status == 'True')
+      wait: true
+      resources:
+        - apiVersion: gateway.networking.k8s.io/v1
+          kind: HTTPRoute
+          metadata:
+            name: grafana
+            namespace: grafana
+          spec:
+            parentRefs:
+              - name: << inputs.modules.grafana.gateway >>
+                namespace: << inputs.gateway.namespace >>
+                sectionName: https
+            hostnames:
+              - << inputs.modules.grafana.domain | quote >>
+            rules:
+              - backendRefs:
+                  - name: grafana
+                    port: 80
+    << end >>
