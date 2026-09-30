@@ -53,6 +53,13 @@ kube = {
       resources = { requests = { memory = "320Mi" } }
     }
   }
+  # And for victoria_logs: 160Mi over the socle's 128Mi
+  # (EXPECT_VICTORIA_LOGS_MEMORY), its 50m intact.
+  victoria_logs = {
+    values = {
+      server = { resources = { requests = { memory = "160Mi" } } }
+    }
+  }
   hello = {
     replicas = 1
   }
