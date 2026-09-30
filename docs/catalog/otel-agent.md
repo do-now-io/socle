@@ -25,6 +25,12 @@ logs join it with `victoria_logs`. The module contract is
 
 ## What is installed
 
+> **With `victoria_logs` on** (and `kube.otel_agent.logs`, `true` by default)
+> the agent also reads every container's log from `/var/log/pods` through a
+> read-only `hostPath`, as root with every capability dropped, and exports it
+> to VictoriaLogs. Without it, none of that exists: no `hostPath`, the image's
+> non-root user. What and why: [victoria-logs.md](victoria-logs.md).
+
 One `ResourceSet` (`oci/catalog/otel-agent/resourceset.yaml`),
 `resourcesTemplate`, six objects, each carrying the per-resource reconcile
 toggle on `inputs.modules.otel_agent.enabled`:

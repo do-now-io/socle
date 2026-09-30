@@ -93,6 +93,12 @@ spec:
           # (pods, list and watch) is also what the pod discovery below reads.
           kubernetesAttributes:
             enabled: true
+          << if inputs.modules.victoria_logs.enabled >>
+          # Kubernetes events, as logs: k8sobjects watching events.k8s.io,
+          # deleted events excluded. One replica, so each event once.
+          kubernetesEvents:
+            enabled: true
+          << end >>
         # OTLP in, gRPC and HTTP, on the Service only; the chart's Jaeger and
         # Zipkin receivers are off. No hostPort: the chart only sets those in
         # daemonset mode.
@@ -167,12 +173,28 @@ spec:
             # fill its queue and its log.
             nop: {}
             << end >>
+            << if inputs.modules.victoria_logs.enabled >>
+            otlp_http/victoria-logs:
+              logs_endpoint: http://victoria-logs.victoria-logs.svc:9428/insert/opentelemetry/v1/logs
+            << end >>
           service:
             pipelines:
-              # Logs and traces arrive with their backends (victoria_logs,
-              # victoria_traces); until then the gateway takes OTLP metrics
-              # only.
+              << if inputs.modules.victoria_logs.enabled >>
+              logs:
+                # The applications' OTLP logs; the kubernetesEvents preset adds
+                # k8sobjects to this list and kubernetesAttributes k8s_attributes
+                # to the processors.
+                receivers:
+                  - otlp
+                processors:
+                  - memory_limiter
+                  - batch
+                exporters:
+                  - otlp_http/victoria-logs
+              << else >>
               logs: null
+              << end >>
+              # Traces arrive with their backend, victoria_traces.
               traces: null
               metrics:
                 # The clusterMetrics preset adds k8s_cluster to this list and

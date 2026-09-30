@@ -116,11 +116,12 @@ spec:
         # One datasource per backend that is on, provisioned read-only. The
         # built-in Prometheus type rather than VictoriaMetrics' own plugin:
         # nothing to download, and PromQL is what the dashboards speak.
-        << if inputs.modules.victoria_metrics.enabled >>
+        << if or inputs.modules.victoria_metrics.enabled inputs.modules.victoria_logs.enabled >>
         datasources:
           datasources.yaml:
             apiVersion: 1
             datasources:
+              << if inputs.modules.victoria_metrics.enabled >>
               - name: VictoriaMetrics
                 uid: victoria-metrics
                 type: prometheus
@@ -131,6 +132,24 @@ spec:
                 jsonData:
                   # The collectors' slowest cadence: the gateway's scrape.
                   timeInterval: 30s
+              << end >>
+              << if inputs.modules.victoria_logs.enabled >>
+              # VictoriaLogs has no built-in type: its own plugin, below.
+              - name: VictoriaLogs
+                uid: victoria-logs
+                type: victoriametrics-logs-datasource
+                access: proxy
+                url: http://victoria-logs.victoria-logs.svc:9428
+                editable: false
+              << end >>
+        << end >>
+        << if inputs.modules.victoria_logs.enabled >>
+        # The VictoriaLogs datasource plugin, pinned, signed by Grafana, and
+        # downloaded from grafana.com when the pod starts
+        # (GF_PLUGINS_PREINSTALL_SYNC): a cluster with no egress to it gets
+        # Grafana without its logs (docs/monitoring.md §10, question 4).
+        plugins:
+          - victoriametrics-logs-datasource@0.32.0
         << end >>
         # Every ConfigMap labelled grafana_dashboard "1", in any namespace, is
         # a dashboard: the modules ship theirs that way, and so can a client.

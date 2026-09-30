@@ -56,6 +56,7 @@
       values_secret: victoria-metrics-values
     otel_agent:
       enabled: true
+      logs: true
       values:
         resources:
           requests:
@@ -77,6 +78,16 @@
           requests:
             memory: 160Mi
       values_secret: grafana-values
+    victoria_logs:
+      enabled: true
+      retention: 7d
+      storage_size: 20Gi
+      values:
+        server:
+          resources:
+            requests:
+              memory: 160Mi
+      values_secret: victoria-logs-values
     hello:
       enabled: true
       replicas: 2
