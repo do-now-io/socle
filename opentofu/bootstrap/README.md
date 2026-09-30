@@ -64,6 +64,10 @@ type, is an error at plan, with the allowed list in the message.
 | `otel_gateway` | `enabled` | `true` | Deploy the OpenTelemetry Collector as a one-replica Deployment: Kubernetes object state, the Prometheus endpoints of pods annotated `prometheus.io/scrape`, and the applications' OTLP on `otel-gateway.otel-gateway.svc:4317/4318`, to `victoria_metrics`; ships the workloads dashboard ([design note](../../docs/catalog/otel-gateway.md)) |
 | `otel_gateway` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Literal credentials refused at plan; `${env:NAME}` read from a Secret is fine |
 | `otel_gateway` | `values_secret` | `""` | Name of a Secret in `otel-gateway` with a `values.yaml` key, created by the client, merged last |
+| `grafana` | `enabled` | `true` | Deploy Grafana: a read-only datasource for each monitoring backend that is on, and every dashboard a module ships ([design note](../../docs/catalog/grafana.md)) |
+| `grafana` | `domain` | `""` | Host Grafana is served at (`grafana.ini` `server.root_url`, later the HTTPRoute); empty means none |
+| `grafana` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan: admin password, secret key, OAuth client secrets, literal datasource secrets |
+| `grafana` | `values_secret` | `""` | Name of a Secret in `grafana` with a `values.yaml` key, created by the client, merged last |
 | `hello` | `enabled` | `true` | Deploy podinfo as a proof the pipeline works |
 | `hello` | `replicas` | `1` | Replicas of the podinfo Deployment |
 | `hello` | `message` | `"hello from socle"` | Message podinfo serves |

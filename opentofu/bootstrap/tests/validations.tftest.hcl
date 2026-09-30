@@ -591,3 +591,65 @@ run "kube_refuses_otel_gateway_values_secret_that_is_not_a_secret_name" {
   variables { kube = { otel_gateway = { values_secret = "gateway values" } } }
   expect_failures = [var.kube]
 }
+
+run "kube_refuses_grafana_enabled_that_is_not_a_bool" {
+  command = plan
+  variables { kube = { grafana = { enabled = "on" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_grafana_domain_with_a_scheme" {
+  command = plan
+  variables { kube = { grafana = { domain = "https://grafana.acme.example" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_grafana_domain_that_is_a_bare_label" {
+  command = plan
+  variables { kube = { grafana = { domain = "grafana" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_grafana_values_carrying_the_admin_password" {
+  command = plan
+  variables { kube = { grafana = { values = { adminPassword = "hunter2" } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_grafana_values_carrying_the_secret_key" {
+  command = plan
+  variables { kube = { grafana = { values = { "grafana.ini" = { security = { secret_key = "x" } } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_grafana_values_carrying_an_oauth_client_secret" {
+  command = plan
+  variables { kube = { grafana = { values = { "grafana.ini" = { "auth.generic_oauth" = { enabled = true, client_id = "id", client_secret = "s3cr3t" } } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_grafana_values_carrying_a_literal_datasource_secret" {
+  command = plan
+  variables {
+    kube = { grafana = { values = { datasources = { "extra.yaml" = { apiVersion = 1, datasources = [{ name = "pg", type = "postgres", secureJsonData = { password = "hunter2" } }] } } } } }
+  }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_grafana_values_carrying_a_credential_env" {
+  command = plan
+  variables { kube = { grafana = { values = { env = { GF_SECURITY_ADMIN_PASSWORD = "hunter2" } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_grafana_values_carrying_a_secret_among_extra_objects" {
+  command = plan
+  variables { kube = { grafana = { values = { extraObjects = [{ apiVersion = "v1", kind = "Secret", metadata = { name = "x" } }] } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_grafana_values_secret_that_is_not_a_secret_name" {
+  command = plan
+  variables { kube = { grafana = { values_secret = "Grafana_Values" } } }
+  expect_failures = [var.kube]
+}
