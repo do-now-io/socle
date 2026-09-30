@@ -160,8 +160,12 @@ locals {
     # argocd's; empty means none. values and values_secret as every module,
     # secrets refused there (docs/catalog/grafana.md).
     grafana = {
-      enabled       = true
-      domain        = ""
+      enabled = true
+      domain  = ""
+      # The shared Gateway its HTTPRoute attaches to, as argocd's: private by
+      # default, public, or "" for no route. The route exists only with a
+      # domain and the shared Gateways (inputs.gateway.shared).
+      gateway       = "private"
       values        = {}
       values_secret = ""
     }
