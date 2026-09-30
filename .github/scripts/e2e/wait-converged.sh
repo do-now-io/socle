@@ -6,8 +6,8 @@
 # pulled by the exact tag TAG with its signature verified, podinfo at 1 replica.
 # Optional expectations come from the environment, one variable per module
 # (EXPECT_UI_COLOR, EXPECT_ARGOCD, EXPECT_VICTORIA_METRICS, EXPECT_OTEL_AGENT,
-# EXPECT_OTEL_GATEWAY): the job says what the catalog defaults and its tfvars
-# make true, the script checks it.
+# EXPECT_OTEL_GATEWAY, EXPECT_GRAFANA): the job says what the catalog defaults
+# and its tfvars make true, the script checks it.
 set -euo pipefail
 # wait_ready <resourceset> [attempts of 5 s, default 60]
 wait_ready() {
@@ -240,6 +240,68 @@ assert r["limits"]["memory"] == "1Gi", "the socle memory limit did not survive t
     | awk '{print "otel-gateway: " $1 " cpu=" $2 " memory=" $3}' || true
   kubectl -n victoria-metrics top pod --no-headers 2>/dev/null \
     | awk '{print "victoria-metrics under both collectors: " $1 " cpu=" $2 " memory=" $3}' || true
+fi
+# grafana when expected, last of the stack: Grafana answers, it has exactly
+# the datasource the socle provisions for victoria_metrics, its sidecar loaded
+# the collectors' dashboards from their own namespaces, and a query through
+# Grafana's own datasource proxy returns the collectors' metrics — what a
+# person opening Grafana sees. Reached with a port-forward: the image is
+# distroless, the API needs the admin's basic auth, and the service proxy
+# carries no credential of its own. EXPECT_GRAFANA_MEMORY asserts the client's
+# value on a request the socle sets (256Mi).
+if [ "${EXPECT_GRAFANA:-}" = true ]; then
+  SECONDS=0
+  wait_ready grafana 120
+  kubectl -n grafana rollout status deployment/grafana --timeout=180s
+  echo "grafana converged: resourceset Ready and the Deployment rolled out after ${SECONDS}s"
+  pass="$(kubectl -n grafana get secret grafana -o jsonpath='{.data.admin-password}' | base64 -d)"
+  kubectl -n grafana port-forward svc/grafana 13000:80 > /tmp/grafana-port-forward.log 2>&1 &
+  pf=$!
+  trap 'kill "$pf" 2> /dev/null || true' EXIT
+  for _ in $(seq 1 30); do
+    curl -sf http://127.0.0.1:13000/api/health > /dev/null 2>&1 && break
+    sleep 2
+  done
+  gf() { curl -sf -u "admin:$pass" "http://127.0.0.1:13000$1"; }
+  echo "grafana health: $(curl -sf http://127.0.0.1:13000/api/health | tr -d '\n ')"
+  ds="$(gf /api/datasources)"
+  echo "grafana datasources: $(printf '%s' "$ds" | python3 -c 'import sys,json; print(", ".join("%s (%s) %s default=%s" % (d["name"], d["type"], d["url"], d["isDefault"]) for d in json.load(sys.stdin)))')"
+  printf '%s' "$ds" | python3 -c '
+import sys, json
+ds = json.load(sys.stdin)
+vm = [d for d in ds if d["uid"] == "victoria-metrics"]
+assert len(ds) == 1 and len(vm) == 1, ds
+assert vm[0]["type"] == "prometheus" and vm[0]["url"] == "http://victoria-metrics.victoria-metrics.svc:8428" and vm[0]["isDefault"], vm
+' || { echo "::error::grafana does not have exactly the VictoriaMetrics datasource the socle provisions"; exit 1; }
+  # The modules' dashboards, found by the sidecar in their own namespaces.
+  for uid in socle-otel-nodes-pods socle-otel-workloads; do
+    found=false
+    for _ in $(seq 1 30); do
+      gf "/api/dashboards/uid/$uid" > /dev/null 2>&1 && { found=true; break; }
+      sleep 2
+    done
+    [ "$found" = true ] || { echo "::error::dashboard $uid was not loaded by grafana's sidecar"; exit 1; }
+    echo "grafana dashboard $uid: $(gf "/api/dashboards/uid/$uid" | python3 -c 'import sys,json; d=json.load(sys.stdin)["dashboard"]; print("%s, %d panels" % (d["title"], len(d["panels"])))')"
+  done
+  # End to end: the collectors' metric, read through Grafana's datasource.
+  through="$(gf "/api/datasources/proxy/uid/victoria-metrics/api/v1/query?query=$(urlq 'count(k8s_pod_cpu_usage)')" \
+    | python3 -c 'import sys,json; r=json.load(sys.stdin)["data"]["result"]; print(r[0]["value"][1] if r else 0)')"
+  echo "through grafana's datasource: count(k8s_pod_cpu_usage) = $through"
+  [ "$through" != 0 ] || { echo "::error::grafana's datasource returns no collector metric"; exit 1; }
+  res="$(kubectl -n grafana get deployment grafana -o jsonpath='{.spec.template.spec.containers[?(@.name=="grafana")].resources}')"
+  echo "grafana resources: $res"
+  if [ -n "${EXPECT_GRAFANA_MEMORY:-}" ]; then
+    printf '%s' "$res" | python3 -c '
+import sys, json
+r = json.load(sys.stdin); want = sys.argv[1]
+assert r["requests"]["memory"] == want, "client value lost to the socle default: memory %s, expected %s" % (r["requests"]["memory"], want)
+assert r["requests"]["cpu"] == "50m", "the socle cpu request did not survive the merge: %s" % r["requests"]["cpu"]
+' "$EXPECT_GRAFANA_MEMORY" || { echo "::error::grafana precedence"; exit 1; }
+  fi
+  kubectl -n grafana top pod --no-headers --containers 2>/dev/null \
+    | awk '{print "grafana: " $1 "/" $2 " cpu=" $3 " memory=" $4}' || true
+  kill "$pf" 2> /dev/null || true
+  trap - EXIT
 fi
 wait_ready socle-root
 # external-dns is off by default (it needs a zone and a credential): Ready

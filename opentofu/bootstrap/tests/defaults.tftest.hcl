@@ -71,6 +71,10 @@ run "defaults_are_the_recommended_position" {
     error_message = "otel_gateway must default to on, with no client values and no values Secret (docs/monitoring.md §4)."
   }
   assert {
+    condition     = output.inputs.modules.grafana.enabled == true && output.inputs.modules.grafana.domain == "" && output.inputs.modules.grafana.values == {} && output.inputs.modules.grafana.values_secret == ""
+    error_message = "grafana must default to on, with no domain, no client values and no values Secret (docs/monitoring.md §4)."
+  }
+  assert {
     condition     = can(regex("refs/heads/main\\$$", output.cosign_identity.subject))
     error_message = "the default cosign identity must trust the release workflow on main only."
   }
@@ -630,5 +634,38 @@ run "otel_gateway_values_flow_through_and_a_header_read_from_the_environment_is_
   assert {
     condition     = output.inputs.modules.otel_gateway.values.config.exporters["otlp_http/saas"].headers["X-API-Key"] == "$${env:SAAS_KEY}"
     error_message = "a header the collector reads from its environment must reach the inputs as written: only a literal is refused."
+  }
+}
+
+run "grafana_accepts_a_domain_and_secrets_grafana_resolves_itself" {
+  command = plan
+  variables {
+    kube = {
+      grafana = {
+        domain = "grafana.acme.example"
+        values = {
+          admin        = { existingSecret = "grafana-admin" }
+          envValueFrom = { PG_PASSWORD = { secretKeyRef = { name = "pg", key = "password" } } }
+          datasources = {
+            "extra.yaml" = {
+              apiVersion = 1
+              datasources = [
+                { name = "pg", type = "postgres", secureJsonData = { password = "$${PG_PASSWORD}" } },
+                { name = "tls", type = "prometheus", secureJsonData = { tlsClientKey = "$__file{/etc/secrets/tls.key}" } },
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+
+  assert {
+    condition     = output.inputs.modules.grafana.domain == "grafana.acme.example" && output.inputs.modules.grafana.values.admin.existingSecret == "grafana-admin"
+    error_message = "a valid domain and an admin Secret by name must reach the inputs as set."
+  }
+  assert {
+    condition     = output.inputs.modules.grafana.values.datasources["extra.yaml"].datasources[0].secureJsonData.password == "$${PG_PASSWORD}"
+    error_message = "a secureJsonData value Grafana resolves itself ($${VAR}, $__file{…}) must flow through: only a literal is refused."
   }
 }

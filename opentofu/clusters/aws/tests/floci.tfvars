@@ -47,6 +47,12 @@ kube = {
       resources = { requests = { memory = "320Mi" } }
     }
   }
+  # And for grafana: 320Mi over the socle's 256Mi (EXPECT_GRAFANA_MEMORY).
+  grafana = {
+    values = {
+      resources = { requests = { memory = "320Mi" } }
+    }
+  }
   hello = {
     replicas = 1
   }
