@@ -21,7 +21,7 @@ external-dns migration, are each meant to be a small PR written from this note.
 | Question | Position |
 | --- | --- |
 | What a module declares | Its own managed resources, per cloud: on AWS an `iam.aws.m.upbound.io` `Role` and an `eks.aws.m.upbound.io` `PodIdentityAssociation` — the contract in §3 |
-| What `crossplane` installs | Core; on AWS `provider-{family-aws,aws-iam,aws-eks}` v2.8.1 and `ClusterProviderConfig default` on Pod Identity. No XRD, no Composition, nothing per module |
+| What `crossplane` installs | Core; on AWS `provider-{family-aws,aws-iam,aws-eks}` v2.8.1 and `ClusterProviderConfig default` on Pod Identity. No XRD, no Composition, nothing per module. The family is declared as `crossplane-contrib-provider-family-aws`, the name Crossplane gives a dependency it resolves itself: any other name lets it install the family twice, and the duplicate lock entry keeps every provider unhealthy |
 | What the foundations still owe | Crossplane's identity, and the **permissions boundary** every module role must carry: an allowlist of services the client writes, empty by default — `opentofu/aws` variable `crossplane` |
 | How a module waits | Its `ResourceSet` `dependsOn` the `crossplane` ResourceSet and uses `steps`: its role first, health-checked Ready, then its workload |
 | Crossplane off | The module takes a pre-made identity by name (`kube.<module>.identity`); neither → refused at plan |

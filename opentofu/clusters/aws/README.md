@@ -46,6 +46,19 @@ Identity Agent before Flux — every AWS identity in the catalog needs it —
 then the EBS CSI driver, and EFS CSI if `eks_addons.efs_csi` is set. No
 `aws eks create-addon` by hand.
 
+## Values the root derives for you
+
+- `kube.crossplane.permissions_boundary`, from the foundations' boundary,
+  when `aws.crossplane` is set.
+- `kube.external_dns`: on, filtered to `aws.gateway_certificate.domain`,
+  when that certificate is requested and Crossplane can give external-dns
+  its role — `kube.crossplane.enabled`, `aws.crossplane` set, `route53` in
+  its `allowed_services`. Every route on the Gateways is `<name>.<domain>`,
+  so that domain is the zone it writes to.
+
+What you write under `kube` always wins: `external_dns = { enabled = false }`
+turns it off, `domain_filters` replaces the derived one.
+
 ## A private registry
 
 While `ghcr.io/do-now-io/socle/flux-modules` is private, Flux needs a pull secret. Create it

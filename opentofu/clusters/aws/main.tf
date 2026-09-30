@@ -98,23 +98,43 @@ module "socle" {
   schedulable_nodes = module.foundations.bootstrap_node_group.node_count
 }
 
-# The one value the root derives for the crossplane module: when the
-# foundations mint Crossplane's identity (aws.crossplane), the boundary every
-# role it creates must carry is what kube.crossplane.permissions_boundary
-# takes, so the client does not copy an ARN from one output into another
-# input. A value the client wrote wins. Both branches are maps of strings so
+# The values the root derives for the catalog, so the client does not copy
+# one input or output into another. A value the client wrote always wins.
+#
+# crossplane: when the foundations mint Crossplane's identity
+# (aws.crossplane), the boundary every role it creates must carry is what
+# kube.crossplane.permissions_boundary takes.
+#
+# external_dns: when the client already named the domain the Gateways serve
+# (aws.gateway_certificate) and gave Crossplane what external-dns's role
+# needs — the module on, its identity, and route53 inside the boundary — it
+# is on by default, filtered to that domain. Every route on either Gateway
+# is <name>.<domain>, so that is the one zone it has to write to. Both branches are maps of strings so
 # the conditional type-checks, and the try() hands a kube that is not an
 # object to the bootstrap module untouched, for its validations to refuse
 # with their own message.
 locals {
   crossplane_boundary = { permissions_boundary = var.aws.crossplane == null ? "" : module.foundations.crossplane_permissions_boundary_arn }
+
+  external_dns_derived = (
+    var.aws.gateway_certificate != null
+    && try(var.kube.crossplane.enabled, false) == true
+    && var.aws.crossplane != null
+    && contains(try(var.aws.crossplane.allowed_services, []), "route53")
+  )
+  # Through JSON, like kube below: the two branches are objects of different
+  # shapes, which a conditional refuses to unify.
+  external_dns_defaults = jsondecode(local.external_dns_derived ? jsonencode({ enabled = true, domain_filters = [var.aws.gateway_certificate.domain] }) : "{}")
   # var.kube is `any`: merging an unknown-at-plan value (the boundary's ARN,
   # not created yet) into it erases the whole result's static type, and the
   # bootstrap module's kind check then sees "known after apply" instead of a
   # kind. jsondecode(jsonencode(...)) rebuilds a concrete type from the
   # client's literal values first, so only the one new key stays unknown.
   kube = try(
-    merge(jsondecode(jsonencode(var.kube)), { crossplane = merge(local.crossplane_boundary, try(var.kube.crossplane, {})) }),
+    merge(jsondecode(jsonencode(var.kube)), {
+      crossplane   = merge(local.crossplane_boundary, try(var.kube.crossplane, {}))
+      external_dns = merge(local.external_dns_defaults, try(var.kube.external_dns, {}))
+    }),
     var.kube,
   )
 }

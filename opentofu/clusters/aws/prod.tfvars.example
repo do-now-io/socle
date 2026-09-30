@@ -39,6 +39,8 @@ aws = {
   # load balancers; without it no Gateway is created, and ArgoCD gets no route.
   # gateway_certificate = { domain = "acme.example" }
   # gateway_certificate = { domain = "sbx.acme.example", zone = "acme.example" }
+  # With it, kube.crossplane on and route53 in crossplane.allowed_services,
+  # external_dns turns on by itself, filtered to that domain.
 }
 
 # Only what differs from the catalog's defaults. An unknown module or
