@@ -430,7 +430,8 @@ Design notes of the real modules, one per folder under `oci/catalog/`:
 The monitoring stack, six modules designed together — [docs/monitoring.md](monitoring.md);
 `victoria_metrics` — [docs/catalog/victoria-metrics.md](catalog/victoria-metrics.md);
 `otel_agent` — [docs/catalog/otel-agent.md](catalog/otel-agent.md);
-`otel_gateway` — [docs/catalog/otel-gateway.md](catalog/otel-gateway.md).
+`otel_gateway` — [docs/catalog/otel-gateway.md](catalog/otel-gateway.md);
+`grafana` — [docs/catalog/grafana.md](catalog/grafana.md).
 
 ## 7. Publishing the artifact, and releasing
 

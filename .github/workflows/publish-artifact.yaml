@@ -251,6 +251,8 @@ jobs:
       EXPECT_OTEL_AGENT_MEMORY: 160Mi    # tests/floci.tfvars: overrides the socle's 128Mi
       EXPECT_OTEL_GATEWAY: "true"        # catalog.tf: otel_gateway.enabled defaults to true
       EXPECT_OTEL_GATEWAY_MEMORY: 320Mi  # tests/floci.tfvars: overrides the socle's 128Mi
+      EXPECT_GRAFANA: "true"            # catalog.tf: grafana.enabled defaults to true
+      EXPECT_GRAFANA_MEMORY: 320Mi       # tests/floci.tfvars: overrides the socle's 256Mi
     defaults:
       run:
         working-directory: opentofu/clusters/aws
@@ -278,7 +280,7 @@ jobs:
           GHCR_TOKEN: ${{ github.token }}
         run: |
           "$GITHUB_WORKSPACE/.github/scripts/e2e/ghcr-auth.sh" socle-e2e
-      - name: The root ResourceSet and the hello, argocd, victoria_metrics and collector modules converge
+      - name: The root ResourceSet and the hello, argocd and monitoring modules converge
         run: |
           "$GITHUB_WORKSPACE/.github/scripts/e2e/wait-converged.sh"
       - name: What the cluster looked like when it failed
@@ -308,7 +310,8 @@ jobs:
             echo "\`argocd\` and \`victoria-metrics\` ResourceSets reach Ready with \`hello/podinfo\`"
             echo "at 1 replica, \`argocd/argocd-server\` Available, a sample written to"
             echo "VictoriaMetrics on its bound claim read back through PromQL, and every metric"
-            echo "the \`otel_agent\` and \`otel_gateway\` dashboards read stored there by the collectors."
+            echo "the \`otel_agent\` and \`otel_gateway\` dashboards read stored there by the collectors,"
+            echo "then read again through Grafana's own VictoriaMetrics datasource."
             echo ""
             echo "No idempotence check here: floci does not read back several EKS/CloudWatch"
             echo "attributes, so a refresh always re-discovers drift, and a second apply dies"
@@ -355,6 +358,7 @@ jobs:
       EXPECT_VM_MAX_HOURLY_SERIES: "100000"  # no client value here: the socle's own default
       EXPECT_OTEL_AGENT: "true"          # catalog.tf: otel_agent.enabled defaults to true
       EXPECT_OTEL_GATEWAY: "true"        # catalog.tf: otel_gateway.enabled defaults to true
+      EXPECT_GRAFANA: "true"            # catalog.tf: grafana.enabled defaults to true
     defaults:
       run:
         working-directory: opentofu/clusters/aws/tests/floci
@@ -379,7 +383,7 @@ jobs:
           GHCR_TOKEN: ${{ github.token }}
         run: |
           "$GITHUB_WORKSPACE/.github/scripts/e2e/ghcr-auth.sh" socle-e2e-catalog
-      - name: The root ResourceSet and the hello, argocd, victoria_metrics and collector modules converge
+      - name: The root ResourceSet and the hello, argocd and monitoring modules converge
         run: |
           "$GITHUB_WORKSPACE/.github/scripts/e2e/wait-converged.sh"
       # The operator omits a disabled module's objects entirely, so the proof
@@ -445,6 +449,16 @@ jobs:
           }
           flipped otel-agent otel-agent-agent daemonset/otel-agent-agent
           flipped otel-gateway otel-gateway deployment/otel-gateway
+          # And grafana drops the datasource: its provisioning no longer
+          # names VictoriaMetrics, and the pod rolls onto it.
+          SECONDS=0
+          for _ in $(seq 1 36); do
+            dsy="$(kubectl -n grafana get configmap grafana -o jsonpath='{.data.datasources\.yaml}' 2>/dev/null || true)"
+            case "$dsy" in *victoria-metrics*) sleep 5 ;; *) break ;; esac
+          done
+          case "$dsy" in *victoria-metrics*) echo "::error::grafana still provisions the VictoriaMetrics datasource"; exit 1 ;; esac
+          kubectl -n grafana rollout status deployment/grafana --timeout=180s
+          echo "grafana provisions no datasource ${SECONDS}s after victoria_metrics went, Deployment rolled out"
       - name: Re-enabling hello, argocd and victoria_metrics recreates them
         run: |
           tofu apply -input=false -auto-approve \
@@ -503,6 +517,14 @@ jobs:
           vm=/api/v1/namespaces/victoria-metrics/services/victoria-metrics:http/proxy
           resumed otel-agent otel-agent-agent k8s_pod_cpu_usage
           resumed otel-gateway otel-gateway k8s_deployment_available
+          SECONDS=0
+          for _ in $(seq 1 36); do
+            dsy="$(kubectl -n grafana get configmap grafana -o jsonpath='{.data.datasources\.yaml}' 2>/dev/null || true)"
+            case "$dsy" in *victoria-metrics*) break ;; *) sleep 5 ;; esac
+          done
+          case "$dsy" in *victoria-metrics*) ;; *) echo "::error::grafana did not provision VictoriaMetrics again"; exit 1 ;; esac
+          kubectl -n grafana rollout status deployment/grafana --timeout=180s
+          echo "grafana provisions VictoriaMetrics again after ${SECONDS}s, Deployment rolled out"
           # The images are already on the node, so the second convergence is
           # the operator's and Helm's own latency, not the network's.
           SECONDS=0
@@ -518,9 +540,10 @@ jobs:
           done
           echo "::error::argocd never came back after re-enabling"
           exit 1
-      # The collectors on their own: off garbage-collects each release and the
-      # dashboard its Kustomization applied, on brings both back.
-      - name: Disabling otel_agent and otel_gateway garbage-collects them and their dashboards, re-enabling brings them back
+      # The collectors and grafana on their own: off garbage-collects each
+      # release, the dashboards the collectors' Kustomizations applied and
+      # grafana's ClusterRole; on brings them all back.
+      - name: Disabling the collectors and grafana garbage-collects them, re-enabling brings them back
         run: |
           apply() {
             tofu apply -input=false -auto-approve \
@@ -540,12 +563,14 @@ jobs:
               *) echo "::error::$2 $1/$3 still there, or kubectl failed otherwise: $out"; return 1 ;;
             esac
           }
-          apply '{hello={replicas=1},otel_agent={enabled=false},otel_gateway={enabled=false}}'
+          apply '{hello={replicas=1},otel_agent={enabled=false},otel_gateway={enabled=false},grafana={enabled=false}}'
           gone otel-agent helmrelease otel-agent
           gone otel-gateway helmrelease otel-gateway
           # Each Kustomization's finalizer prunes its dashboard ConfigMap first.
           gone flux-system kustomization otel-agent-dashboards
           gone flux-system kustomization otel-gateway-dashboards
+          gone grafana helmrelease grafana
+          gone default clusterrole grafana-dashboards
           apply '{hello={replicas=1}}'
           SECONDS=0
           for m in otel-agent otel-gateway; do
@@ -564,6 +589,16 @@ jobs:
           done
           kubectl -n otel-agent rollout status daemonset/otel-agent-agent --timeout=180s
           kubectl -n otel-gateway rollout status deployment/otel-gateway --timeout=180s
+          for _ in $(seq 1 60); do
+            status="$(kubectl -n flux-system get resourceset grafana \
+              -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)"
+            [ "$status" = True ] && break
+            sleep 5
+          done
+          [ "$status" = True ] || { echo "::error::grafana never came back after re-enabling"; exit 1; }
+          kubectl get clusterrole grafana-dashboards > /dev/null
+          kubectl -n grafana rollout status deployment/grafana --timeout=180s
+          echo "resourceset/grafana Ready again after ${SECONDS}s, its ClusterRole back"
       # crossplane is off by default (catalog.tf), so the default path above
       # proves nothing about it. Turned on here with one client value that
       # overrides a socle default, a module-shaped Role against floci's IAM,

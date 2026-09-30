@@ -151,6 +151,20 @@ locals {
       values        = {}
       values_secret = ""
     }
+    # The monitoring stack's one place to read (docs/monitoring.md §5):
+    # Grafana from the grafana-community chart, a read-only datasource for
+    # each backend that is on, and every dashboard a module ships as a
+    # ConfigMap labelled grafana_dashboard. ClusterIP, no persistence, the
+    # chart's random admin password. domain is the host Grafana believes it is
+    # served at (grafana.ini server.root_url, later the HTTPRoute), validated as
+    # argocd's; empty means none. values and values_secret as every module,
+    # secrets refused there (docs/catalog/grafana.md).
+    grafana = {
+      enabled       = true
+      domain        = ""
+      values        = {}
+      values_secret = ""
+    }
   }
 
   # Which clouds a module exists on. Absent = every cloud. A module listed
