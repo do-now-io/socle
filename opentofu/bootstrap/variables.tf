@@ -401,6 +401,58 @@ variable "kube" {
     condition     = !can(var.kube.otel_gateway.values_secret) || try(var.kube.otel_gateway.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.otel_gateway.values_secret)), true)
     error_message = "kube.otel_gateway.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
   }
+
+  # --- grafana — docs/catalog/grafana.md ------------------------------------
+  validation {
+    condition = (
+      !can(var.kube.grafana.domain)
+      || lookup(local.json_kinds, substr(jsonencode(var.kube.grafana.domain), 0, 1), "number") != "string"
+      || var.kube.grafana.domain == ""
+      || can(regex("^([a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$", var.kube.grafana.domain))
+    )
+    error_message = "kube.grafana.domain must be empty or a fully qualified DNS name in lowercase, such as grafana.acme.example: no scheme, no port, no path."
+  }
+
+  # values is free-form on purpose, minus one rule: no secret material. What a
+  # client writes there ends up in the OpenTofu state and in a ConfigMap on the
+  # cluster. The chart's secret-bearing paths are refused: adminPassword (the
+  # admin's goes in admin.existingSecret, or stays the chart's random one),
+  # grafana.ini's security admin_password and secret_key, database and smtp
+  # passwords, an auth.* section's client_secret, a datasource's password or
+  # a secureJsonData value that is not a reference Grafana resolves itself
+  # ($VAR, $${VAR}, $__env{…}, $__file{…}), an env entry named like a
+  # credential (the chart's env is literal; envValueFrom reads a Secret), and
+  # a Secret among extraObjects.
+  validation {
+    condition = (
+      !can(var.kube.grafana.values)
+      || !can(keys(var.kube.grafana.values))
+      || (
+        !can(var.kube.grafana.values.adminPassword)
+        && !can(var.kube.grafana.values["grafana.ini"].security.admin_password)
+        && !can(var.kube.grafana.values["grafana.ini"].security.secret_key)
+        && !can(var.kube.grafana.values["grafana.ini"].database.password)
+        && !can(var.kube.grafana.values["grafana.ini"].smtp.password)
+        && !anytrue([for s, v in try(var.kube.grafana.values["grafana.ini"], {}) : startswith(s, "auth.") && can(v.client_secret)])
+        && !anytrue(flatten([
+          for f, doc in try(var.kube.grafana.values.datasources, {}) : [
+            for ds in try(doc.datasources, []) : concat(
+              [can(ds.password), can(ds.basicAuthPassword)],
+              [for k, v in try(ds.secureJsonData, {}) : !can(regex("^\\$(\\{?[A-Za-z_][A-Za-z0-9_]*\\}?|__(env|file)\\{[^}]+\\})$", v))],
+            )
+          ]
+        ]))
+        && !anytrue([for k, v in try(var.kube.grafana.values.env, {}) : can(regex("(?i)(password|passwd|secret|token|api_?key|private_?key)", k))])
+        && !anytrue(try([for o in var.kube.grafana.values.extraObjects : try(o.kind == "Secret", false)], []))
+      )
+    )
+    error_message = "kube.grafana.values must not carry secrets: adminPassword, grafana.ini security.admin_password and security.secret_key, database.password and smtp.password, an auth.* client_secret, a datasource password or a literal secureJsonData value, an env entry named like a credential, and a Secret in extraObjects are refused. Name a Secret instead — admin.existingSecret, envValueFrom, a datasource's $${VAR} or $__file{…} — or put them in a Secret in the grafana namespace named in kube.grafana.values_secret."
+  }
+
+  validation {
+    condition     = !can(var.kube.grafana.values_secret) || try(var.kube.grafana.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.grafana.values_secret)), true)
+    error_message = "kube.grafana.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
+  }
 }
 
 # ---------------------------------------------------------------------------
