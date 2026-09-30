@@ -10,7 +10,9 @@
 #
 # On aws and azure two more releases precede the operator — Cilium and (aws)
 # CoreDNS — because those clusters are created with no CNI and Flux cannot
-# run, let alone render, without one: cilium.tf.
+# run, let alone render, without one: cilium.tf. On aws the EKS-managed
+# add-ons follow them, the Pod Identity Agent before the operator:
+# eks_addons.tf.
 
 locals {
   # Bumped with the module's own tag. VERSION at the repo root is the source;
@@ -40,6 +42,20 @@ locals {
     gcp      = "gke-l7-global-external-managed"
     scaleway = ""
   }[var.cloud]
+
+  # The foundations' output, null when they issued no certificate.
+  gateway_certificate_arn = var.gateway_certificate_arn == null ? "" : var.gateway_certificate_arn
+
+  # docs/catalog/gateway-api.md. Where the socle's Cilium serves the
+  # `cilium` class, the client kept them, and — on aws, where TLS
+  # terminates at the load balancer — a certificate exists: the socle never
+  # serves a route in clear text.
+  shared_gateways = (
+    local.modules.gateway_api.enabled
+    && local.modules.gateway_api.gateways
+    && local.gateway_class_name == "cilium"
+    && (var.cloud != "aws" || local.gateway_certificate_arn != "")
+  )
 
   common_labels = {
     "app.kubernetes.io/part-of"   = "socle"
@@ -80,8 +96,16 @@ locals {
     # it, GKE's global external managed load balancer on gcp. Empty where
     # nothing implements Gateway API yet — scaleway, or Cilium with
     # gateway_api off — and a template must then render no Gateway.
+    #
+    # `shared` — the gateway_api module creates the two shared Gateways,
+    # `public` and `private`, in `namespace`, and a route may attach to
+    # their `https` listener. `certificateArn` — on aws, the ACM certificate
+    # their load balancers terminate TLS with; empty elsewhere.
     gateway = {
-      className = local.gateway_class_name
+      className      = local.gateway_class_name
+      shared         = local.shared_gateways
+      namespace      = "gateway-system"
+      certificateArn = local.gateway_certificate_arn
     }
   }
 }
@@ -111,7 +135,9 @@ resource "helm_release" "operator" {
     }
   }
 
-  depends_on = [helm_release.cilium, helm_release.coredns]
+  # The Pod Identity Agent too, on aws: every catalog module that talks to
+  # AWS gets its credentials from it, and without it they hang silently.
+  depends_on = [helm_release.cilium, helm_release.coredns, aws_eks_addon.pod_identity_agent]
 }
 
 # 2. The instance: which controllers run, how they are wired. No sync block —

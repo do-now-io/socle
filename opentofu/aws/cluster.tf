@@ -196,8 +196,9 @@ resource "aws_eks_cluster" "socle" {
 # that this module provisions nothing that needs a pod to run.
 #
 # EBS CSI, EFS CSI and the Pod Identity Agent stay EKS-managed add-ons — that
-# decision is unchanged. They are installed by the factory, once compute
-# exists, at versions the socle pipeline pins. CoreDNS is the exception: it
+# decision is unchanged. The bootstrap module installs them, once compute
+# exists, at versions it pins (opentofu/bootstrap/eks_addons.tf), with the
+# drivers' roles beside them. CoreDNS is the exception: it
 # is needed before Flux and cannot be an add-on before a CNI exists, so the
 # bootstrap module installs it by Helm, after Cilium (docs/catalog/cilium.md).
 # What stays here is what the add-ons bind to: the roles in iam.tf.

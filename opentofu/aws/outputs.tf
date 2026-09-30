@@ -96,5 +96,10 @@ output "crossplane_permissions_boundary_arn" {
   # block, which OpenTofu refuses to evaluate against an unknown value — the
   # apply fails at plan rather than deferring. account_id and cluster_name
   # are known immediately, so this ARN is too, on the very first apply.
-  value = var.crossplane == null ? null : "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy${local.crossplane_role_path}crossplane-boundary"
+  value = var.crossplane == null ? null : "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy${local.crossplane_role_path}${local.crossplane_boundary_name}"
+}
+
+output "gateway_certificate_arn" {
+  description = "ARN of the issued ACM certificate the socle's Gateways terminate TLS with — what the bootstrap module's gateway_certificate_arn takes, and what the client root passes for you. Null when gateway_certificate is not set."
+  value       = one(aws_acm_certificate_validation.gateway[*].certificate_arn)
 }

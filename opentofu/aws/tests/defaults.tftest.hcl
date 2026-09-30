@@ -17,6 +17,14 @@ provider "aws" {
 # API: the log encryption key's policy names the account root, and a key policy
 # that omits it is unmanageable. Stubbed rather than reached, so these runs stay
 # credential-free. data.aws_region resolves from provider config and needs none.
+# The shared Gateways' zone is looked up by name; stubbed the same way.
+override_data {
+  target = data.aws_route53_zone.gateway
+  values = {
+    zone_id = "Z0123456789ABCDEFGHIJ"
+  }
+}
+
 override_data {
   target = data.aws_caller_identity.current
   values = {
@@ -318,7 +326,7 @@ run "crossplane_identity_creates_only_bounded_roles" {
   # plan; pinned here so the document can be read.
   override_resource {
     target = aws_iam_policy.crossplane_boundary
-    values = { arn = "arn:aws:iam::000000000000:policy/socle/socle-test/crossplane-boundary" }
+    values = { arn = "arn:aws:iam::000000000000:policy/socle/socle-test/socle-test-crossplane-boundary" }
   }
   override_resource {
     target = aws_eks_cluster.socle
@@ -375,5 +383,68 @@ run "crossplane_without_a_service_gets_a_boundary_that_grants_nothing" {
   assert {
     condition     = alltrue([for st in jsondecode(aws_iam_policy.crossplane_boundary[0].policy).Statement : st.Effect == "Deny"])
     error_message = "with no service allowed, the boundary must allow nothing: a role Crossplane creates then grants nothing."
+  }
+}
+
+# --- The shared Gateways' certificate — certificate.tf ---
+
+run "no_gateway_certificate_by_default" {
+  command = plan
+
+  assert {
+    condition     = length(aws_acm_certificate.gateway) == 0 && length(aws_route53_record.gateway_certificate_validation) == 0 && output.gateway_certificate_arn == null
+    error_message = "without gateway_certificate nothing is issued, and the bootstrap module must be told so by a null ARN."
+  }
+}
+
+run "the_gateway_certificate_covers_the_domain_and_its_wildcard" {
+  command = plan
+  variables {
+    gateway_certificate = { domain = "acme.example" }
+  }
+
+  assert {
+    condition     = aws_acm_certificate.gateway[0].domain_name == "acme.example" && contains(aws_acm_certificate.gateway[0].subject_alternative_names, "*.acme.example")
+    error_message = "one certificate must cover the domain and *.domain: every route on either Gateway is <name>.<domain>."
+  }
+  assert {
+    condition     = aws_acm_certificate.gateway[0].validation_method == "DNS" && length(aws_acm_certificate_validation.gateway) == 1
+    error_message = "the certificate must be validated by DNS, and the ARN handed on only once ACM has issued it."
+  }
+  assert {
+    condition     = alltrue([for r in aws_route53_record.gateway_certificate_validation : r.zone_id == "Z0123456789ABCDEFGHIJ" && r.allow_overwrite])
+    error_message = "the validation records must go to the client's zone, and tolerate the one the domain and its wildcard share."
+  }
+  assert {
+    condition     = data.aws_route53_zone.gateway[0].name == "acme.example" && data.aws_route53_zone.gateway[0].private_zone == false
+    error_message = "the zone must be found by the domain's name, public only: ACM cannot read a private zone."
+  }
+}
+
+run "a_subdomain_certificate_is_validated_in_its_parent_zone" {
+  command = plan
+  variables {
+    gateway_certificate = { domain = "sbx.acme.example", zone = "acme.example" }
+  }
+
+  assert {
+    condition     = data.aws_route53_zone.gateway[0].name == "acme.example" && aws_acm_certificate.gateway[0].domain_name == "sbx.acme.example" && contains(aws_acm_certificate.gateway[0].subject_alternative_names, "*.sbx.acme.example")
+    error_message = "zone must name the parent zone the subdomain's certificate is validated in."
+  }
+}
+
+run "the_crossplane_boundary_is_named_after_its_cluster" {
+  command = plan
+  variables {
+    crossplane = { allowed_services = ["route53"] }
+  }
+
+  assert {
+    condition     = aws_iam_policy.crossplane_boundary[0].name == "socle-test-crossplane-boundary" && aws_iam_policy.crossplane_boundary[0].path == "/socle/socle-test/"
+    error_message = "IAM policy names are unique per account whatever the path: the boundary must carry the cluster's name, or a second cluster in the account fails with EntityAlreadyExists."
+  }
+  assert {
+    condition     = output.crossplane_permissions_boundary_arn == "arn:aws:iam::000000000000:policy/socle/socle-test/socle-test-crossplane-boundary"
+    error_message = "the boundary's ARN, built without waiting for AWS, must name the policy as it is created."
   }
 }

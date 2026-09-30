@@ -32,6 +32,15 @@ output "cilium" {
   }
 }
 
+output "eks_addons" {
+  description = "The EKS-managed add-ons this module installed (aws only), each as its pinned version, and for the two storage drivers the ARN of the role their controller runs as. Null for an add-on not installed."
+  value = {
+    pod_identity_agent = length(aws_eks_addon.pod_identity_agent) > 0 ? { version = local.eks_addon_versions.pod_identity_agent } : null
+    ebs_csi            = length(aws_eks_addon.ebs_csi) > 0 ? { version = local.eks_addon_versions.ebs_csi, role_arn = aws_iam_role.ebs_csi[0].arn } : null
+    efs_csi            = length(aws_eks_addon.efs_csi) > 0 ? { version = local.eks_addon_versions.efs_csi, role_arn = aws_iam_role.efs_csi[0].arn } : null
+  }
+}
+
 output "namespace" {
   description = "Namespace holding the operator, the Flux controllers and the socle's inputs."
   value       = local.namespace
