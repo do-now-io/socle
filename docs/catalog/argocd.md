@@ -12,7 +12,7 @@ one a client is expected to keep on. Part of #32; the module contract is
 | Where | Every cloud, the same template, no cloud patch — nothing in ArgoCD is cloud-specific until SSO or an identity for private repositories |
 | Default | **On.** It is what a client gets a socle for, and it converges on floci's k3s (measured below) |
 | Shape | Non-HA, sized for a small cluster: one replica of each component, the single Redis, requests set, no limits |
-| Exposure | `ClusterIP`, `server.insecure: true` — TLS terminates in front, at the Gateway once the HTTPRoute exists |
+| Exposure | `ClusterIP`, `server.insecure: true`, and an `HTTPRoute` on the shared `private` Gateway for `domain` ([gateway-api.md](gateway-api.md)); TLS terminates at the Gateway or its load balancer |
 | Identity | Local `admin` kept, Dex off. SSO is a follow-up |
 | Client surface | Four typed switches under `kube.argocd`, plus `values`: the client's own chart values, merged over the socle's, the client winning; secrets through `values_secret`, a Secret he owns |
 
@@ -226,39 +226,24 @@ re-enable.
 The 7 GB runner took the module without a resource change: no eviction, no
 pending pod, no retry of the HelmRelease. The requests above were not lowered.
 
-## Follow-up: exposure through Gateway API
+## Exposure through Gateway API
 
-The chart renders the route objects itself, so the follow-up is values only,
-in this `HelmRelease`, gated on the gateway-api module's decisions:
+`kube.argocd.gateway` names the shared Gateway the route attaches to: `private`
+by default, because ArgoCD is an operator's tool and not an internet service.
+It can also be `public`, or `""` for no route. The route is rendered only when
+`domain` is set and the shared Gateways exist (`inputs.gateway.shared`,
+[gateway-api.md](gateway-api.md)).
 
-```yaml
-server:
-  httproute:
-    enabled: true
-    parentRefs:
-      - name: socle                 # the Gateway the gateway-api module creates
-        namespace: <its namespace>
-    hostnames:
-      - << inputs.modules.argocd.domain >>
-  # gRPC for the argocd CLI, on Gateway implementations that do not infer
-  # the backend protocol from the route type (GEP-1911):
-  service:
-    servicePortHttp2: 8080
-    servicePortHttp2AppProtocol: kubernetes.io/h2c   # or what the controller expects
-  grpcroute:
-    enabled: true
-    parentRefs: [same]
-```
+It is the socle's own `HTTPRoute`, `argocd/argocd-server`, and not the chart's
+`server.httproute`. It sits in a child `ResourceSet`, `argocd-route`, which
+`dependsOn` its Gateway being `Accepted`. The chart's route would be applied
+with the release, possibly before the Gateway API CRDs exist, and a failed
+install stalls the release. The route attaches to the `https` listener and
+sends `domain` to `argocd-server:80`. `server.insecure: true` is what makes
+that port answer in plain HTTP.
 
-It needs from the gateway-api module: the Gateway's name and namespace
-(constants in the template, or `inputs.modules.gateway_api.*` if it exposes
-them), whether the Gateway's listener terminates TLS for `*.<domain>` or per
-host (a cert-manager or DNS decision), and which backend protocol its
-implementation understands for gRPC. It needs from this module only `domain`,
-already there; the route should render only when `domain` is set and the
-gateway-api module is enabled — a `<< if and … >>` block. `configs.params.
-"server.insecure": true` is already the right setting for a route to the HTTP
-port.
+Not done yet: a `GRPCRoute` for the `argocd` CLI. `argocd login --grpc-web`
+works over the HTTPRoute.
 
 ## Open questions for the coordinator
 

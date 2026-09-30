@@ -1,8 +1,16 @@
 # A consumer who sets nothing gets the recommended configuration, and what he
 # sets is normalised against the catalog before it leaves OpenTofu. The helm
-# provider is mocked: these runs plan without a cluster.
+# and aws providers are mocked: these runs plan without a cluster or an
+# account.
 
 mock_provider "helm" {}
+mock_provider "aws" {
+  # The add-ons' pod_identity_association validates the role ARN it is
+  # given; the mock's random string is not one.
+  mock_resource "aws_iam_role" {
+    defaults = { arn = "arn:aws:iam::000000000000:role/socle-test-mock" }
+  }
+}
 
 variables {
   cloud        = "aws"
@@ -91,7 +99,7 @@ run "crossplane_turns_on_and_its_values_flow_through_untouched" {
       crossplane = {
         enabled              = true
         values_secret        = "crossplane-values"
-        permissions_boundary = "arn:aws:iam::123456789012:policy/socle/socle-test/crossplane-boundary"
+        permissions_boundary = "arn:aws:iam::123456789012:policy/socle/socle-test/socle-test-crossplane-boundary"
         values = {
           metrics                = { enabled = true }
           resourcesCrossplane    = { requests = { memory = "256Mi" } }
@@ -111,7 +119,7 @@ run "crossplane_turns_on_and_its_values_flow_through_untouched" {
     error_message = "the client's chart values must reach the inputs as written: the template hands them to helm-controller, nothing rewrites them."
   }
   assert {
-    condition     = output.inputs.modules.crossplane.permissions_boundary == "arn:aws:iam::123456789012:policy/socle/socle-test/crossplane-boundary"
+    condition     = output.inputs.modules.crossplane.permissions_boundary == "arn:aws:iam::123456789012:policy/socle/socle-test/socle-test-crossplane-boundary"
     error_message = "the permissions boundary the root wires must reach the inputs."
   }
   assert {
@@ -213,6 +221,10 @@ run "scaleway_is_a_plain_kubernetes_cluster_for_the_operator" {
   assert {
     condition     = length(helm_release.cilium) == 0 && length(helm_release.coredns) == 0 && output.inputs.cilium.installed == false
     error_message = "Kapsule operates Cilium: the socle must install nothing on scaleway, and the templates must be told so."
+  }
+  assert {
+    condition     = length(aws_eks_addon.pod_identity_agent) == 0 && length(aws_eks_addon.ebs_csi) == 0 && length(aws_eks_addon.efs_csi) == 0 && length(aws_iam_role.ebs_csi) == 0
+    error_message = "EKS add-ons exist only on aws: nothing of eks_addons.tf may be planned elsewhere, whatever its defaults."
   }
 }
 
@@ -449,7 +461,7 @@ run "a_cluster_with_no_node_fails_at_plan_not_after_a_helm_timeout" {
     schedulable_nodes = 0
   }
 
-  expect_failures = [helm_release.coredns]
+  expect_failures = [helm_release.coredns, aws_eks_addon.pod_identity_agent]
 }
 
 run "with_no_coredns_to_install_the_flux_operator_carries_the_check" {
@@ -516,5 +528,154 @@ run "argocd_values_flow_through_untouched_and_a_repository_without_credentials_i
   assert {
     condition     = output.inputs.modules.argocd.values_secret == "argocd-values"
     error_message = "the name of the client's values Secret must flow to the inputs."
+  }
+}
+
+# --- EKS-managed add-ons — eks_addons.tf, docs/aws/eks-managed-scope.md ---
+
+run "aws_installs_the_pod_identity_agent_and_ebs_csi_by_default" {
+  command = plan
+
+  assert {
+    condition     = aws_eks_addon.pod_identity_agent[0].addon_name == "eks-pod-identity-agent" && aws_eks_addon.pod_identity_agent[0].cluster_name == "socle-test"
+    error_message = "the Pod Identity Agent must be installed on the cluster by default: without it every Pod Identity association, Crossplane's included, hangs without an error (#48)."
+  }
+  assert {
+    condition     = aws_eks_addon.ebs_csi[0].addon_name == "aws-ebs-csi-driver" && length(aws_eks_addon.efs_csi) == 0 && length(aws_iam_role.efs_csi) == 0
+    error_message = "EBS CSI is delegated to EKS and on by default; EFS CSI is a catalog option, off by default, with no role."
+  }
+  assert {
+    condition     = alltrue([for a in [aws_eks_addon.pod_identity_agent[0], aws_eks_addon.ebs_csi[0]] : can(regex("^v[0-9]+\\.[0-9]+\\.[0-9]+-eksbuild\\.[0-9]+$", a.addon_version))])
+    error_message = "every add-on version must be pinned to one exact eksbuild, never left to AWS's default or most_recent."
+  }
+  assert {
+    condition     = output.eks_addons.pod_identity_agent.version == aws_eks_addon.pod_identity_agent[0].addon_version && output.eks_addons.ebs_csi.version == aws_eks_addon.ebs_csi[0].addon_version && output.eks_addons.efs_csi == null
+    error_message = "the pinned versions must be visible to the root that consumes them, and an add-on not installed must be null."
+  }
+}
+
+run "the_ebs_csi_controller_runs_as_its_own_role_through_pod_identity" {
+  command = plan
+
+  assert {
+    condition     = one(aws_eks_addon.ebs_csi[0].pod_identity_association).service_account == "ebs-csi-controller-sa"
+    error_message = "the EBS CSI controller's identity must be bound through the add-on's own pod_identity_association, on the controller's ServiceAccount."
+  }
+  assert {
+    condition     = aws_iam_role_policy_attachment.ebs_csi[0].policy_arn == "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+    error_message = "the EBS CSI role must carry AWS's managed driver policy, and nothing else."
+  }
+  assert {
+    condition     = aws_iam_role.ebs_csi[0].name == "socle-test-ebs-csi" && aws_iam_role.ebs_csi[0].path == "/"
+    error_message = "the EBS CSI role must be named after the cluster and live outside /socle/<cluster>/, the path Crossplane may rewrite."
+  }
+  assert {
+    condition     = jsondecode(aws_iam_role.ebs_csi[0].assume_role_policy).Statement[0].Principal.Service == "pods.eks.amazonaws.com" && contains(jsondecode(aws_iam_role.ebs_csi[0].assume_role_policy).Statement[0].Action, "sts:TagSession")
+    error_message = "the EBS CSI role must be trusted by EKS Pod Identity, not IRSA."
+  }
+}
+
+run "efs_csi_is_installed_on_request_with_its_own_role" {
+  command = plan
+  variables {
+    eks_addons = { efs_csi = true }
+  }
+
+  assert {
+    condition     = aws_eks_addon.efs_csi[0].addon_name == "aws-efs-csi-driver" && one(aws_eks_addon.efs_csi[0].pod_identity_association).service_account == "efs-csi-controller-sa"
+    error_message = "efs_csi = true must install the EFS CSI add-on, its controller bound to its own role through Pod Identity."
+  }
+  assert {
+    condition     = aws_iam_role.efs_csi[0].name == "socle-test-efs-csi" && aws_iam_role_policy_attachment.efs_csi[0].policy_arn == "arn:aws:iam::aws:policy/service-role/AmazonEFSCSIDriverPolicy"
+    error_message = "the EFS CSI role must be named after the cluster and carry AWS's managed driver policy."
+  }
+  assert {
+    condition     = length(aws_eks_addon.pod_identity_agent) == 1 && length(aws_eks_addon.ebs_csi) == 1
+    error_message = "turning one add-on on must leave the others at their defaults."
+  }
+}
+
+run "every_eks_addon_can_be_turned_off" {
+  command = plan
+  variables {
+    eks_addons = { pod_identity_agent = false, ebs_csi = false }
+  }
+
+  assert {
+    condition     = length(aws_eks_addon.pod_identity_agent) == 0 && length(aws_eks_addon.ebs_csi) == 0 && length(aws_iam_role.ebs_csi) == 0 && length(aws_eks_addon.efs_csi) == 0
+    error_message = "a cluster that brings its own — the e2e test double — must be able to turn every add-on off, and the roles go with them."
+  }
+  assert {
+    condition     = output.eks_addons.pod_identity_agent == null && output.eks_addons.ebs_csi == null
+    error_message = "an add-on not installed must be null in the output."
+  }
+}
+
+# --- The shared Gateways — docs/catalog/gateway-api.md ---
+
+run "no_shared_gateway_on_aws_without_a_certificate" {
+  command = plan
+
+  assert {
+    condition     = output.inputs.gateway.shared == false && output.inputs.gateway.certificateArn == ""
+    error_message = "on aws TLS terminates at the load balancer: without the foundations' certificate no Gateway may be created, never one serving clear text."
+  }
+  assert {
+    condition     = output.inputs.modules.gateway_api.gateways == true && output.inputs.modules.argocd.gateway == "private"
+    error_message = "the shared Gateways are on by default, and ArgoCD's route targets the private one."
+  }
+}
+
+run "aws_with_a_certificate_gets_the_shared_gateways" {
+  command = plan
+  variables {
+    gateway_certificate_arn = "arn:aws:acm:eu-west-3:000000000000:certificate/00000000-0000-0000-0000-000000000000"
+  }
+
+  assert {
+    condition     = output.inputs.gateway.shared == true && output.inputs.gateway.namespace == "gateway-system" && output.inputs.gateway.className == "cilium"
+    error_message = "with the certificate, the templates must be told to create the shared Gateways in gateway-system, on the cilium class."
+  }
+  assert {
+    condition     = output.inputs.gateway.certificateArn == "arn:aws:acm:eu-west-3:000000000000:certificate/00000000-0000-0000-0000-000000000000"
+    error_message = "the certificate ARN must reach the templates untouched: the NLBs terminate TLS with it."
+  }
+}
+
+run "the_client_can_keep_the_class_and_drop_the_shared_gateways" {
+  command = plan
+  variables {
+    gateway_certificate_arn = "arn:aws:acm:eu-west-3:000000000000:certificate/00000000-0000-0000-0000-000000000000"
+    kube                    = { gateway_api = { gateways = false } }
+  }
+
+  assert {
+    condition     = output.inputs.gateway.shared == false && output.inputs.gateway.className == "cilium"
+    error_message = "gateways = false must drop the shared Gateways and keep the class."
+  }
+}
+
+run "azure_gets_the_shared_gateways_without_an_aws_certificate" {
+  command = plan
+  variables {
+    cloud = "azure"
+  }
+
+  assert {
+    condition     = output.inputs.gateway.shared == true && output.inputs.gateway.certificateArn == ""
+    error_message = "on azure Envoy terminates TLS with the client's Secret: the shared Gateways need no AWS certificate."
+  }
+}
+
+run "no_shared_gateway_where_cilium_does_not_serve_gateway_api" {
+  command = plan
+  variables {
+    gateway_certificate_arn = "arn:aws:acm:eu-west-3:000000000000:certificate/00000000-0000-0000-0000-000000000000"
+    cilium                  = { enabled = false }
+  }
+
+  assert {
+    condition     = output.inputs.gateway.shared == false
+    error_message = "without the socle's Cilium there is no class to create a Gateway on — the e2e test double's case."
   }
 }

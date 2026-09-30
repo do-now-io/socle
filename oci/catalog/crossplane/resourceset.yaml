@@ -184,10 +184,15 @@ spec:
         ---
         # The family provider is a dependency of the other two; declared so
         # that its version is pinned here and not resolved by Crossplane.
+        # Named exactly as Crossplane names a dependency it installs itself
+        # (the package path, slashes as dashes): under any other name, when
+        # the other two are resolved first, Crossplane installs the family a
+        # second time, the lock holds one package twice, and every provider
+        # stays unhealthy on "node … already exists" — measured on EKS.
         apiVersion: pkg.crossplane.io/v1
         kind: Provider
         metadata:
-          name: provider-family-aws
+          name: crossplane-contrib-provider-family-aws
           annotations:
             fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
         spec:
@@ -231,7 +236,7 @@ spec:
           dependsOn:
             - apiVersion: pkg.crossplane.io/v1
               kind: Provider
-              name: provider-family-aws
+              name: crossplane-contrib-provider-family-aws
               ready: true
               readyExpr: status.conditions.exists(c, c.type == 'Healthy' && c.status == 'True')
             - apiVersion: pkg.crossplane.io/v1

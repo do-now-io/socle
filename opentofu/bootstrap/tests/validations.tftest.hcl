@@ -1,6 +1,15 @@
 # Every validation block, tripped once. Negative cases only: the plan stops at
 # variable validation, before the helm provider is ever configured, so these
-# runs need no cluster.
+# runs need no cluster. The aws provider is configured earlier than that, and
+# would look for credentials a CI runner does not have: mocked.
+
+mock_provider "aws" {
+  # The add-ons' pod_identity_association validates the role ARN it is
+  # given; the mock's random string is not one.
+  mock_resource "aws_iam_role" {
+    defaults = { arn = "arn:aws:iam::000000000000:role/socle-test-mock" }
+  }
+}
 
 variables {
   cloud        = "aws"
@@ -433,5 +442,51 @@ run "kube_refuses_argocd_values_carrying_a_repository_private_key" {
 run "kube_refuses_argocd_values_secret_that_is_not_a_secret_name" {
   command = plan
   variables { kube = { argocd = { values_secret = "ArgoCD_Values" } } }
+  expect_failures = [var.kube]
+}
+
+run "eks_addons_refuses_a_value_that_is_not_an_object" {
+  command = plan
+  variables { eks_addons = "all" }
+  expect_failures = [var.eks_addons]
+}
+
+run "eks_addons_refuses_an_unknown_addon" {
+  command = plan
+  variables { eks_addons = { vpc_cni = true } }
+  expect_failures = [var.eks_addons]
+}
+
+run "eks_addons_refuses_a_value_that_is_not_a_bool" {
+  command = plan
+  variables { eks_addons = { ebs_csi = "yes" } }
+  expect_failures = [var.eks_addons]
+}
+
+run "eks_addons_is_refused_off_aws" {
+  command = plan
+  variables {
+    cloud           = "gcp"
+    eks_addons      = { ebs_csi = false }
+    cluster_network = null
+  }
+  expect_failures = [var.eks_addons]
+}
+
+run "eks_addons_refuses_a_storage_driver_without_the_pod_identity_agent" {
+  command = plan
+  variables { eks_addons = { pod_identity_agent = false } }
+  expect_failures = [var.eks_addons]
+}
+
+run "kube_refuses_an_argocd_gateway_that_is_not_one_of_the_shared_ones" {
+  command = plan
+  variables { kube = { argocd = { gateway = "internal" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_gateway_api_gateways_that_is_not_a_bool" {
+  command = plan
+  variables { kube = { gateway_api = { gateways = "yes" } } }
   expect_failures = [var.kube]
 }

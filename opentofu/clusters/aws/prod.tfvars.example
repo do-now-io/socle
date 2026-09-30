@@ -31,6 +31,16 @@ aws = {
   # add a service when you enable a module that uses it (route53 for
   # external_dns). Empty grants nothing.
   # crossplane = { allowed_services = ["route53"] }
+
+  # The ACM certificate of the two shared Gateways, public (internet-facing)
+  # and private (internal): acme.example and *.acme.example, validated in
+  # the public Route 53 zone of that name, found for you. zone names the
+  # parent zone when the domain is a subdomain of it. TLS terminates at their
+  # load balancers; without it no Gateway is created, and ArgoCD gets no route.
+  # gateway_certificate = { domain = "acme.example" }
+  # gateway_certificate = { domain = "sbx.acme.example", zone = "acme.example" }
+  # With it, kube.crossplane on and route53 in crossplane.allowed_services,
+  # external_dns turns on by itself, filtered to that domain.
 }
 
 # Only what differs from the catalog's defaults. An unknown module or
@@ -75,4 +85,10 @@ kube = {
 # The same for the CoreDNS installed with it:
 # coredns = {
 #   values = { replicaCount = 3 }
+# }
+#
+# The EKS-managed add-ons installed once the nodes run. The Pod Identity
+# Agent and EBS CSI are on by default; EFS CSI, for RWX volumes, is not.
+# eks_addons = {
+#   efs_csi = true
 # }

@@ -38,6 +38,7 @@ variable "aws" {
     bootstrap_node_capacity_type         = optional(string)
     bootstrap_node_count                 = optional(number)
     crossplane                           = optional(object({ allowed_services = optional(list(string), []) }))
+    gateway_certificate                  = optional(object({ domain = string, zone = optional(string) }))
   })
 }
 
@@ -55,6 +56,12 @@ variable "cilium" {
 
 variable "coredns" {
   description = "The CoreDNS installed right after Cilium: { values = {} }. values is any CoreDNS chart value, the client's winning. Validated by the bootstrap module."
+  type        = any
+  default     = {}
+}
+
+variable "eks_addons" {
+  description = "The EKS-managed add-ons installed once the nodes run: { pod_identity_agent = true, ebs_csi = true, efs_csi = false }, every key optional. The Pod Identity Agent is what every catalog module's AWS identity, Crossplane's included, gets its credentials from; the two storage drivers need it. Versions pinned by the bootstrap module, which validates this."
   type        = any
   default     = {}
 }

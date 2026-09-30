@@ -12,6 +12,14 @@
 # ConfigMap listed first in valuesFrom, the client's second, his Secret last —
 # later wins, so the client overrides any socle default (docs/catalog/argocd.md).
 #
+# Exposure: an HTTPRoute of the socle's own, not the chart's, on the shared
+# Gateway kube.argocd.gateway names (private by default), for the domain —
+# rendered only when both exist (inputs.gateway.shared). It lives in a child
+# ResourceSet that dependsOn that Gateway being Accepted: the chart's own
+# route would be applied with the release, before the Gateway API CRDs may
+# exist, and a failed install stalls the release. TLS is the Gateway's; the
+# server speaks plain HTTP (server.insecure).
+#
 # Every other rule is the hello module's: inputsFrom the one provider, the
 # reconcile toggle on each resource, values tested never presence.
 apiVersion: fluxcd.controlplane.io/v1
@@ -69,7 +77,7 @@ spec:
       values.yaml: |
         << if inputs.modules.argocd.domain >>
         # The chart derives configs.cm.url (and statusbadge.url) from it; the
-        # follow-up HTTPRoute reads its hostname from it too.
+        # HTTPRoute below reads its hostname from it too.
         global:
           domain: << inputs.modules.argocd.domain | quote >>
         << end >>
@@ -82,8 +90,8 @@ spec:
             << end >>
             admin.enabled: << inputs.modules.argocd.admin_enabled >>
           params:
-            # TLS terminates in front of ArgoCD — at the Gateway once the
-            # HTTPRoute exists — so the server speaks plain HTTP in-cluster.
+            # TLS terminates in front of ArgoCD, at the shared Gateway or its
+            # load balancer, so the server speaks plain HTTP in-cluster.
             server.insecure: true
         << if inputs.modules.argocd.ha >>
         # HA as the chart documents it without autoscaling: the Redis HA
@@ -194,3 +202,39 @@ spec:
       upgrade:
         remediation:
           retries: 3
+    << if and inputs.modules.argocd.domain inputs.modules.argocd.gateway inputs.gateway.shared >>
+    ---
+    apiVersion: fluxcd.controlplane.io/v1
+    kind: ResourceSet
+    metadata:
+      name: argocd-route
+      namespace: flux-system
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.argocd.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      dependsOn:
+        - apiVersion: gateway.networking.k8s.io/v1
+          kind: Gateway
+          name: << inputs.modules.argocd.gateway >>
+          namespace: << inputs.gateway.namespace >>
+          ready: true
+          readyExpr: status.conditions.exists(c, c.type == 'Accepted' && c.status == 'True')
+      wait: true
+      resources:
+        - apiVersion: gateway.networking.k8s.io/v1
+          kind: HTTPRoute
+          metadata:
+            name: argocd-server
+            namespace: argocd
+          spec:
+            parentRefs:
+              - name: << inputs.modules.argocd.gateway >>
+                namespace: << inputs.gateway.namespace >>
+                sectionName: https
+            hostnames:
+              - << inputs.modules.argocd.domain | quote >>
+            rules:
+              - backendRefs:
+                  - name: argocd-server
+                    port: 80
+    << end >>

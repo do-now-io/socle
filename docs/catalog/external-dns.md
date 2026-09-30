@@ -343,8 +343,8 @@ refused, is the sandbox EKS apply.
 ## Prerequisite and assumptions for the coordinator
 
 - **The EKS Pod Identity Agent add-on.** The module's role on AWS depends
-  on it. The coordinator routed it to the cilium worktree, as an
-  `aws_eks_addon` in the foundations that is on by default.
+  on it. It is an `aws_eks_addon` in the bootstrap module, on by default,
+  installed before flux-operator (#48).
 - **The annotation prefix.** The gateway-api and argocd modules must annotate
   with `external-dns.kubernetes.io/`, not the alpha prefix most tutorials
   still show.
