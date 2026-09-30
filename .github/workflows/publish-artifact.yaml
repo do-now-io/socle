@@ -670,6 +670,22 @@ jobs:
           kubectl -n otel-agent rollout status daemonset/otel-agent-agent --timeout=180s
           kubectl -n grafana rollout status deployment/grafana --timeout=180s
           echo "victoria_logs back after ${SECONDS}s: a new claim Bound, both collectors exporting to it, grafana's datasource provisioned"
+      # victoria_traces is off by default (pre-GA), so the default path proves
+      # only that it applies nothing. Turned on here, then off again —
+      # .github/scripts/e2e/victoria-traces.sh says what each phase asserts.
+      - name: victoria_traces turns on, stores a trace, turns off
+        run: |
+          apply() {
+            tofu apply -input=false -auto-approve \
+              -var "socle_version=$TAG" \
+              -var "cosign_identity=$COSIGN" \
+              -var artifact_pull_secret=ghcr-auth \
+              -var "kube=$1"
+          }
+          apply '{hello={replicas=1},victoria_traces={enabled=true}}'
+          "$GITHUB_WORKSPACE/.github/scripts/e2e/victoria-traces.sh" on
+          apply '{hello={replicas=1}}'
+          "$GITHUB_WORKSPACE/.github/scripts/e2e/victoria-traces.sh" off
       # crossplane is off by default (catalog.tf), so the default path above
       # proves nothing about it. Turned on here with one client value that
       # overrides a socle default, a module-shaped Role against floci's IAM,

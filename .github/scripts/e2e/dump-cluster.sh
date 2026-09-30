@@ -15,6 +15,7 @@ kubectl -n otel-gateway logs deployment/otel-gateway --tail=40 || true
 kubectl -n grafana get helmrelease,ocirepository,deploy,pod,configmap -o wide || true
 kubectl -n grafana logs deployment/grafana --all-containers --tail=40 || true
 kubectl -n victoria-logs get helmrelease,ocirepository,deploy,pod,pvc -o wide || true
+kubectl -n victoria-traces get helmrelease,ocirepository,deploy,pod,pvc -o wide || true
 kubectl get storageclass || true
 kubectl -n flux-system get ocirepository socle \
   -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}: {.message}{"\n"}{end}' || true
