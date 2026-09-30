@@ -68,6 +68,14 @@
           requests:
             memory: 320Mi
       values_secret: otel-gateway-values
+    grafana:
+      enabled: true
+      domain: grafana.example.com
+      values:
+        resources:
+          requests:
+            memory: 160Mi
+      values_secret: grafana-values
     hello:
       enabled: true
       replicas: 2

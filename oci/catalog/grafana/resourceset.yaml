@@ -1,0 +1,208 @@
+# The grafana module: Grafana from the grafana-community chart, the monitoring
+# stack's one place to read — a datasource for each backend that is on, and
+# every dashboard a module ships. Design: docs/monitoring.md §5; this module:
+# docs/catalog/grafana.md.
+#
+# resourcesTemplate rather than resources: the datasources depend on which
+# backends are on, the server block on whether the client set a domain, and
+# the Secret in valuesFrom only exists when named — the operator's block
+# `<< if >>`/`<< end >>` is text templating, which the structured resources
+# list cannot carry.
+#
+# Values: no spec.values on the HelmRelease. The socle's defaults are a
+# ConfigMap listed first in valuesFrom, the client's second, his Secret last —
+# later wins, so the client overrides any socle default (docs/flux-catalog.md §6).
+#
+# Grafana names no module: a dashboard ships with the module whose metrics it
+# reads, as a ConfigMap labelled grafana_dashboard, and the sidecar picks it up.
+#
+# Every other rule is the hello module's: inputsFrom the one provider, the
+# reconcile toggle on each resource, values tested never presence.
+apiVersion: fluxcd.controlplane.io/v1
+kind: ResourceSet
+metadata:
+  name: grafana
+  namespace: flux-system
+spec:
+  inputsFrom:
+    - apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSetInputProvider
+      name: socle
+  wait: true
+  resourcesTemplate: |
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: grafana
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.grafana.enabled >>enabled<< else >>disabled<< end >>
+    ---
+    # What the dashboard sidecar may read: ConfigMaps, in every namespace,
+    # and nothing else. The chart's own ClusterRole grants configmaps AND
+    # secrets cluster-wide — every Secret of every client — whenever the
+    # sidecar is on, with no value to narrow it; so the socle brings this one
+    # and the chart binds to it (rbac.useExistingClusterRole below).
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata:
+      name: grafana-dashboards
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.grafana.enabled >>enabled<< else >>disabled<< end >>
+    rules:
+      - apiGroups: [""]
+        resources: ["configmaps"]
+        verbs: ["get", "watch", "list"]
+    ---
+    apiVersion: source.toolkit.fluxcd.io/v1
+    kind: OCIRepository
+    metadata:
+      name: grafana-chart
+      namespace: grafana
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.grafana.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 1h
+      url: oci://ghcr.io/grafana-community/helm-charts/grafana
+      layerSelector:
+        mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+        operation: copy
+      ref:
+        tag: 13.2.6  # appVersion 13.2.2
+    ---
+    # The socle's own chart values, as a document rather than the HelmRelease's
+    # spec.values: helm-controller merges valuesFrom in order and then
+    # spec.values over the result, so an inline socle default would beat the
+    # client on every key both set. (No template delimiters in these
+    # comments: the operator templates them too.)
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: grafana-socle-values
+      namespace: grafana
+      # helm-controller re-reconciles the release the moment a labelled
+      # valuesFrom ConfigMap changes, instead of at its next interval.
+      labels:
+        reconcile.fluxcd.io/watch: Enabled
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.grafana.enabled >>enabled<< else >>disabled<< end >>
+    data:
+      values.yaml: |
+        # A constant name: the Service is grafana.grafana.svc, port 80.
+        fullnameOverride: grafana
+        # The admin password is the chart's: random, in Secret/grafana, key
+        # admin-password. A client who wants his own names a Secret in
+        # admin.existingSecret; OpenTofu refuses adminPassword in values.
+        rbac:
+          useExistingClusterRole: grafana-dashboards
+        # No persistence: everything shown is provisioned, so a restarted pod
+        # loses only what someone clicked together by hand. A client who wants
+        # that kept sets persistence.enabled in values.
+        persistence:
+          enabled: false
+        # The chart's helm test pod, which Flux never runs.
+        testFramework:
+          enabled: false
+        grafana.ini:
+          analytics:
+            check_for_updates: false
+            reporting_enabled: false
+          << if inputs.modules.grafana.domain >>
+          # The host Grafana is served at, for its redirects and links; the
+          # HTTPRoute that serves it there is the Gateway API follow-up.
+          server:
+            domain: << inputs.modules.grafana.domain | quote >>
+            root_url: << printf "https://%s" inputs.modules.grafana.domain | quote >>
+          << end >>
+        # One datasource per backend that is on, provisioned read-only. The
+        # built-in Prometheus type rather than VictoriaMetrics' own plugin:
+        # nothing to download, and PromQL is what the dashboards speak.
+        << if inputs.modules.victoria_metrics.enabled >>
+        datasources:
+          datasources.yaml:
+            apiVersion: 1
+            datasources:
+              - name: VictoriaMetrics
+                uid: victoria-metrics
+                type: prometheus
+                access: proxy
+                url: http://victoria-metrics.victoria-metrics.svc:8428
+                isDefault: true
+                editable: false
+                jsonData:
+                  # The collectors' slowest cadence: the gateway's scrape.
+                  timeInterval: 30s
+        << end >>
+        # Every ConfigMap labelled grafana_dashboard "1", in any namespace, is
+        # a dashboard: the modules ship theirs that way, and so can a client.
+        # ConfigMaps only, which is all the ClusterRole above lets it read.
+        sidecar:
+          dashboards:
+            enabled: true
+            label: grafana_dashboard
+            labelValue: "1"
+            searchNamespace: ALL
+            resource: configmap
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+        service:
+          type: ClusterIP
+        # Measured on floci: about 300Mi once both dashboards are loaded.
+        resources:
+          requests:
+            cpu: 50m
+            memory: 256Mi
+    ---
+    # The client's own chart values, as he wrote them in kube.grafana.values,
+    # merged over the socle's document above — the client wins wherever the two
+    # meet. OpenTofu refuses secrets in there.
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: grafana-client-values
+      namespace: grafana
+      labels:
+        reconcile.fluxcd.io/watch: Enabled
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.grafana.enabled >>enabled<< else >>disabled<< end >>
+    data:
+      values.yaml: |<< toYaml inputs.modules.grafana.values | nindent 4 >>
+    ---
+    apiVersion: helm.toolkit.fluxcd.io/v2
+    kind: HelmRelease
+    metadata:
+      name: grafana
+      namespace: grafana
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.grafana.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 10m
+      releaseName: grafana
+      chartRef:
+        kind: OCIRepository
+        name: grafana-chart
+      # No spec.values, on purpose: it would be merged last and win. The
+      # order below is the precedence, later wins — the socle's defaults, the
+      # client's values from kube.grafana.values, then his Secret when he named
+      # one, created by him in grafana, never read by OpenTofu, optional so
+      # the release does not wait for it.
+      valuesFrom:
+        - kind: ConfigMap
+          name: grafana-socle-values
+          valuesKey: values.yaml
+        - kind: ConfigMap
+          name: grafana-client-values
+          valuesKey: values.yaml
+        << if inputs.modules.grafana.values_secret >>
+        - kind: Secret
+          name: << inputs.modules.grafana.values_secret | quote >>
+          valuesKey: values.yaml
+          optional: true
+        << end >>
+      install:
+        remediation:
+          retries: 3
+      upgrade:
+        remediation:
+          retries: 3
