@@ -186,6 +186,19 @@ locals {
       values        = {}
       values_secret = ""
     }
+    # The monitoring stack's traces storage (docs/monitoring.md): VictoriaTraces
+    # single-node, the applications' OTLP traces in through otel_gateway, the
+    # Jaeger query API out to Grafana. OFF by default: pre-GA, its storage
+    # format not yet committed, so an upgrade may drop stored traces — turning
+    # it on accepts that. Same shape as victoria_logs, 10Gi by default
+    # (docs/catalog/victoria-traces.md).
+    victoria_traces = {
+      enabled       = false
+      retention     = "7d"
+      storage_size  = "10Gi"
+      values        = {}
+      values_secret = ""
+    }
   }
 
   # Which clouds a module exists on. Absent = every cloud. A module listed
