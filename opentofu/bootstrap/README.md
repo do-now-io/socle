@@ -79,6 +79,11 @@ type, is an error at plan, with the allowed list in the message.
 | `victoria_logs` | `storage_size` | `"20Gi"` | Size of the claim on the default StorageClass; `""` means an `emptyDir`, as `victoria_metrics` |
 | `victoria_logs` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan |
 | `victoria_logs` | `values_secret` | `""` | Name of a Secret in `victoria-logs` with a `values.yaml` key, created by the client, merged last |
+| `victoria_traces` | `enabled` | `false` | Deploy VictoriaTraces single-node, the applications' OTLP traces through `otel_gateway`, a Jaeger datasource in Grafana. **Off**: pre-GA, an upgrade may drop stored traces ([design note](../../docs/catalog/victoria-traces.md)) |
+| `victoria_traces` | `retention` | `"7d"` | How long traces are kept: whole hours, days, weeks or years, at least a day |
+| `victoria_traces` | `storage_size` | `"10Gi"` | Size of the claim on the default StorageClass; `""` means an `emptyDir` |
+| `victoria_traces` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan |
+| `victoria_traces` | `values_secret` | `""` | Name of a Secret in `victoria-traces` with a `values.yaml` key, created by the client, merged last |
 | `hello` | `enabled` | `true` | Deploy podinfo as a proof the pipeline works |
 | `hello` | `replicas` | `1` | Replicas of the podinfo Deployment |
 | `hello` | `message` | `"hello from socle"` | Message podinfo serves |

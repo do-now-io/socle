@@ -87,6 +87,12 @@
             requests:
               memory: 160Mi
       values_secret: victoria-logs-values
+    victoria_traces:
+      enabled: true
+      retention: 7d
+      storage_size: 10Gi
+      values: {}
+      values_secret: ""
     hello:
       enabled: true
       replicas: 2

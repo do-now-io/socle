@@ -510,6 +510,63 @@ variable "kube" {
     condition     = !can(var.kube.victoria_logs.values_secret) || try(var.kube.victoria_logs.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.victoria_logs.values_secret)), true)
     error_message = "kube.victoria_logs.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
   }
+
+  # --- victoria_traces — docs/catalog/victoria-traces.md --------------------
+  # The same flags and the same envflag convention as VictoriaMetrics, so the
+  # same four rules.
+  # A value of the wrong kind is the kind check's to refuse; these rules only
+  # judge strings, so one mistake gives one diagnostic.
+
+  # What -retentionPeriod accepts, minus the forms a client should not need
+  # (bare months, fractions, ms), and never under its own one-day minimum.
+  validation {
+    condition = !can(var.kube.victoria_traces.retention) || try(
+      lookup(local.json_kinds, substr(jsonencode(var.kube.victoria_traces.retention), 0, 1), "number") != "string"
+      || can(regex("^[1-9][0-9]*[dwy]$", var.kube.victoria_traces.retention))
+      || (can(regex("^[1-9][0-9]*h$", var.kube.victoria_traces.retention)) && tonumber(trimsuffix(var.kube.victoria_traces.retention, "h")) >= 24),
+      false
+    )
+    error_message = "kube.victoria_traces.retention must be a whole number of hours, days, weeks or years, such as 15d, 4w or 1y, and at least one day (24h): VictoriaTraces refuses less."
+  }
+
+  validation {
+    condition = !can(var.kube.victoria_traces.storage_size) || try(
+      lookup(local.json_kinds, substr(jsonencode(var.kube.victoria_traces.storage_size), 0, 1), "number") != "string"
+      || var.kube.victoria_traces.storage_size == ""
+      || can(regex("^[1-9][0-9]*(Gi|Ti)$", var.kube.victoria_traces.storage_size)),
+      false
+    )
+    error_message = "kube.victoria_traces.storage_size must be empty (no volume claim, an emptyDir) or a size in Gi or Ti, such as 20Gi."
+  }
+
+  # values is free-form on purpose, minus one rule: no secret material. What a
+  # client writes there ends up in the OpenTofu state and in a ConfigMap on the
+  # cluster. VictoriaTraces takes its credentials as flags and as VM_*
+  # environment variables (envflag), so those are the paths refused: an
+  # extraArgs flag named like a password or an auth key (httpAuth.password,
+  # deleteAuthKey, snapshotAuthKey…), an env entry with a literal value whose
+  # name looks like a credential (valueFrom is fine), and a Secret among
+  # extraObjects.
+  validation {
+    condition = (
+      !can(var.kube.victoria_traces.values)
+      || !can(keys(var.kube.victoria_traces.values))
+      || (
+        !anytrue(try([for o in var.kube.victoria_traces.values.extraObjects : try(o.kind == "Secret", false)], []))
+        && !anytrue([for k in try(keys(var.kube.victoria_traces.values.server.extraArgs), []) : can(regex("(?i)(password|passwd|auth_?key|token)", k))])
+        && alltrue([
+          for e in try(tolist(var.kube.victoria_traces.values.server.env), []) :
+          !(can(e.value) && can(regex("(?i)(secret|password|passwd|token|auth_?key|api_?key|access_?key|private_?key)", try(e.name, ""))))
+        ])
+      )
+    )
+    error_message = "kube.victoria_traces.values must not carry secrets: an extraArgs flag such as httpAuth.password or deleteAuthKey, an env entry with a literal value named like a credential (VM_httpAuth_password, …), and a Secret in extraObjects are refused. Put them in a Secret in the victoria-traces namespace and name it in kube.victoria_traces.values_secret."
+  }
+
+  validation {
+    condition     = !can(var.kube.victoria_traces.values_secret) || try(var.kube.victoria_traces.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.victoria_traces.values_secret)), true)
+    error_message = "kube.victoria_traces.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
+  }
 }
 
 # ---------------------------------------------------------------------------

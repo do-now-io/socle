@@ -91,6 +91,10 @@ run "defaults_are_the_recommended_position" {
     error_message = "otel_agent must collect container logs by default, for victoria_logs to store."
   }
   assert {
+    condition     = output.inputs.modules.victoria_traces.enabled == false && output.inputs.modules.victoria_traces.retention == "7d" && output.inputs.modules.victoria_traces.storage_size == "10Gi"
+    error_message = "victoria_traces must default to OFF (pre-GA, docs/monitoring.md §10 question 7), 7 days on a 10Gi claim when turned on."
+  }
+  assert {
     condition     = can(regex("refs/heads/main\\$$", output.cosign_identity.subject))
     error_message = "the default cosign identity must trust the release workflow on main only."
   }
@@ -851,5 +855,17 @@ run "victoria_logs_accepts_no_volume_and_otel_agent_without_logs" {
   assert {
     condition     = output.inputs.modules.victoria_logs.storage_size == "" && output.inputs.modules.victoria_logs.retention == "2w" && output.inputs.modules.otel_agent.logs == false
     error_message = "an empty storage_size, a retention in weeks and an agent without logs must reach the inputs as set."
+  }
+}
+
+run "victoria_traces_turns_on_with_a_retention_in_days" {
+  command = plan
+  variables {
+    kube = { victoria_traces = { enabled = true, retention = "3d" } }
+  }
+
+  assert {
+    condition     = output.inputs.modules.victoria_traces.enabled == true && output.inputs.modules.victoria_traces.retention == "3d" && output.inputs.modules.victoria_traces.storage_size == "10Gi"
+    error_message = "a client turning traces on must get them with his retention and the default claim."
   }
 }

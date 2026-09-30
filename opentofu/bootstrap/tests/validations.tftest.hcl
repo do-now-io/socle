@@ -735,3 +735,33 @@ run "kube_refuses_victoria_logs_values_secret_that_is_not_a_secret_name" {
   variables { kube = { victoria_logs = { values_secret = "VL_Values" } } }
   expect_failures = [var.kube]
 }
+
+run "kube_refuses_victoria_traces_enabled_that_is_not_a_bool" {
+  command = plan
+  variables { kube = { victoria_traces = { enabled = 1 } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_victoria_traces_retention_spelt_out" {
+  command = plan
+  variables { kube = { victoria_traces = { retention = "one week" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_victoria_traces_storage_size_without_a_unit" {
+  command = plan
+  variables { kube = { victoria_traces = { storage_size = "10" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_victoria_traces_values_carrying_a_literal_credential_env" {
+  command = plan
+  variables { kube = { victoria_traces = { values = { server = { env = [{ name = "VM_httpAuth_password", value = "x" }] } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_victoria_traces_values_secret_that_is_not_a_secret_name" {
+  command = plan
+  variables { kube = { victoria_traces = { values_secret = "VT_Values" } } }
+  expect_failures = [var.kube]
+}
