@@ -26,6 +26,10 @@ another mode, and the module follows the same contract.
 
 ## What is installed
 
+> **With `victoria_logs` on**, the gateway also watches Kubernetes events
+> (`k8sobjects` on `events.k8s.io`) and takes the applications' OTLP logs,
+> both exported to VictoriaLogs: [victoria-logs.md](victoria-logs.md).
+
 The same six objects as `otel_agent`, each under the reconcile toggle on
 `inputs.modules.otel_gateway.enabled`: `Namespace/otel-gateway`, the chart's
 `OCIRepository`, `ConfigMap/otel-gateway-socle-values`,

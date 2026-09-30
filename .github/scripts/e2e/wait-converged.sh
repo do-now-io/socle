@@ -6,8 +6,8 @@
 # pulled by the exact tag TAG with its signature verified, podinfo at 1 replica.
 # Optional expectations come from the environment, one variable per module
 # (EXPECT_UI_COLOR, EXPECT_ARGOCD, EXPECT_VICTORIA_METRICS, EXPECT_OTEL_AGENT,
-# EXPECT_OTEL_GATEWAY, EXPECT_GRAFANA): the job says what the catalog defaults
-# and its tfvars make true, the script checks it.
+# EXPECT_OTEL_GATEWAY, EXPECT_VICTORIA_LOGS, EXPECT_GRAFANA): the job says what
+# the catalog defaults and its tfvars make true, the script checks it.
 set -euo pipefail
 # wait_ready <resourceset> [attempts of 5 s, default 60]
 wait_ready() {
@@ -241,6 +241,79 @@ assert r["limits"]["memory"] == "1Gi", "the socle memory limit did not survive t
   kubectl -n victoria-metrics top pod --no-headers 2>/dev/null \
     | awk '{print "victoria-metrics under both collectors: " $1 " cpu=" $2 " memory=" $3}' || true
 fi
+# victoria_logs when expected, after both collectors, which write to it: the
+# module converges on a Bound claim, and each of the three paths that write
+# logs reaches it, each proven by a token no other record carries — a
+# container's log read from /var/log/pods by otel_agent (a short-lived pod
+# that echoes the token), the Kubernetes events of that pod from otel_gateway,
+# and an application's OTLP log posted to the gateway by podinfo. Queried in
+# LogsQL through the API server's service proxy. EXPECT_VICTORIA_LOGS_MEMORY
+# asserts the client's value on a request the socle sets (128Mi).
+if [ "${EXPECT_VICTORIA_LOGS:-}" = true ]; then
+  SECONDS=0
+  wait_ready victoria-logs 120
+  kubectl -n victoria-logs wait deploy/victoria-logs --for=condition=Available --timeout=120s
+  echo "victoria-logs converged: resourceset Ready and the server Available after ${SECONDS}s"
+  pvc="$(kubectl -n victoria-logs get pvc victoria-logs -o jsonpath='{.status.phase}')"
+  [ "$pvc" = Bound ] || { echo "::error::the victoria-logs claim is '$pvc', expected Bound"; exit 1; }
+  vl=/api/v1/namespaces/victoria-logs/services/victoria-logs:http/proxy
+  # hits <logsql>: how many records match, 0 on any error.
+  hits() {
+    kubectl get --raw "$vl/select/logsql/query?query=$(urlq "$1")&limit=10" 2>/dev/null | grep -c . || true
+  }
+  # wait_hits <logsql> [attempts of 5 s]: until at least one record matches.
+  wait_hits() {
+    for _ in $(seq 1 "${2:-36}"); do
+      h="$(hits "$1")"
+      [ "${h:-0}" != 0 ] && return 0
+      sleep 5
+    done
+    return 1
+  }
+  token="$(date +%s)"
+  # A container's log: a new file under /var/log/pods, which file_log reads
+  # from its first line (start_at: end only applies to files already there).
+  kubectl -n hello run "socle-e2e-probe-$token" --restart=Never \
+    --image=ghcr.io/stefanprodan/podinfo:6.15.0 --command -- sh -c "echo socle-e2e-logline-$token"
+  SECONDS=0
+  wait_hits "\"socle-e2e-logline-$token\"" \
+    || { echo "::error::a container's log line never reached victoria-logs through otel_agent"; exit 1; }
+  echo "logs: a container's line read by otel_agent, in victoria-logs after ${SECONDS}s"
+  kubectl get --raw "$vl/select/logsql/query?query=$(urlq "\"socle-e2e-logline-$token\"")&limit=1" \
+    | python3 -c 'import sys,json; r=json.loads(sys.stdin.readline()); print("  fields: " + ", ".join(sorted(k for k in r if k.startswith(("k8s.", "_")))))'
+  # Kubernetes events, which k8sobjects tags k8s.resource.name=events. The
+  # probe pod's own events are looked for too, by its name in the text, and
+  # reported: whether a structured body is searchable as text is what the run
+  # records, not what it asserts.
+  wait_hits 'k8s.resource.name:=events' \
+    || { echo "::error::no Kubernetes event reached victoria-logs through otel_gateway"; exit 1; }
+  echo "logs: Kubernetes events from otel_gateway in victoria-logs; the probe pod's by name: $(hits "\"socle-e2e-probe-$token\"")"
+  kubectl get --raw "$vl/select/logsql/query?query=$(urlq 'k8s.resource.name:=events')&limit=1" \
+    | python3 -c 'import sys,json; r=json.loads(sys.stdin.readline()); print("  event fields: " + ", ".join(sorted(r))); print("  _msg: " + r.get("_msg", "")[:200])'
+  kubectl -n hello delete pod "socle-e2e-probe-$token" --wait=false > /dev/null
+  # An application's OTLP log, from podinfo's own curl, as the metrics probe.
+  payload="$(printf '{"resourceLogs":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"socle-e2e"}}]},"scopeLogs":[{"logRecords":[{"timeUnixNano":"%s","severityText":"INFO","body":{"stringValue":"socle-e2e-otlplog-%s"}}]}]}]}' \
+    "$(( $(date +%s) * 1000000000 ))" "$token")"
+  kubectl -n hello exec deploy/podinfo -- curl -sSf -H 'Content-Type: application/json' \
+    --data-binary "$payload" http://otel-gateway.otel-gateway.svc:4318/v1/logs > /dev/null
+  wait_hits "\"socle-e2e-otlplog-$token\"" 24 \
+    || { echo "::error::an application's OTLP log never reached victoria-logs through otel_gateway"; exit 1; }
+  echo "logs: an OTLP log posted by hello/podinfo, in victoria-logs"
+  res="$(kubectl -n victoria-logs get deployment victoria-logs -o jsonpath='{.spec.template.spec.containers[0].resources}')"
+  echo "victoria-logs resources: $res"
+  if [ -n "${EXPECT_VICTORIA_LOGS_MEMORY:-}" ]; then
+    printf '%s' "$res" | python3 -c '
+import sys, json
+r = json.load(sys.stdin); want = sys.argv[1]
+assert r["requests"]["memory"] == want, "client value lost to the socle default: memory %s, expected %s" % (r["requests"]["memory"], want)
+assert r["requests"]["cpu"] == "50m", "the socle cpu request did not survive the merge: %s" % r["requests"]["cpu"]
+' "$EXPECT_VICTORIA_LOGS_MEMORY" || { echo "::error::victoria_logs precedence"; exit 1; }
+  fi
+  kubectl -n victoria-logs top pod --no-headers 2>/dev/null \
+    | awk '{print "victoria-logs: " $1 " cpu=" $2 " memory=" $3}' || true
+  kubectl -n otel-agent top pod --no-headers 2>/dev/null \
+    | awk '{print "otel-agent with logs: " $1 " cpu=" $2 " memory=" $3}' || true
+fi
 # grafana when expected, last of the stack: Grafana answers, it has exactly
 # the datasource the socle provisions for victoria_metrics, its sidecar loaded
 # the collectors' dashboards from their own namespaces, and a query through
@@ -270,9 +343,19 @@ if [ "${EXPECT_GRAFANA:-}" = true ]; then
 import sys, json
 ds = json.load(sys.stdin)
 vm = [d for d in ds if d["uid"] == "victoria-metrics"]
-assert len(ds) == 1 and len(vm) == 1, ds
+logs = sys.argv[1] == "true"
+vl = [d for d in ds if d["uid"] == "victoria-logs"]
+assert len(ds) == 1 + logs and len(vm) == 1 and len(vl) == logs, ds
 assert vm[0]["type"] == "prometheus" and vm[0]["url"] == "http://victoria-metrics.victoria-metrics.svc:8428" and vm[0]["isDefault"], vm
-' || { echo "::error::grafana does not have exactly the VictoriaMetrics datasource the socle provisions"; exit 1; }
+assert not logs or (vl[0]["type"] == "victoriametrics-logs-datasource" and vl[0]["url"] == "http://victoria-logs.victoria-logs.svc:9428"), vl
+' "${EXPECT_VICTORIA_LOGS:-false}" || { echo "::error::grafana does not have exactly the datasources the socle provisions"; exit 1; }
+  if [ "${EXPECT_VICTORIA_LOGS:-}" = true ]; then
+    gf /api/plugins/victoriametrics-logs-datasource/settings \
+      | python3 -c 'import sys,json; p=json.load(sys.stdin); print("grafana plugin: %s %s, signature %s" % (p["id"], p["info"]["version"], p.get("signature")))'
+    health="$(gf /api/datasources/uid/victoria-logs/health | python3 -c 'import sys,json; print(json.load(sys.stdin).get("status"))')"
+    echo "grafana datasource victoria-logs health: $health"
+    [ "$health" = OK ] || { echo "::error::grafana's VictoriaLogs datasource is not healthy"; exit 1; }
+  fi
   # The modules' dashboards, found by the sidecar in their own namespaces.
   for uid in socle-otel-nodes-pods socle-otel-workloads; do
     found=false

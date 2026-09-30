@@ -708,3 +708,39 @@ run "kube_refuses_grafana_values_secret_that_is_not_a_secret_name" {
   variables { kube = { grafana = { values_secret = "Grafana_Values" } } }
   expect_failures = [var.kube]
 }
+
+run "kube_refuses_otel_agent_logs_that_is_not_a_bool" {
+  command = plan
+  variables { kube = { otel_agent = { logs = "yes" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_victoria_logs_retention_under_a_day" {
+  command = plan
+  variables { kube = { victoria_logs = { retention = "6h" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_victoria_logs_retention_that_is_not_a_string" {
+  command = plan
+  variables { kube = { victoria_logs = { retention = 7 } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_victoria_logs_storage_size_in_decimal_units" {
+  command = plan
+  variables { kube = { victoria_logs = { storage_size = "20G" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_victoria_logs_values_carrying_an_auth_password_flag" {
+  command = plan
+  variables { kube = { victoria_logs = { values = { server = { extraArgs = { "httpAuth.password" = "x" } } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_victoria_logs_values_secret_that_is_not_a_secret_name" {
+  command = plan
+  variables { kube = { victoria_logs = { values_secret = "VL_Values" } } }
+  expect_failures = [var.kube]
+}

@@ -25,6 +25,10 @@ and Grafana shows it on their two dashboards.
 
 ## What is installed
 
+> **With `victoria_logs` on**, Grafana also provisions a read-only
+> `VictoriaLogs` datasource and installs its plugin, pinned at 0.32.0 and
+> downloaded from grafana.com at start: [victoria-logs.md](victoria-logs.md).
+
 One `ResourceSet` (`oci/catalog/grafana/resourceset.yaml`), `resourcesTemplate`,
 six objects, each carrying the reconcile toggle on
 `inputs.modules.grafana.enabled`:
