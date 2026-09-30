@@ -431,7 +431,8 @@ The monitoring stack, six modules designed together — [docs/monitoring.md](mon
 `victoria_metrics` — [docs/catalog/victoria-metrics.md](catalog/victoria-metrics.md);
 `otel_agent` — [docs/catalog/otel-agent.md](catalog/otel-agent.md);
 `otel_gateway` — [docs/catalog/otel-gateway.md](catalog/otel-gateway.md);
-`grafana` — [docs/catalog/grafana.md](catalog/grafana.md).
+`grafana` — [docs/catalog/grafana.md](catalog/grafana.md);
+`victoria_logs` — [docs/catalog/victoria-logs.md](catalog/victoria-logs.md).
 
 ## 7. Publishing the artifact, and releasing
 

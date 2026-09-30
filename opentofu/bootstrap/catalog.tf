@@ -119,7 +119,11 @@ locals {
     # logs switch arrives with victoria_logs. values and values_secret as every
     # module, secrets refused there (docs/catalog/otel-agent.md).
     otel_agent = {
-      enabled       = true
+      enabled = true
+      # Container logs to victoria_logs while it is on; false keeps the
+      # agent to metrics, for a cluster whose logs go elsewhere, or where the
+      # read-only hostPath on /var/log/pods is refused (Baseline Pod Security).
+      logs          = true
       values        = {}
       values_secret = ""
     }
@@ -147,6 +151,19 @@ locals {
     grafana = {
       enabled       = true
       domain        = ""
+      values        = {}
+      values_secret = ""
+    }
+    # The monitoring stack's logs storage (docs/monitoring.md): VictoriaLogs
+    # single-node, OTLP in from both collectors — container logs from
+    # otel_agent, Kubernetes events and the applications' logs from
+    # otel_gateway — LogsQL out to Grafana. Same shape as victoria_metrics:
+    # retention (7 days) and storage_size (20Gi, empty for an emptyDir), values
+    # and values_secret, secrets refused there (docs/catalog/victoria-logs.md).
+    victoria_logs = {
+      enabled       = true
+      retention     = "7d"
+      storage_size  = "20Gi"
       values        = {}
       values_secret = ""
     }

@@ -68,6 +68,11 @@ kube = {
     # Flag values as strings: Helm renders a number from a million up as 1e+06.
     # values     = { server = { extraArgs = { "storage.maxHourlySeries" = "300000" } } }
   }
+  # Logs storage, on by default: 7 days on a 20Gi claim — the same StorageClass
+  # question as victoria_metrics above.
+  victoria_logs = {
+    storage_size = ""
+  }
   hello = {
     replicas = 2
   }

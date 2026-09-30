@@ -1,6 +1,7 @@
 # The otel_agent module: the OpenTelemetry Collector as a DaemonSet, one pod
 # per node, for what lives on a node — node, pod and container metrics from the
-# kubelet, with Kubernetes metadata on every point. Design: docs/monitoring.md;
+# kubelet and, with victoria_logs on, every container's log, with Kubernetes
+# metadata on every point and record. Design: docs/monitoring.md;
 # this module: docs/catalog/otel-agent.md.
 #
 # resourcesTemplate rather than resources: the exporter depends on whether the
@@ -92,6 +93,30 @@ spec:
           # point, watching this node's pods only.
           kubernetesAttributes:
             enabled: true
+          << if and inputs.modules.victoria_logs.enabled inputs.modules.otel_agent.logs >>
+          # file_log: every container's log under /var/log/pods, mounted
+          # read-only, read from the end of each file. No checkpoints: they
+          # make the collector write to the node, and a restarted agent loses
+          # the lines written while it was down instead.
+          logsCollection:
+            enabled: true
+          << end >>
+        << if and inputs.modules.victoria_logs.enabled inputs.modules.otel_agent.logs >>
+        # Reading /var/log/pods: containerd writes each container's log as
+        # root, mode 0640, so only root may read it, and Kubernetes gives a
+        # non-root container no effective capability. Root, then, with every
+        # capability dropped: it reads as the files' owner and bypasses no
+        # permission, on a read-only root filesystem.
+        securityContext:
+          runAsUser: 0
+          runAsGroup: 0
+          runAsNonRoot: false
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+              - ALL
+        << end >>
         # The agent receives nothing: applications send OTLP to the
         # otel_gateway module. So no receiver port and, above all, none of the
         # chart's six hostPorts on every node.
@@ -130,9 +155,25 @@ spec:
             # fill its queue and its log.
             nop: {}
             << end >>
+            << if and inputs.modules.victoria_logs.enabled inputs.modules.otel_agent.logs >>
+            otlp_http/victoria-logs:
+              logs_endpoint: http://victoria-logs.victoria-logs.svc:9428/insert/opentelemetry/v1/logs
+            << end >>
           service:
             pipelines:
+              << if and inputs.modules.victoria_logs.enabled inputs.modules.otel_agent.logs >>
+              logs:
+                # The logsCollection preset adds file_log to this list and the
+                # kubernetesAttributes preset k8s_attributes to the processors.
+                receivers: []
+                processors:
+                  - memory_limiter
+                  - batch
+                exporters:
+                  - otlp_http/victoria-logs
+              << else >>
               logs: null
+              << end >>
               traces: null
               metrics:
                 # The collector's own telemetry, scraped from itself; the

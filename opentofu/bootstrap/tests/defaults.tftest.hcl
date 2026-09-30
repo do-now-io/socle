@@ -75,6 +75,14 @@ run "defaults_are_the_recommended_position" {
     error_message = "grafana must default to on, with no domain, no client values and no values Secret (docs/monitoring.md §4)."
   }
   assert {
+    condition     = output.inputs.modules.victoria_logs.enabled == true && output.inputs.modules.victoria_logs.retention == "7d" && output.inputs.modules.victoria_logs.storage_size == "20Gi"
+    error_message = "victoria_logs must default to on, 7 days of retention on a 20Gi claim (docs/monitoring.md §3)."
+  }
+  assert {
+    condition     = output.inputs.modules.otel_agent.logs == true
+    error_message = "otel_agent must collect container logs by default, for victoria_logs to store."
+  }
+  assert {
     condition     = can(regex("refs/heads/main\\$$", output.cosign_identity.subject))
     error_message = "the default cosign identity must trust the release workflow on main only."
   }
@@ -667,5 +675,20 @@ run "grafana_accepts_a_domain_and_secrets_grafana_resolves_itself" {
   assert {
     condition     = output.inputs.modules.grafana.values.datasources["extra.yaml"].datasources[0].secureJsonData.password == "$${PG_PASSWORD}"
     error_message = "a secureJsonData value Grafana resolves itself ($${VAR}, $__file{…}) must flow through: only a literal is refused."
+  }
+}
+
+run "victoria_logs_accepts_no_volume_and_otel_agent_without_logs" {
+  command = plan
+  variables {
+    kube = {
+      victoria_logs = { storage_size = "", retention = "2w" }
+      otel_agent    = { logs = false }
+    }
+  }
+
+  assert {
+    condition     = output.inputs.modules.victoria_logs.storage_size == "" && output.inputs.modules.victoria_logs.retention == "2w" && output.inputs.modules.otel_agent.logs == false
+    error_message = "an empty storage_size, a retention in weeks and an agent without logs must reach the inputs as set."
   }
 }
