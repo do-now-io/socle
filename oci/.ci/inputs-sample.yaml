@@ -71,6 +71,7 @@
     grafana:
       enabled: true
       domain: grafana.example.com
+      gateway: public
       values:
         resources:
           requests:

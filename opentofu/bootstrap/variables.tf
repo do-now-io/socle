@@ -450,6 +450,11 @@ variable "kube" {
   }
 
   validation {
+    condition     = !can(var.kube.grafana.gateway) || try(contains(["private", "public", ""], var.kube.grafana.gateway), true)
+    error_message = "kube.grafana.gateway must be private, public, or empty for no HTTPRoute: the shared Gateway Grafana's route attaches to."
+  }
+
+  validation {
     condition     = !can(var.kube.grafana.values_secret) || try(var.kube.grafana.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.grafana.values_secret)), true)
     error_message = "kube.grafana.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
   }
