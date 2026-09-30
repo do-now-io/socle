@@ -253,6 +253,8 @@ jobs:
       EXPECT_OTEL_GATEWAY_MEMORY: 320Mi  # tests/floci.tfvars: overrides the socle's 128Mi
       EXPECT_GRAFANA: "true"            # catalog.tf: grafana.enabled defaults to true
       EXPECT_GRAFANA_MEMORY: 320Mi       # tests/floci.tfvars: overrides the socle's 256Mi
+      EXPECT_VICTORIA_LOGS: "true"      # catalog.tf: victoria_logs.enabled defaults to true
+      EXPECT_VICTORIA_LOGS_MEMORY: 160Mi  # tests/floci.tfvars: overrides the socle's 128Mi
     defaults:
       run:
         working-directory: opentofu/clusters/aws
@@ -359,6 +361,7 @@ jobs:
       EXPECT_OTEL_AGENT: "true"          # catalog.tf: otel_agent.enabled defaults to true
       EXPECT_OTEL_GATEWAY: "true"        # catalog.tf: otel_gateway.enabled defaults to true
       EXPECT_GRAFANA: "true"            # catalog.tf: grafana.enabled defaults to true
+      EXPECT_VICTORIA_LOGS: "true"      # catalog.tf: victoria_logs.enabled defaults to true
     defaults:
       run:
         working-directory: opentofu/clusters/aws/tests/floci
@@ -599,6 +602,74 @@ jobs:
           kubectl get clusterrole grafana-dashboards > /dev/null
           kubectl -n grafana rollout status deployment/grafana --timeout=180s
           echo "resourceset/grafana Ready again after ${SECONDS}s, its ClusterRole back"
+      # victoria_logs on its own: off, both collectors drop their logs pipeline
+      # (the agent its hostPath and its root user with it) and grafana its
+      # datasource and plugin; on again, all of it comes back.
+      - name: Disabling victoria_logs takes the logs path out of the collectors and grafana, re-enabling brings it back
+        run: |
+          apply() {
+            tofu apply -input=false -auto-approve \
+              -var "socle_version=$TAG" \
+              -var "cosign_identity=$COSIGN" \
+              -var artifact_pull_secret=ghcr-auth \
+              -var "kube=$1"
+          }
+          # config <namespace> <configmap> <key>: the rendered file, empty on error.
+          config() { kubectl -n "$1" get configmap "$2" -o "jsonpath={.data.$3}" 2>/dev/null || true; }
+          # until_config <without|with> <namespace> <configmap> <key> <needle>
+          until_config() {
+            for _ in $(seq 1 36); do
+              c="$(config "$2" "$3" "$4")"
+              case "$1:$c" in
+                without:*"$5"*|with:) sleep 5 ;;
+                without:*) return 0 ;;
+                with:*"$5"*) return 0 ;;
+                *) sleep 5 ;;
+              esac
+            done
+            echo "::error::$2/$3 is not $1 $5"
+            return 1
+          }
+          apply '{hello={replicas=1},victoria_logs={enabled=false}}'
+          for _ in $(seq 1 36); do
+            out="$(kubectl -n victoria-logs get helmrelease victoria-logs 2>&1)" || break
+            sleep 5
+          done
+          case "$out" in
+            *NotFound*|*"not found"*) echo "helmrelease victoria-logs/victoria-logs is gone" ;;
+            *) echo "::error::victoria-logs' HelmRelease still there: $out"; exit 1 ;;
+          esac
+          until_config without otel-agent otel-agent-agent relay otlp_http/victoria-logs
+          until_config without otel-gateway otel-gateway relay otlp_http/victoria-logs
+          until_config without grafana grafana 'datasources\.yaml' victoria-logs
+          kubectl -n otel-agent rollout status daemonset/otel-agent-agent --timeout=180s
+          uid="$(kubectl -n otel-agent get daemonset otel-agent-agent \
+            -o jsonpath='{.spec.template.spec.containers[0].securityContext.runAsUser}')"
+          vols="$(kubectl -n otel-agent get daemonset otel-agent-agent -o jsonpath='{.spec.template.spec.volumes[*].hostPath.path}')"
+          echo "otel-agent without logs: runAsUser='$uid' hostPaths='$vols'"
+          [ -z "$uid$vols" ] || { echo "::error::otel-agent kept its root user or hostPath without victoria_logs"; exit 1; }
+          echo "victoria_logs off: no logs exporter in either collector, no datasource in grafana,"
+          echo "  the agent back to non-root without hostPath"
+          apply '{hello={replicas=1}}'
+          SECONDS=0
+          back=false
+          for _ in $(seq 1 60); do
+            status="$(kubectl -n flux-system get resourceset victoria-logs \
+              -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)"
+            if [ "$status" = True ] && [ "$(kubectl -n victoria-logs get pvc victoria-logs \
+              -o jsonpath='{.status.phase}' 2>/dev/null || true)" = Bound ]; then
+              back=true
+              break
+            fi
+            sleep 5
+          done
+          [ "$back" = true ] || { echo "::error::victoria-logs never came back with a Bound claim"; exit 1; }
+          until_config with otel-agent otel-agent-agent relay otlp_http/victoria-logs
+          until_config with otel-gateway otel-gateway relay otlp_http/victoria-logs
+          until_config with grafana grafana 'datasources\.yaml' victoria-logs
+          kubectl -n otel-agent rollout status daemonset/otel-agent-agent --timeout=180s
+          kubectl -n grafana rollout status deployment/grafana --timeout=180s
+          echo "victoria_logs back after ${SECONDS}s: a new claim Bound, both collectors exporting to it, grafana's datasource provisioned"
       # crossplane is off by default (catalog.tf), so the default path above
       # proves nothing about it. Turned on here with one client value that
       # overrides a socle default, a module-shaped Role against floci's IAM,

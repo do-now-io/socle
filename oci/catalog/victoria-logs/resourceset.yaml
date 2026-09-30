@@ -1,0 +1,153 @@
+# The victoria_logs module: VictoriaLogs single-node, the monitoring stack's
+# logs storage — container logs from otel_agent, Kubernetes events and the
+# applications' OTLP logs from otel_gateway, LogsQL out to Grafana.
+# Design: docs/monitoring.md; this module: docs/catalog/victoria-logs.md.
+#
+# resourcesTemplate rather than resources: the persistence block and the
+# Secret in valuesFrom only exist under a condition, and the operator's block
+# `<< if >>`/`<< end >>` is text templating, which the structured resources
+# list cannot carry (see opentofu/bootstrap/manifests/templates/root.yaml).
+#
+# Values: no spec.values on the HelmRelease. The socle's defaults are a
+# ConfigMap listed first in valuesFrom, the client's second, his Secret last —
+# later wins, so the client overrides any socle default (docs/flux-catalog.md §6).
+#
+# The pipelines that write here and the datasource that reads it live in the
+# modules that run them (otel_agent, otel_gateway, grafana), each under a test
+# on inputs.modules.victoria_logs.enabled: this module names none of them.
+#
+# Every other rule is the hello module's: inputsFrom the one provider, the
+# reconcile toggle on each resource, values tested never presence.
+apiVersion: fluxcd.controlplane.io/v1
+kind: ResourceSet
+metadata:
+  name: victoria-logs
+  namespace: flux-system
+spec:
+  inputsFrom:
+    - apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSetInputProvider
+      name: socle
+  wait: true
+  resourcesTemplate: |
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: victoria-logs
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.victoria_logs.enabled >>enabled<< else >>disabled<< end >>
+    ---
+    apiVersion: source.toolkit.fluxcd.io/v1
+    kind: OCIRepository
+    metadata:
+      name: victoria-logs-chart
+      namespace: victoria-logs
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.victoria_logs.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 1h
+      url: oci://ghcr.io/victoriametrics/helm-charts/victoria-logs-single
+      layerSelector:
+        mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+        operation: copy
+      ref:
+        tag: 0.13.9  # appVersion v1.52.0
+    ---
+    # The socle's own chart values, as a document rather than the HelmRelease's
+    # spec.values: helm-controller merges valuesFrom in order and then
+    # spec.values over the result, so an inline socle default would beat the
+    # client on every key both set. (No template delimiters in these
+    # comments: the operator templates them too.)
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: victoria-logs-socle-values
+      namespace: victoria-logs
+      # helm-controller re-reconciles the release the moment a labelled
+      # valuesFrom ConfigMap changes, instead of at its next interval.
+      labels:
+        reconcile.fluxcd.io/watch: Enabled
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.victoria_logs.enabled >>enabled<< else >>disabled<< end >>
+    data:
+      values.yaml: |
+        server:
+          # A constant name: the collectors write to and Grafana reads from
+          # victoria-logs.victoria-logs.svc:9428, never a chart-derived name.
+          fullnameOverride: victoria-logs
+          # A Deployment and a standalone PVC rather than the chart's default
+          # StatefulSet, for victoria_metrics' reason: Helm cannot change a
+          # volumeClaimTemplate, so a new storage_size would fail every upgrade.
+          mode: deployment
+          # The chart defaults it to one month, over the binary's own 7 days.
+          retentionPeriod: << inputs.modules.victoria_logs.retention | quote >>
+          persistentVolume:
+            << if inputs.modules.victoria_logs.storage_size >>
+            enabled: true
+            size: << inputs.modules.victoria_logs.storage_size | quote >>
+            << else >>
+            # storage_size empty: no claim, the chart's emptyDir. For a
+            # cluster with no default StorageClass; the logs go with the pod.
+            enabled: false
+            << end >>
+          # Scraped by the otel_gateway module, which reads these annotations.
+          podAnnotations:
+            prometheus.io/scrape: "true"
+            prometheus.io/port: "9428"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+    ---
+    # The client's own chart values, as he wrote them in
+    # kube.victoria_logs.values, merged over the socle's document above — the
+    # client wins wherever the two meet. OpenTofu refuses secrets in there.
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: victoria-logs-client-values
+      namespace: victoria-logs
+      labels:
+        reconcile.fluxcd.io/watch: Enabled
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.victoria_logs.enabled >>enabled<< else >>disabled<< end >>
+    data:
+      values.yaml: |<< toYaml inputs.modules.victoria_logs.values | nindent 4 >>
+    ---
+    apiVersion: helm.toolkit.fluxcd.io/v2
+    kind: HelmRelease
+    metadata:
+      name: victoria-logs
+      namespace: victoria-logs
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.victoria_logs.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 10m
+      releaseName: victoria-logs
+      chartRef:
+        kind: OCIRepository
+        name: victoria-logs-chart
+      # No spec.values, on purpose: it would be merged last and win. The
+      # order below is the precedence, later wins — the socle's defaults, the
+      # client's values from kube.victoria_logs.values, then his Secret when he
+      # named one, created by him in victoria-logs, never read by OpenTofu,
+      # optional so the release does not wait for it.
+      valuesFrom:
+        - kind: ConfigMap
+          name: victoria-logs-socle-values
+          valuesKey: values.yaml
+        - kind: ConfigMap
+          name: victoria-logs-client-values
+          valuesKey: values.yaml
+        << if inputs.modules.victoria_logs.values_secret >>
+        - kind: Secret
+          name: << inputs.modules.victoria_logs.values_secret | quote >>
+          valuesKey: values.yaml
+          optional: true
+        << end >>
+      install:
+        remediation:
+          retries: 3
+      upgrade:
+        remediation:
+          retries: 3

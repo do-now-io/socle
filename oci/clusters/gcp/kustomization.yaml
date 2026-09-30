@@ -15,6 +15,7 @@ resources:
   - ../../catalog/otel-agent/resourceset.yaml
   - ../../catalog/otel-gateway/resourceset.yaml
   - ../../catalog/grafana/resourceset.yaml
+  - ../../catalog/victoria-logs/resourceset.yaml
   - ../../catalog/hello/resourceset.yaml
 patches:
   - path: hello-color.patch.yaml
