@@ -83,6 +83,9 @@ kube = {
   victoria_logs = {
     storage_size = ""
   }
+  # Traces are off by default (VictoriaTraces is pre-GA; an upgrade may drop
+  # stored traces). Turning them on:
+  # victoria_traces = { enabled = true, storage_size = "" }
   hello = {
     replicas = 2
   }

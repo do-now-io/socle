@@ -387,6 +387,20 @@ assert r["requests"]["cpu"] == "50m", "the socle cpu request did not survive the
   trap - EXIT
 fi
 wait_ready socle-root
+# victoria_traces is off by default (pre-GA): Ready here proves the template
+# renders on the real operator and that a disabled module applies nothing,
+# and the gateway has no traces pipeline to write into it. The catalog job
+# turns it on (the traces step of publish-artifact.yaml).
+if [ "${EXPECT_VICTORIA_TRACES:-false}" != true ]; then
+  wait_ready victoria-traces
+  if kubectl get namespace victoria-traces > /dev/null 2>&1; then
+    echo "::error::victoria-traces is disabled but its namespace exists"; exit 1
+  fi
+  if kubectl -n otel-gateway get configmap otel-gateway -o jsonpath='{.data.relay}' 2>/dev/null | grep -q victoria-traces; then
+    echo "::error::the gateway exports traces to a victoria-traces that is off"; exit 1
+  fi
+  echo "victoria-traces off: nothing applied, no traces pipeline in the gateway"
+fi
 # external-dns is off by default (it needs a zone and a credential): Ready
 # here proves the template renders on the real operator and that a disabled
 # module applies nothing.
