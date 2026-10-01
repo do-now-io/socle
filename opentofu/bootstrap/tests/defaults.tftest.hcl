@@ -95,6 +95,14 @@ run "defaults_are_the_recommended_position" {
     error_message = "victoria_traces must default to OFF (pre-GA, docs/monitoring.md §10 question 7), 7 days on a 10Gi claim when turned on."
   }
   assert {
+    condition     = output.inputs.modules.kyverno.enabled == false && output.inputs.modules.kyverno_policies.enabled == false
+    error_message = "kyverno and kyverno_policies must default to OFF: an admission webhook is opted into (docs/catalog/kyverno.md)."
+  }
+  assert {
+    condition     = output.inputs.modules.kyverno_policies.profile == "baseline" && length(output.inputs.modules.kyverno_policies.enforce) == 0 && length(output.inputs.modules.kyverno_policies.allowed_registries) == 0
+    error_message = "kyverno_policies must default to the baseline profile, every policy in Audit, no registry allow-list."
+  }
+  assert {
     condition     = can(regex("refs/heads/main\\$$", output.cosign_identity.subject))
     error_message = "the default cosign identity must trust the release workflow on main only."
   }
@@ -927,5 +935,29 @@ run "victoria_traces_turns_on_with_a_retention_in_days" {
   assert {
     condition     = output.inputs.modules.victoria_traces.enabled == true && output.inputs.modules.victoria_traces.retention == "3d" && output.inputs.modules.victoria_traces.storage_size == "10Gi"
     error_message = "a client turning traces on must get them with his retention and the default claim."
+  }
+}
+
+run "kyverno_policies_turn_on_with_enforce_and_an_allow_list" {
+  command = plan
+  variables {
+    kube = {
+      kyverno = { enabled = true }
+      kyverno_policies = {
+        enabled            = true
+        profile            = "restricted"
+        enforce            = ["disallow-privileged-containers", "require-run-as-nonroot", "restrict-image-registries"]
+        allowed_registries = ["ghcr.io", "registry.k8s.io", "123456789012.dkr.ecr.eu-west-3.amazonaws.com/acme", "localhost:5000"]
+      }
+    }
+  }
+
+  assert {
+    condition     = output.inputs.modules.kyverno.enabled == true && output.inputs.modules.kyverno_policies.profile == "restricted"
+    error_message = "a client turning the policies on with the engine must get the profile he chose."
+  }
+  assert {
+    condition     = output.inputs.modules.kyverno_policies.enforce == ["disallow-privileged-containers", "require-run-as-nonroot", "restrict-image-registries"] && length(output.inputs.modules.kyverno_policies.allowed_registries) == 4
+    error_message = "enforce and allowed_registries must reach the inputs as set."
   }
 }

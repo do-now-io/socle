@@ -84,6 +84,15 @@ type, is an error at plan, with the allowed list in the message.
 | `victoria_traces` | `storage_size` | `"10Gi"` | Size of the claim on the default StorageClass; `""` means an `emptyDir` |
 | `victoria_traces` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan |
 | `victoria_traces` | `values_secret` | `""` | Name of a Secret in `victoria-traces` with a `values.yaml` key, created by the client, merged last |
+| `kyverno` | `enabled` | `false` | Deploy the Kyverno engine: admission (three replicas, a PodDisruptionBudget), background, cleanup and reports controllers, no policy; its webhooks never see `kube-system` or `flux-system`. **Off**: an admission webhook is opted into ([design note](../../docs/catalog/kyverno.md)) |
+| `kyverno` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Registry credentials (`imagePullSecrets`) and literal credential env refused at plan |
+| `kyverno` | `values_secret` | `""` | Name of a Secret in `kyverno` with a `values.yaml` key, created by the client, merged last |
+| `kyverno_policies` | `enabled` | `false` | Deploy the socle's policy set on `kyverno` (required): the Pod Security Standards as CEL policies, requests required, no `latest` tag, every policy in Audit ([design note](../../docs/catalog/kyverno-policies.md)) |
+| `kyverno_policies` | `profile` | `"baseline"` | `baseline`, or `restricted` for baseline plus the six restricted policies |
+| `kyverno_policies` | `enforce` | `[]` | Policies switched to Enforce, each compiled into a native ValidatingAdmissionPolicy the API server applies with Kyverno up or down; only names this configuration renders |
+| `kyverno_policies` | `allowed_registries` | `[]` | Registries images may come from (`ghcr.io`, `registry.k8s.io`, `ghcr.io/acme`); empty means no registry policy |
+| `kyverno_policies` | `values` | `{}` | The client's own `kyverno-policies` chart values, merged over the socle's, client wins; a list he sets replaces the socle's whole |
+| `kyverno_policies` | `values_secret` | `""` | Name of a Secret in `kyverno-policies` with a `values.yaml` key, created by the client, merged last |
 | `hello` | `enabled` | `true` | Deploy podinfo as a proof the pipeline works |
 | `hello` | `replicas` | `1` | Replicas of the podinfo Deployment |
 | `hello` | `message` | `"hello from socle"` | Message podinfo serves |

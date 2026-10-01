@@ -19,6 +19,8 @@ resources:
   - ../../catalog/victoria-logs/resourceset.yaml
   - ../../catalog/victoria-traces/resourceset.yaml
   - ../../catalog/keda/resourceset.yaml
+  - ../../catalog/kyverno/resourceset.yaml
+  - ../../catalog/kyverno-policies/resourceset.yaml
   - ../../catalog/hello/resourceset.yaml
 patches:
   - path: hello-color.patch.yaml

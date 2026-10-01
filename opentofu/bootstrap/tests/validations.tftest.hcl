@@ -872,3 +872,87 @@ run "keda_refuses_an_invalid_values_secret_name" {
   variables { kube = { keda = { values_secret = "My_Values" } } }
   expect_failures = [var.kube]
 }
+
+run "kube_refuses_kyverno_enabled_that_is_not_a_bool" {
+  command = plan
+  variables { kube = { kyverno = { enabled = "yes" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_kyverno_values_carrying_registry_credentials" {
+  command = plan
+  variables { kube = { kyverno = { values = { imagePullSecrets = { regcred = { registry = "r.example", username = "u", password = "p" } } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_kyverno_values_carrying_a_literal_credential_env" {
+  command = plan
+  variables { kube = { kyverno = { values = { reportsController = { extraEnvVars = [{ name = "REGISTRY_PASSWORD", value = "x" }] } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_kyverno_values_secret_that_is_not_a_secret_name" {
+  command = plan
+  variables { kube = { kyverno = { values_secret = "Kyverno_Values" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_kyverno_policies_without_the_engine" {
+  command = plan
+  variables { kube = { kyverno_policies = { enabled = true } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_kyverno_policies_profile_unknown" {
+  command = plan
+  variables { kube = { kyverno = { enabled = true }, kyverno_policies = { enabled = true, profile = "privileged" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_kyverno_policies_enforce_that_is_not_a_list" {
+  command = plan
+  variables { kube = { kyverno = { enabled = true }, kyverno_policies = { enabled = true, enforce = "disallow-privileged-containers" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_kyverno_policies_enforce_naming_an_unknown_policy" {
+  command = plan
+  variables { kube = { kyverno = { enabled = true }, kyverno_policies = { enabled = true, enforce = ["disallow-everything"] } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_kyverno_policies_enforce_naming_a_restricted_policy_on_baseline" {
+  command = plan
+  variables { kube = { kyverno = { enabled = true }, kyverno_policies = { enabled = true, enforce = ["require-run-as-nonroot"] } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_kyverno_policies_enforce_naming_the_registry_policy_without_an_allow_list" {
+  command = plan
+  variables { kube = { kyverno = { enabled = true }, kyverno_policies = { enabled = true, enforce = ["restrict-image-registries"] } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_kyverno_policies_allowed_registries_with_a_scheme" {
+  command = plan
+  variables { kube = { kyverno = { enabled = true }, kyverno_policies = { enabled = true, allowed_registries = ["https://ghcr.io"] } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_kyverno_policies_allowed_registries_with_a_trailing_slash" {
+  command = plan
+  variables { kube = { kyverno = { enabled = true }, kyverno_policies = { enabled = true, allowed_registries = ["ghcr.io/"] } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_kyverno_policies_allowed_registries_without_a_host" {
+  command = plan
+  variables { kube = { kyverno = { enabled = true }, kyverno_policies = { enabled = true, allowed_registries = ["nginx"] } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_kyverno_policies_values_secret_that_is_not_a_secret_name" {
+  command = plan
+  variables { kube = { kyverno_policies = { values_secret = "Policies_Values" } } }
+  expect_failures = [var.kube]
+}

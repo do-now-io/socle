@@ -1,0 +1,406 @@
+# The kyverno module's proof (docs/catalog/kyverno.md): the engine, OFF by
+# default. Selected by label:
+#   health   the disabled shape: the ResourceSet Ready with nothing rendered,
+#            no namespace.
+#   module   on: three admission replicas behind a PodDisruptionBudget, the
+#            three leader-elected controllers, the webhooks' namespace
+#            exclusions in Kyverno's own config, the dashboard for Grafana;
+#            the whole valuesFrom order on the reports controller's memory;
+#            off: the release gone, and with it every webhook configuration
+#            Kyverno registered and every CRD the chart installed — what an
+#            uninstall must never leave, since a webhook pointing at nothing
+#            is the cluster-wide outage this module is careful to avoid.
+# The policies, and what they refuse, are kyverno_policies' proof.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: kyverno-health
+  labels:
+    phase: health
+    cloud: any
+    platform: any
+spec:
+  description: Off by default, the ResourceSet renders nothing.
+  timeouts:
+    assert: 3m
+    error: 1m
+  steps:
+    - name: the ResourceSet is Ready with nothing in its inventory, and no kyverno namespace
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: kyverno
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (length(inventory.entries || `[]`)): 0
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: kyverno
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: kyverno
+---
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: kyverno-module
+  labels:
+    phase: module
+    cloud: any
+    platform: any
+spec:
+  description: >-
+    On, the engine converges in its HA shape with Flux and the control plane
+    out of its webhooks; the client's values win; off, nothing is left.
+  timeouts:
+    assert: 5m
+    error: 5m
+  steps:
+    - name: enabled = true converges, three admission replicas behind a PodDisruptionBudget
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    kyverno:
+                      enabled: true
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: kyverno
+                namespace: kyverno
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: kyverno-admission-controller
+                namespace: kyverno
+              spec:
+                replicas: 3
+              status:
+                readyReplicas: 3
+        - assert:
+            resource:
+              apiVersion: policy/v1
+              kind: PodDisruptionBudget
+              metadata:
+                name: kyverno-admission-controller
+                namespace: kyverno
+              spec:
+                minAvailable: 1
+        # The three leader-elected controllers, one replica each.
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: kyverno-background-controller
+                namespace: kyverno
+              spec:
+                replicas: 1
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: kyverno-cleanup-controller
+                namespace: kyverno
+              spec:
+                replicas: 1
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: kyverno-reports-controller
+                namespace: kyverno
+              spec:
+                replicas: 1
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        # Kyverno's own config carries the namespaces no webhook of its sees:
+        # the control plane's and Flux's, on top of its own.
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: kyverno
+                namespace: kyverno
+              data:
+                (contains(webhooks, 'flux-system')): true
+                (contains(webhooks, 'kube-system')): true
+        # The chart's dashboard, labelled for the grafana module's sidecar.
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: kyverno-grafana-grafana
+                namespace: kyverno
+                labels:
+                  grafana_dashboard: '1'
+        # Scraped by otel_gateway, which reads these annotations.
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: kyverno-admission-controller
+                namespace: kyverno
+              spec:
+                template:
+                  metadata:
+                    annotations:
+                      prometheus.io/scrape: 'true'
+                      prometheus.io/port: '8000'
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: kyverno
+            name: kyverno
+        - events:
+            namespace: kyverno
+        - podLogs:
+            namespace: kyverno
+            tail: 40
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 40
+    # The order of valuesFrom, proven whole (docs/flux-catalog.md §6): the
+    # socle's document, then kube.kyverno.values, then the Secret the client
+    # names in values_secret — created by him in the module's namespace, never
+    # read by OpenTofu, merged last. On the reports controller's memory
+    # request, which the socle sets to 64Mi — one replica, so each step is one
+    # rollout, not three: 80Mi in values, 96Mi in the Secret; the live object
+    # carries the Secret's; both cleared, the socle's.
+    - name: kube.kyverno.values_secret is merged last, over values and the socle
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: kyverno-e2e-values
+                namespace: kyverno
+                labels:
+                  reconcile.fluxcd.io/watch: Enabled
+              stringData:
+                values.yaml: |
+                  reportsController:
+                    resources:
+                      requests:
+                        memory: 96Mi
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    kyverno:
+                      values_secret: kyverno-e2e-values
+                      values:
+                        reportsController:
+                          resources:
+                            requests:
+                              memory: 80Mi
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: kyverno-reports-controller
+                namespace: kyverno
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'controller'] || `[]`):
+                      - resources:
+                          requests:
+                            memory: 96Mi
+              status:
+                readyReplicas: 1
+                updatedReplicas: 1
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    kyverno:
+                      values_secret: ''
+                      values:
+                        reportsController: null
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: kyverno-reports-controller
+                namespace: kyverno
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'controller'] || `[]`):
+                      - resources:
+                          requests:
+                            memory: 64Mi
+              status:
+                readyReplicas: 1
+                updatedReplicas: 1
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Secret
+              name: kyverno-e2e-values
+              namespace: kyverno
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: kyverno
+            name: kyverno
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 40
+    # Off is the default, so this step also leaves the inputs as it found
+    # them. The chart removes Kyverno's webhook configurations in a pre-delete
+    # hook; whatever it misses would stay registered with no server behind it.
+    - name: enabled = false garbage-collects the module, every webhook configuration and every CRD
+      try:
+        # The release must be idle before the module goes: helm-controller
+        # honours a deletion only once the running action returns, and the
+        # values steps above have just driven an upgrade — turned off under
+        # Helm's --wait, the namespace is garbage-collected, the rollout can
+        # never finish, and the deletion waits the release's whole timeout
+        # (five minutes, measured four times on external-dns).
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: kyverno
+                namespace: kyverno
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'Released'] || `[]`):
+                  - status: 'True'
+                (length(conditions[?type == 'Reconciling'] || `[]`)): 0
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    kyverno:
+                      enabled: false
+        - error:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: kyverno
+                namespace: kyverno
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: kyverno
+        - error:
+            resource:
+              apiVersion: admissionregistration.k8s.io/v1
+              kind: ValidatingWebhookConfiguration
+              metadata:
+                labels:
+                  webhook.kyverno.io/managed-by: kyverno
+        - error:
+            resource:
+              apiVersion: admissionregistration.k8s.io/v1
+              kind: MutatingWebhookConfiguration
+              metadata:
+                labels:
+                  webhook.kyverno.io/managed-by: kyverno
+        - error:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: validatingpolicies.policies.kyverno.io
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: kyverno
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (length(inventory.entries || `[]`)): 0
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: kyverno
+        - get:
+            apiVersion: admissionregistration.k8s.io/v1
+            kind: ValidatingWebhookConfiguration
+        - get:
+            apiVersion: admissionregistration.k8s.io/v1
+            kind: MutatingWebhookConfiguration
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 60
+        - podLogs:
+            namespace: flux-system
+            selector: app.kubernetes.io/name=flux-operator
+            tail: 40
