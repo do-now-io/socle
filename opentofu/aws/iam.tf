@@ -279,6 +279,11 @@ resource "aws_iam_role_policy" "crossplane" {
           "s3:PutBucketPublicAccessBlock",
           "s3:PutEncryptionConfiguration",
           "s3:PutLifecycleConfiguration",
+          # The provider reads and writes a bucket's tags through S3 Control
+          # (ListTagsForResource), not GetBucketTagging — measured on floci.
+          "s3:ListTagsForResource",
+          "s3:TagResource",
+          "s3:UntagResource",
         ]
         Resource = "arn:aws:s3:::${var.cluster_name}-*"
       },

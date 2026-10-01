@@ -280,7 +280,9 @@ as it manages roles under its path — a capability of the socle, which
 2. **`opentofu/aws/iam.tf`**, Crossplane's own policy gains one statement,
    `ManageBucketsUnderTheClusterPrefix`, on `arn:aws:s3:::<cluster>-*`: create
    the bucket, read its configuration, and write its versioning, encryption,
-   public access block, lifecycle and tags. **No `s3:DeleteBucket`, no
+   public access block, lifecycle and tags — the tags through S3 Control
+   (`s3:ListTagsForResource`, `s3:TagResource`, `s3:UntagResource`), which
+   is how provider-upjet-aws 2.8.1 reads them (measured on floci). **No `s3:DeleteBucket`, no
    `s3:Delete*`, no object action**: Crossplane can never delete a bucket of
    backups nor read what is in it, whatever a managed resource says. Each
    action is listed — no `s3:*` — and `tofu test` asserts the absences.

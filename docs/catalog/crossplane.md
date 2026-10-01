@@ -240,7 +240,8 @@ for one module:
 - **Crossplane's own identity** gains one statement in `opentofu/aws/iam.tf`,
   `ManageBucketsUnderTheClusterPrefix`, on `arn:aws:s3:::<cluster>-*`. It
   may create a bucket, read its configuration, and write its versioning,
-  encryption, public access block, lifecycle and tags. **It has no
+  encryption, public access block, lifecycle and tags — the tags through S3
+  Control, as the provider reads them. **It has no
   `s3:Delete*`, no object action, no bucket policy and no ACL**: Crossplane
   can never delete a bucket of data, nor read what is in it, nor open it to
   anyone. `tofu test` asserts each of these absences.
