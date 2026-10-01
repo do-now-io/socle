@@ -1,0 +1,73 @@
+---
+# Self-hosted Renovate: the repository's renovate.json, run from here instead
+# of the Mend-hosted app, so the cadence, the version and the logs stay in
+# this repository and nothing leaves GitHub.
+#
+# The identity is a GitHub App owned by do-now-io, never the GITHUB_TOKEN:
+# a pull request opened with the GITHUB_TOKEN triggers no workflow, so the
+# required checks would never run, and the GITHUB_TOKEN may not touch
+# .github/workflows/ at all, which is where the github-actions group writes.
+# App id in the RENOVATE_APP_ID variable, private key in the
+# RENOVATE_APP_PRIVATE_KEY secret; until both exist the job is skipped.
+#
+# Human gate: renovate.json sets dependencyDashboardApproval, so no PR exists
+# before its box is ticked on the Dependency Dashboard issue. Ticking it
+# edits the issue, which runs this workflow within the minute.
+name: Renovate
+
+on:
+  schedule:
+    - cron: "17 * * * *"      # hourly; the renovate.json schedule still governs PR creation
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Compute everything, write nothing (dryRun=full)
+        type: boolean
+        default: false
+      log-level:
+        description: Renovate log level
+        type: choice
+        options: [info, debug]
+        default: info
+  issues:
+    types: [edited]           # a box ticked on the Dependency Dashboard
+  push:
+    branches: [main]
+    paths: [renovate.json]
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  renovate:
+    name: Renovate
+    runs-on: ubuntu-latest
+    # Skip until the App is configured, and on every issue edit that is not a
+    # human on the dashboard: Renovate rewrites that issue on every run, and
+    # an App token's edits do trigger workflows, which would loop.
+    if: >-
+      vars.RENOVATE_APP_ID != '' &&
+      (github.event_name != 'issues' ||
+       (github.event.issue.title == 'Dependency Dashboard' &&
+        !endsWith(github.event.sender.login, '[bot]')))
+    steps:
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app
+        with:
+          app-id: ${{ vars.RENOVATE_APP_ID }}
+          private-key: ${{ secrets.RENOVATE_APP_PRIVATE_KEY }}
+
+      - uses: renovatebot/github-action@6d26fcf0275dc65624cbc3d51fe78bc773f98321 # v46.3.6
+        with:
+          token: ${{ steps.app.outputs.token }}
+        env:
+          RENOVATE_REPOSITORIES: ${{ github.repository }}
+          RENOVATE_ONBOARDING: "false"             # renovate.json already exists
+          # Commits go through the GitHub API under the App's identity, so
+          # they are signed and show as Verified; no git author to configure.
+          RENOVATE_PLATFORM_COMMIT: enabled
+          RENOVATE_DRY_RUN: ${{ inputs.dry-run && 'full' || '' }}
+          LOG_LEVEL: ${{ inputs.log-level || 'info' }}
