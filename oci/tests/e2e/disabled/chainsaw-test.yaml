@@ -1,0 +1,56 @@
+# A module turned off through OpenTofu: kube.<module>.enabled = false went
+# through the client's whole path — validation, the envelope's Helm upgrade,
+# the operator re-rendering — and the module's ResourceSet is Ready with an
+# empty inventory: the operator omits a disabled module's objects and
+# garbage-collects what it had applied. The operator labels everything it
+# renders with resourceset.fluxcd.controlplane.io/name, so a namespace still
+# carrying the module's name is a namespace it failed to collect.
+# Bindings: $values.resourceset, the module's ResourceSet — its folder name.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: disabled
+  labels:
+    phase: disabled
+    cloud: any
+    platform: any
+spec:
+  description: The module's ResourceSet is Ready and renders nothing.
+  timeouts:
+    assert: 3m
+    error: 3m
+  steps:
+    - name: the module's ResourceSet is Ready with nothing in its inventory
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: ($values.resourceset)
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (length(inventory.entries || `[]`)): 0
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                labels:
+                  resourceset.fluxcd.controlplane.io/name: ($values.resourceset)
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: ($values.resourceset)
+        - describe:
+            apiVersion: v1
+            kind: Namespace
+            selector: resourceset.fluxcd.controlplane.io/namespace=flux-system
+        - podLogs:
+            namespace: flux-system
+            selector: app.kubernetes.io/name=flux-operator
+            tail: 40

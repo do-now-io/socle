@@ -71,6 +71,10 @@ spec:
     metadata:
       name: argocd-socle-values
       namespace: argocd
+      labels:
+        # helm-controller watches a valuesFrom ConfigMap only with this label;
+        # without it, a change here waits for the next interval (10m).
+        reconcile.fluxcd.io/watch: Enabled
       annotations:
         fluxcd.controlplane.io/reconcile: << if inputs.modules.argocd.enabled >>enabled<< else >>disabled<< end >>
     data:
@@ -156,6 +160,10 @@ spec:
     metadata:
       name: argocd-client-values
       namespace: argocd
+      labels:
+        # helm-controller watches a valuesFrom ConfigMap only with this label;
+        # without it, a change here waits for the next interval (10m).
+        reconcile.fluxcd.io/watch: Enabled
       annotations:
         fluxcd.controlplane.io/reconcile: << if inputs.modules.argocd.enabled >>enabled<< else >>disabled<< end >>
     data:

@@ -1,0 +1,536 @@
+# The victoria_logs module's proof (docs/catalog/victoria-logs.md): the
+# monitoring stack's logs storage, on by default. Selected by label:
+#   health   the ResourceSet Ready, the server Available on a Bound claim, and
+#            each of the three paths that write logs reaching it, each proven
+#            by a token no other record carries (vl.sh): a container's log read
+#            from /var/log/pods by otel_agent (a short-lived pod echoing the
+#            token), the Kubernetes events from otel_gateway, and an
+#            application's OTLP log posted to the gateway by podinfo.
+#   module   a client request beats the socle's; off takes the logs path out of
+#            both collectors (the agent back to non-root with no hostPath) and
+#            the datasource out of Grafana; on brings all of it back on a new
+#            claim.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: victoria-logs-health
+  labels:
+    phase: health
+    cloud: any
+    platform: any
+spec:
+  description: >-
+    VictoriaLogs is Available on a Bound claim and receives the agent's, the
+    gateway's and an application's logs.
+  timeouts:
+    assert: 5m
+    exec: 5m
+  steps:
+    - name: the ResourceSet is Ready, the server Available on a Bound claim
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: victoria-logs
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        # storage_size, the catalog's 20Gi, Bound on the cluster's default class.
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: PersistentVolumeClaim
+              metadata:
+                name: victoria-logs
+                namespace: victoria-logs
+              spec:
+                resources:
+                  requests:
+                    storage: 20Gi
+              status:
+                phase: Bound
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: victoria-logs
+                namespace: victoria-logs
+              spec:
+                template:
+                  spec:
+                    (containers[0].args || `[]`):
+                      (contains(@, '--retentionPeriod=7d')): true
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: victoria-logs
+            name: victoria-logs
+        - describe:
+            apiVersion: v1
+            kind: PersistentVolumeClaim
+            namespace: victoria-logs
+        - events:
+            namespace: victoria-logs
+        - podLogs:
+            namespace: victoria-logs
+            tail: 40
+    # A container's log: a new file under /var/log/pods, which file_log reads
+    # from its first line (start_at: end only applies to files already there).
+    # Kubernetes events, which k8sobjects tags k8s.resource.name=events; the
+    # probe pod's own are looked for by name and reported, not asserted.
+    - name: a container's line, the Kubernetes events and an OTLP log reach VictoriaLogs
+      try:
+        - script:
+            content: |
+              . ./vl.sh
+              token="$(date +%s)"
+              kubectl -n hello run "socle-e2e-probe-$token" --restart=Never \
+                --image=ghcr.io/stefanprodan/podinfo:6.15.0 --command -- sh -c "echo socle-e2e-logline-$token"
+              wait_hits "\"socle-e2e-logline-$token\""
+              fields "\"socle-e2e-logline-$token\""
+              wait_hits 'k8s.resource.name:=events'
+              echo "the probe pod's events by name: $(hits "\"socle-e2e-probe-$token\"")"
+              kubectl -n hello delete pod "socle-e2e-probe-$token" --wait=false > /dev/null
+              post_otlp_log "socle-e2e-otlplog-$token"
+              wait_hits "\"socle-e2e-otlplog-$token\"" 24
+      catch:
+        - podLogs:
+            namespace: otel-agent
+            tail: 40
+        - podLogs:
+            namespace: otel-gateway
+            tail: 40
+        - podLogs:
+            namespace: victoria-logs
+            tail: 40
+---
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: victoria-logs-module
+  labels:
+    phase: module
+    cloud: any
+    platform: any
+spec:
+  description: >-
+    A client request wins over the socle's; off takes the logs path out of the
+    collectors and Grafana; on brings it back.
+  timeouts:
+    assert: 5m
+    error: 5m
+  steps:
+    # 128Mi in the socle's document, its 50m request intact.
+    - name: kube.victoria_logs.values beats the socle's memory request, its sibling kept
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    victoria_logs:
+                      values:
+                        server:
+                          resources:
+                            requests:
+                              memory: 160Mi
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: victoria-logs
+                namespace: victoria-logs
+              spec:
+                template:
+                  spec:
+                    (containers[0].resources || `{}`):
+                      requests:
+                        cpu: 50m
+                        memory: 160Mi
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    victoria_logs:
+                      values:
+                        server: null
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: victoria-logs
+            name: victoria-logs
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 40
+    # The order of valuesFrom, proven whole (docs/flux-catalog.md §6): the
+    # socle's document, then kube.victoria_logs.values, then the Secret the client
+    # names in values_secret — created by him in the module's namespace, never
+    # read by OpenTofu, merged last. 160Mi in values and 176Mi in the Secret:
+    # the live object carries the Secret's; both cleared, the socle's 128Mi.
+    - name: kube.victoria_logs.values_secret is merged last, over values and the socle
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: victoria-logs-e2e-values
+                namespace: victoria-logs
+                labels:
+                  reconcile.fluxcd.io/watch: Enabled
+              stringData:
+                values.yaml: |
+                  server:
+                    resources:
+                      requests:
+                        memory: 176Mi
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    victoria_logs:
+                      values_secret: victoria-logs-e2e-values
+                      values:
+                        server:
+                          resources:
+                            requests:
+                              memory: 160Mi
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: victoria-logs
+                namespace: victoria-logs
+              spec:
+                template:
+                  spec:
+                    (containers[0].resources || `{}`):
+                      requests:
+                        memory: 176Mi
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    victoria_logs:
+                      values_secret: ''
+                      values:
+                        server: null
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: victoria-logs
+                namespace: victoria-logs
+              spec:
+                template:
+                  spec:
+                    (containers[0].resources || `{}`):
+                      requests:
+                        memory: 128Mi
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Secret
+              name: victoria-logs-e2e-values
+              namespace: victoria-logs
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: victoria-logs
+            name: victoria-logs
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 40
+    # retention, the named attribute behind -retentionPeriod.
+    - name: kube.victoria_logs.retention reaches the live args
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    victoria_logs:
+                      retention: 14d
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: victoria-logs
+                namespace: victoria-logs
+              spec:
+                template:
+                  spec:
+                    (containers[0].args || `[]`):
+                      (contains(@, '--retentionPeriod=14d')): true
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    victoria_logs:
+                      retention: 7d
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: victoria-logs
+                namespace: victoria-logs
+              spec:
+                template:
+                  spec:
+                    (containers[0].args || `[]`):
+                      (contains(@, '--retentionPeriod=7d')): true
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: victoria-logs
+            name: victoria-logs
+    # Off: both collectors drop their logs pipeline (the agent its hostPath and
+    # its root user with it) and Grafana its datasource.
+    - name: enabled = false takes the logs path out of the collectors and Grafana
+      try:
+        # The release must be idle before the module goes: helm-controller
+        # honours a deletion only once the running action returns, and the
+        # values steps above have just driven an upgrade — turned off under
+        # Helm's --wait, the namespace is garbage-collected, the rollout can
+        # never finish, and the deletion waits the release's whole timeout
+        # (five minutes, measured four times on external-dns).
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: victoria-logs
+                namespace: victoria-logs
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'Released'] || `[]`):
+                  - status: 'True'
+                (length(conditions[?type == 'Reconciling'] || `[]`)): 0
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    victoria_logs:
+                      enabled: false
+        - error:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: victoria-logs
+                namespace: victoria-logs
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: otel-agent-agent
+                namespace: otel-agent
+              data:
+                (contains(relay, 'otlp_http/victoria-logs')): false
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: otel-gateway
+                namespace: otel-gateway
+              data:
+                (contains(relay, 'otlp_http/victoria-logs')): false
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: grafana
+                namespace: grafana
+              data:
+                (contains("datasources.yaml", 'victoria-logs')): false
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: otel-agent-agent
+                namespace: otel-agent
+              spec:
+                template:
+                  spec:
+                    (containers[0].securityContext.runAsUser == null): true
+                    (length(volumes[?hostPath] || `[]`)): 0
+              status:
+                (desiredNumberScheduled > `0` && updatedNumberScheduled == desiredNumberScheduled): true
+                (numberReady == desiredNumberScheduled): true
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: victoria-logs
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+        - describe:
+            apiVersion: apps/v1
+            kind: DaemonSet
+            namespace: otel-agent
+            name: otel-agent-agent
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 40
+    - name: back to the defaults, a new claim is Bound and the logs path is back everywhere
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    victoria_logs:
+                      enabled: true
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: PersistentVolumeClaim
+              metadata:
+                name: victoria-logs
+                namespace: victoria-logs
+              status:
+                phase: Bound
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: otel-agent-agent
+                namespace: otel-agent
+              data:
+                (contains(relay, 'otlp_http/victoria-logs')): true
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: otel-gateway
+                namespace: otel-gateway
+              data:
+                (contains(relay, 'otlp_http/victoria-logs')): true
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: grafana
+                namespace: grafana
+              data:
+                (contains("datasources.yaml", 'victoria-logs')): true
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: grafana
+                namespace: grafana
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: victoria-logs
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: victoria-logs
+        - events:
+            namespace: victoria-logs
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 40

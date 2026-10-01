@@ -1,0 +1,362 @@
+# The gateway_api module's proof (docs/catalog/cilium.md §4). Selected by
+# label:
+#   health   the standard CRDs established from upstream through Flux —
+#            nothing vendored — and the ResourceSet Ready
+#   module   off: the Flux objects go and the CRDs stay (deletionPolicy:
+#            Orphan — deleting a CRD deletes every Gateway of every client);
+#            on: the Kustomization is back and adopts them
+#   destroyed  after `tofu destroy` of the socle: the standard CRDs are still
+#            there, Established — orphaned by design, so every Gateway and
+#            route of every client survives the socle's uninstall.
+# The Cilium GatewayClass, the operator restart (inputs.cilium.gatewayApi)
+# and the two shared Gateways (inputs.gateway.shared) need the socle's
+# Cilium, which no floci root installs: not provable here. What floci does
+# prove is the negative, in a Test of its own (`platform: floci`): shared is
+# false, and the template renders no Gateway — the child ResourceSet and
+# gateway-system are absent. The sandbox (M4) runs the positive.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: gateway-api-health
+  labels:
+    phase: health
+    cloud: any
+    platform: any
+spec:
+  description: The Gateway API standard CRDs are established from the pinned upstream commit.
+  timeouts:
+    assert: 3m
+  steps:
+    - name: the ResourceSet, its GitRepository and its Kustomization are Ready
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: gateway-api
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: source.toolkit.fluxcd.io/v1
+              kind: GitRepository
+              metadata:
+                name: gateway-api
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                artifact:
+                  (starts_with(revision || '', 'release-1.6@sha1:')): true
+        - assert:
+            resource:
+              apiVersion: kustomize.toolkit.fluxcd.io/v1
+              kind: Kustomization
+              metadata:
+                name: gateway-api-crds
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: source.toolkit.fluxcd.io/v1
+            kind: GitRepository
+            namespace: flux-system
+            name: gateway-api
+        - describe:
+            apiVersion: kustomize.toolkit.fluxcd.io/v1
+            kind: Kustomization
+            namespace: flux-system
+            name: gateway-api-crds
+        - podLogs:
+            namespace: flux-system
+            selector: app=source-controller
+            tail: 40
+    - name: the standard CRDs are established
+      try:
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: gatewayclasses.gateway.networking.k8s.io
+              status:
+                (conditions[?type == 'Established'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: gateways.gateway.networking.k8s.io
+              status:
+                (conditions[?type == 'Established'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: httproutes.gateway.networking.k8s.io
+              status:
+                (conditions[?type == 'Established'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: grpcroutes.gateway.networking.k8s.io
+              status:
+                (conditions[?type == 'Established'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: referencegrants.gateway.networking.k8s.io
+              status:
+                (conditions[?type == 'Established'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: kustomize.toolkit.fluxcd.io/v1
+            kind: Kustomization
+            namespace: flux-system
+            name: gateway-api-crds
+        - podLogs:
+            namespace: flux-system
+            selector: app=kustomize-controller
+            tail: 40
+---
+# floci only: no Cilium, so no shared Gateways (docs/catalog/gateway-api.md).
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: gateway-api-floci
+  labels:
+    phase: health
+    cloud: aws
+    platform: floci
+spec:
+  description: Without Cilium, inputs.gateway.shared is false and no Gateway is rendered.
+  timeouts:
+    assert: 1m
+    error: 1m
+  steps:
+    - name: shared is false and the Gateways' ResourceSet does not exist
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  gateway:
+                    shared: false
+                    className: ''
+                  modules:
+                    gateway_api:
+                      gateways: true
+        - error:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: gateway-api-gateways
+                namespace: flux-system
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: gateway-system
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+---
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: gateway-api-module
+  labels:
+    phase: module
+    cloud: any
+    platform: any
+spec:
+  description: Off removes the Flux objects and orphans the CRDs; on adopts them again.
+  timeouts:
+    assert: 3m
+    error: 3m
+  steps:
+    - name: enabled = false garbage-collects the Flux objects and orphans the CRDs
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    gateway_api:
+                      enabled: false
+        - error:
+            resource:
+              apiVersion: kustomize.toolkit.fluxcd.io/v1
+              kind: Kustomization
+              metadata:
+                name: gateway-api-crds
+                namespace: flux-system
+        - error:
+            resource:
+              apiVersion: source.toolkit.fluxcd.io/v1
+              kind: GitRepository
+              metadata:
+                name: gateway-api
+                namespace: flux-system
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: gateway-api
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (length(inventory.entries || `[]`)): 0
+        # Orphaned, not deleted: every Gateway of every client survives.
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: gateways.gateway.networking.k8s.io
+              status:
+                (conditions[?type == 'Established'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: gateway-api
+        - podLogs:
+            namespace: flux-system
+            selector: app.kubernetes.io/name=flux-operator
+            tail: 40
+    - name: back to the defaults, the Kustomization adopts the CRDs
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    gateway_api:
+                      enabled: true
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: gateway-api
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        # First that the operator re-created it: kubectl wait fails at once on
+        # a NotFound (measured, run 36845204178), where an assert retries.
+        - assert:
+            resource:
+              apiVersion: kustomize.toolkit.fluxcd.io/v1
+              kind: Kustomization
+              metadata:
+                name: gateway-api-crds
+                namespace: flux-system
+        # A re-created Kustomization goes through Ready=Unknown while its
+        # source is fetched again; kubectl wait rides that out where a
+        # Chainsaw assert once gave up early (measured, once, 2026-09-30).
+        - wait:
+            apiVersion: kustomize.toolkit.fluxcd.io/v1
+            kind: Kustomization
+            name: gateway-api-crds
+            namespace: flux-system
+            timeout: 3m
+            for:
+              condition:
+                name: Ready
+                value: 'true'
+        - assert:
+            resource:
+              apiVersion: kustomize.toolkit.fluxcd.io/v1
+              kind: Kustomization
+              metadata:
+                name: gateway-api-crds
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: kustomize.toolkit.fluxcd.io/v1
+            kind: Kustomization
+            namespace: flux-system
+            name: gateway-api-crds
+        - podLogs:
+            namespace: flux-system
+            selector: app=kustomize-controller
+            tail: 40
+---
+# After `tofu destroy -target=module.socle`: the CRDs are the one thing the
+# gateway_api module leaves on purpose (deletionPolicy: Orphan).
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: gateway-api-destroyed
+  labels:
+    phase: destroyed
+    cloud: any
+    platform: any
+spec:
+  description: The Gateway API standard CRDs survive the socle's uninstall.
+  timeouts:
+    assert: 1m
+  steps:
+    - name: the standard CRDs are still Established
+      try:
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: gateways.gateway.networking.k8s.io
+              status:
+                (conditions[?type == 'Established'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: httproutes.gateway.networking.k8s.io
+              status:
+                (conditions[?type == 'Established'] || `[]`):
+                  - status: 'True'

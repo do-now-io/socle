@@ -142,6 +142,11 @@ VictoriaMetrics and no plugin.
 | `e2e-aws-catalog` | `victoria_logs` disabled | no logs exporter in either collector, no datasource in Grafana, the agent back to **non-root with no `hostPath`** (`runAsUser` and `hostPath` both empty on the live DaemonSet) |
 | `e2e-aws-catalog` | re-enabled | a new claim `Bound`, both collectors exporting to it, the datasource provisioned, **28 s** |
 
+**e2e, through Chainsaw** (`tests/e2e/chainsaw-test.yaml`, since the e2e moved
+into the modules — `docs/flux-catalog.md` §8). The table above is the bash phase
+this module shipped with; the same proof now runs on every push in the `root`
+job (`health`) and the module's own job (`health`, then `module`): `victoria-logs-health` asserts the Bound claim and the three write paths by token (`vl.sh`): a probe pod's line through the agent, the Kubernetes events through the gateway, an OTLP log posted by podinfo; `victoria-logs-module` patches the memory request (160Mi over 128Mi), turns the module off — no logs exporter in either collector, no datasource in Grafana, the agent back to non-root with no hostPath — and on again on a new claim.
+
 Jobs: `e2e-aws-root` 3m50s, `e2e-aws-catalog` 14m36s.
 
 **What the run found about events.** `k8sobjects` sends each event as a

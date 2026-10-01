@@ -247,7 +247,7 @@ spec:
             # The three optional entries read a Secret named external-dns-aws that
             # the client creates: static keys, and AWS_ENDPOINT_URL for a Route
             # 53-compatible endpoint — the e2e runs external-dns against floci that
-            # way (.github/scripts/e2e/external-dns.sh). An optional secretKeyRef
+            # way (tests/e2e/chainsaw-test.yaml). An optional secretKeyRef
             # whose Secret is absent sets no variable, and the SDK falls through to
             # its default chain: with Crossplane on, the Pod Identity association
             # the access step made for the module's own role.

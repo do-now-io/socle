@@ -1,0 +1,123 @@
+# The socle's own proof, on any cloud, on any root: the artifact reached the
+# cluster by its exact tag with its signature verified, and the root
+# converged — socle-root has wait: true, so its Ready means the Kustomization
+# applied every module's ResourceSet and each of those reached Ready.
+# Bindings: $values.tag, the tag the run published; $values.cluster and
+# $values.cloud, what the root was applied with. Run on every job, after the
+# apply and again after the OpenTofu mutation brought the defaults back.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: root
+  labels:
+    phase: root
+    cloud: any
+    platform: any
+spec:
+  description: The artifact is pulled by tag and verified, and the root ResourceSet converges.
+  timeouts:
+    assert: 5m
+  steps:
+    # What OpenTofu deposited, exactly as the templates read it: the inputs of
+    # the one provider carry the tag, the cluster and the cloud of the apply.
+    - name: the inputs OpenTofu deposited name this tag, this cluster and this cloud
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                type: Static
+                defaultValues:
+                  cloud: ($values.cloud)
+                  cluster:
+                    name: ($values.cluster)
+                  socle:
+                    version: ($values.tag)
+                    pullSecret: ghcr-auth
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSetInputProvider
+            namespace: flux-system
+            name: socle
+    - name: the artifact is pulled by its exact tag and its signature verifies
+      try:
+        - assert:
+            resource:
+              apiVersion: source.toolkit.fluxcd.io/v1
+              kind: OCIRepository
+              metadata:
+                name: socle
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'SourceVerified'] || `[]`):
+                  - status: 'True'
+                artifact:
+                  (starts_with(revision || '', join('', [$values.tag, '@']))): true
+      catch:
+        - describe:
+            apiVersion: source.toolkit.fluxcd.io/v1
+            kind: OCIRepository
+            namespace: flux-system
+            name: socle
+        - podLogs:
+            namespace: flux-system
+            selector: app=source-controller
+            tail: 40
+    # socle-root's inventory names the Kustomization; the Kustomization's
+    # wait covers every ResourceSet it applied; each ResourceSet's wait
+    # covers what it rendered. One condition, the whole tree.
+    - name: the root ResourceSet converges
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: socle-root
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: kustomize.toolkit.fluxcd.io/v1
+              kind: Kustomization
+              metadata:
+                name: socle
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+        - describe:
+            apiVersion: kustomize.toolkit.fluxcd.io/v1
+            kind: Kustomization
+            namespace: flux-system
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: '*'
+        - events:
+            namespace: '*'
+        - podLogs:
+            namespace: flux-system
+            selector: app.kubernetes.io/name=flux-operator
+            tail: 80
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 80

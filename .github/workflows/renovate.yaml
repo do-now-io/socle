@@ -44,7 +44,7 @@ concurrency:
 jobs:
   renovate:
     name: Renovate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Skip until the App is configured, and on every issue edit that is not a
     # human on the dashboard: Renovate rewrites that issue on every run, and
     # an App token's edits do trigger workflows, which would loop.

@@ -21,7 +21,7 @@ EKS, GKE, AKS and Kapsule.
 | Version pin | `socle_version` in the tfvars drives both module sources and the artifact tag |
 | Artifact from `main` | `<next>-alpha.N` on every push, `<next>` read from the conventional commits since the last release; merging release-please's PR re-tags that alpha as the release, cosign keyless |
 | Artifact from a branch | A pre-release tag `0.0.0-<branch>.<sha>`, deletable, signed by the branch |
-| CI convergence proof | Two jobs in `publish-artifact.yaml`: `e2e-aws-root` applies the real `opentofu/clusters/aws` on floci once and asserts convergence; `e2e-aws-catalog` applies a bare fixture root and runs the mutations, because floci cannot re-apply the real one |
+| CI convergence proof | `e2e.yaml`, called by `publish-artifact.yaml`: the real `opentofu/clusters/aws` applied once on floci, then one job per (module, cloud) on a bare fixture root, each module proven by its own Chainsaw suite (`oci/catalog/<module>/tests/e2e`), every job ending in `tofu destroy` |
 
 ## 1. Three roles, never mixed
 
@@ -297,9 +297,14 @@ oci/
 ├── clusters/
 │   ├── aws/kustomization.yaml       # lists the catalog ResourceSets available on this cloud
 │   ├── gcp/  azure/  scaleway/
+├── tests/e2e/                       # the socle's own Chainsaw suite: root, disabled, destroyed
 └── catalog/
-    ├── hello/resourceset.yaml       # v1: podinfo, proves the pipeline
-    └── <module>/resourceset.yaml
+    ├── hello/                       # v1: podinfo, proves the pipeline — and the model for every module
+    │   ├── resourceset.yaml
+    │   └── tests/e2e/chainsaw-test.yaml
+    └── <module>/
+        ├── resourceset.yaml
+        └── tests/e2e/               # chainsaw-test.yaml, and values.yaml when the tests need bindings
 ```
 
 Rules for a module template, all measured:
@@ -420,6 +425,37 @@ Rules for a module template, all measured:
   Crossplane, a module's role, that module's workload — are in
   `docs/catalog/crossplane.md`; each
   module's own note says what access it declares.
+
+- **A module ships its e2e proof, in `tests/e2e/chainsaw-test.yaml`**, run
+  by [Chainsaw](https://kyverno.github.io/chainsaw/) on floci's k3s
+  (§8). CI discovers the matrix from those folders and never names a module;
+  `.github/scripts/check-catalog-clouds.sh` fails a module without the file.
+  The file holds one `Test` per phase, selected by label:
+
+  | Label | Runs where | Holds |
+  | --- | --- | --- |
+  | `phase: health` | every job, the real root's included | what a converged cluster shows at the catalog defaults: the ResourceSet Ready, the workload Available, the socle's own values on the live objects |
+  | `phase: module` | the module's own job, on the fixture root | the mutations, through a `patch` of the `ResourceSetInputProvider` `socle` — the object a `tofu apply` changes: a value reaching the chart, the client's value beating the socle's on a key the socle sets, off (garbage-collected), back on, and what the module proves against the cloud; the last step leaves the inputs as it found them |
+  | `cloud: any` / `cloud: <cloud>` | on every cloud, or on that cloud's job only | a per-cloud assertion (an overlay's patch, the module's IAM role) is a `Test` of its own |
+  | `phase: destroyed` | after `tofu destroy` of the socle, beside the socle's own `destroyed` suite | what must survive the uninstall by design — the Gateway API CRDs |
+  | `platform: any` / `platform: floci` | everywhere, or on floci only | what only floci can state — a negative where the sandbox (M4) runs the positive: no shared Gateway without Cilium, no ArgoCD route without a Gateway |
+
+  What a module's `module` phase proves, at least: every named attribute of
+  its catalog entry reaching the live object it feeds; the whole order of
+  `valuesFrom` — a key the socle sets, overridden by `values`, overridden
+  again by the Secret the client names in `values_secret` (created in the
+  module's namespace, labelled `reconcile.fluxcd.io/watch: Enabled`, merged
+  last), then both cleared and the socle's value back; off, every object it
+  rendered garbage-collected and what it says of the modules that depend on
+  it (the collectors ending in `nop` when their backend goes); on again.
+
+  Every step carries a `catch` that prints what the next failure needs
+  (`describe`, `events`, `podLogs`), and a `script` is the one escape hatch —
+  for what the cluster cannot see, a record in floci's Route 53. What floci
+  cannot serve (Pod Identity, today) is a step of its own, named as a seam,
+  to delete the day it does. `hello` is the model; `values.yaml` beside the
+  test carries bindings the job does not set (the job sets `tag`, `cloud`,
+  `floci_ip`, and `resourceset` for the generic suite).
 
 Deleting a `ResourceSet` uninstalls everything it rendered — measured.
 
@@ -573,40 +609,124 @@ instead of emitting it with `reconcile: disabled`, so on/off behaviour is
 asserted on the live cluster, never on the CLI render. kubeconform v0.7.0's
 schema-location template uses `{{.ResourceAPIVersion}}`.
 
-**Integration**, built in Task 11: two jobs in `publish-artifact.yaml`, both
-`needs: publish`, not a leg of `integration.yaml`. Each starts its own floci
-with the Docker socket mounted and the mock flag dropped — Kubernetes needs
-both, which is why `integration.yaml`'s legs, still started with
-`FLOCI_SERVICES_EKS_MOCK=true`, stay plan-only. Both pull the branch
-pre-release the same commit just published, so signature and identity are
-exercised end to end.
+**e2e (`e2e.yaml`, called by `publish-artifact.yaml` with the tag it just
+pushed).** Every job runs on `ubuntu-24.04` — the label is pinned, not
+`ubuntu-latest`, which migrates to Ubuntu 26 on 2026-10-19
+(actions/runner-images#14748); a runner bump is a deliberate one-line change
+— with floci 2.1.0 as a service
+container — the image is a `services:` entry Renovate reads, the Docker
+socket a `volumes:` line, and floci's k3s joins the job's Docker network, so
+a pod reaches floci at the container's IP (`FLOCI_IP`), never at the
+runner's localhost. `.github/actions/e2e-cluster` is the only place a shell
+runs: a registered IAM key (floci 2.x rejects `test`/`test` on the EKS token
+webhook), `tofu init` and `apply` of the root, a kubeconfig carrying a
+ServiceAccount token (floci refuses the presigned `aws eks get-token` after
+60 s and Chainsaw does not re-run the plugin), the GHCR pull secret from the
+workflow's own token; and `tofu destroy` at the end. Everything else is a
+Chainsaw suite.
 
-`e2e-aws-root` applies the real `opentofu/clusters/aws` against floci **once**
-(37 resources, ~70 s) and asserts: the root and `hello` `ResourceSet`s Ready,
-the `OCIRepository` revision at the published tag with `SourceVerified=True`,
-`hello`'s podinfo at 1 replica.
+- `root (<cloud>)` applies the real `opentofu/clusters/<cloud>` once with
+  `.github/e2e/<cloud>/floci.tfvars` (floci does not read back several EKS
+  attributes, so a second apply of that root fails), runs the socle's `root`
+  suite and every module's `health` tests, uninstalls the socle
+  (`tofu destroy -target=module.socle`) and asserts the cluster empty.
+- `<module> (<cloud>)`, one job per pair the cloud's overlay deploys: the
+  bare fixture root `.github/e2e/<cloud>/`, the `root` suite and the module's
+  `health` tests, then the module's `module` tests alone (Chainsaw orders
+  tests arbitrarily, and this phase mutates what the other asserts). Then the
+  one mutation that goes through OpenTofu — `kube.<module>.enabled = false`,
+  the `disabled` suite asserting the ResourceSet Ready with an empty
+  inventory and no namespace carrying the module's label; the defaults back,
+  the `root` suite again; `tofu plan -detailed-exitcode` empty — so the
+  client's path is exercised end to end while every other mutation is a
+  Chainsaw `patch` of the same `ResourceSetInputProvider`. Then the socle
+  uninstalled and the `destroyed` suite: no ResourceSet, no FluxInstance, no
+  Deployment in `flux-system`, no namespace labelled by a ResourceSet.
+- `e2e` aggregates them (`needs` every job, `if: always()`, red if any is):
+  the matrix is discovered, so it is the one context a ruleset can require.
 
-`e2e-aws-catalog` applies a bare fixture root
-(`opentofu/clusters/aws/tests/floci/`: an `aws_eks_cluster` plus the real
-bootstrap module) and runs the mutations: `hello.enabled = false` →
-`HelmRelease` garbage-collected (1 s), re-enable → Ready again (~76 s),
-`tofu plan -detailed-exitcode` → exit 0.
+Reports come out as JUnit (`--report-format JUNIT-STEP`) and land in the
+Checks tab, one check per job, the failing step named.
 
-**Why two jobs.** floci applies the real root once but does not read back
-several attributes the EKS and CloudWatch APIs return (EKS `logging`,
-`encryptionConfig`, `upgradePolicy`, `identity`; the log group's `kmsKeyId`;
-the flow-log role), so a refresh of the real root always re-discovers the
-same drift and a second apply fails on an unsupported `AssociateKmsKey`. The
-bare fixture root has none of that surface and is idempotent, so the mutation
-and second-plan assertions run there instead. The version-bump assertion is
-not in CI — it needs a second signed tag — and stays measured only in the
-spike (§11).
+Reference run, the first fully green one:
+<https://github.com/do-now-io/socle/actions/runs/36777789562> — `root`
+4m21s, `hello` 5m12s, `gateway-api` 5m04s, `argocd` 6m06s, `crossplane`
+7m50s, `external-dns` 10m12s (two Crossplane convergences and the two sleeps
+the DNS proof needs; the one job over the 8-minute target of #61). `root`
+and `argocd` were green on four consecutive runs, the others on the runs
+their tests existed in unchanged. Under floci 2.1.0 every job spends ~1m40s
+before Chainsaw starts: floci up, the cluster, the three releases (47 s).
 
-Reference run:
-<https://github.com/do-now-io/socle/actions/runs/35733476935> — `e2e-aws-root`
-2m29s, `e2e-aws-catalog` 3m35s. The `oidc_issuer_url` output of
-`opentofu/aws` is now `try(…, null)`: floci's EKS reports no identity, and an
-unguarded index there would fail the apply.
+**Why one job per module.** Each module's mutations run on their own
+cluster, in parallel, with the argocd images pulled cold on every runner:
+the flake this replaces (`HelmRelease/argocd/argocd … Running 'install'
+action with timeout of 10m0s`, five runs in a row on `main`) now fails on
+one job named after the module, with the `catch` output beside it. The
+first run under Chainsaw (36771300863) caught `ErrImagePull` on
+`argocd-redis` on a cold runner: the pull, not the node, is the suspect.
+
+**Off right after a values change: a five-minute wait, explained.** Turning
+external-dns off took 10 s on one run and five minutes on three others. The
+`finally` of that step prints helm-controller's log, and it reads the same
+every time: `running 'upgrade' action with timeout of 5m0s` — the upgrade
+the `policy = "sync"` patch triggered — then, five minutes to the second
+later, `uninstalled Helm release for deleted resource`. The test had moved
+on as soon as the new pod ran with `--policy=sync`, and turned the module
+off while Helm's `--wait` was still watching the rollout; the operator then
+garbage-collected the namespace, so the rollout could never finish, and
+helm-controller only honours a deletion once the running action returns. A
+client who flips a module off right after changing its values sees the
+same five minutes. Every module's test now gates its `enabled = false` on
+the release being idle — `Ready` and `Released` true, no `Reconciling`
+condition — since each values step before it drives an upgrade.
+
+**What landed on `main` meanwhile, and what floci says of it.** The EKS
+add-ons (Pod Identity Agent, EBS and EFS CSI) stay off on both floci roots:
+floci 2.1.0 has no add-on API at all (`CreateAddon` answers "Unknown
+operation", measured 2026-10-01; nightly records them as metadata only), and
+its k3s would run no add-on workload. The shared Gateways and ArgoCD's
+HTTPRoute need the socle's Cilium, which no floci root installs: two
+`platform: floci` tests assert the negative — `inputs.gateway.shared` false,
+no `gateway-api-gateways` or `argocd-route` ResourceSet, no `gateway-system`
+namespace — so a template that rendered a Gateway without a class would
+fail here. The provider family's new name is asserted Healthy with the
+other two. The positives are the sandbox's (M4).
+
+**Uninstall racing a re-enable.** On one run (36850894039) the
+`victoria-metrics` namespace survived the uninstall, Active, with the
+operator's labels on it, every ResourceSet gone. The job had just applied
+the defaults back after `enabled = false`, asserted `socle-root` Ready —
+true from the previous reconcile, the operator had not re-rendered yet —
+and run `tofu destroy` 18 s later, while the module's ResourceSet was
+re-creating its objects. The operator uninstalls a ResourceSet from the
+inventory of its last *completed* reconcile — empty, from the disabled one
+— and releases the finalizer at once; what the in-flight reconcile had
+applied stays. The job now re-runs the module's `health` tests after the
+defaults are back, so the destroy starts from a converged module. The same
+race exists for a client who turns a module on and destroys right after;
+noted for the operator.
+
+**One flake left, Crossplane's.** Once in five runs (36828601604) the two
+AWS `Provider`s stayed `Healthy=False` — `Deployment does not have minimum
+availability` — for the test's eight minutes while their pods were Running
+and Ready: the package manager's stale view of the Deployment, not the
+pods. The `crossplane-provider-config` ResourceSet waits on that very
+condition, so a client's cluster would stall the same way until Crossplane
+re-evaluates. The test's `catch` now describes the revisions and the
+Deployments and prints the core's log, for the next occurrence; no upstream
+issue matched the message on 2026-10-01.
+
+**`tofu destroy`, run for the first time in CI.** The uninstall order is
+envelope → instance → operator, and Helm's `--wait` (the provider passes
+`wait` to uninstall) only holds the envelope until `socle-root` is gone —
+which happened as soon as the `socle` Kustomization was finalized, i.e. as
+soon as kustomize-controller had *issued* the deletes of the catalog
+ResourceSets. The instance and the operator then went while the operator
+was still finalizing them: five ResourceSets survived with their finalizer
+(run 36771300863, argocd job). `deletionPolicy: WaitForTermination` on the
+`socle` Kustomization holds it until every ResourceSet it pruned is gone;
+measured after the change: the envelope's uninstall waits 12 s, the whole
+socle is gone in 28 s, nothing is left.
 
 ## 9. Convergence signal
 
@@ -637,6 +757,18 @@ module upgraded: 10 s. Second plan: no changes. Typo in an `object`-typed
 `kube`: silently accepted; as `any` with validations: refused with the
 allowed list. `commonMetadata.annotations` templating: not evaluated.
 Variable in module `source`: resolved from tfvars, both modules follow.
+
+**2026-09-30, from `e2e.yaml` on floci 2.1.0** (run
+<https://github.com/do-now-io/socle/actions/runs/36777789562>): the fixture
+root applies in 47 s (cluster 18 s, operator 17 s, instance 15 s), the real
+root in ~70 s; `socle-root` Ready 46–56 s after Chainsaw starts; argocd
+Ready 44–50 s; a value patched into the `ResourceSetInputProvider` reaches
+podinfo in 13 s and argocd-server (with the watch label) within the
+69 s the whole argocd suite takes; crossplane on → core, providers and
+ProviderConfig converged, a module-shaped Role in IAM, off again in
+under 4 minutes cold; `tofu destroy -target=module.socle` with
+`WaitForTermination`: 28 s locally, nothing left; a second `tofu plan` after
+the off/on mutation: empty.
 
 **2026-09-22, from the two `e2e-aws-*` jobs in `publish-artifact.yaml`**
 (run <https://github.com/do-now-io/socle/actions/runs/35733476935>):

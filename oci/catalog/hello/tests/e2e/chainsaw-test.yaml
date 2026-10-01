@@ -1,0 +1,319 @@
+# The hello module's proof — and the model for every module's. One Test per
+# phase, selected by label:
+#   health   what a converged cluster shows on any cloud; run on every job,
+#            the real root's included
+#   module   the mutations, through a patch of the ResourceSetInputProvider —
+#            the object a `tofu apply` changes — on the fixture root only:
+#            a value reaching the chart, the module off (garbage-collected)
+#            and back on. The last step puts the inputs back as it found them.
+# A cloud-bound Test carries `cloud: <cloud>` and runs on that cloud's job.
+# Every `catch` prints what the next failure needs. docs/flux-catalog.md §6.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: hello-health
+  labels:
+    phase: health
+    cloud: any
+    platform: any
+spec:
+  description: podinfo runs, with the socle's message naming the cluster and the cloud.
+  timeouts:
+    assert: 3m
+  steps:
+    - name: the ResourceSet is Ready and podinfo is Available at 1 replica
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: hello
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: podinfo
+                namespace: hello
+              spec:
+                replicas: 1
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        # The catalog's default message, inputs.cluster.name and inputs.cloud,
+        # rendered into one value — exactly. An array in an assertion is
+        # matched by index, so a list is filtered.
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: podinfo
+                namespace: hello
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'podinfo'] || `[]`):
+                      - (env[?name == 'PODINFO_UI_MESSAGE'] || `[]`):
+                          - value: (join('', ['hello from socle — ', $values.cluster, ' on ', $values.cloud]))
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: hello
+            name: podinfo
+        - events:
+            namespace: hello
+        - podLogs:
+            namespace: hello
+            tail: 40
+---
+# The per-cloud overlay: oci/clusters/aws/hello-color.patch.yaml paints
+# podinfo in the cloud's colour. Asserted where the colour is known.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: hello-health-aws
+  labels:
+    phase: health
+    cloud: aws
+    platform: any
+spec:
+  description: The aws overlay's colour reaches podinfo.
+  timeouts:
+    assert: 1m
+  steps:
+    - name: podinfo wears the aws colour
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: podinfo
+                namespace: hello
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'podinfo'] || `[]`):
+                      - (env[?name == 'PODINFO_UI_COLOR'] || `[]`):
+                          - value: '#FF9900'
+---
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: hello-module
+  labels:
+    phase: module
+    cloud: any
+    platform: any
+spec:
+  description: A value reaches the chart; off garbage-collects the module; on brings it back.
+  timeouts:
+    assert: 3m
+    error: 3m
+  steps:
+    - name: kube.hello.replicas reaches the Deployment
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    hello:
+                      replicas: 2
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: podinfo
+                namespace: hello
+              spec:
+                replicas: 2
+              status:
+                readyReplicas: 2
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: hello
+            name: podinfo
+        - events:
+            namespace: hello
+    - name: kube.hello.message reaches the Deployment, the cluster and the cloud still appended
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    hello:
+                      message: hi from the e2e
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: podinfo
+                namespace: hello
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'podinfo'] || `[]`):
+                      - (env[?name == 'PODINFO_UI_MESSAGE'] || `[]`):
+                          - value: (join('', ['hi from the e2e — ', $values.cluster, ' on ', $values.cloud]))
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    hello:
+                      message: hello from socle
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: hello
+            name: podinfo
+    # The operator omits a disabled module's objects entirely: the namespace
+    # it rendered, and everything in it, is garbage-collected.
+    - name: enabled = false garbage-collects the module
+      try:
+        # The release must be idle before the module goes: helm-controller
+        # honours a deletion only once the running action returns, and the
+        # values steps above have just driven an upgrade — turned off under
+        # Helm's --wait, the namespace is garbage-collected, the rollout can
+        # never finish, and the deletion waits the release's whole timeout
+        # (five minutes, measured four times on external-dns).
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: podinfo
+                namespace: hello
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'Released'] || `[]`):
+                  - status: 'True'
+                (length(conditions[?type == 'Reconciling'] || `[]`)): 0
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    hello:
+                      enabled: false
+        - error:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: podinfo
+                namespace: hello
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: hello
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: hello
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (length(inventory.entries || `[]`)): 0
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: hello
+        - podLogs:
+            namespace: flux-system
+            selector: app.kubernetes.io/name=flux-operator
+            tail: 40
+    - name: back to the defaults, podinfo is back at 1 replica
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    hello:
+                      enabled: true
+                      replicas: 1
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: hello
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: podinfo
+                namespace: hello
+              spec:
+                replicas: 1
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: hello
+            name: podinfo
+        - events:
+            namespace: hello
+        - podLogs:
+            namespace: flux-system
+            selector: app.kubernetes.io/name=flux-operator
+            tail: 40

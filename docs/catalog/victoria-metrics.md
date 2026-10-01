@@ -212,6 +212,11 @@ run. `wait-converged.sh` reads `EXPECT_VICTORIA_METRICS`:
 | `e2e-aws-catalog` | disabled with hello and argocd | HelmRelease NotFound within the 10 s step |
 | `e2e-aws-catalog` | re-enabled | Ready again with a **new** claim `Bound` **20 s** after hello |
 
+**e2e, through Chainsaw** (`tests/e2e/chainsaw-test.yaml`, since the e2e moved
+into the modules — `docs/flux-catalog.md` §8). The table above is the bash phase
+this module shipped with; the same proof now runs on every push in the `root`
+job (`health`) and the module's own job (`health`, then `module`): `victoria-metrics-health` asserts the Bound claim, the socle's flags on the live args and a sample read back; `victoria-metrics-module` patches `storage.maxHourlySeries` (the client's 50000 over the socle's 100000), turns the module off — both collectors' pipelines end in `nop`, Grafana drops the datasource — and on again, a new claim Bound and the collectors writing into it.
+
 Job totals: `e2e-aws-root` 2m46s, `e2e-aws-catalog` 12m43s — of which
 Crossplane's step is 5m06s and external-dns' four 2m54s; this module's own
 steps add about half a minute.

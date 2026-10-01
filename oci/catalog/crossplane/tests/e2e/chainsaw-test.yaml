@@ -1,0 +1,601 @@
+# The crossplane module's proof (docs/catalog/crossplane.md §7). Off by
+# default, so `health` proves only the disabled shape; the `module` phase
+# turns it on with one client value, proves what a module declares for its
+# AWS access against floci's IAM, and turns it off again.
+#
+# floci is the one seam, in two steps of their own so they go the day floci
+# runs Pod Identity (on nightly since 2026-09-21, expected in the 2026-10-06
+# stable): the socle's ClusterProviderConfig `default` is on Pod Identity,
+# which floci does not serve, so the test creates a second one, `floci`, with
+# static test keys and floci's endpoint as a pod sees it ($values.floci_ip,
+# the Docker network they share), and points the module-shaped resources at
+# it; and floci 2.1.0 has no association API, so the PodIdentityAssociation
+# never syncs and is released by hand. floci ignores PermissionsBoundary and
+# enforces no policy: the role is proven, the boundary and the policy are not.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: crossplane-health
+  labels:
+    phase: health
+    cloud: any
+    platform: any
+spec:
+  description: Off by default, the ResourceSet is Ready and renders nothing.
+  timeouts:
+    assert: 3m
+    error: 1m
+  steps:
+    - name: the ResourceSet is Ready with nothing in its inventory
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: crossplane
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (length(inventory.entries || `[]`)): 0
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: crossplane-system
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: crossplane
+---
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: crossplane-module-aws
+  labels:
+    phase: module
+    cloud: aws
+    platform: any
+spec:
+  description: On, a client value wins, a module-shaped Role becomes an IAM role, off again.
+  timeouts:
+    assert: 5m
+    error: 3m
+    exec: 1m
+    # A managed resource goes when the provider deleted its IAM role and
+    # released its finalizer: 32 s measured in CI, against Chainsaw's 15 s.
+    delete: 3m
+  steps:
+    # Core, the AWS providers and the ProviderConfig converge; the client's
+    # 48Mi beats the socle's 32Mi (valuesFrom order, docs/flux-catalog.md
+    # §6), and the socle's `limits: null` removed the chart's limits.
+    - name: enabled = true with one client value converges core, providers and ProviderConfig
+      # 99 s cold (docs/catalog/crossplane.md §7); ~5 min when the providers
+      # re-adopt CRDs a previous install left behind.
+      timeouts:
+        assert: 8m
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    crossplane:
+                      enabled: true
+                      values:
+                        resourcesRBACManager:
+                          requests:
+                            memory: 48Mi
+        # In the order their CRDs appear — an assert on a kind whose CRD is
+        # not there yet fails at once: the release first (core applies the
+        # pkg CRDs), the providers Healthy (they apply the aws CRDs), the
+        # ProviderConfig last. The ResourceSet's Ready is stale right after
+        # the patch; it is asserted once the child ResourceSet is Ready.
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: crossplane
+                namespace: crossplane-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: crossplane-rbac-manager
+                namespace: crossplane-system
+              spec:
+                template:
+                  spec:
+                    (containers[0].resources || `{}`):
+                      requests:
+                        memory: 48Mi
+                      (limits == null): true
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        # The family under the name Crossplane gives a dependency it installs
+        # itself: under any other name the lock held it twice and every
+        # provider stayed unhealthy (measured on EKS, #48).
+        - assert:
+            resource:
+              apiVersion: pkg.crossplane.io/v1
+              kind: Provider
+              metadata:
+                name: crossplane-contrib-provider-family-aws
+              status:
+                (conditions[?type == 'Healthy'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: pkg.crossplane.io/v1
+              kind: Provider
+              metadata:
+                name: provider-aws-iam
+              status:
+                (conditions[?type == 'Healthy'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: pkg.crossplane.io/v1
+              kind: Provider
+              metadata:
+                name: provider-aws-eks
+              status:
+                (conditions[?type == 'Healthy'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: aws.m.upbound.io/v1beta1
+              kind: ClusterProviderConfig
+              metadata:
+                name: default
+              spec:
+                credentials:
+                  source: PodIdentity
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: crossplane-provider-config
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: crossplane
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (length(inventory.entries || `[]`) > `0`): true
+      # Once in five runs (36828601604) both AWS providers stayed Healthy=False
+      # — "Deployment does not have minimum availability" — for eight minutes
+      # while their pods were Running and Ready: the package manager's stale
+      # view, not the pods. The revisions, the Deployments and the core's log
+      # are what the next occurrence needs.
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: crossplane-system
+            name: crossplane
+        - describe:
+            apiVersion: pkg.crossplane.io/v1
+            kind: Provider
+        - describe:
+            apiVersion: pkg.crossplane.io/v1
+            kind: ProviderRevision
+        - describe:
+            apiVersion: apps/v1
+            kind: Deployment
+            namespace: crossplane-system
+        - podLogs:
+            namespace: crossplane-system
+            selector: app=crossplane
+            tail: 60
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: crossplane-provider-config
+        - describe:
+            apiVersion: v1
+            kind: Pod
+            namespace: crossplane-system
+        - events:
+            namespace: crossplane-system
+        - podLogs:
+            namespace: crossplane-system
+            tail: 40
+    # The seam: floci's own ClusterProviderConfig. Deleted with this step
+    # the day floci serves Pod Identity.
+    # skipDelete: the last step removes these two itself, before Crossplane
+    # goes — Chainsaw's own cleanup would run after, when no provider is left
+    # to release the ClusterProviderConfig, and time out.
+    - name: 'floci seam: a ClusterProviderConfig with static keys and floci''s endpoint'
+      skipDelete: true
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: floci-credentials
+                namespace: crossplane-system
+              stringData:
+                credentials: |
+                  [default]
+                  aws_access_key_id = test
+                  aws_secret_access_key = test
+        - apply:
+            resource:
+              apiVersion: aws.m.upbound.io/v1beta1
+              kind: ClusterProviderConfig
+              metadata:
+                name: floci
+              spec:
+                credentials:
+                  source: Secret
+                  secretRef:
+                    namespace: crossplane-system
+                    name: floci-credentials
+                    key: credentials
+                endpoint:
+                  hostnameImmutable: true
+                  services: [iam, eks, sts]
+                  url:
+                    type: Static
+                    static: (join('', ['http://', $values.floci_ip, ':4566']))
+                skip_credentials_validation: true
+                skip_metadata_api_check: true
+                skip_region_validation: true
+                skip_requesting_account_id: true
+    # Exactly what a module's AWS overlay renders (docs/catalog/crossplane.md
+    # §3): its Role under /socle/<cluster>/, trusted by Pod Identity, with its
+    # own inline policy (no boundary: this fixture root has no foundations),
+    # then the association with its ServiceAccount. Crossplane reports the
+    # role's ARN back: no `aws` CLI needed for the proof.
+    - name: a module-shaped Role becomes an IAM role under /socle/<cluster>/
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: e2e-probe
+        - apply:
+            resource:
+              apiVersion: iam.aws.m.upbound.io/v1beta1
+              kind: Role
+              metadata:
+                name: probe
+                namespace: e2e-probe
+                annotations:
+                  crossplane.io/external-name: socle-e2e-catalog-e2e-probe
+              spec:
+                providerConfigRef:
+                  kind: ClusterProviderConfig
+                  name: floci
+                forProvider:
+                  path: /socle/socle-e2e-catalog/
+                  assumeRolePolicy: >-
+                    {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"pods.eks.amazonaws.com"},
+                    "Action":["sts:AssumeRole","sts:TagSession"]}]}
+                  inlinePolicy:
+                    - name: route53
+                      policy: >-
+                        {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["route53:ChangeResourceRecordSets"],
+                        "Resource":"arn:aws:route53:::hostedzone/*"}]}
+        - apply:
+            resource:
+              apiVersion: eks.aws.m.upbound.io/v1beta1
+              kind: PodIdentityAssociation
+              metadata:
+                name: probe
+                namespace: e2e-probe
+              spec:
+                providerConfigRef:
+                  kind: ClusterProviderConfig
+                  name: floci
+                forProvider:
+                  region: eu-west-3
+                  clusterName: socle-e2e-catalog
+                  namespace: e2e-probe
+                  serviceAccount: probe
+                  roleArnRef:
+                    name: probe
+        - assert:
+            resource:
+              apiVersion: iam.aws.m.upbound.io/v1beta1
+              kind: Role
+              metadata:
+                name: probe
+                namespace: e2e-probe
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'Synced'] || `[]`):
+                  - status: 'True'
+                atProvider:
+                  arn: arn:aws:iam::000000000000:role/socle/socle-e2e-catalog/socle-e2e-catalog-e2e-probe
+                  (contains(assumeRolePolicy || '', 'pods.eks.amazonaws.com')): true
+        # What the cluster cannot see: the inline policy as IAM stores it.
+        - script:
+            env:
+              - name: AWS_ENDPOINT_URL
+                value: http://localhost:4566
+            content: |
+              aws iam get-role-policy --role-name socle-e2e-catalog-e2e-probe --policy-name route53 \
+                --query PolicyDocument --output json | grep -q route53:ChangeResourceRecordSets
+      catch:
+        - describe:
+            apiVersion: iam.aws.m.upbound.io/v1beta1
+            kind: Role
+            namespace: e2e-probe
+            name: probe
+        - podLogs:
+            namespace: crossplane-system
+            selector: pkg.crossplane.io/provider=provider-aws-iam
+            tail: 40
+    # The order of valuesFrom, proven whole (docs/flux-catalog.md §6): the
+    # socle's document, then kube.crossplane.values, then the Secret the client
+    # names in values_secret — created by him in the module's namespace, never
+    # read by OpenTofu, merged last. 48Mi in values and 56Mi in the Secret:
+    # the live object carries the Secret's; both cleared, the socle's 32Mi.
+    - name: kube.crossplane.values_secret is merged last, over values and the socle
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: crossplane-e2e-values
+                namespace: crossplane-system
+                labels:
+                  reconcile.fluxcd.io/watch: Enabled
+              stringData:
+                values.yaml: |
+                  resourcesRBACManager:
+                    requests:
+                      memory: 56Mi
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    crossplane:
+                      values_secret: crossplane-e2e-values
+                      values:
+                        resourcesRBACManager:
+                          requests:
+                            memory: 48Mi
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: crossplane-rbac-manager
+                namespace: crossplane-system
+              spec:
+                template:
+                  spec:
+                    (containers[0].resources || `{}`):
+                      requests:
+                        memory: 56Mi
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    crossplane:
+                      values_secret: ''
+                      values:
+                        resourcesRBACManager: null
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: crossplane-rbac-manager
+                namespace: crossplane-system
+              spec:
+                template:
+                  spec:
+                    (containers[0].resources || `{}`):
+                      requests:
+                        memory: 32Mi
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Secret
+              name: crossplane-e2e-values
+              namespace: crossplane-system
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: crossplane-system
+            name: crossplane
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 40
+    # floci seam, second half: the association never syncs (no API in floci
+    # 2.1.0). Asserted as such so that the day it syncs, this step fails and
+    # gets deleted together with the seam above.
+    - name: 'floci seam: the association cannot sync, and is released by hand'
+      try:
+        - assert:
+            resource:
+              apiVersion: eks.aws.m.upbound.io/v1beta1
+              kind: PodIdentityAssociation
+              metadata:
+                name: probe
+                namespace: e2e-probe
+              status:
+                (conditions[?type == 'Synced'] || `[]`):
+                  - status: 'False'
+        - patch:
+            resource:
+              apiVersion: eks.aws.m.upbound.io/v1beta1
+              kind: PodIdentityAssociation
+              metadata:
+                name: probe
+                namespace: e2e-probe
+                finalizers: []
+        - delete:
+            ref:
+              apiVersion: eks.aws.m.upbound.io/v1beta1
+              kind: PodIdentityAssociation
+              name: probe
+              namespace: e2e-probe
+    - name: deleting the Role deletes the IAM role
+      try:
+        - delete:
+            ref:
+              apiVersion: iam.aws.m.upbound.io/v1beta1
+              kind: Role
+              name: probe
+              namespace: e2e-probe
+        - script:
+            env:
+              - name: AWS_ENDPOINT_URL
+                value: http://localhost:4566
+            content: |
+              for _ in $(seq 1 30); do
+                aws iam get-role --role-name socle-e2e-catalog-e2e-probe > /dev/null 2>&1 || exit 0
+                sleep 2
+              done
+              echo "IAM role socle-e2e-catalog-e2e-probe survived its Role"; exit 1
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Namespace
+              name: e2e-probe
+    # Off: the release and the namespace go. Left behind by design
+    # (docs/catalog/crossplane.md §7): the CRDs and the crossplane-no-usages
+    # webhook configuration.
+    - name: enabled = false garbage-collects the module
+      try:
+        - delete:
+            ref:
+              apiVersion: aws.m.upbound.io/v1beta1
+              kind: ClusterProviderConfig
+              name: floci
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Secret
+              name: floci-credentials
+              namespace: crossplane-system
+        # The release must be idle before the module goes: helm-controller
+        # honours a deletion only once the running action returns, and the
+        # values steps above have just driven an upgrade — turned off under
+        # Helm's --wait, the namespace is garbage-collected, the rollout can
+        # never finish, and the deletion waits the release's whole timeout
+        # (five minutes, measured four times on external-dns).
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: crossplane
+                namespace: crossplane-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'Released'] || `[]`):
+                  - status: 'True'
+                (length(conditions[?type == 'Reconciling'] || `[]`)): 0
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    crossplane:
+                      enabled: false
+                      values:
+                        resourcesRBACManager: null
+        - error:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: crossplane
+                namespace: crossplane-system
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: crossplane-system
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: crossplane
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (length(inventory.entries || `[]`)): 0
+        - script:
+            content: |
+              echo "left behind by design: $(kubectl get crd -o name | grep -c '\.crossplane\.io$') Crossplane CRDs," \
+                "$(kubectl get crd -o name | grep -c '\.upbound\.io$') provider CRDs," \
+                "$(kubectl get validatingwebhookconfiguration -o name | grep -c crossplane) webhook configuration(s)"
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: crossplane
+        - describe:
+            apiVersion: v1
+            kind: Namespace
+            name: crossplane-system
+        - podLogs:
+            namespace: flux-system
+            selector: app.kubernetes.io/name=flux-operator
+            tail: 40

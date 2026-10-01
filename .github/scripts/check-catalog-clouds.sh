@@ -2,7 +2,8 @@
 # The catalog is declared twice, on purpose: opentofu/bootstrap/catalog.tf says
 # what a client may configure (and, through catalog_clouds, on which clouds),
 # and oci/clusters/<cloud>/kustomization.yaml says what Flux deploys there.
-# This fails when the two disagree, in either direction.
+# This fails when the two disagree, in either direction — and when a module
+# ships no tests/e2e/chainsaw-test.yaml, the proof e2e.yaml discovers it by.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 python3 - <<'PY'
@@ -32,9 +33,14 @@ for m, cl in restricted.items():
         if c not in all_clouds:
             print(f"::error file=opentofu/bootstrap/catalog.tf::catalog_clouds names cloud {c} for {m}, no oci/clusters/{c}/ overlay"); fail = 1
 for m in modules:
-    if not os.path.isdir(f"oci/catalog/{m.replace('_', '-')}"):
-        print(f"::error file=opentofu/bootstrap/catalog.tf::{m} has no oci/catalog/{m.replace('_', '-')}/ folder"); fail = 1
+    folder = f"oci/catalog/{m.replace('_', '-')}"
+    if not os.path.isdir(folder):
+        print(f"::error file=opentofu/bootstrap/catalog.tf::{m} has no {folder}/ folder"); fail = 1
+    # The module's e2e proof travels with it: .github/workflows/e2e.yaml
+    # discovers the matrix from these folders and never names a module.
+    elif not os.path.isfile(f"{folder}/tests/e2e/chainsaw-test.yaml"):
+        print(f"::error file={folder}/resourceset.yaml::{m} ships no {folder}/tests/e2e/chainsaw-test.yaml — its e2e proof (docs/flux-catalog.md §6)"); fail = 1
 if not fail:
-    print(f"catalog and overlays agree: {len(modules)} module(s) on {len(all_clouds)} cloud(s), {len(restricted)} cloud-bound")
+    print(f"catalog and overlays agree: {len(modules)} module(s) on {len(all_clouds)} cloud(s), {len(restricted)} cloud-bound, every module with its tests/e2e")
 sys.exit(fail)
 PY

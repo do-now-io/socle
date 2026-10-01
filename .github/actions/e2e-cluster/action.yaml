@@ -1,0 +1,185 @@
+---
+# The one place the e2e touches a shell: the cluster a Chainsaw suite runs
+# against, brought up and torn down with the two CLIs the product is made of.
+#
+#   mode: apply     floci is up, a registered IAM key, `tofu init` and `apply`
+#                   of the root, a kubeconfig, the GHCR pull secret. Exports
+#                   KUBECONFIG, the AWS credentials and FLOCI_IP to the job.
+#   mode: destroy   `tofu destroy` of the same root, with the same variables.
+#                   -target narrows it to the socle (module.socle): the
+#                   envelope, the instance, the operator — what a client
+#                   uninstalls, leaving the cluster for the suite to inspect.
+#
+# What it proves: that the root applies from a checkout against floci's real
+# k3s, with the artifact pulled by its exact tag through a pull secret the
+# workflow's own token created after the apply — no credential enters
+# OpenTofu. Nothing about the modules: that is Chainsaw's, in the job.
+# What it cannot: floci's k3s is one node with flannel and CoreDNS already
+# there (cilium.enabled = false on every root it applies), and floci
+# validates nothing of what IAM grants.
+#
+# floci 2.x facts this encodes, measured on 2.1.0 (2026-09-30):
+# - the EKS token webhook rejects the well-known `test`/`test` pair, so a
+#   real IAM user and access key are created first and exported for the job;
+#   floci's IAM accepts any registered key — and it refuses a presigned
+#   token after 60 s, so the kubeconfig handed to the job carries a
+#   ServiceAccount token (see the kubeconfig step);
+# - the k3s container joins floci's own Docker network (auto-detected), so a
+#   pod reaches floci at FLOCI_IP, never at the runner's localhost;
+# - HTTP on 4566 is the default; TLS is opt-in (FLOCI_TLS_ENABLED), untouched.
+name: e2e cluster
+description: Bring up (or tear down) the socle on floci's real k3s for a Chainsaw suite.
+
+inputs:
+  mode:
+    description: apply, destroy-socle or destroy.
+    required: true
+  root:
+    description: The OpenTofu root, relative to the workspace.
+    required: true
+  var-file:
+    description: A tfvars file for the root, relative to the workspace. Optional.
+    default: ''
+  kube:
+    description: The `kube` variable, as HCL. Empty leaves the root's own value.
+    default: ''
+  cluster:
+    description: Name of the EKS cluster the root creates (kubeconfig, pull secret).
+    required: true
+  tag:
+    description: The artifact tag the root pins.
+    required: true
+  cosign-identity:
+    description: The identity Flux verifies against, as the HCL object the roots take.
+    required: true
+  token:
+    description: A token with packages:read, for the pull secret. Never reaches OpenTofu.
+    default: ''
+  floci:
+    description: Name or id of the floci container (the service container's id).
+    default: floci
+
+runs:
+  using: composite
+  steps:
+    # DiskPressure was a candidate for the argocd flake: the kubelet evicts
+    # under ~10 % free nodefs. Measured on the first run (36771300863): the
+    # runner starts with 86 GB free, so nothing is cleared, and the figure is
+    # kept in the summary for the day it drops.
+    - name: Free disk on the runner
+      if: inputs.mode == 'apply'
+      shell: bash
+      run: |
+        free="$(df -h / | awk 'NR==2 {print $4}')"
+        echo "free on /: $free"
+        echo "| Runner free disk | $free |" >> "$GITHUB_STEP_SUMMARY"
+
+    - name: floci answers, and a registered IAM key
+      if: inputs.mode == 'apply'
+      shell: bash
+      env:
+        FLOCI: ${{ inputs.floci }}
+      run: |
+        for _ in $(seq 1 60); do
+          curl -fs http://localhost:4566/_floci/health > /dev/null && break
+          sleep 2
+        done
+        curl -fs http://localhost:4566/_floci/health > /dev/null \
+          || { echo "::error::floci never became healthy"; docker logs "$FLOCI"; exit 1; }
+        ip="$(docker inspect "$FLOCI" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' | awk '{print $1}')"
+        # floci 2.x rejects test/test on the EKS token webhook: the key the
+        # helm provider's exec plugin and kubectl sign with is a real one.
+        aws iam create-user --user-name e2e > /dev/null
+        key="$(aws iam create-access-key --user-name e2e --query 'AccessKey.[AccessKeyId,SecretAccessKey]' --output text)"
+        {
+          echo "AWS_ACCESS_KEY_ID=${key%%	*}"
+          echo "AWS_SECRET_ACCESS_KEY=${key##*	}"
+          echo "FLOCI_IP=$ip"
+          echo "KUBECONFIG=$RUNNER_TEMP/e2e.kubeconfig"
+        } >> "$GITHUB_ENV"
+        version="$(curl -s http://localhost:4566/_floci/health | python3 -c 'import sys,json; print(json.load(sys.stdin)["version"])')"
+        echo "floci $version at $ip, key ${key%%	*}"
+        echo "| floci | $version at $ip |" >> "$GITHUB_STEP_SUMMARY"
+
+    - name: tofu init and apply
+      if: inputs.mode == 'apply'
+      shell: bash
+      working-directory: ${{ inputs.root }}
+      env:
+        VAR_FILE: ${{ inputs.var-file }}
+        KUBE: ${{ inputs.kube }}
+        TAG: ${{ inputs.tag }}
+        COSIGN: ${{ inputs.cosign-identity }}
+      run: |
+        args=(-input=false -var "socle_version=$TAG" -var "cosign_identity=$COSIGN" -var artifact_pull_secret=ghcr-auth)
+        [ -z "$VAR_FILE" ] || args+=(-var-file "$GITHUB_WORKSPACE/$VAR_FILE")
+        [ -z "$KUBE" ] || args+=(-var "kube=$KUBE")
+        tofu init -input=false > /dev/null
+        SECONDS=0
+        tofu apply -auto-approve "${args[@]}"
+        echo "| \`tofu apply\` of \`${{ inputs.root }}\` | ${SECONDS}s |" >> "$GITHUB_STEP_SUMMARY"
+
+    # The package is private: the pull secret is created after the apply,
+    # from the workflow's own token, so that no credential ever enters
+    # OpenTofu. The OCIRepository already names the secret; the annotation
+    # skips the retry backoff.
+    #
+    # The kubeconfig Chainsaw reads carries a ServiceAccount token, not the
+    # `aws eks get-token` exec plugin `update-kubeconfig` writes: floci 2.x
+    # refuses that presigned token after 60 s and Chainsaw's client does not
+    # re-run the plugin on a 401, so every assert died at 60 s whatever its
+    # timeout (measured: an assert with a 100 s timeout ends at 61 s through
+    # the exec plugin, at 100 s through a static token). kubectl re-runs
+    # the plugin, which is why the aws-native flow below still works for it.
+    - name: kubeconfig and the GHCR pull secret
+      if: inputs.mode == 'apply'
+      shell: bash
+      env:
+        CLUSTER: ${{ inputs.cluster }}
+        GHCR_TOKEN: ${{ inputs.token }}
+      run: |
+        aws eks update-kubeconfig --name "$CLUSTER" --kubeconfig "$RUNNER_TEMP/eks.kubeconfig" > /dev/null
+        export KUBECONFIG="$RUNNER_TEMP/eks.kubeconfig"
+        kubectl get nodes -o wide
+        kubectl -n kube-system create serviceaccount e2e
+        kubectl create clusterrolebinding e2e --clusterrole=cluster-admin --serviceaccount=kube-system:e2e
+        token="$(kubectl -n kube-system create token e2e --duration=3h)"
+        kubectl config view --raw --minify --flatten -o json | python3 -c '
+        import sys, json
+        c = json.load(sys.stdin)
+        c["users"] = [{"name": "e2e", "user": {"token": sys.argv[1]}}]
+        c["contexts"][0]["context"]["user"] = "e2e"
+        print(json.dumps(c))' "$token" > "$RUNNER_TEMP/e2e.kubeconfig"
+        export KUBECONFIG="$RUNNER_TEMP/e2e.kubeconfig"
+        kubectl auth whoami
+        kubectl -n flux-system create secret docker-registry ghcr-auth \
+          --docker-server=ghcr.io --docker-username="$GITHUB_ACTOR" --docker-password="$GHCR_TOKEN"
+        for _ in $(seq 1 60); do
+          if kubectl -n flux-system get ocirepository socle > /dev/null 2>&1; then
+            kubectl -n flux-system annotate ocirepository socle reconcile.fluxcd.io/requestedAt="$(date +%s)" --overwrite
+            exit 0
+          fi
+          sleep 2
+        done
+        echo "::error::the operator never created ocirepository/socle"
+        exit 1
+
+    - name: tofu destroy
+      if: inputs.mode == 'destroy-socle' || inputs.mode == 'destroy'
+      shell: bash
+      working-directory: ${{ inputs.root }}
+      env:
+        MODE: ${{ inputs.mode }}
+        VAR_FILE: ${{ inputs.var-file }}
+        KUBE: ${{ inputs.kube }}
+        TAG: ${{ inputs.tag }}
+        COSIGN: ${{ inputs.cosign-identity }}
+      run: |
+        args=(-input=false -auto-approve -var "socle_version=$TAG" -var "cosign_identity=$COSIGN" -var artifact_pull_secret=ghcr-auth)
+        [ -z "$VAR_FILE" ] || args+=(-var-file "$GITHUB_WORKSPACE/$VAR_FILE")
+        [ -z "$KUBE" ] || args+=(-var "kube=$KUBE")
+        [ "$MODE" = destroy ] || args+=(-target=module.socle)
+        SECONDS=0
+        tofu destroy "${args[@]}"
+        echo "| \`tofu destroy${MODE/destroy-socle/ -target=module.socle}\` of \`${{ inputs.root }}\` | ${SECONDS}s |" \
+          >> "$GITHUB_STEP_SUMMARY"

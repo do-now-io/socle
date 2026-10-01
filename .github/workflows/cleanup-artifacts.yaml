@@ -31,7 +31,7 @@ defaults:
 jobs:
   cleanup:
     name: Delete pre-release tags (${{ matrix.package }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: github.event_name != 'delete' || github.event.ref_type == 'branch'
     permissions:
       packages: write

@@ -35,7 +35,7 @@ concurrency:
 jobs:
   opentofu-plan:
     name: tofu plan (${{ matrix.cloud }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # azure only: floci-az's self-signed TLS certificate fails Go's x509
     # validation ("not standards compliant") — a floci-az bug, reported
     # upstream, not something this repo can fix. That makes the plan fail

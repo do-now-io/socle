@@ -64,3 +64,11 @@ spec:
       # version bump could only ever add.
       prune: true
       wait: true
+      # On uninstall, hold this object until every catalog ResourceSet it
+      # pruned is gone — i.e. until the operator finalized each of them.
+      # Without it the Kustomization is finalized as soon as the deletes are
+      # issued, socle-root follows, Helm returns, and `tofu destroy` removes
+      # the Flux instance and then the operator while the ResourceSets are
+      # still terminating: five of them survived with their finalizer on the
+      # first destroy CI ever ran (run 36771300863, argocd job).
+      deletionPolicy: WaitForTermination

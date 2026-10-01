@@ -217,6 +217,11 @@ written. Defaults asserted.
 | `e2e-aws-catalog` | `victoria_metrics` re-enabled | exporter back and `k8s_pod_cpu_usage` in the new, empty storage **2 s** after VictoriaMetrics was Ready |
 | `e2e-aws-catalog` | `otel_agent` disabled alone, then re-enabled | HelmRelease and `otel-agent-dashboards` Kustomization NotFound; Ready again with the dashboard ConfigMap back after **77 s** |
 
+**e2e, through Chainsaw** (`tests/e2e/chainsaw-test.yaml`, since the e2e moved
+into the modules — `docs/flux-catalog.md` §8). The table above is the bash phase
+this module shipped with; the same proof now runs on every push in the `root`
+job (`health`) and the module's own job (`health`, then `module`): `otel-agent-health` asserts the DaemonSet rolled out, `k8s_pod_cpu_usage` in VictoriaMetrics and every metric of the nodes and pods dashboard with series (`vm.sh` beside it); `otel-agent-module` patches the memory request (160Mi over the socle's 128Mi, cpu and limit kept), `logs = false` (non-root, no hostPath, no logs exporter) and back, then off (release, dashboards Kustomization and dashboard gone) and on.
+
 What VictoriaMetrics stores from kubeletstats, as printed by the run — the
 dashboard's names are among them: `container_cpu_time_seconds_total`,
 `container_cpu_usage`, `container_filesystem_{available,capacity,usage}_bytes`,

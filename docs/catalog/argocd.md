@@ -226,6 +226,18 @@ re-enable.
 The 7 GB runner took the module without a resource change: no eviction, no
 pending pod, no retry of the HelmRelease. The requests above were not lowered.
 
+**e2e, through Chainsaw** (`tests/e2e/chainsaw-test.yaml`, since the e2e
+moved into the modules — `docs/flux-catalog.md` §8). The two jobs above are
+now the `root (aws)` job, which runs `argocd-health`, and the `argocd (aws)`
+job, which runs it and then `argocd-module`: the precedence proof is a
+`patch` of the `ResourceSetInputProvider` with the same two client values the
+root job's `.github/e2e/aws/floci.tfvars` carries (`accounts.e2e`, `server` memory 96Mi) asserted
+on the live `argocd-cm` and `argocd-server`, then `enabled = false` and back.
+For the patch to reach the release before the 10-minute interval, both
+values ConfigMaps now carry `reconcile.fluxcd.io/watch: Enabled`, as
+external-dns's already did: without it, measured, a client value landed in
+`argocd-client-values` and the Deployment kept the old request 209 s later.
+
 ## Exposure through Gateway API
 
 `kube.argocd.gateway` names the shared Gateway the route attaches to: `private`
@@ -245,6 +257,11 @@ that port answer in plain HTTP.
 Not done yet: a `GRPCRoute` for the `argocd` CLI. `argocd login --grpc-web`
 works over the HTTPRoute.
 
+On floci there is no shared Gateway, so `tests/e2e/chainsaw-test.yaml`
+(`argocd-floci`, `platform: floci`) asserts the negative: `gateway` at its
+default, no `argocd-route` ResourceSet. The route itself is the sandbox's
+proof.
+
 ## Open questions for the coordinator
 
 1. **Renovate does not see the chart pin.** `spec.ref.tag: 10.9.2` sits in a
@@ -252,10 +269,12 @@ works over the HTTPRoute.
    manager also does not read inside a `ResourceSet`. A custom regex manager
    over `oci/catalog/*/resourceset.yaml` (`# renovate:` comment convention)
    would cover every module; one PR for all of them, outside this one.
-2. **`argocd` first in the e2e wait.** `wait-converged.sh` waits for this
-   module with a 10-minute budget before the shared 5-minute waits, so a slow
-   image pull fails on the module's line and not on `socle-root`. If the
-   coordinator prefers one budget for everything, it is a one-line change.
+2. **The e2e budget is the module's.** `tests/e2e/chainsaw-test.yaml` gives
+   `argocd-health` a 10-minute assert timeout, the chart's own install
+   timeout, where the socle's `root` suite keeps 5 minutes: a slow image pull
+   fails on this module's test, with its `catch` output — events, the
+   HelmRelease, the pods, helm-controller's log, the node's conditions —
+   and not on `socle-root`.
 3. **HA on a one-node cluster.** `redis-ha` carries a hard anti-affinity and
    needs three nodes; `ha = true` on a smaller cluster leaves Redis pending.
    Not e2e-tested (floci is one node); the validation cannot know the node

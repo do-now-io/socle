@@ -1,0 +1,450 @@
+# The otel_agent module's proof (docs/catalog/otel-agent.md): the node-level
+# collector, on by default. Selected by label:
+#   health   the ResourceSet Ready, the DaemonSet rolled out on every node, a
+#            kubelet metric queryable in VictoriaMetrics by its stored name,
+#            and every metric the nodes and pods dashboard reads present there
+#            (vm.sh): the dashboard is written on the names VictoriaMetrics
+#            stores, and this is what keeps it honest.
+#   module   a client request beats the socle's on the live DaemonSet, the
+#            socle's siblings kept; logs = false takes the agent back to
+#            non-root with no hostPath; off garbage-collects the release, the
+#            dashboards Kustomization and its ConfigMap; on brings them back.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: otel-agent-health
+  labels:
+    phase: health
+    cloud: any
+    platform: any
+spec:
+  description: >-
+    The agent runs on every node; its kubelet metrics, and every metric its
+    dashboard reads, are in VictoriaMetrics.
+  timeouts:
+    assert: 5m
+    exec: 5m
+  steps:
+    - name: the ResourceSet is Ready, the DaemonSet rolled out, the dashboard shipped
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: otel-agent
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: otel-agent-agent
+                namespace: otel-agent
+              status:
+                (desiredNumberScheduled > `0` && numberReady == desiredNumberScheduled): true
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: otel-agent-dashboard-nodes-pods
+                namespace: otel-agent
+                labels:
+                  grafana_dashboard: '1'
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: otel-agent
+            name: otel-agent
+        - describe:
+            apiVersion: kustomize.toolkit.fluxcd.io/v1
+            kind: Kustomization
+            namespace: flux-system
+            name: otel-agent-dashboards
+        - events:
+            namespace: otel-agent
+        - podLogs:
+            namespace: otel-agent
+            tail: 40
+    - name: a kubelet metric is in VictoriaMetrics, and every metric of the dashboard has series
+      try:
+        - script:
+            content: |
+              . ./vm.sh
+              wait_series k8s_pod_cpu_usage
+              stored_names k8s_ container_
+              check_dashboard otel-agent otel-agent-dashboard-nodes-pods nodes-pods.json '\b(?:k8s|container)_[a-z0-9_]+\b'
+      catch:
+        - podLogs:
+            namespace: otel-agent
+            tail: 40
+        - podLogs:
+            namespace: victoria-metrics
+            tail: 20
+---
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: otel-agent-module
+  labels:
+    phase: module
+    cloud: any
+    platform: any
+spec:
+  description: >-
+    A client request wins over the socle's; logs = false drops root and the
+    hostPath; off garbage-collects, on brings it back.
+  timeouts:
+    assert: 5m
+    error: 5m
+  steps:
+    # 128Mi in the socle's document: the client's 160Mi must be on the live
+    # DaemonSet, the socle's cpu request and memory limit intact.
+    - name: kube.otel_agent.values beats the socle's memory request, its siblings kept
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    otel_agent:
+                      values:
+                        resources:
+                          requests:
+                            memory: 160Mi
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: otel-agent-agent
+                namespace: otel-agent
+              spec:
+                template:
+                  spec:
+                    (containers[0].resources || `{}`):
+                      requests:
+                        cpu: 50m
+                        memory: 160Mi
+                      limits:
+                        memory: 512Mi
+              status:
+                (desiredNumberScheduled > `0` && updatedNumberScheduled == desiredNumberScheduled): true
+                (numberReady == desiredNumberScheduled): true
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    otel_agent:
+                      values:
+                        resources: null
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: otel-agent
+            name: otel-agent
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 40
+    # The order of valuesFrom, proven whole (docs/flux-catalog.md §6): the
+    # socle's document, then kube.otel_agent.values, then the Secret the client
+    # names in values_secret — created by him in the module's namespace, never
+    # read by OpenTofu, merged last. 160Mi in values and 176Mi in the Secret:
+    # the live object carries the Secret's; both cleared, the socle's 128Mi.
+    - name: kube.otel_agent.values_secret is merged last, over values and the socle
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: otel-agent-e2e-values
+                namespace: otel-agent
+                labels:
+                  reconcile.fluxcd.io/watch: Enabled
+              stringData:
+                values.yaml: |
+                  resources:
+                    requests:
+                      memory: 176Mi
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    otel_agent:
+                      values_secret: otel-agent-e2e-values
+                      values:
+                        resources:
+                          requests:
+                            memory: 160Mi
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: otel-agent-agent
+                namespace: otel-agent
+              spec:
+                template:
+                  spec:
+                    (containers[0].resources || `{}`):
+                      requests:
+                        memory: 176Mi
+              status:
+                (desiredNumberScheduled > `0` && updatedNumberScheduled == desiredNumberScheduled): true
+                (numberReady == desiredNumberScheduled): true
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    otel_agent:
+                      values_secret: ''
+                      values:
+                        resources: null
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: otel-agent-agent
+                namespace: otel-agent
+              spec:
+                template:
+                  spec:
+                    (containers[0].resources || `{}`):
+                      requests:
+                        memory: 128Mi
+              status:
+                (desiredNumberScheduled > `0` && updatedNumberScheduled == desiredNumberScheduled): true
+                (numberReady == desiredNumberScheduled): true
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Secret
+              name: otel-agent-e2e-values
+              namespace: otel-agent
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: otel-agent
+            name: otel-agent
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 40
+    # logs = false: no logs exporter, and the agent back to the image's
+    # non-root user with no hostPath on /var/log/pods (docs/catalog/victoria-logs.md).
+    - name: logs = false takes the agent back to non-root with no hostPath
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    otel_agent:
+                      logs: false
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: otel-agent-agent
+                namespace: otel-agent
+              data:
+                (contains(relay, 'otlp_http/victoria-logs')): false
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: otel-agent-agent
+                namespace: otel-agent
+              spec:
+                template:
+                  spec:
+                    (containers[0].securityContext.runAsUser == null): true
+                    (length(volumes[?hostPath] || `[]`)): 0
+              status:
+                (desiredNumberScheduled > `0` && updatedNumberScheduled == desiredNumberScheduled): true
+                (numberReady == desiredNumberScheduled): true
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    otel_agent:
+                      logs: true
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: otel-agent-agent
+                namespace: otel-agent
+              data:
+                (contains(relay, 'otlp_http/victoria-logs')): true
+      catch:
+        - describe:
+            apiVersion: apps/v1
+            kind: DaemonSet
+            namespace: otel-agent
+            name: otel-agent-agent
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 40
+    # Each Kustomization's finalizer prunes its dashboard ConfigMap first.
+    - name: enabled = false garbage-collects the release, the dashboards Kustomization and the dashboard
+      try:
+        # The release must be idle before the module goes: helm-controller
+        # honours a deletion only once the running action returns, and the
+        # values steps above have just driven an upgrade — turned off under
+        # Helm's --wait, the namespace is garbage-collected, the rollout can
+        # never finish, and the deletion waits the release's whole timeout
+        # (five minutes, measured four times on external-dns).
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: otel-agent
+                namespace: otel-agent
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'Released'] || `[]`):
+                  - status: 'True'
+                (length(conditions[?type == 'Reconciling'] || `[]`)): 0
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    otel_agent:
+                      enabled: false
+        - error:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: otel-agent
+                namespace: otel-agent
+        - error:
+            resource:
+              apiVersion: kustomize.toolkit.fluxcd.io/v1
+              kind: Kustomization
+              metadata:
+                name: otel-agent-dashboards
+                namespace: flux-system
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: otel-agent
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: otel-agent
+        - podLogs:
+            namespace: flux-system
+            selector: app.kubernetes.io/name=flux-operator
+            tail: 40
+    - name: back to the defaults, the DaemonSet rolls out and the dashboard is back
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    otel_agent:
+                      enabled: true
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: otel-agent-dashboard-nodes-pods
+                namespace: otel-agent
+                labels:
+                  grafana_dashboard: '1'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: otel-agent-agent
+                namespace: otel-agent
+              status:
+                (desiredNumberScheduled > `0` && numberReady == desiredNumberScheduled): true
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: otel-agent
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: otel-agent
+            name: otel-agent
+        - events:
+            namespace: otel-agent

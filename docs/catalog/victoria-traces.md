@@ -99,6 +99,11 @@ run:
 | `e2e-aws-catalog` | `kubectl top` | VictoriaTraces **2m CPU, 10Mi** with one trace |
 | `e2e-aws-catalog` | turned off | HelmRelease NotFound, no traces pipeline, no Jaeger datasource |
 
+**e2e, through Chainsaw** (`tests/e2e/chainsaw-test.yaml`, since the e2e moved
+into the modules — `docs/flux-catalog.md` §8). The table above is the bash phase
+this module shipped with; the same proof now runs on every push in the `root`
+job (`health`) and the module's own job (`health`, then `module`): `victoria-traces-health` asserts the disabled shape and no traces pipeline in the gateway; `victoria-traces-module` turns it on (Bound claim, the gateway's `otlp_http/victoria-traces` exporter, Grafana's Jaeger datasource), posts one span through podinfo and finds it by trace id through the Jaeger API (`vt.sh`), then turns it off.
+
 The checks live in `.github/scripts/e2e/victoria-traces.sh` (`on`, `off`).
 Jobs: `e2e-aws-root` 4m34s, `e2e-aws-catalog` 16m31s. The catalog job now
 carries the whole stack, Crossplane's step included.

@@ -83,8 +83,11 @@ routes tests `shared`, never the presence of the Gateway.
 ## Not measured yet
 
 floci's k3s runs no Cilium, so `shared` is false there, and the e2e jobs create
-no Gateway. The proof is a sandbox EKS apply with `aws.gateway_certificate`
-set. It has to show three things:
+no Gateway — `tests/e2e/chainsaw-test.yaml` (`gateway-api-floci`,
+`platform: floci`) asserts exactly that: `shared` false in the inputs, no
+`gateway-api-gateways` ResourceSet, no `gateway-system` namespace. The proof
+is a sandbox EKS apply with `aws.gateway_certificate` set. It has to show
+three things:
 
 - both NLBs come up in the right subnets;
 - on azure, `curl -I http://…` answers 301 (aws has no port 80);

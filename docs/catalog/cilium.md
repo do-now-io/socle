@@ -511,10 +511,11 @@ Measured on 2026-09-23 with OpenTofu 1.12.6, helm 4.1.0 and flux-operator
 **e2e.** floci's EKS is a k3s with flannel, kube-proxy and CoreDNS. The
 production default installs Cilium, which would fight flannel. Both e2e roots
 therefore set `cilium = { enabled = false }`, with a comment saying why: the
-real root through `tests/floci.tfvars`, and the fixture root in
-`tests/floci/main.tf`. The e2e jobs still prove that the rest of the
-bootstrap path converges with the new inputs and the new ordering. They also
-assert the Gateway API standard CRDs established from upstream through Flux.
+real root through `.github/e2e/aws/floci.tfvars`, and the fixture root in
+`.github/e2e/aws/main.tf`. The e2e jobs still prove that the rest of the
+bootstrap path converges with the new inputs and the new ordering. The
+gateway-api module's own test asserts the Gateway API standard CRDs
+established from upstream through Flux, orphaned when the module is off.
 No attempt
 was made to run Cilium on k3s. The configuration that would converge there,
 chaining over flannel with no ENI and no kube-proxy replacement, shares

@@ -187,22 +187,28 @@ Each of these is a socle default. A client can still override it through
   failing case.
 - **e2e, disabled.** Both jobs assert that the `external-dns` ResourceSet
   is Ready while disabled, and that its namespace is absent.
-- **e2e, against a fake Route 53.** `e2e-aws-catalog` enables the module on
-  floci's k3s on every push, through `kube` as a client would. The steps are
-  in `.github/scripts/e2e/external-dns.sh`:
+- **e2e, against a fake Route 53.** The `external-dns (aws)` job enables the
+  module on floci's k3s on every push, through a `patch` of the
+  `ResourceSetInputProvider` — what `kube` sets. The steps are the module's
+  own, `tests/e2e/chainsaw-test.yaml` (`external-dns-module-aws`), with
+  `records.sh` beside it for what the cluster cannot see:
 
   | Step | What it proves |
   | --- | --- |
-  | `prepare` | A hosted zone `e2e.socle.test` in floci's Route 53, and the `external-dns-aws` Secret with test keys and floci's endpoint |
-  | `publish` | `values` overrides the socle's `txtOwnerId`. An Ingress becomes an A record and an ExternalName Service a CNAME, each with a `socle-` TXT naming the client's owner |
-  | `kept` | With `upsert-only`, deleting the Ingress leaves its A record |
-  | `deleted` | After re-applying with `policy = "sync"`, the A record and its TXT go, and the CNAME stays |
-  | GC | Disabling the module removes its namespace |
-  | `access` | With Crossplane on: the `Role` becomes IAM role `socle-e2e-catalog-external-dns` under `/socle/socle-e2e-catalog/`, trusted by `pods.eks.amazonaws.com`, with the `route53` policy carrying the condition key and `e2e.socle.test` (2 s after the seam is applied); the association never syncs, and one minute later there is still no `HelmRelease`: the workload waits for the association |
-  | `access-off` | The module off: the IAM role is deleted, the namespace goes |
+  | a fake hosted zone, and the Secret | A hosted zone `e2e.socle.test` in floci's Route 53, and the `external-dns-aws` Secret with test keys and floci's endpoint as a pod sees it |
+  | enabled through kube | `values` overrides the socle's `txtOwnerId`; the Deployment runs with `--policy=upsert-only`, the client's owner and the domain filter |
+  | an Ingress and a Service | An Ingress becomes an A record and an ExternalName Service a CNAME, each with a `socle-` TXT naming the client's owner |
+  | upsert-only keeps | With `upsert-only`, deleting the Ingress leaves its A record |
+  | policy = "sync" deletes | After the patch to `sync`, the A record and its TXT go, and the CNAME stays |
+  | enabled = false | Disabling the module removes its namespace |
+  | with Crossplane on | The module renders its `Role` and its association |
+  | floci seam | floci's own `ClusterProviderConfig`, and both objects pointed at it |
+  | the Role becomes an IAM role | `socle-e2e-catalog-external-dns` under `/socle/socle-e2e-catalog/`, trusted by `pods.eks.amazonaws.com`, with the `route53` policy carrying the condition key and `*.e2e.socle.test` — read from what Crossplane reports (`status.atProvider`) |
+  | floci seam, second half | The association `Synced=False`, and one minute later still no `HelmRelease`: the workload waits for the association |
+  | off | The association released by hand, the IAM role deleted, the namespace gone; Crossplane off last |
 
-  Measured first on a local floci: all four steps pass with the values the
-  template renders for aws. A pod reaches floci over the Docker bridge both share.
+  Measured first on a local floci: every step passes with the values the
+  template renders for aws. A pod reaches floci over the Docker network both share.
 - **Not provable on floci.** The fake Route 53 steps run with Crossplane off
   and the Secret seam; the module's role reaching EKS and the pod using it
   are not provable there, for the reasons in
@@ -316,12 +322,13 @@ namespace. Turn the module off first, Crossplane after.
 
 ### What floci proves, and what needs a real account
 
-The `access` phase of `.github/scripts/e2e/external-dns.sh` proves, on every
-push, that the rendered objects are valid for the real CRDs, that the Role
-becomes an IAM role with the path, the trust and the scoped policy, that the
+The second half of `tests/e2e/chainsaw-test.yaml` proves, on every push,
+that the rendered objects are valid for the real CRDs, that the Role becomes
+an IAM role with the path, the trust and the scoped policy, that the
 workload is withheld while the association is not Ready, and that turning
-the module off deletes the role. One seam: the e2e points both objects at
-floci's own `ClusterProviderConfig` after the fact, as `crossplane.sh` does.
+the module off deletes the role. One seam, in steps named as such: the test
+points both objects at floci's own `ClusterProviderConfig` after the fact,
+as the crossplane module's test does.
 
 What floci cannot carry, so the next person does not rediscover it:
 

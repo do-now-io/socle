@@ -145,6 +145,11 @@ tag `0.0.0-feat-catalog-otel-gateway.ceedef3`, both jobs green:
 | `e2e-aws-catalog` | `victoria_metrics` re-enabled | `k8s_deployment_available` back in the new storage 9 s later |
 | `e2e-aws-catalog` | disabled with the agent, then re-enabled | HelmRelease and dashboards Kustomization NotFound; Ready again with the dashboard after **77 s** |
 
+**e2e, through Chainsaw** (`tests/e2e/chainsaw-test.yaml`, since the e2e moved
+into the modules — `docs/flux-catalog.md` §8). The table above is the bash phase
+this module shipped with; the same proof now runs on every push in the `root`
+job (`health`) and the module's own job (`health`, then `module`): `otel-gateway-health` asserts `k8s_deployment_available`, the scraped `vm_app_version` of the annotated victoria-metrics pod, an OTLP gauge posted by podinfo read back enriched with `k8s_namespace_name=hello`, `k8s_deployment_name=podinfo`, and every metric of the workloads dashboard; `otel-gateway-module` patches the memory request (320Mi over 128Mi, 100m and 1Gi kept), then off and on.
+
 Jobs: `e2e-aws-root` 3m13s, `e2e-aws-catalog` 13m53s.
 
 **Two probes that did not work, kept here so nobody tries them again.** The

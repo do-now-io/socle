@@ -1,0 +1,63 @@
+# After `tofu destroy -target=module.socle`: what a client's uninstall leaves.
+# The envelope went first (the operator deleting socle-root, the Kustomization
+# pruning every module's ResourceSet, each ResourceSet garbage-collecting
+# what it rendered), then the FluxInstance, then the operator. The operator
+# labels everything it renders with resourceset.fluxcd.controlplane.io/name,
+# so no namespace may carry that label any more; and flux-system, which Helm
+# created for the operator and which Helm never deletes, runs nothing.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: destroyed
+  labels:
+    phase: destroyed
+    cloud: any
+    platform: any
+spec:
+  description: Nothing of the socle is left in the cluster after tofu destroy.
+  timeouts:
+    error: 3m
+  steps:
+    - name: no operator, no Flux, no ResourceSet is left in flux-system
+      try:
+        - error:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                namespace: flux-system
+        - error:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: FluxInstance
+              metadata:
+                namespace: flux-system
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                namespace: flux-system
+      catch:
+        - describe:
+            apiVersion: apps/v1
+            kind: Deployment
+            namespace: flux-system
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+    - name: no namespace rendered by a ResourceSet is left
+      try:
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                labels:
+                  resourceset.fluxcd.controlplane.io/namespace: flux-system
+      catch:
+        - describe:
+            apiVersion: v1
+            kind: Namespace
+            selector: resourceset.fluxcd.controlplane.io/namespace=flux-system

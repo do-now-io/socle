@@ -1,0 +1,540 @@
+# The victoria_metrics module's proof (docs/catalog/victoria-metrics.md): the
+# monitoring stack's metrics storage, on by default. Selected by label:
+#   health   converged on any cloud: the ResourceSet Ready, the server
+#            Available on a Bound claim (the cluster's default class), the
+#            socle's own flags on the live Deployment, and a sample written
+#            through the import API read back through PromQL — storage proven
+#            end to end before any collector is looked at. The query goes
+#            through the API server's service proxy (vm.sh).
+#   module   a client flag beats the socle's on the live args (a key the socle
+#            sets: -storage.maxHourlySeries); then off, which must leave both
+#            collectors' pipelines ending in `nop` and Grafana without the
+#            datasource (docs/monitoring.md §2) — not an exporter retrying into
+#            a Service that is gone — and on again: a new claim Bound, the
+#            collectors writing into the new, empty storage, the datasource back.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: victoria-metrics-health
+  labels:
+    phase: health
+    cloud: any
+    platform: any
+spec:
+  description: VictoriaMetrics is Available on a Bound claim and reads back what it is written.
+  timeouts:
+    assert: 5m
+    exec: 3m
+  steps:
+    - name: the ResourceSet is Ready, the server Available on a Bound claim
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: victoria-metrics
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        # storage_size, the catalog's 20Gi, on a claim Bound on the cluster's
+        # default class (local-path on floci).
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: PersistentVolumeClaim
+              metadata:
+                name: victoria-metrics
+                namespace: victoria-metrics
+              spec:
+                resources:
+                  requests:
+                    storage: 20Gi
+              status:
+                phase: Bound
+        # The socle's own flags, from the catalog's defaults; a client's
+        # extraArgs merge beside them (the module phase proves the override).
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: victoria-metrics
+                namespace: victoria-metrics
+              spec:
+                template:
+                  spec:
+                    (containers[0].args || `[]`):
+                      (contains(@, '--retentionPeriod=15d')): true
+                      (contains(@, '--opentelemetry.usePrometheusNaming')): true
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: victoria-metrics
+            name: victoria-metrics
+        - describe:
+            apiVersion: v1
+            kind: PersistentVolumeClaim
+            namespace: victoria-metrics
+        - events:
+            namespace: victoria-metrics
+        - podLogs:
+            namespace: victoria-metrics
+            tail: 40
+    # A minute in the past: newer samples sit inside -search.latencyOffset
+    # (30 s) and an instant query would not return them yet.
+    - name: a sample written through the import API is read back through PromQL
+      try:
+        - script:
+            content: |
+              . ./vm.sh
+              probe="$(mktemp)"
+              printf '{"metric":{"__name__":"socle_e2e_probe","job":"e2e"},"values":[42],"timestamps":[%s]}\n' \
+                "$(( ($(date +%s) - 60) * 1000 ))" > "$probe"
+              kubectl create --raw "$vm/api/v1/import" -f "$probe" > /dev/null
+              for _ in $(seq 1 12); do
+                kubectl get --raw "$vm/internal/force_flush" > /dev/null || true
+                got="$(kubectl get --raw "$vm/api/v1/query?query=socle_e2e_probe" 2>/dev/null \
+                  | python3 -c 'import sys,json; r=json.load(sys.stdin)["data"]["result"]; print(r[0]["value"][1] if r else "")' \
+                  2>/dev/null || true)"
+                [ "$got" = 42 ] && { echo "read back socle_e2e_probe=$got"; exit 0; }
+                sleep 5
+              done
+              echo "a sample written to victoria-metrics was not read back (got '$got')"; exit 1
+      catch:
+        - podLogs:
+            namespace: victoria-metrics
+            tail: 40
+---
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: victoria-metrics-module
+  labels:
+    phase: module
+    cloud: any
+    platform: any
+spec:
+  description: >-
+    A client flag wins over the socle's; off leaves the collectors on nop and
+    Grafana without the datasource; on brings all of it back.
+  timeouts:
+    assert: 5m
+    error: 5m
+    exec: 5m
+  steps:
+    - name: kube.victoria_metrics.values beats the socle's -storage.maxHourlySeries, its siblings kept
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    victoria_metrics:
+                      values:
+                        server:
+                          extraArgs:
+                            storage.maxHourlySeries: '50000'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: victoria-metrics
+                namespace: victoria-metrics
+              spec:
+                template:
+                  spec:
+                    (containers[0].args || `[]`):
+                      (contains(@, '--storage.maxHourlySeries=50000')): true
+                      (contains(@, '--opentelemetry.usePrometheusNaming')): true
+                      (contains(@, '--retentionPeriod=15d')): true
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    victoria_metrics:
+                      values:
+                        server: null
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: victoria-metrics
+                namespace: victoria-metrics
+              spec:
+                template:
+                  spec:
+                    (containers[0].args || `[]`):
+                      (contains(@, '--storage.maxHourlySeries=100000')): true
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: victoria-metrics
+            name: victoria-metrics
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 40
+    # The order of valuesFrom, proven whole (docs/flux-catalog.md §6): the
+    # socle's document, then kube.victoria_metrics.values, then the Secret the client
+    # names in values_secret — created by him in the module's namespace, never
+    # read by OpenTofu, merged last. 160Mi in values and 176Mi in the Secret:
+    # the live object carries the Secret's; both cleared, the socle's 128Mi.
+    - name: kube.victoria_metrics.values_secret is merged last, over values and the socle
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: victoria-metrics-e2e-values
+                namespace: victoria-metrics
+                labels:
+                  reconcile.fluxcd.io/watch: Enabled
+              stringData:
+                values.yaml: |
+                  server:
+                    resources:
+                      requests:
+                        memory: 176Mi
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    victoria_metrics:
+                      values_secret: victoria-metrics-e2e-values
+                      values:
+                        server:
+                          resources:
+                            requests:
+                              memory: 160Mi
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: victoria-metrics
+                namespace: victoria-metrics
+              spec:
+                template:
+                  spec:
+                    (containers[0].resources || `{}`):
+                      requests:
+                        memory: 176Mi
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    victoria_metrics:
+                      values_secret: ''
+                      values:
+                        server: null
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: victoria-metrics
+                namespace: victoria-metrics
+              spec:
+                template:
+                  spec:
+                    (containers[0].resources || `{}`):
+                      requests:
+                        memory: 128Mi
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Secret
+              name: victoria-metrics-e2e-values
+              namespace: victoria-metrics
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: victoria-metrics
+            name: victoria-metrics
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 40
+    # retention, the named attribute behind -retentionPeriod.
+    - name: kube.victoria_metrics.retention reaches the live args
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    victoria_metrics:
+                      retention: 30d
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: victoria-metrics
+                namespace: victoria-metrics
+              spec:
+                template:
+                  spec:
+                    (containers[0].args || `[]`):
+                      (contains(@, '--retentionPeriod=30d')): true
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    victoria_metrics:
+                      retention: 15d
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: victoria-metrics
+                namespace: victoria-metrics
+              spec:
+                template:
+                  spec:
+                    (containers[0].args || `[]`):
+                      (contains(@, '--retentionPeriod=15d')): true
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: victoria-metrics
+            name: victoria-metrics
+    # Off: the release and the namespace go. The collectors stay on while
+    # their backend goes, so each pipeline must end in `nop` — their
+    # socle-values ConfigMaps carry reconcile.fluxcd.io/watch, so the releases
+    # follow at once — and Grafana's provisioning no longer names it.
+    - name: enabled = false garbage-collects the module, and the collectors and Grafana let go of it
+      try:
+        # The release must be idle before the module goes: helm-controller
+        # honours a deletion only once the running action returns, and the
+        # values steps above have just driven an upgrade — turned off under
+        # Helm's --wait, the namespace is garbage-collected, the rollout can
+        # never finish, and the deletion waits the release's whole timeout
+        # (five minutes, measured four times on external-dns).
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: victoria-metrics
+                namespace: victoria-metrics
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'Released'] || `[]`):
+                  - status: 'True'
+                (length(conditions[?type == 'Reconciling'] || `[]`)): 0
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    victoria_metrics:
+                      enabled: false
+        - error:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: victoria-metrics
+                namespace: victoria-metrics
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: victoria-metrics
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: otel-agent-agent
+                namespace: otel-agent
+              data:
+                (contains(relay, 'otlp_http/victoria-metrics')): false
+                (contains(relay, 'nop')): true
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: otel-gateway
+                namespace: otel-gateway
+              data:
+                (contains(relay, 'otlp_http/victoria-metrics')): false
+                (contains(relay, 'nop')): true
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: grafana
+                namespace: grafana
+              data:
+                (contains("datasources.yaml", 'victoria-metrics')): false
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+        - describe:
+            apiVersion: v1
+            kind: ConfigMap
+            namespace: otel-agent
+            name: otel-agent-agent
+        - describe:
+            apiVersion: v1
+            kind: ConfigMap
+            namespace: grafana
+            name: grafana
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 40
+    # Back: the namespace went with the module and its claim with it, so this
+    # is a new claim bound on the default class, not the old volume reattached;
+    # both collectors export to it again and their own metric reaches the new,
+    # empty storage; Grafana provisions it again.
+    - name: back to the defaults, a new claim is Bound and the collectors write into it again
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    victoria_metrics:
+                      enabled: true
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: PersistentVolumeClaim
+              metadata:
+                name: victoria-metrics
+                namespace: victoria-metrics
+              status:
+                phase: Bound
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: victoria-metrics
+                namespace: victoria-metrics
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: otel-agent-agent
+                namespace: otel-agent
+              data:
+                (contains(relay, 'otlp_http/victoria-metrics')): true
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: otel-gateway
+                namespace: otel-gateway
+              data:
+                (contains(relay, 'otlp_http/victoria-metrics')): true
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: grafana
+                namespace: grafana
+              data:
+                (contains("datasources.yaml", 'victoria-metrics')): true
+        - script:
+            content: |
+              . ./vm.sh
+              wait_series k8s_pod_cpu_usage 48 && wait_series k8s_deployment_available 48
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: victoria-metrics
+        - events:
+            namespace: victoria-metrics
+        - podLogs:
+            namespace: otel-agent
+            tail: 20
+        - podLogs:
+            namespace: otel-gateway
+            tail: 20

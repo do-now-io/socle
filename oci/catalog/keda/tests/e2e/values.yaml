@@ -1,0 +1,5 @@
+# Bindings for this module's tests, on top of what the job sets (tag, cloud,
+# cluster, floci_ip): the SQS queue the scaler watches in floci, and the
+# namespace the scaled Deployment lives in.
+queue: e2e-keda
+apps: e2e-keda

@@ -292,6 +292,17 @@ Local measurements were taken on an earlier revision that also installed two
 functions for a Composition since removed; they changed none of the figures
 above but the ~40Mi they cost.
 
+The e2e row above describes the bash phase this module shipped with. Since
+the e2e moved into the modules (`docs/flux-catalog.md` §8) the same proof is
+`tests/e2e/chainsaw-test.yaml`: `crossplane-health` asserts the disabled
+shape on every job, `crossplane-module-aws` turns the module on with the
+client's 48Mi, asserts core, providers and `ClusterProviderConfig default`,
+creates the floci `ClusterProviderConfig` (a step named as the seam), applies
+the module-shaped `Role` and association and reads the role's ARN, path and
+trust back from what Crossplane reports (`status.atProvider`), keeps one
+`aws iam get-role-policy` for the inline policy, asserts the association
+`Synced=False` (the second seam), deletes both, turns the module off.
+
 **floci's limits, stated plainly.** floci implements IAM, so the provider and
 a module-shaped role are proven for real. It does **not** implement the EKS
 Pod Identity association API (the provider gets a 404 HTML page), so the
@@ -365,8 +376,9 @@ The same fix applies to argocd and to §6's wording.
 ```
 
 PR #36's `external-dns-aws` Secret seam for its e2e stays as it is; on floci
-its Role needs `providerConfigRef: floci`, which the e2e sets with a one-line
-`kubectl patch`, since the module does not render that field.
+its Role needs `providerConfigRef: floci`, which the module's Chainsaw test
+sets with a `patch` step of its own, since the module does not render that
+field.
 
 ## 9. Open questions for the coordinator
 
