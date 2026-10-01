@@ -516,7 +516,9 @@ is read from the conventional commits since it.
   proofs ran on. The script refuses when the tag is not that commit's
   `VERSION`, when the version is already in the registry, and when no alpha
   was built from the commit. Runs on `main` share one never-cancelled
-  concurrency group, so a promotion never interleaves with the next push.
+  concurrency group, so a promotion never interleaves with the next push;
+  on every other branch a new push cancels the run in flight — a replaced
+  commit's proof is worth nothing and its runners are the branch's own.
 - **Why in one workflow and not `on: release`**: a release created with the
   workflow's own token does not trigger other workflows (GitHub rule), and a
   PAT or a GitHub App would have been the alternative. Chaining the jobs in

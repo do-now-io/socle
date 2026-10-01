@@ -25,11 +25,16 @@ on:
 permissions:
   contents: read
 
-# One group per ref, never cancelled: runs on main are serialised, so the
+# One group per ref. On main, never cancelled: runs are serialised, so the
 # alpha, its proofs, the release PR refresh and a promotion never interleave.
+# On any other branch the new push wins: the run of a commit that was just
+# replaced proves nothing, and finishing it holds the branch's runners for a
+# quarter of an hour (measured: a re-push queued 10 min behind its
+# predecessor's last e2e job). The branch tag is per commit, so cancelling
+# a run leaves no half-written artifact behind — only a tag nobody pulls.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   REGISTRY: ghcr.io
