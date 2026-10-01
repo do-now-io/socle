@@ -231,7 +231,6 @@ jobs:
     uses: ./.github/workflows/e2e.yaml
     permissions:
       contents: read
-      packages: read
       checks: write
     with:
       tag: ${{ needs.publish.outputs.tag }}

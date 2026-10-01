@@ -106,7 +106,6 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
-      packages: read
       checks: write
     strategy:
       fail-fast: false
@@ -139,7 +138,6 @@ jobs:
           cluster: socle-e2e
           tag: ${{ inputs.tag }}
           cosign-identity: ${{ inputs.cosign_identity }}
-          token: ${{ github.token }}
           floci: ${{ job.services.floci.id }}
       - name: The socle converges, and every module is healthy
         env:
@@ -221,7 +219,6 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
-      packages: read
       checks: write
     strategy:
       fail-fast: false
@@ -258,7 +255,6 @@ jobs:
           cluster: socle-e2e-catalog
           tag: ${{ inputs.tag }}
           cosign-identity: ${{ inputs.cosign_identity }}
-          token: ${{ github.token }}
           floci: ${{ job.services.floci.id }}
       # Two runs, not one: Chainsaw orders tests arbitrarily, and the
       # module's `module` phase mutates what `health` asserts. Values are the
@@ -293,7 +289,7 @@ jobs:
         run: |
           apply() {
             tofu apply -input=false -auto-approve -var "socle_version=$TAG" -var "cosign_identity=$COSIGN" \
-              -var artifact_pull_secret=ghcr-auth -var "kube=$1"
+              -var "kube=$1"
           }
           values=()
           if [ -f "$GITHUB_WORKSPACE/$TESTS/values.yaml" ]; then values=(--values "$GITHUB_WORKSPACE/$TESTS/values.yaml"); fi
@@ -315,7 +311,7 @@ jobs:
           # the last completed inventory — empty — and lets the finalizer go).
           suite "root, health" "$GITHUB_WORKSPACE/oci/tests/e2e" "$GITHUB_WORKSPACE/$TESTS"
           tofu plan -input=false -detailed-exitcode -var "socle_version=$TAG" -var "cosign_identity=$COSIGN" \
-            -var artifact_pull_secret=ghcr-auth -var 'kube={}' > /dev/null
+            -var 'kube={}' > /dev/null
           echo "| second \`tofu plan\` | empty (exit 0) |" >> "$GITHUB_STEP_SUMMARY"
       - name: Uninstall the socle
         if: always()
