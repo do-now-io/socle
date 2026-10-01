@@ -1,0 +1,7 @@
+# Bindings for this module's tests, on top of what the job sets (tag, cloud,
+# floci_ip): the fake zone the records go into, and the owner ids the TXT
+# records must name — the socle's default is the cluster name, the client's
+# comes through kube.external_dns.values.txtOwnerId.
+zone: e2e.socle.test
+owner: socle-e2e-client
+socle_owner: socle-e2e-catalog

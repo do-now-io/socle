@@ -1,0 +1,520 @@
+# The argocd module's proof (docs/catalog/argocd.md). Selected by label:
+#   health   converged on any cloud: the ResourceSet Ready, argocd-server
+#            Available, the socle's own keys in argocd-cm. The slow module
+#            on a fresh node — five images — and the one that has flaked
+#            (`Running 'install' action with timeout of 10m0s`, issue #61):
+#            every `catch` here prints what the next failure needs.
+#   module   values precedence through a patch of the ResourceSetInputProvider
+#            (docs/flux-catalog.md §6: the client wins where the two meet, on a
+#            key the socle itself sets — a key it leaves unset proves nothing),
+#            then off (garbage-collected) and back on.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: argocd-health
+  labels:
+    phase: health
+    cloud: any
+    platform: any
+spec:
+  description: ArgoCD converges on the socle's defaults.
+  timeouts:
+    assert: 10m
+  steps:
+    - name: the ResourceSet is Ready and argocd-server is Available
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: argocd
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: argocd-server
+                namespace: argocd
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        # The socle's own document reached the chart: configs.cm lands in
+        # argocd-cm, configs.params in argocd-cmd-params-cm.
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: argocd-cm
+                namespace: argocd
+              data:
+                admin.enabled: 'true'
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: argocd-cmd-params-cm
+                namespace: argocd
+              data:
+                server.insecure: 'true'
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: argocd
+            name: argocd
+        - describe:
+            apiVersion: source.toolkit.fluxcd.io/v1
+            kind: OCIRepository
+            namespace: argocd
+            name: argo-cd-chart
+        - describe:
+            apiVersion: v1
+            kind: Pod
+            namespace: argocd
+        - events:
+            namespace: argocd
+        - podLogs:
+            namespace: argocd
+            tail: 40
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 80
+        - script:
+            content: |
+              kubectl top node 2>/dev/null || true
+              kubectl describe node | sed -n '/Conditions:/,/Addresses:/p'
+              df -h / 2>/dev/null || true
+---
+# floci only: no shared Gateway (no Cilium), so kube.argocd.gateway keeps its
+# default and the socle renders no HTTPRoute — the argocd-route ResourceSet
+# is absent (docs/catalog/argocd.md, "Exposure through Gateway API"). The
+# sandbox (M4) proves the route.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: argocd-floci
+  labels:
+    phase: health
+    cloud: aws
+    platform: floci
+spec:
+  description: Without a shared Gateway, no HTTPRoute is rendered for ArgoCD.
+  timeouts:
+    assert: 1m
+    error: 1m
+  steps:
+    - name: gateway defaults to private, and no route ResourceSet exists
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    argocd:
+                      gateway: private
+                      domain: ''
+        - error:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: argocd-route
+                namespace: flux-system
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+---
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: argocd-module
+  labels:
+    phase: module
+    cloud: any
+    platform: any
+spec:
+  description: The client's values win over the socle's; off garbage-collects; on brings it back.
+  timeouts:
+    assert: 5m
+    error: 3m
+  steps:
+    # kube.argocd.values, deep-merged by helm-controller over the socle's
+    # document: a key the socle leaves unset (accounts.e2e) lands next to the
+    # socle's own keys, and on a key the socle sets (server memory request,
+    # 64Mi in argocd-socle-values) the client's 96Mi wins while the socle's
+    # sibling cpu request survives the merge.
+    - name: kube.argocd.values beats the socle's defaults on the live objects
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    argocd:
+                      values:
+                        configs:
+                          cm:
+                            accounts.e2e: apiKey
+                        server:
+                          resources:
+                            requests:
+                              memory: 96Mi
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: argocd-cm
+                namespace: argocd
+              data:
+                accounts.e2e: apiKey
+                admin.enabled: 'true'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: argocd-server
+                namespace: argocd
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'server'] || `[]`):
+                      - resources:
+                          requests:
+                            cpu: 50m
+                            memory: 96Mi
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: argocd
+            name: argocd
+        - describe:
+            apiVersion: v1
+            kind: ConfigMap
+            namespace: argocd
+            name: argocd-client-values
+        - events:
+            namespace: argocd
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 80
+    # The order of valuesFrom, proven whole (docs/flux-catalog.md §6): the
+    # socle's document, then kube.argocd.values, then the Secret the client
+    # names in values_secret — created by him in the module's namespace, never
+    # read by OpenTofu, merged last. 160Mi in values and 176Mi in the Secret:
+    # the live object carries the Secret's; both cleared, the socle's 64Mi.
+    - name: kube.argocd.values_secret is merged last, over values and the socle
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: argocd-e2e-values
+                namespace: argocd
+                labels:
+                  reconcile.fluxcd.io/watch: Enabled
+              stringData:
+                values.yaml: |
+                  server:
+                    resources:
+                      requests:
+                        memory: 176Mi
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    argocd:
+                      values_secret: argocd-e2e-values
+                      values:
+                        server:
+                          resources:
+                            requests:
+                              memory: 160Mi
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: argocd-server
+                namespace: argocd
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'server'] || `[]`):
+                      - resources:
+                          requests:
+                            memory: 176Mi
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    argocd:
+                      values_secret: ''
+                      values:
+                        server: null
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: argocd-server
+                namespace: argocd
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'server'] || `[]`):
+                      - resources:
+                          requests:
+                            memory: 64Mi
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Secret
+              name: argocd-e2e-values
+              namespace: argocd
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: argocd
+            name: argocd
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 40
+    # The two other named attributes, on the ConfigMaps the chart derives
+    # them into: admin_enabled → argocd-cm admin.enabled; domain →
+    # global.domain → argocd-cm url (https://<domain>). Back to the defaults
+    # after: no admin lost for the steps below, and no URL at all rather than
+    # the chart's example.com.
+    - name: kube.argocd.admin_enabled and domain reach argocd-cm
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    argocd:
+                      admin_enabled: false
+                      domain: argocd.e2e.socle.test
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: argocd-cm
+                namespace: argocd
+              data:
+                admin.enabled: 'false'
+                url: https://argocd.e2e.socle.test
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    argocd:
+                      admin_enabled: true
+                      domain: ''
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: argocd-cm
+                namespace: argocd
+              data:
+                admin.enabled: 'true'
+                # The chart drops an empty url from the ConfigMap: absent or
+                # empty, never example.com (measured, run 36846880986).
+                (url || ''): ''
+      catch:
+        - describe:
+            apiVersion: v1
+            kind: ConfigMap
+            namespace: argocd
+            name: argocd-socle-values
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: argocd
+            name: argocd
+    - name: enabled = false garbage-collects the module
+      try:
+        # The release must be idle before the module goes: helm-controller
+        # honours a deletion only once the running action returns, and the
+        # values steps above have just driven an upgrade — turned off under
+        # Helm's --wait, the namespace is garbage-collected, the rollout can
+        # never finish, and the deletion waits the release's whole timeout
+        # (five minutes, measured four times on external-dns).
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: argocd
+                namespace: argocd
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'Released'] || `[]`):
+                  - status: 'True'
+                (length(conditions[?type == 'Reconciling'] || `[]`)): 0
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    argocd:
+                      enabled: false
+        - error:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: argocd
+                namespace: argocd
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: argocd
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: argocd
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (length(inventory.entries || `[]`)): 0
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: argocd
+        - podLogs:
+            namespace: flux-system
+            selector: app.kubernetes.io/name=flux-operator
+            tail: 40
+    # The images are already on the node: this second convergence is the
+    # operator's and Helm's own latency, not the network's.
+    - name: back to the defaults, ArgoCD is back
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    argocd:
+                      enabled: true
+                      values:
+                        configs: null
+                        server: null
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: argocd
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: argocd-server
+                namespace: argocd
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'server'] || `[]`):
+                      - resources:
+                          requests:
+                            memory: 64Mi
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: argocd
+            name: argocd
+        - events:
+            namespace: argocd
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 80

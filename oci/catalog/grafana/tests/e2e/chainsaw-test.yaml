@@ -1,0 +1,477 @@
+# The grafana module's proof (docs/catalog/grafana.md): the monitoring stack's
+# one place to read, on by default, last of the stack. Selected by label:
+#   health   the ResourceSet Ready, the Deployment rolled out, the ClusterRole
+#            the sidecar reads dashboards with; then through Grafana's own API
+#            (grafana.sh): exactly the datasources the socle provisions, the
+#            collectors' dashboards loaded from their own namespaces, and the
+#            collectors' metric read through Grafana's datasource proxy — what
+#            a person opening Grafana sees.
+#   module   a client request beats the socle's; off garbage-collects the
+#            release and the ClusterRole; on brings them back.
+# floci only (`platform: floci`): no shared Gateway, so no HTTPRoute — the
+# grafana-route ResourceSet is absent. The sandbox (M4) proves the route.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: grafana-health
+  labels:
+    phase: health
+    cloud: any
+    platform: any
+spec:
+  description: >-
+    Grafana runs with the socle's datasources and the modules' dashboards, and
+    reads the collectors' metrics.
+  timeouts:
+    assert: 5m
+    exec: 5m
+  steps:
+    - name: the ResourceSet is Ready, the Deployment Available, the ClusterRole there
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: grafana
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: grafana
+                namespace: grafana
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: rbac.authorization.k8s.io/v1
+              kind: ClusterRole
+              metadata:
+                name: grafana-dashboards
+        # The provisioning the socle renders: a datasource per backend that is on.
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: grafana
+                namespace: grafana
+              data:
+                (contains("datasources.yaml", 'victoria-metrics')): true
+                (contains("datasources.yaml", 'victoria-logs')): true
+                (contains("datasources.yaml", 'victoria-traces')): false
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: grafana
+            name: grafana
+        - events:
+            namespace: grafana
+        - podLogs:
+            namespace: grafana
+            tail: 40
+    - name: through Grafana's API, the datasources, the dashboards and the collectors' metric
+      try:
+        - script:
+            content: |
+              . ./grafana.sh
+              gf_up
+              echo "grafana health: $(curl -sf http://127.0.0.1:13000/api/health | tr -d '\n ')"
+              datasources true
+              health="$(gf /api/datasources/uid/victoria-logs/health \
+                | python3 -c 'import sys,json; print(json.load(sys.stdin).get("status"))')"
+              echo "datasource victoria-logs health: $health"
+              [ "$health" = OK ]
+              dashboard socle-otel-nodes-pods
+              dashboard socle-otel-workloads
+              n="$(through k8s_pod_cpu_usage)"
+              echo "through grafana's datasource: count(k8s_pod_cpu_usage) = $n"
+              [ "$n" != 0 ]
+      catch:
+        - podLogs:
+            namespace: grafana
+            tail: 60
+---
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: grafana-floci
+  labels:
+    phase: health
+    cloud: aws
+    platform: floci
+spec:
+  description: Without a shared Gateway, no HTTPRoute is rendered for Grafana.
+  timeouts:
+    assert: 1m
+    error: 1m
+  steps:
+    - name: gateway defaults to private, and no route ResourceSet exists
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    grafana:
+                      gateway: private
+                      domain: ''
+        - error:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: grafana-route
+                namespace: flux-system
+---
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: grafana-module
+  labels:
+    phase: module
+    cloud: any
+    platform: any
+spec:
+  description: >-
+    A client request wins over the socle's; off garbage-collects the release
+    and the ClusterRole; on brings them back.
+  timeouts:
+    assert: 5m
+    error: 5m
+  steps:
+    # 256Mi in the socle's document, its 50m request intact.
+    - name: kube.grafana.values beats the socle's memory request, its sibling kept
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    grafana:
+                      values:
+                        resources:
+                          requests:
+                            memory: 320Mi
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: grafana
+                namespace: grafana
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'grafana'] || `[]`):
+                      - resources:
+                          requests:
+                            cpu: 50m
+                            memory: 320Mi
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    grafana:
+                      values:
+                        resources: null
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: grafana
+            name: grafana
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 40
+    # The order of valuesFrom, proven whole (docs/flux-catalog.md §6): the
+    # socle's document, then kube.grafana.values, then the Secret the client
+    # names in values_secret — created by him in the module's namespace, never
+    # read by OpenTofu, merged last. 320Mi in values and 336Mi in the Secret:
+    # the live object carries the Secret's; both cleared, the socle's 256Mi.
+    - name: kube.grafana.values_secret is merged last, over values and the socle
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: grafana-e2e-values
+                namespace: grafana
+                labels:
+                  reconcile.fluxcd.io/watch: Enabled
+              stringData:
+                values.yaml: |
+                  resources:
+                    requests:
+                      memory: 336Mi
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    grafana:
+                      values_secret: grafana-e2e-values
+                      values:
+                        resources:
+                          requests:
+                            memory: 320Mi
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: grafana
+                namespace: grafana
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'grafana'] || `[]`):
+                      - resources:
+                          requests:
+                            memory: 336Mi
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    grafana:
+                      values_secret: ''
+                      values:
+                        resources: null
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: grafana
+                namespace: grafana
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'grafana'] || `[]`):
+                      - resources:
+                          requests:
+                            memory: 256Mi
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Secret
+              name: grafana-e2e-values
+              namespace: grafana
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: grafana
+            name: grafana
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 40
+    # domain → grafana.ini server.domain and root_url, in the ConfigMap the
+    # chart renders. Empty again after: no root_url at all.
+    - name: kube.grafana.domain reaches grafana.ini
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    grafana:
+                      domain: grafana.e2e.socle.test
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: grafana
+                namespace: grafana
+              data:
+                (contains("grafana.ini", 'root_url = https://grafana.e2e.socle.test')): true
+                (contains("grafana.ini", 'domain = grafana.e2e.socle.test')): true
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    grafana:
+                      domain: ''
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: grafana
+                namespace: grafana
+              data:
+                (contains("grafana.ini", 'root_url')): false
+      catch:
+        - describe:
+            apiVersion: v1
+            kind: ConfigMap
+            namespace: grafana
+            name: grafana-socle-values
+    - name: enabled = false garbage-collects the release and the ClusterRole
+      try:
+        # The release must be idle before the module goes: helm-controller
+        # honours a deletion only once the running action returns, and the
+        # values steps above have just driven an upgrade — turned off under
+        # Helm's --wait, the namespace is garbage-collected, the rollout can
+        # never finish, and the deletion waits the release's whole timeout
+        # (five minutes, measured four times on external-dns).
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: grafana
+                namespace: grafana
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'Released'] || `[]`):
+                  - status: 'True'
+                (length(conditions[?type == 'Reconciling'] || `[]`)): 0
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    grafana:
+                      enabled: false
+        - error:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: grafana
+                namespace: grafana
+        - error:
+            resource:
+              apiVersion: rbac.authorization.k8s.io/v1
+              kind: ClusterRole
+              metadata:
+                name: grafana-dashboards
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: grafana
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: grafana
+        - podLogs:
+            namespace: flux-system
+            selector: app.kubernetes.io/name=flux-operator
+            tail: 40
+    - name: back to the defaults, the Deployment is Available and the ClusterRole back
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    grafana:
+                      enabled: true
+        - assert:
+            resource:
+              apiVersion: rbac.authorization.k8s.io/v1
+              kind: ClusterRole
+              metadata:
+                name: grafana-dashboards
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: grafana
+                namespace: grafana
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: grafana
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: grafana
+            name: grafana
+        - events:
+            namespace: grafana

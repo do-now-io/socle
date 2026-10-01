@@ -305,8 +305,11 @@ runs, which is the invariance §6 asks for. It is not in this stack.
 
 ## 7. What floci can prove
 
-The e2e jobs run the real AWS root on floci's k3s, a single node on a 7 GB
-runner that already carries argocd.
+The e2e runs the real AWS root on floci's k3s once, and one job per module on
+a bare fixture root — each a single node on a 7 GB runner that already
+carries argocd and, since this stack, every backend and collector on by
+default. Each module's proof is its own `tests/e2e/chainsaw-test.yaml`
+(`docs/flux-catalog.md` §6, §8).
 
 | Provable on floci | Not provable on floci |
 | --- | --- |
@@ -320,9 +323,10 @@ runner that already carries argocd.
 **Memory is the budget to watch.** Crossplane alone costs ~1.1 GB idle and
 moved a job from 3m35s to 6m24s. No idle figure is published upstream for any
 of the six; the first module PR measures them and decides, per module,
-whether it stays in `tests/floci.tfvars` or is covered by `e2e-aws-catalog`
-only. A module that cannot converge on floci defaults to off, with the reason
-written down — the catalog rule, not a new one.
+whether it stays in the real root's fixture (`.github/e2e/aws/floci.tfvars`)
+or is covered by its own module job only. A module that cannot converge on
+floci defaults to off, with the reason written down — the catalog rule, not a
+new one.
 
 ## 8. The stack
 

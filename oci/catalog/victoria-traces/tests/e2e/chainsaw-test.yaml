@@ -1,0 +1,364 @@
+# The victoria_traces module's proof (docs/catalog/victoria-traces.md): the
+# monitoring stack's traces storage, OFF by default (pre-GA). Selected by
+# label:
+#   health   the disabled shape: the ResourceSet Ready with nothing rendered,
+#            no namespace, and no traces pipeline in the gateway.
+#   module   on: Ready on a Bound claim, the gateway exports traces, Grafana
+#            provisions the Jaeger datasource, and one OTLP span posted by
+#            podinfo to the gateway is found by its trace id through the
+#            Jaeger API (the one `script`); off: the release gone, the
+#            gateway's traces pipeline and Grafana's datasource with it.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: victoria-traces-health
+  labels:
+    phase: health
+    cloud: any
+    platform: any
+spec:
+  description: >-
+    Off by default, the ResourceSet renders nothing and the gateway has no
+    traces pipeline.
+  timeouts:
+    assert: 3m
+    error: 1m
+  steps:
+    - name: the ResourceSet is Ready with nothing in its inventory, and the gateway exports no traces
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: victoria-traces
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (length(inventory.entries || `[]`)): 0
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: victoria-traces
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: otel-gateway
+                namespace: otel-gateway
+              data:
+                (contains(relay, 'victoria-traces')): false
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: victoria-traces
+---
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: victoria-traces-module
+  labels:
+    phase: module
+    cloud: any
+    platform: any
+spec:
+  description: >-
+    On, a trace posted to the gateway is found through the Jaeger API; off,
+    the pipeline and the datasource go.
+  timeouts:
+    assert: 5m
+    error: 5m
+    exec: 5m
+  steps:
+    - name: enabled = true converges on a Bound claim, the gateway exports traces, Grafana provisions Jaeger
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    victoria_traces:
+                      enabled: true
+        # storage_size, the catalog's 10Gi; retention, its 7d.
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: PersistentVolumeClaim
+              metadata:
+                name: victoria-traces
+                namespace: victoria-traces
+              spec:
+                resources:
+                  requests:
+                    storage: 10Gi
+              status:
+                phase: Bound
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: victoria-traces
+                namespace: victoria-traces
+              spec:
+                template:
+                  spec:
+                    (containers[0].args || `[]`):
+                      (contains(@, '--retentionPeriod=7d')): true
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: otel-gateway
+                namespace: otel-gateway
+              data:
+                (contains(relay, 'otlp_http/victoria-traces')): true
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: otel-gateway
+                namespace: otel-gateway
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: grafana
+                namespace: grafana
+              data:
+                (contains("datasources.yaml", 'victoria-traces')): true
+                (contains("datasources.yaml", 'jaeger')): true
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: victoria-traces
+            name: victoria-traces
+        - events:
+            namespace: victoria-traces
+        - podLogs:
+            namespace: victoria-traces
+            tail: 40
+    # One span, OTLP/JSON, trace and span ids in hex as the spec writes them,
+    # posted by podinfo to the gateway, which forwards it as protobuf; found by
+    # id through the Jaeger query API, via the API server's service proxy.
+    - name: a span posted to the gateway is found by its trace id through the Jaeger API
+      try:
+        - script:
+            content: |
+              . ./vt.sh
+              trace_id="$(post_span)"
+              find_trace "$trace_id"
+      catch:
+        - podLogs:
+            namespace: otel-gateway
+            tail: 40
+        - podLogs:
+            namespace: victoria-traces
+            tail: 40
+    # The order of valuesFrom, proven whole (docs/flux-catalog.md §6): the
+    # socle's document, then kube.victoria_traces.values, then the Secret the client
+    # names in values_secret — created by him in the module's namespace, never
+    # read by OpenTofu, merged last. 160Mi in values and 176Mi in the Secret:
+    # the live object carries the Secret's; both cleared, the socle's 128Mi.
+    - name: kube.victoria_traces.values_secret is merged last, over values and the socle
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: victoria-traces-e2e-values
+                namespace: victoria-traces
+                labels:
+                  reconcile.fluxcd.io/watch: Enabled
+              stringData:
+                values.yaml: |
+                  server:
+                    resources:
+                      requests:
+                        memory: 176Mi
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    victoria_traces:
+                      values_secret: victoria-traces-e2e-values
+                      values:
+                        server:
+                          resources:
+                            requests:
+                              memory: 160Mi
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: victoria-traces
+                namespace: victoria-traces
+              spec:
+                template:
+                  spec:
+                    (containers[0].resources || `{}`):
+                      requests:
+                        memory: 176Mi
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    victoria_traces:
+                      values_secret: ''
+                      values:
+                        server: null
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: victoria-traces
+                namespace: victoria-traces
+              spec:
+                template:
+                  spec:
+                    (containers[0].resources || `{}`):
+                      requests:
+                        memory: 128Mi
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Secret
+              name: victoria-traces-e2e-values
+              namespace: victoria-traces
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: victoria-traces
+            name: victoria-traces
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 40
+    - name: enabled = false garbage-collects the module, and the gateway and Grafana let go of it
+      try:
+        # The release must be idle before the module goes: helm-controller
+        # honours a deletion only once the running action returns, and the
+        # values steps above have just driven an upgrade — turned off under
+        # Helm's --wait, the namespace is garbage-collected, the rollout can
+        # never finish, and the deletion waits the release's whole timeout
+        # (five minutes, measured four times on external-dns).
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: victoria-traces
+                namespace: victoria-traces
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'Released'] || `[]`):
+                  - status: 'True'
+                (length(conditions[?type == 'Reconciling'] || `[]`)): 0
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    victoria_traces:
+                      enabled: false
+        - error:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: victoria-traces
+                namespace: victoria-traces
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: otel-gateway
+                namespace: otel-gateway
+              data:
+                (contains(relay, 'victoria-traces')): false
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: grafana
+                namespace: grafana
+              data:
+                (contains("datasources.yaml", 'victoria-traces')): false
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: victoria-traces
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: victoria-traces
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (length(inventory.entries || `[]`)): 0
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: victoria-traces
+        - podLogs:
+            namespace: flux-system
+            selector: app.kubernetes.io/name=flux-operator
+            tail: 40

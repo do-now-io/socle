@@ -1,0 +1,393 @@
+---
+# Level 3 of the socle test pyramid: the artifact a push just published,
+# applied on floci's real k3s and proven by Chainsaw. Called by
+# publish-artifact.yaml with the tag it pushed, never run on its own: the
+# proof is of one signed artifact, and the tag is its name.
+#
+# Nothing here names a module. A catalog module is a folder under
+# oci/catalog/ and it ships tests/e2e/chainsaw-test.yaml; `discover` turns
+# those folders into the matrix, one job per (module, cloud) on its own
+# floci, and Chainsaw runs the socle's generic suite (oci/tests/e2e) beside
+# the module's own. The clouds are the folders under .github/e2e/, one
+# fixture root each; a (module, cloud) pair exists when the cloud's overlay
+# deploys the module. Adding a module or a cloud never touches this file.
+#
+# Two kinds of job, both ending in `tofu destroy`:
+#   root      the real client root (opentofu/clusters/<cloud>), applied once
+#             with the fixture tfvars; the generic suite plus every module's
+#             `phase: health` tests. Once only: floci does not read back
+#             several EKS attributes, so a second apply of that root fails.
+#   <module>  the bare fixture root, then the generic suite and the module's
+#             whole suite; the one OpenTofu-driven mutation (the module off
+#             through `kube`, back on, a second plan empty); the socle
+#             uninstalled and the cluster asserted empty.
+# `e2e` is the single context a ruleset can require: the matrix is
+# discovered, so its job names cannot be listed.
+#
+# What this cannot prove: what floci does not run — Cilium on real nodes,
+# Pod Identity, IAM enforcement, the cloud's DNS — is the sandbox's (M4).
+name: e2e
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: The artifact tag this run proves.
+        required: true
+        type: string
+      subject:
+        description: The workflow identity the artifact is signed as.
+        required: true
+        type: string
+      cosign_identity:
+        description: The identity as the HCL object the roots take.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# `shell: bash` runs every step with -o pipefail: a failure on the left of a
+# pipe (`| tee`, `| python3`) fails the step instead of vanishing behind the
+# right-hand command's exit code. The unspecified default, `bash -e`, does not.
+defaults:
+  run:
+    shell: bash
+
+env:
+  AWS_ENDPOINT_URL: http://localhost:4566
+  AWS_ACCESS_KEY_ID: test
+  AWS_SECRET_ACCESS_KEY: test
+  AWS_REGION: eu-west-3
+  AWS_DEFAULT_REGION: eu-west-3
+
+jobs:
+  # The only listing there is: modules from their tests/e2e folders, clouds
+  # from their fixture roots, pairs from the cloud's overlay.
+  discover:
+    name: Discover modules and clouds
+    runs-on: ubuntu-24.04
+    outputs:
+      clouds: ${{ steps.matrix.outputs.clouds }}
+      pairs: ${{ steps.matrix.outputs.pairs }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: The matrix
+        id: matrix
+        run: |
+          mapfile -t modules < <(find oci/catalog -mindepth 3 -maxdepth 3 -type d -path '*/tests/e2e' | cut -d/ -f3 | sort)
+          mapfile -t clouds < <(find .github/e2e -mindepth 1 -maxdepth 1 -type d | cut -d/ -f3 | sort)
+          pairs=()
+          for cloud in "${clouds[@]}"; do
+            for module in "${modules[@]}"; do
+              grep -q "catalog/$module/resourceset.yaml" "oci/clusters/$cloud/kustomization.yaml" && pairs+=("$module:$cloud")
+            done
+          done
+          {
+            echo "clouds=$(printf '%s\n' "${clouds[@]}" | jq -R -s -c 'split("\n") | map(select(length > 0))')"
+            echo "pairs=$(printf '%s\n' "${pairs[@]}" \
+              | jq -R -s -c 'split("\n") | map(select(length > 0)) | map(split(":") | {module: .[0], cloud: .[1]})')"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### e2e matrix"
+            echo "| Module | Clouds |"
+            echo "|---|---|"
+            for module in "${modules[@]}"; do
+              echo "| \`$module\` | $(printf '%s\n' "${pairs[@]}" | grep "^$module:" | cut -d: -f2 | tr '\n' ' ') |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  root:
+    name: root (${{ matrix.cloud }})
+    runs-on: ubuntu-24.04
+    needs: discover
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+      checks: write
+    strategy:
+      fail-fast: false
+      matrix:
+        cloud: ${{ fromJSON(needs.discover.outputs.clouds) }}
+    # floci runs a real k3s behind its emulated EKS once the Docker socket is
+    # mounted and FLOCI_SERVICES_EKS_MOCK is left unset. A service container
+    # so that Renovate reads the image: the github-actions manager knows
+    # `services.*.image`, and nothing inside a `run:` line.
+    services:
+      floci:
+        image: floci/floci:2.1.0@sha256:f5aa8c18302cedb4f2385f5c4e455b3efc77fee6bf7b6e5d1712b2817ba102db
+        ports:
+          - 4566:4566
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+      - uses: kyverno/action-install-chainsaw@1223ef75bedeb59c4e7b5455463d4316e76dff01 # v0.2.15
+      - name: Apply the real root, once
+        id: apply
+        uses: ./.github/actions/e2e-cluster
+        with:
+          mode: apply
+          root: opentofu/clusters/${{ matrix.cloud }}
+          var-file: .github/e2e/${{ matrix.cloud }}/floci.tfvars
+          cluster: socle-e2e
+          tag: ${{ inputs.tag }}
+          cosign-identity: ${{ inputs.cosign_identity }}
+          token: ${{ github.token }}
+          floci: ${{ job.services.floci.id }}
+      - name: The socle converges, and every module is healthy
+        env:
+          TAG: ${{ inputs.tag }}
+          CLOUD: ${{ matrix.cloud }}
+          CLUSTER: socle-e2e
+        run: |
+          mkdir -p "$RUNNER_TEMP/reports"
+          chainsaw test oci/tests/e2e oci/catalog/*/tests/e2e \
+            --selector "phase in (root, health), cloud in ($CLOUD, any), platform in (floci, any)" \
+            --set "tag=$TAG" --set "cloud=$CLOUD" --set "cluster=$CLUSTER" --set "floci_ip=$FLOCI_IP" \
+            --report-format JUNIT-STEP --report-name root --report-path "$RUNNER_TEMP/reports"
+      - name: Uninstall the socle, and nothing is left
+        if: always()
+        uses: ./.github/actions/e2e-cluster
+        with:
+          mode: destroy-socle
+          root: opentofu/clusters/${{ matrix.cloud }}
+          var-file: .github/e2e/${{ matrix.cloud }}/floci.tfvars
+          cluster: socle-e2e
+          tag: ${{ inputs.tag }}
+          cosign-identity: ${{ inputs.cosign_identity }}
+      # A module may ship a `destroyed` test too: what must survive the
+      # socle's uninstall (the Gateway API CRDs, orphaned by design).
+      - name: The cluster is empty
+        if: always() && steps.apply.outcome == 'success'
+        env:
+          TAG: ${{ inputs.tag }}
+          CLOUD: ${{ matrix.cloud }}
+          CLUSTER: socle-e2e
+        run: |
+          chainsaw test oci/tests/e2e oci/catalog/*/tests/e2e \
+            --selector "phase=destroyed, cloud in ($CLOUD, any), platform in (floci, any)" \
+            --set "tag=$TAG" --set "cloud=$CLOUD" --set "cluster=$CLUSTER" \
+            --report-format JUNIT-STEP --report-name destroyed --report-path "$RUNNER_TEMP/reports"
+      - name: Destroy the cluster
+        if: always()
+        uses: ./.github/actions/e2e-cluster
+        with:
+          mode: destroy
+          root: opentofu/clusters/${{ matrix.cloud }}
+          var-file: .github/e2e/${{ matrix.cloud }}/floci.tfvars
+          cluster: socle-e2e
+          tag: ${{ inputs.tag }}
+          cosign-identity: ${{ inputs.cosign_identity }}
+      - name: The Checks tab names the failing step
+        if: always()
+        uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6.5.0
+        with:
+          report_paths: ${{ runner.temp }}/reports/*.xml
+          check_name: e2e root (${{ matrix.cloud }})
+          include_passed: true
+      - name: Summary
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          TAG: ${{ inputs.tag }}
+          SUBJECT: ${{ inputs.subject }}
+          CLOUD: ${{ matrix.cloud }}
+        run: |
+          if [ "$JOB_STATUS" != success ]; then
+            echo "### root ($CLOUD) ❌ — see the failed step; each Chainsaw step's \`catch\` printed what the cluster looked like" \
+              >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "### root ($CLOUD) ✅"
+            echo "Applied \`opentofu/clusters/$CLOUD\` — the real root, foundations included — once on"
+            echo "floci's k3s against \`ghcr.io/do-now-io/socle/flux-modules:$TAG\`, signed as \`$SUBJECT\`."
+            echo "Proven by Chainsaw: the artifact pulled by that exact tag with its signature verified,"
+            echo "\`socle-root\` Ready, every module's \`health\` test green; then the socle uninstalled"
+            echo "through \`tofu destroy\` and the cluster asserted empty."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  module:
+    name: ${{ matrix.module }} (${{ matrix.cloud }})
+    runs-on: ubuntu-24.04
+    needs: discover
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+      checks: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.discover.outputs.pairs) }}
+    services:
+      floci:
+        image: floci/floci:2.1.0@sha256:f5aa8c18302cedb4f2385f5c4e455b3efc77fee6bf7b6e5d1712b2817ba102db
+        ports:
+          - 4566:4566
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock
+    env:
+      ROOT: .github/e2e/${{ matrix.cloud }}
+      TESTS: oci/catalog/${{ matrix.module }}/tests/e2e
+      TAG: ${{ inputs.tag }}
+      CLOUD: ${{ matrix.cloud }}
+      CLUSTER: socle-e2e-catalog
+      # The folder names the ResourceSet; the catalog key is the same in
+      # snake_case (docs/flux-catalog.md §2, §6).
+      MODULE: ${{ matrix.module }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+      - uses: kyverno/action-install-chainsaw@1223ef75bedeb59c4e7b5455463d4316e76dff01 # v0.2.15
+      - name: Apply the fixture root
+        id: apply
+        uses: ./.github/actions/e2e-cluster
+        with:
+          mode: apply
+          root: ${{ env.ROOT }}
+          cluster: socle-e2e-catalog
+          tag: ${{ inputs.tag }}
+          cosign-identity: ${{ inputs.cosign_identity }}
+          token: ${{ github.token }}
+          floci: ${{ job.services.floci.id }}
+      # Two runs, not one: Chainsaw orders tests arbitrarily, and the
+      # module's `module` phase mutates what `health` asserts. Values are the
+      # module's tests/e2e/values.yaml when it ships one.
+      - name: The socle converges, and the module is healthy
+        run: |
+          mkdir -p "$RUNNER_TEMP/reports"
+          values=()
+          if [ -f "$TESTS/values.yaml" ]; then values=(--values "$TESTS/values.yaml"); fi
+          chainsaw test oci/tests/e2e "$TESTS" "${values[@]}" \
+            --selector "phase in (root, health), cloud in ($CLOUD, any), platform in (floci, any)" \
+            --set "tag=$TAG" --set "cloud=$CLOUD" --set "cluster=$CLUSTER" --set "floci_ip=$FLOCI_IP" \
+            --report-format JUNIT-STEP --report-name health --report-path "$RUNNER_TEMP/reports"
+      - name: The module proves itself
+        run: |
+          values=()
+          if [ -f "$TESTS/values.yaml" ]; then values=(--values "$TESTS/values.yaml"); fi
+          chainsaw test "$TESTS" "${values[@]}" \
+            --selector "phase=module, cloud in ($CLOUD, any), platform in (floci, any)" \
+            --set "tag=$TAG" --set "cloud=$CLOUD" --set "cluster=$CLUSTER" --set "floci_ip=$FLOCI_IP" \
+            --report-format JUNIT-STEP --report-name module --report-path "$RUNNER_TEMP/reports"
+      # The one mutation that goes through OpenTofu, so the client's path —
+      # kube → validated inputs → the envelope's Helm upgrade → the operator
+      # re-rendering — is exercised end to end; every other mutation is a
+      # Chainsaw patch of the same ResourceSetInputProvider. Off through kube,
+      # asserted gone; back to the defaults, asserted converged; a second plan
+      # empty.
+      - name: kube turns the module off, then back on, and a second plan is empty
+        working-directory: ${{ env.ROOT }}
+        env:
+          COSIGN: ${{ inputs.cosign_identity }}
+        run: |
+          apply() {
+            tofu apply -input=false -auto-approve -var "socle_version=$TAG" -var "cosign_identity=$COSIGN" \
+              -var artifact_pull_secret=ghcr-auth -var "kube=$1"
+          }
+          values=()
+          if [ -f "$GITHUB_WORKSPACE/$TESTS/values.yaml" ]; then values=(--values "$GITHUB_WORKSPACE/$TESTS/values.yaml"); fi
+          suite() {  # suite <phases> <dirs…>
+            phases="$1"; shift
+            chainsaw test "$@" "${values[@]}" \
+              --selector "phase in ($phases), cloud in ($CLOUD, any), platform in (floci, any)" \
+              --set "resourceset=$MODULE" \
+              --set "tag=$TAG" --set "cloud=$CLOUD" --set "cluster=$CLUSTER" --set "floci_ip=$FLOCI_IP" \
+              --report-format JUNIT-STEP --report-name "mutation-${phases//[^a-z]/-}" --report-path "$RUNNER_TEMP/reports"
+          }
+          apply "{${MODULE//-/_}={enabled=false}}"
+          suite disabled "$GITHUB_WORKSPACE/oci/tests/e2e"
+          apply '{}'
+          # The module's own health, not only socle-root: socle-root's Ready is
+          # the previous reconcile's until the operator re-renders, and a
+          # destroy that races the re-enable orphans what that reconcile
+          # applied (measured, run 36850894039: the operator uninstalls from
+          # the last completed inventory — empty — and lets the finalizer go).
+          suite "root, health" "$GITHUB_WORKSPACE/oci/tests/e2e" "$GITHUB_WORKSPACE/$TESTS"
+          tofu plan -input=false -detailed-exitcode -var "socle_version=$TAG" -var "cosign_identity=$COSIGN" \
+            -var artifact_pull_secret=ghcr-auth -var 'kube={}' > /dev/null
+          echo "| second \`tofu plan\` | empty (exit 0) |" >> "$GITHUB_STEP_SUMMARY"
+      - name: Uninstall the socle
+        if: always()
+        uses: ./.github/actions/e2e-cluster
+        with:
+          mode: destroy-socle
+          root: ${{ env.ROOT }}
+          cluster: socle-e2e-catalog
+          tag: ${{ inputs.tag }}
+          cosign-identity: ${{ inputs.cosign_identity }}
+      - name: The cluster is empty
+        if: always() && steps.apply.outcome == 'success'
+        run: |
+          chainsaw test oci/tests/e2e "$TESTS" \
+            --selector "phase=destroyed, cloud in ($CLOUD, any), platform in (floci, any)" \
+            --set "tag=$TAG" --set "cloud=$CLOUD" --set "cluster=$CLUSTER" \
+            --report-format JUNIT-STEP --report-name destroyed --report-path "$RUNNER_TEMP/reports"
+      - name: Destroy the cluster
+        if: always()
+        uses: ./.github/actions/e2e-cluster
+        with:
+          mode: destroy
+          root: ${{ env.ROOT }}
+          cluster: socle-e2e-catalog
+          tag: ${{ inputs.tag }}
+          cosign-identity: ${{ inputs.cosign_identity }}
+      - name: The Checks tab names the failing step
+        if: always()
+        uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6.5.0
+        with:
+          report_paths: ${{ runner.temp }}/reports/*.xml
+          check_name: e2e ${{ matrix.module }} (${{ matrix.cloud }})
+          include_passed: true
+      - name: Summary
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          SUBJECT: ${{ inputs.subject }}
+        run: |
+          if [ "$JOB_STATUS" != success ]; then
+            echo "### $MODULE ($CLOUD) ❌ — see the failed step; each Chainsaw step's \`catch\` printed what the cluster looked like" \
+              >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "### $MODULE ($CLOUD) ✅"
+            echo "Applied \`$ROOT\` — a bare cluster plus the real bootstrap module — on floci's k3s"
+            echo "against \`ghcr.io/do-now-io/socle/flux-modules:$TAG\`, signed as \`$SUBJECT\`. Proven by"
+            echo "Chainsaw (\`$TESTS\`): the artifact pulled by that exact tag with its signature verified,"
+            echo "\`socle-root\` Ready, the module's own suite green; then \`kube.${MODULE//-/_}.enabled=false\`"
+            echo "through OpenTofu garbage-collecting it, the defaults bringing it back, a second \`tofu plan\`"
+            echo "empty, the socle uninstalled through \`tofu destroy\` and the cluster asserted empty."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # The one context a ruleset can require (M1): red if any job above is.
+  # `if: always()` so that it reports whatever happened above; a job that
+  # never reports would leave a PR waiting forever.
+  e2e:
+    name: e2e
+    runs-on: ubuntu-24.04
+    needs: [discover, root, module]
+    if: always()
+    steps:
+      - name: Every job above is green
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          failed="$(echo "$RESULTS" | jq -r '[to_entries[] | select(.value.result != "success")] | length')"
+          if [ "$failed" != 0 ]; then
+            echo "::error::$failed e2e job(s) did not succeed"
+            echo "### e2e ❌ — $failed job(s) red or skipped above" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "### e2e ✅ — the root and every (module, cloud) job green" >> "$GITHUB_STEP_SUMMARY"

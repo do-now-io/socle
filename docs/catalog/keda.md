@@ -340,6 +340,21 @@ current replica count; after, the object is inert.
   | `scale` | an SQS queue in floci, a `TriggerAuthentication` on static keys, `awsEndpoint` at floci | `ScaledObject` Ready at once; the Deployment at 1 went to **0** on the empty queue in 1 s; 10 messages with `queueLength: 5` took it to **2** in 12 s (`keda-hpa-worker 10/5 (avg)`); a purge took it back to **0** in 12 s. The namespace was then deleted while KEDA ran |
   | `off` | module off | Namespace and `APIService` gone within 13 s; the six `keda.sh` CRDs still present |
 
+**e2e, through Chainsaw** (`tests/e2e/chainsaw-test.yaml`, since the e2e moved
+into the modules — `docs/flux-catalog.md` §8). The table above is the bash phase
+this module shipped with; the same proof now runs on every push in the `root`
+job (`keda-health`, the disabled shape and no external metrics APIService) and
+the module's own job (`keda-module-aws`): on without a service — the three
+Deployments, the APIService Available, the client's 160Mi over the socle's
+128Mi, the Secret in `values_secret` merged last, no Role and an empty
+cloud-access annotation; the SQS scale loop (1 → 0 on an empty queue, 0 → 2 on
+ten messages, back to 0 on a purge) with `sqs.sh` beside the test for the queue
+calls; off with the CRDs kept; then Crossplane on and `services = ["sqs"]`:
+the Role read from `status.atProvider` under `/socle/<cluster>/` with the one
+`sqs:GetQueueAttributes` statement and none of the other services, the
+association `Synced=False` and the workload withheld (the two floci seams, steps
+of their own), off deleting the IAM role.
+
 ### What floci proves, and what needs a real account
 
 floci implements IAM and SQS, so the role's shape and the scaler's loop are

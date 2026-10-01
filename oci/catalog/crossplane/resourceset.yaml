@@ -72,6 +72,10 @@ spec:
         metadata:
           name: crossplane-socle-values
           namespace: crossplane-system
+          labels:
+            # helm-controller watches a valuesFrom ConfigMap only with this label;
+            # without it, a change here waits for the next interval (10m).
+            reconcile.fluxcd.io/watch: Enabled
           annotations:
             fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
         data:
@@ -100,6 +104,10 @@ spec:
         metadata:
           name: crossplane-client-values
           namespace: crossplane-system
+          labels:
+            # helm-controller watches a valuesFrom ConfigMap only with this label;
+            # without it, a change here waits for the next interval (10m).
+            reconcile.fluxcd.io/watch: Enabled
           annotations:
             fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
         data:

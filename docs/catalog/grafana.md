@@ -156,6 +156,11 @@ checked to raise its own message only.
 | `e2e-aws-catalog` | `victoria_metrics` re-enabled | VictoriaMetrics provisioned again 1 s after it was Ready |
 | `e2e-aws-catalog` | disabled with the collectors, then re-enabled | HelmRelease and `ClusterRole/grafana-dashboards` NotFound; Ready again with its ClusterRole after **24 s** |
 
+**e2e, through Chainsaw** (`tests/e2e/chainsaw-test.yaml`, since the e2e moved
+into the modules — `docs/flux-catalog.md` §8). The table above is the bash phase
+this module shipped with; the same proof now runs on every push in the `root`
+job (`health`) and the module's own job (`health`, then `module`): `grafana-health` asserts the Deployment, the ClusterRole and the provisioning ConfigMap, then through Grafana's API (`grafana.sh`, a port-forward): exactly the datasources the socle provisions, the VictoriaLogs datasource healthy, both collectors' dashboards loaded, `k8s_pod_cpu_usage` read through the datasource proxy; `grafana-module` patches the memory request (320Mi over 256Mi), then off (release and ClusterRole gone) and on; `grafana-floci` (`platform: floci`) asserts no `grafana-route` ResourceSet without a shared Gateway.
+
 The same run is the gateway's first green one. Its OTLP probe, from podinfo,
 came back enriched with `k8s_deployment_name=podinfo`. The workloads
 dashboard's twelve metrics all had series. Jobs: `e2e-aws-root` 4m06s,
