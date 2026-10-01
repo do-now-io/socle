@@ -1,5 +1,5 @@
-# The kyverno module: the Kyverno admission controller and its background,
-# cleanup and reports controllers, from the official chart — the engine only.
+# The kyverno module: the Kyverno admission controller and its background
+# and reports controllers, from the official chart — the engine only.
 # The policies are a module of their own, kyverno_policies, so a client can
 # take the engine without the socle's set. Off by default: an admission
 # webhook on every client cluster is opted into, not shipped.
@@ -72,8 +72,8 @@ spec:
         # Admission is the one controller in the API server's path: three
         # replicas, the chart's preferred anti-affinity spreading them, and a
         # PodDisruptionBudget so a node drain never takes the last one. The
-        # other three are leader-elected — a second replica is a standby, not
-        # capacity — so one each.
+        # background and reports controllers are leader-elected — a second
+        # replica is a standby, not capacity — so one each.
         admissionController:
           replicas: 3
           podDisruptionBudget:
@@ -98,15 +98,14 @@ spec:
             requests:
               cpu: 50m
               memory: 64Mi
+        # No cleanup controller: the socle ships no cleanup or deleting
+        # policy, and it is the one controller that outlives the chart's
+        # uninstall hook — measured on floci, it re-registered its webhook
+        # configuration two seconds after the hook removed it, and the
+        # configuration stayed with no server behind it. A client who wants
+        # TTL cleanup turns it on in values (docs/catalog/kyverno.md).
         cleanupController:
-          replicas: 1
-          podAnnotations:
-            prometheus.io/scrape: "true"
-            prometheus.io/port: "8000"
-          resources:
-            requests:
-              cpu: 50m
-              memory: 64Mi
+          enabled: false
         reportsController:
           replicas: 1
           podAnnotations:

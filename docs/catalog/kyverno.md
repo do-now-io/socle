@@ -15,7 +15,7 @@ client opts into, not something the socle ships unasked.
 | --- | --- |
 | What | The official `kyverno` chart, `oci://ghcr.io/kyverno/charts/kyverno:3.9.1` (Kyverno v1.19.1), one `HelmRelease` in namespace `kyverno` |
 | Default | **Off** |
-| Shape | Admission controller ×3 with a PodDisruptionBudget (`minAvailable: 1`); background, cleanup and reports controllers ×1 |
+| Shape | Admission controller ×3 with a PodDisruptionBudget (`minAvailable: 1`); background and reports controllers ×1; **no cleanup controller** |
 | Webhooks | Never see `kube-system`, `flux-system` or `kyverno` |
 | Metrics | `prometheus.io/*` annotations on `:8000` for every controller, scraped by [`otel_gateway`](otel-gateway.md) |
 | Dashboard | The chart's own, a `ConfigMap` labelled `grafana_dashboard`, loaded by [`grafana`](grafana.md) |
@@ -57,9 +57,10 @@ The same proof runs in CI, in `kyverno_policies`' Chainsaw test.
 
 **Replicas.** The admission controller is the one in the API server's path:
 three replicas, spread by the chart's preferred anti-affinity, behind a
-PodDisruptionBudget, so a node drain never takes the last one. The background,
-cleanup and reports controllers are leader-elected. A second replica would be
-a standby, not capacity, so they run one each. A client lowers the admission
+PodDisruptionBudget, so a node drain never takes the last one. The background
+and reports controllers are leader-elected. A second replica would be a
+standby, not capacity, so they run one each. The cleanup controller is off:
+see the next section. A client lowers the admission
 replicas through `values` for a dev cluster.
 
 ## Uninstall: nothing left behind
@@ -71,10 +72,26 @@ reference, so Kubernetes' garbage collector never removes them. Deleting the
 The chart removes them in a Helm `pre-delete` hook, which helm-controller runs
 when the operator garbage-collects the `HelmRelease`.
 
-Measured through the real off path on the local k3s: no
-`ValidatingWebhookConfiguration`, no `MutatingWebhookConfiguration` and no
-Kyverno CRD is left. The Chainsaw test asserts all three, by the
-`webhook.kyverno.io/managed-by: kyverno` label.
+The hook races the controllers it cleans up after. Every Kyverno controller
+re-registers its webhook configuration when it disappears. The chart's first
+hook scales the admission controller to zero, the second deletes the
+configurations. The cleanup controller is still running at that moment.
+Measured on floci, in this module's first CI run: off at 13:56:26, the release
+uninstalled at 13:56:42, and `kyverno-cleanup-validating-webhook-cfg`
+recreated at 13:56:28. It was still there five minutes later, with no server
+behind it and `failurePolicy: Fail`. A local run on k3s had left nothing: the
+outcome depends on timing.
+
+**So the socle runs no cleanup controller.** It ships no cleanup or deleting
+policy, which is all that controller serves: `CleanupPolicy`,
+`DeletingPolicy` and the `cleanup.kyverno.io/ttl` label. Without it, the off
+path leaves nothing, and the Chainsaw test asserts that every run: no
+`ValidatingWebhookConfiguration`, no `MutatingWebhookConfiguration` labelled
+`webhook.kyverno.io/managed-by: kyverno`, and no Kyverno CRD. A client who
+wants TTL cleanup sets `cleanupController.enabled: true` in `values`. He then
+accepts that an off may leave that one configuration behind. Its rules match
+only Kyverno's cleanup kinds, whose CRDs go with the release, so no request
+ever reaches it, and a later install of Kyverno takes it back.
 
 **The policies go first.** Turning `kyverno` off while `kyverno_policies` is
 on is refused at plan. Forced through the input provider, it was measured: the
@@ -93,9 +110,10 @@ When enabled, the hello-module shape under the `kyverno` names: `Namespace`,
 `kyverno-client-values` (labelled `reconcile.fluxcd.io/watch`), and a
 `HelmRelease` with no `spec.values`. The socle's values:
 
-- the replica counts and the PodDisruptionBudget above;
+- the replica counts and the PodDisruptionBudget above, and
+  `cleanupController.enabled: false`;
 - requests of 100m / 128Mi for the admission container, 50m / 64Mi for the
-  other three;
+  other two;
 - the webhooks' `namespaceSelector`;
 - the `prometheus.io/*` annotations on every controller;
 - `grafana.enabled`, the chart's dashboard.
@@ -151,11 +169,21 @@ component. Chainsaw, the socle's e2e runner, comes from the same project.
 Locally on k3s 1.34.1 with flux-operator 0.60.0, through the real Flux path:
 
 - install of both modules from the input provider to `Ready`: 96 s;
-- the four controllers' footprint at rest: admission 26–109m CPU and 48–59Mi
-  per replica, the other three 16–24m and 18–56Mi;
-- off: the release uninstalled in 38 s, no webhook configuration or CRD left.
+- the controllers' footprint at rest: admission 26–109m CPU and 48–59Mi per
+  replica, background and reports 16–24m and 51–56Mi;
+- off: the release uninstalled in 38 s.
 
-The CI run on floci adds its own figures below once it lands.
+On floci, in the CI run of the first commit (run 36870726028), the
+`kyverno (aws)` job:
+
+| Step | Measured |
+| --- | --- |
+| On, to three admission replicas Ready | 52 s |
+| Values order, two rollouts of the reports controller | 51 s |
+| Off, the release uninstalled | 16 s; the cleanup controller's webhook left behind, which is why it is off |
+
+The `kyverno-policies (aws)` job turns the engine on and off too, and was
+green in the same run.
 
 ## Left out
 
