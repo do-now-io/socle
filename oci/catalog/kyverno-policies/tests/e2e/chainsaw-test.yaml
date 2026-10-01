@@ -261,6 +261,25 @@ spec:
               spec:
                 policyName: vpol-disallow-privileged-containers
                 validationActions: [Deny]
+        # The binding exists before the API server applies it: its admission
+        # plugin loads a new policy from an informer, and a pod created in
+        # between is admitted (measured on floci, run 36874477467: created 3 s
+        # after the binding). A server-side dry run goes through admission and
+        # creates nothing: retried until the native policy refuses.
+        - script:
+            content: |
+              probe='{"spec":{"containers":[{"name":"vap-probe","image":"registry.k8s.io/pause:3.10",
+                "securityContext":{"privileged":true}}]}}'
+              for i in $(seq 1 30); do
+                out="$(kubectl -n "$NAMESPACE" run vap-probe --image=registry.k8s.io/pause:3.10 \
+                  --dry-run=server --overrides="$probe" 2>&1)"
+                case "$out" in
+                  *ValidatingAdmissionPolicy*) echo "native policy enforced after $((i * 2)) s"; exit 0;;
+                esac
+                sleep 2
+              done
+              echo "the native policy never refused: $out"
+              exit 1
         - create:
             resource:
               apiVersion: v1

@@ -74,6 +74,12 @@ answers the issue's failure-policy question
 The native policy carries the policy's `matchConditions`, so the excluded
 namespaces stay excluded.
 
+The refusal is not instant. The API server's admission plugin loads a new
+binding from an informer: on floci, a pod created 3 s after the binding
+appeared was admitted (run 36874477467). The e2e therefore waits on a
+server-side dry run until the native policy refuses, then asserts the
+refusal. A client enforcing a policy should expect the same few seconds.
+
 Two facts of Kyverno 1.19.1 shaped this, both measured:
 
 - Kyverno generates no `ValidatingAdmissionPolicy` while the pod-controller
