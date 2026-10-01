@@ -1,0 +1,488 @@
+# The metrics_server module's proof (docs/catalog/metrics-server.md), on aws,
+# the one cloud that offers it. k3s's own metrics-server is removed by
+# .github/actions/e2e-cluster before the catalog renders, so the one serving
+# metrics.k8s.io here is the socle's. Selected by label:
+#   health   converged at the catalog defaults: the ResourceSet Ready, one
+#            replica Available, system-cluster-critical, the toleration, no
+#            --kubelet-insecure-tls; the APIService the release's, pointing
+#            at metrics-server/metrics-server, Available; NodeMetrics served —
+#            what kubectl top and every HPA read.
+#   module   every named attribute on the live object: values over the
+#            socle's replicas, values_secret merged last, ha's two replicas,
+#            budget and anti-affinity; the APIService with nothing behind it
+#            — Available=False while the HelmRelease stays Ready, the outage
+#            Flux does not show; off garbage-collects the release, the
+#            namespace and the cluster-scoped APIService; on again.
+# Not provable on floci: the EKS kubelets' certificates and an HPA scaling on
+# real nodes — the sandbox's (docs/catalog/metrics-server.md, Measured).
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: metrics-server-health
+  labels:
+    phase: health
+    cloud: aws
+    platform: any
+spec:
+  description: metrics-server serves metrics.k8s.io at the socle's defaults.
+  timeouts:
+    assert: 3m
+  steps:
+    - name: the ResourceSet is Ready and metrics-server is Available at 1 replica
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: metrics-server
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: metrics-server
+                namespace: metrics-server
+              spec:
+                replicas: 1
+                template:
+                  spec:
+                    priorityClassName: system-cluster-critical
+                    (tolerations[?key == 'CriticalAddonsOnly'] || `[]`):
+                      - operator: Exists
+                    (containers[?name == 'metrics-server'] || `[]`):
+                      - (contains(join(' ', args || `[]`), '--kubelet-insecure-tls')): false
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: metrics-server
+            name: metrics-server
+        - events:
+            namespace: metrics-server
+        - podLogs:
+            namespace: metrics-server
+            tail: 40
+    # The one APIService of its group and version is the HelmRelease's — not
+    # k3s's come back — and answers: NodeMetrics is what kubectl top nodes
+    # lists, the first scrape about 15 s after the pod.
+    - name: the APIService is the socle's, Available, and NodeMetrics are served
+      try:
+        - assert:
+            resource:
+              apiVersion: apiregistration.k8s.io/v1
+              kind: APIService
+              metadata:
+                name: v1beta1.metrics.k8s.io
+                labels:
+                  app.kubernetes.io/managed-by: Helm
+                  helm.toolkit.fluxcd.io/name: metrics-server
+              spec:
+                service:
+                  namespace: metrics-server
+                  name: metrics-server
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: metrics.k8s.io/v1beta1
+              kind: NodeMetrics
+              (usage.cpu != null): true
+              (usage.memory != null): true
+      catch:
+        - describe:
+            apiVersion: apiregistration.k8s.io/v1
+            kind: APIService
+            name: v1beta1.metrics.k8s.io
+        - podLogs:
+            namespace: metrics-server
+            tail: 40
+---
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: metrics-server-module
+  labels:
+    phase: module
+    cloud: aws
+    platform: any
+spec:
+  description: Every attribute reaches the Deployment; the outage Flux does not show; off garbage-collects; on brings it back.
+  timeouts:
+    assert: 3m
+    error: 3m
+  steps:
+    # The order of valuesFrom, proven whole (docs/flux-catalog.md §6), on a
+    # key the socle sets — replicas: 1 in metrics-server-socle-values: 2 in
+    # kube.metrics_server.values wins over it, 3 in the Secret named by
+    # values_secret wins over both, and both cleared bring the socle's 1 back.
+    - name: values beats the socle, and values_secret is merged last
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    metrics_server:
+                      values:
+                        replicas: 2
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: metrics-server
+                namespace: metrics-server
+              spec:
+                replicas: 2
+              status:
+                readyReplicas: 2
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: metrics-server-e2e-values
+                namespace: metrics-server
+                labels:
+                  reconcile.fluxcd.io/watch: Enabled
+              stringData:
+                values.yaml: |
+                  replicas: 3
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    metrics_server:
+                      values_secret: metrics-server-e2e-values
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: metrics-server
+                namespace: metrics-server
+              spec:
+                replicas: 3
+              status:
+                readyReplicas: 3
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    metrics_server:
+                      values_secret: ''
+                      values:
+                        replicas: null
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: metrics-server
+                namespace: metrics-server
+              spec:
+                replicas: 1
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Secret
+              name: metrics-server-e2e-values
+              namespace: metrics-server
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: metrics-server
+            name: metrics-server
+        - describe:
+            apiVersion: v1
+            kind: ConfigMap
+            namespace: metrics-server
+            name: metrics-server-client-values
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 40
+    # ha, one switch: two replicas, the budget, the preferred anti-affinity on
+    # the node — preferred, so floci's one node still schedules both. Then
+    # back off: one replica, no budget.
+    - name: ha runs two replicas with a disruption budget and an anti-affinity
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    metrics_server:
+                      ha: true
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: metrics-server
+                namespace: metrics-server
+              spec:
+                replicas: 2
+                template:
+                  spec:
+                    affinity:
+                      podAntiAffinity:
+                        (preferredDuringSchedulingIgnoredDuringExecution[?podAffinityTerm.topologyKey == 'kubernetes.io/hostname'] || `[]`):
+                          - weight: 100
+              status:
+                readyReplicas: 2
+        - assert:
+            resource:
+              apiVersion: policy/v1
+              kind: PodDisruptionBudget
+              metadata:
+                name: metrics-server
+                namespace: metrics-server
+              spec:
+                maxUnavailable: 1
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    metrics_server:
+                      ha: false
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: metrics-server
+                namespace: metrics-server
+              spec:
+                replicas: 1
+        - error:
+            resource:
+              apiVersion: policy/v1
+              kind: PodDisruptionBudget
+              metadata:
+                name: metrics-server
+                namespace: metrics-server
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: metrics-server
+            name: metrics-server
+        - events:
+            namespace: metrics-server
+    # The outage Flux does not show (docs/catalog/metrics-server.md, "When the
+    # metrics.k8s.io API is unavailable"): with nothing behind the APIService
+    # it turns Available=False, and the HelmRelease stays Ready — the
+    # APIService is the object to watch. Helm's drift detection is off, so the
+    # scale-down holds until it is undone here.
+    - name: with nothing behind it, the APIService is unavailable and Flux stays green
+      try:
+        - patch:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: metrics-server
+                namespace: metrics-server
+              spec:
+                replicas: 0
+        - assert:
+            resource:
+              apiVersion: apiregistration.k8s.io/v1
+              kind: APIService
+              metadata:
+                name: v1beta1.metrics.k8s.io
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'False'
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: metrics-server
+                namespace: metrics-server
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - patch:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: metrics-server
+                namespace: metrics-server
+              spec:
+                replicas: 1
+        - assert:
+            resource:
+              apiVersion: apiregistration.k8s.io/v1
+              kind: APIService
+              metadata:
+                name: v1beta1.metrics.k8s.io
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: apiregistration.k8s.io/v1
+            kind: APIService
+            name: v1beta1.metrics.k8s.io
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: metrics-server
+            name: metrics-server
+    - name: enabled = false garbage-collects the module, its APIService included
+      try:
+        # The release must be idle before the module goes: helm-controller
+        # honours a deletion only once the running action returns.
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: metrics-server
+                namespace: metrics-server
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'Released'] || `[]`):
+                  - status: 'True'
+                (length(conditions[?type == 'Reconciling'] || `[]`)): 0
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    metrics_server:
+                      enabled: false
+        - error:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: metrics-server
+                namespace: metrics-server
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: metrics-server
+        # Cluster-scoped, so not swept by the namespace: the release's
+        # uninstall is what removes it.
+        - error:
+            resource:
+              apiVersion: apiregistration.k8s.io/v1
+              kind: APIService
+              metadata:
+                name: v1beta1.metrics.k8s.io
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: metrics-server
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (length(inventory.entries || `[]`)): 0
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: metrics-server
+        - podLogs:
+            namespace: flux-system
+            selector: app.kubernetes.io/name=flux-operator
+            tail: 40
+    - name: back to the defaults, metrics-server is back
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    metrics_server:
+                      enabled: true
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: metrics-server
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apiregistration.k8s.io/v1
+              kind: APIService
+              metadata:
+                name: v1beta1.metrics.k8s.io
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: metrics-server
+            name: metrics-server
+        - events:
+            namespace: metrics-server

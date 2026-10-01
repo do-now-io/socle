@@ -1,0 +1,149 @@
+# The metrics_server module: the official metrics-server chart, the source of
+# the metrics.k8s.io API that kubectl top and every HorizontalPodAutoscaler on
+# CPU or memory read. Offered on aws only — gcp, azure and scaleway ship their
+# own, and two cannot coexist. Design and measurements:
+# docs/catalog/metrics-server.md.
+#
+# resourcesTemplate rather than resources: the HA block and the Secret in
+# valuesFrom only exist under a condition, and the operator's block
+# `<< if >>`/`<< end >>` is text templating, which the structured resources
+# list cannot carry (see opentofu/bootstrap/manifests/templates/root.yaml).
+#
+# Values: no spec.values on the HelmRelease. The socle's defaults are a
+# ConfigMap listed first in valuesFrom, the client's second, the client's
+# Secret last — later wins, so the client overrides any socle default.
+#
+# Every other rule is the hello module's: inputsFrom the one provider, the
+# reconcile toggle on each resource, values tested never presence.
+apiVersion: fluxcd.controlplane.io/v1
+kind: ResourceSet
+metadata:
+  name: metrics-server
+  namespace: flux-system
+spec:
+  inputsFrom:
+    - apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSetInputProvider
+      name: socle
+  wait: true
+  resourcesTemplate: |
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: metrics-server
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.metrics_server.enabled >>enabled<< else >>disabled<< end >>
+    ---
+    # The project publishes no OCI chart, so its own HTTPS Helm repository;
+    # the version is pinned on the HelmRelease below.
+    apiVersion: source.toolkit.fluxcd.io/v1
+    kind: HelmRepository
+    metadata:
+      name: metrics-server
+      namespace: metrics-server
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.metrics_server.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 1h
+      url: https://kubernetes-sigs.github.io/metrics-server/
+    ---
+    # The socle's own chart values, listed first in valuesFrom. Everything not
+    # set here is the chart's default, kept on purpose: one replica, the
+    # system-cluster-critical priority, requests without limits, the kubelets'
+    # certificates checked. (No template delimiters in these comments: the
+    # operator templates them too.)
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: metrics-server-socle-values
+      namespace: metrics-server
+      labels:
+        # helm-controller watches a valuesFrom ConfigMap only with this label;
+        # without it, a change here waits for the next interval (10m).
+        reconcile.fluxcd.io/watch: Enabled
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.metrics_server.enabled >>enabled<< else >>disabled<< end >>
+    data:
+      values.yaml: |
+        replicas: << if inputs.modules.metrics_server.ha >>2<< else >>1<< end >>
+        # So it can follow CoreDNS if the bootstrap nodes are tainted once
+        # Karpenter provisions the workload nodes.
+        tolerations:
+          - key: CriticalAddonsOnly
+            operator: Exists
+        << if inputs.modules.metrics_server.ha >>
+        # A drain never takes both replicas at once.
+        podDisruptionBudget:
+          enabled: true
+          maxUnavailable: 1
+        # Preferred, not required: a cluster down to one node still schedules
+        # the second replica, and the release does not wait on it.
+        affinity:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  topologyKey: kubernetes.io/hostname
+                  labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: metrics-server
+                      app.kubernetes.io/instance: metrics-server
+        << end >>
+    ---
+    # The client's own chart values, as written in kube.metrics_server.values,
+    # merged over the socle's document above — the client wins wherever the
+    # two meet. OpenTofu refuses --kubelet-insecure-tls in there.
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: metrics-server-client-values
+      namespace: metrics-server
+      labels:
+        reconcile.fluxcd.io/watch: Enabled
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.metrics_server.enabled >>enabled<< else >>disabled<< end >>
+    data:
+      values.yaml: |<< toYaml inputs.modules.metrics_server.values | nindent 4 >>
+    ---
+    apiVersion: helm.toolkit.fluxcd.io/v2
+    kind: HelmRelease
+    metadata:
+      name: metrics-server
+      namespace: metrics-server
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.metrics_server.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 10m
+      # The release name is the chart's name, so every object is named
+      # metrics-server and the APIService points at metrics-server/metrics-server.
+      releaseName: metrics-server
+      chart:
+        spec:
+          chart: metrics-server
+          version: 3.14.0  # appVersion 0.9.0
+          sourceRef:
+            kind: HelmRepository
+            name: metrics-server
+      # No spec.values, on purpose: it would be merged last and win. The order
+      # below is the precedence, later wins — the socle's defaults, the
+      # client's values, then the client's Secret when named, never read by
+      # OpenTofu, optional so the release does not wait for it.
+      valuesFrom:
+        - kind: ConfigMap
+          name: metrics-server-socle-values
+          valuesKey: values.yaml
+        - kind: ConfigMap
+          name: metrics-server-client-values
+          valuesKey: values.yaml
+        << if inputs.modules.metrics_server.values_secret >>
+        - kind: Secret
+          name: << inputs.modules.metrics_server.values_secret | quote >>
+          valuesKey: values.yaml
+          optional: true
+        << end >>
+      install:
+        remediation:
+          retries: 3
+      upgrade:
+        remediation:
+          retries: 3

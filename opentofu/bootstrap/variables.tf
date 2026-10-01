@@ -884,6 +884,34 @@ variable "kube" {
     condition     = !can(var.kube.velero.values_secret) || try(var.kube.velero.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.velero.values_secret)), true)
     error_message = "kube.velero.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
   }
+
+  validation {
+    condition     = !can(var.kube.metrics_server.values_secret) || try(var.kube.metrics_server.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.metrics_server.values_secret)), true)
+    error_message = "kube.metrics_server.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
+  }
+
+  # values is free-form, minus the one flag that lowers what the module checks.
+  # --kubelet-insecure-tls makes metrics-server skip the kubelets' serving
+  # certificates, so it would hand its own token to anything answering as a
+  # kubelet. The socle owns the nodes: a certificate that does not validate is
+  # the socle's to fix. The chart reads defaultArgs and args, so both lists are
+  # checked, and the flag is refused in any form. The API server to
+  # metrics-server settings (tls.*, apiService.*) stay free: they can only
+  # raise the check.
+  validation {
+    condition = (
+      !can(var.kube.metrics_server.values)
+      || !can(keys(var.kube.metrics_server.values))
+      || alltrue([
+        for a in concat(
+          try([for x in tolist(var.kube.metrics_server.values.defaultArgs) : tostring(x)], []),
+          try([for x in tolist(var.kube.metrics_server.values.args) : tostring(x)], [])
+        ) :
+        !can(regex("^--kubelet-insecure-tls(=|$)", a))
+      ])
+    )
+    error_message = "kube.metrics_server.values must not set --kubelet-insecure-tls: it disables verification of kubelet certificates, so metrics-server would present its credentials to anyone impersonating a kubelet. The socle owns the nodes, and a certificate that does not validate is a socle bug to fix, not a client's to work around."
+  }
 }
 
 # ---------------------------------------------------------------------------

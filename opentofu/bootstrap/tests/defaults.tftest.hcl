@@ -95,6 +95,10 @@ run "defaults_are_the_recommended_position" {
     error_message = "otel_agent must collect container logs by default, for victoria_logs to store."
   }
   assert {
+    condition     = output.inputs.modules.metrics_server.enabled == true && output.inputs.modules.metrics_server.ha == false && output.inputs.modules.metrics_server.values == {} && output.inputs.modules.metrics_server.values_secret == ""
+    error_message = "metrics_server must default to on, one replica, no client values: without it every HPA on CPU or memory stays blind, and it needs no client input."
+  }
+  assert {
     condition     = output.inputs.modules.victoria_traces.enabled == false && output.inputs.modules.victoria_traces.retention == "7d" && output.inputs.modules.victoria_traces.storage_size == "10Gi"
     error_message = "victoria_traces must default to OFF (pre-GA, docs/monitoring.md §10 question 7), 7 days on a 10Gi claim when turned on."
   }
@@ -1141,5 +1145,35 @@ run "velero_runs_the_node_agent_by_default_when_the_efs_driver_is_on" {
   assert {
     condition     = output.inputs.modules.velero.node_agent == true
     error_message = "EFS has no CSI snapshots: with its driver on, the node-agent is what backs its volumes up."
+  }
+}
+
+run "metrics_server_values_flow_through_untouched_and_honest_kubelet_flags_are_allowed" {
+  command = plan
+  variables {
+    kube = {
+      metrics_server = {
+        ha            = true
+        values_secret = "metrics-server-values"
+        values = {
+          # A real flag that starts like the refused one: the check matches
+          # the flag's whole name, not a prefix.
+          args = ["--v=2", "--kubelet-preferred-address-types=InternalIP"]
+        }
+      }
+    }
+  }
+
+  assert {
+    condition     = output.inputs.modules.metrics_server.ha == true && output.inputs.modules.metrics_server.enabled == true
+    error_message = "ha=true must reach the inputs as set, and enabled keep its default."
+  }
+  assert {
+    condition     = output.inputs.modules.metrics_server.values.args == ["--v=2", "--kubelet-preferred-address-types=InternalIP"]
+    error_message = "the client's chart values must reach the inputs as written, an honest --kubelet-* flag included."
+  }
+  assert {
+    condition     = output.inputs.modules.metrics_server.values_secret == "metrics-server-values"
+    error_message = "the name of the client's values Secret must flow to the inputs."
   }
 }
