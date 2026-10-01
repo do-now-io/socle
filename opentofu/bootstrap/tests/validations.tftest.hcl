@@ -872,3 +872,65 @@ run "keda_refuses_an_invalid_values_secret_name" {
   variables { kube = { keda = { values_secret = "My_Values" } } }
   expect_failures = [var.kube]
 }
+
+run "kube_refuses_metrics_server_ha_that_is_not_a_bool" {
+  command = plan
+  variables { kube = { metrics_server = { ha = "yes" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_metrics_server_values_that_are_not_an_object" {
+  command = plan
+  variables { kube = { metrics_server = { values = "args: []" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_metrics_server_values_secret_that_is_not_a_secret_name" {
+  command = plan
+  variables { kube = { metrics_server = { values_secret = "Metrics_Server_Values" } } }
+  expect_failures = [var.kube]
+}
+
+# The two forms of the flag, one per list the chart reads: alone in args, the
+# way every tutorial writes it, and with a value in defaultArgs.
+run "kube_refuses_metrics_server_kubelet_insecure_tls_in_args" {
+  command = plan
+  variables { kube = { metrics_server = { values = { args = ["--v=2", "--kubelet-insecure-tls"] } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_metrics_server_kubelet_insecure_tls_with_a_value_in_default_args" {
+  command = plan
+  variables { kube = { metrics_server = { values = { defaultArgs = ["--cert-dir=/tmp", "--kubelet-insecure-tls=true"] } } } }
+  expect_failures = [var.kube]
+}
+
+# Offered on aws only: every other cloud ships its own, and two cannot coexist.
+run "kube_refuses_metrics_server_on_gcp" {
+  command = plan
+  variables {
+    cloud           = "gcp"
+    cluster_network = null
+    kube            = { metrics_server = { enabled = true } }
+  }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_metrics_server_on_azure" {
+  command = plan
+  variables {
+    cloud = "azure"
+    kube  = { metrics_server = { enabled = true } }
+  }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_metrics_server_on_scaleway" {
+  command = plan
+  variables {
+    cloud           = "scaleway"
+    cluster_network = null
+    kube            = { metrics_server = { enabled = true } }
+  }
+  expect_failures = [var.kube]
+}
