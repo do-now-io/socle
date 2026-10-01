@@ -79,11 +79,13 @@ admission controller, and both are out of scope here.
 verification already deployed stops matching. It is part of the contract, not
 a filename.
 
-## Private until v1
+## Visibility
 
-Both packages stay private while the socle is under development, and go public
-at v1 — a one-time change in the package settings, which no workflow can make
-because a package does not exist before its first push.
+`flux-modules`, what Flux pulls, is public since 2026-10-01 (anonymous pull
+measured 200): no pull secret in the e2e, none for a client. `opentofu-modules`
+stays private while the socle is under development and goes public at v1 — a
+one-time change in the package settings, which no workflow can make because a
+package does not exist before its first push.
 
 Until then a consumer needs credentials, and so does anyone running the
 `cosign verify` above. That is what going public buys, and it is why "`tofu

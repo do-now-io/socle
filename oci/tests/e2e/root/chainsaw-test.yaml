@@ -37,7 +37,8 @@ spec:
                     name: ($values.cluster)
                   socle:
                     version: ($values.tag)
-                    pullSecret: ghcr-auth
+                    # The package is public: no pull secret, and none asked.
+                    pullSecret: ''
               status:
                 (conditions[?type == 'Ready'] || `[]`):
                   - status: 'True'

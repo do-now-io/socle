@@ -568,14 +568,17 @@ is read from the conventional commits since it.
   in the GHCR UI.
 - **Visibility**: the first push created the GHCR package private. GitHub
   offers no API to change a package's visibility — it is a one-time manual
-  setting (Package settings → Change visibility → Public). The package is
-  private for now.
-- **Measured: `GITHUB_TOKEN` with `packages: read` does pull the private
-  repo-linked package** (run 35731631539) — a fine-grained PAT is not needed
-  for CI. The e2e jobs create the cluster's pull secret from that same token
-  after the apply. A client consumes a private registry the same way: name an
-  existing pull secret in `artifact_pull_secret` (§3); nothing needs the
-  package to be made public first.
+  setting (Package settings → Change visibility → Public). **`flux-modules`
+  is public since 2026-10-01** (anonymous pull of a branch tag measured
+  200); `opentofu-modules` is still private (anonymous pull 403), which M1's
+  `tofu init` against the published package will need an OCI credential for.
+- **Measured, while the package was private: `GITHUB_TOKEN` with
+  `packages: read` does pull the private repo-linked package** (run
+  35731631539) — a fine-grained PAT is not needed for CI, and the e2e then
+  created the cluster's pull secret from that token after the apply. It no
+  longer does: the e2e pulls the public package with no secret, as a client
+  does. A client on a private mirror consumes it the way the e2e did: name
+  an existing pull secret in `artifact_pull_secret` (§3).
 - The publish path keeps the token off argv: `flux push` reads the docker
   config `crane auth login` wrote. The e2e jobs pass it to `kubectl create
   secret docker-registry --docker-password` — argv on an ephemeral,
@@ -621,9 +624,8 @@ runner's localhost. `.github/actions/e2e-cluster` is the only place a shell
 runs: a registered IAM key (floci 2.x rejects `test`/`test` on the EKS token
 webhook), `tofu init` and `apply` of the root, a kubeconfig carrying a
 ServiceAccount token (floci refuses the presigned `aws eks get-token` after
-60 s and Chainsaw does not re-run the plugin), the GHCR pull secret from the
-workflow's own token; and `tofu destroy` at the end. Everything else is a
-Chainsaw suite.
+60 s and Chainsaw does not re-run the plugin); and `tofu destroy` at the end.
+No pull secret: the package is public. Everything else is a Chainsaw suite.
 
 - `root (<cloud>)` applies the real `opentofu/clusters/<cloud>` once with
   `.github/e2e/<cloud>/floci.tfvars` (floci does not read back several EKS
