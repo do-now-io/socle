@@ -23,6 +23,7 @@ resources:
   - ../../catalog/kyverno-policies/resourceset.yaml
   - ../../catalog/external-secrets/resourceset.yaml
   - ../../catalog/reloader/resourceset.yaml
+  - ../../catalog/velero/resourceset.yaml
   - ../../catalog/hello/resourceset.yaml
 patches:
   - path: hello-color.patch.yaml

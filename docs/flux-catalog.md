@@ -473,7 +473,8 @@ The monitoring stack, six modules designed together — [docs/monitoring.md](mon
 `keda` — [docs/catalog/keda.md](catalog/keda.md).
 The admission layer, two modules designed together —
 `kyverno` — [docs/catalog/kyverno.md](catalog/kyverno.md);
-`kyverno_policies` — [docs/catalog/kyverno-policies.md](catalog/kyverno-policies.md).
+`kyverno_policies` — [docs/catalog/kyverno-policies.md](catalog/kyverno-policies.md);
+`velero` — [docs/catalog/velero.md](catalog/velero.md).
 
 ## 7. Publishing the artifact, and releasing
 

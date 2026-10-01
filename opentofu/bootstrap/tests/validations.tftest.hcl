@@ -9,6 +9,10 @@ mock_provider "aws" {
   mock_resource "aws_iam_role" {
     defaults = { arn = "arn:aws:iam::000000000000:role/socle-test-mock" }
   }
+  # inputs.cluster.accountId: a module's bucket name carries it.
+  mock_data "aws_caller_identity" {
+    defaults = { account_id = "000000000000" }
+  }
 }
 
 variables {
@@ -1055,5 +1059,93 @@ run "external_secrets_refuses_a_secret_among_extra_objects" {
 run "external_secrets_refuses_an_invalid_values_secret_name" {
   command = plan
   variables { kube = { external_secrets = { values_secret = "ESO_Values" } } }
+  expect_failures = [var.kube]
+}
+
+# --- velero ---
+
+run "kube_refuses_velero_on_aws_without_crossplane" {
+  command = plan
+  variables {
+    region = "eu-west-3"
+    kube   = { velero = { enabled = true } }
+  }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_velero_on_aws_without_a_region" {
+  command = plan
+  variables {
+    kube = { crossplane = { enabled = true }, velero = { enabled = true } }
+  }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_velero_off_aws" {
+  command = plan
+  variables {
+    cloud           = "gcp"
+    cluster_network = null
+    kube            = { velero = { enabled = false } }
+  }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_a_velero_policy_with_a_retention_in_weeks" {
+  command = plan
+  variables { kube = { velero = { policies = [{ frequency = "daily", retention = "2w", schedule = "0 2 * * *" }] } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_a_velero_policy_with_an_unknown_key" {
+  command = plan
+  variables { kube = { velero = { policies = [{ frequency = "daily", retention = "7d", schedule = "0 2 * * *", ttl = "168h" }] } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_a_velero_policy_with_a_frequency_that_is_not_a_label_value" {
+  command = plan
+  variables { kube = { velero = { policies = [{ frequency = "Daily", retention = "7d", schedule = "0 2 * * *" }] } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_a_velero_policy_with_a_six_field_cron" {
+  command = plan
+  variables { kube = { velero = { policies = [{ frequency = "daily", retention = "7d", schedule = "0 0 2 * * *" }] } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_a_velero_pair_twice" {
+  command = plan
+  variables {
+    kube = { velero = { policies = [
+      { frequency = "daily", retention = "7d", schedule = "0 2 * * *" },
+      { frequency = "daily", retention = "7d", schedule = "0 4 * * *" },
+    ] } }
+  }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_velero_policies_that_are_not_a_list" {
+  command = plan
+  variables { kube = { velero = { policies = { daily = "7d" } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_velero_values_carrying_secret_contents" {
+  command = plan
+  variables { kube = { velero = { values = { credentials = { secretContents = { cloud = "[default]" } } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_velero_values_carrying_a_literal_credential_env" {
+  command = plan
+  variables { kube = { velero = { values = { configuration = { extraEnvVars = [{ name = "AWS_SECRET_ACCESS_KEY", value = "x" }] } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_velero_values_secret_that_is_not_a_secret_name" {
+  command = plan
+  variables { kube = { velero = { values_secret = "Velero_Values" } } }
   expect_failures = [var.kube]
 }

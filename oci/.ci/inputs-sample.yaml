@@ -4,6 +4,7 @@
     environment: dev
     owner: platform
     region: eu-west-3
+    accountId: "123456789012"
   socle:
     url: oci://x/y
     version: 0.0.0 # x-release-please-version
@@ -133,10 +134,23 @@
         reloader:
           logFormat: json
       values_secret: reloader-values
+    velero:
+      enabled: true
+      policies:
+        - {frequency: daily, retention: 7d, schedule: "0 2 * * *"}
+        - {frequency: monthly, retention: 90d, schedule: "0 3 1 * *"}
+        - {frequency: hourly, retention: 48h, schedule: "0 * * * *"}
+      node_agent: true
+      values:
+        configuration:
+          logLevel: debug
+      values_secret: velero-values
     hello:
       enabled: true
       replicas: 2
       message: hi
+  storage:
+    snapshots: true
   cilium:
     installed: true
     gatewayApi: true
