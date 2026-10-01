@@ -216,6 +216,37 @@ locals {
       values        = {}
       values_secret = ""
     }
+    # The admission layer (docs/catalog/kyverno.md): the Kyverno engine —
+    # admission controller (three replicas behind a PodDisruptionBudget),
+    # background, cleanup and reports controllers — from the official chart,
+    # and no policy: those are kyverno_policies'. Off by default: an admission
+    # webhook on every cluster is something a client opts into. No cloud
+    # access. Its webhooks never see kube-system or flux-system. values and
+    # values_secret as every module, secrets refused there (the chart's
+    # imagePullSecrets credentials, an extraEnvVars entry named like one).
+    kyverno = {
+      enabled       = false
+      values        = {}
+      values_secret = ""
+    }
+    # The socle's baseline policy set, on the kyverno engine
+    # (docs/catalog/kyverno-policies.md): the Pod Security Standards from the
+    # official kyverno-policies chart as CEL ValidatingPolicy objects, plus
+    # requests required and the latest tag refused. Off by default, and
+    # refused without kyverno. Every policy in Audit: reported, admitted.
+    # profile is baseline or restricted (baseline plus six). enforce names the
+    # policies the client switches to Enforce, each compiled into a native
+    # ValidatingAdmissionPolicy that the API server applies with Kyverno up or
+    # down. allowed_registries, when not empty, adds a policy admitting images
+    # from those registries only (each a host, optionally a path under it).
+    kyverno_policies = {
+      enabled            = false
+      profile            = "baseline"
+      enforce            = []
+      allowed_registries = []
+      values             = {}
+      values_secret      = ""
+    }
   }
 
   # Which clouds a module exists on. Absent = every cloud. A module listed
@@ -233,6 +264,25 @@ locals {
   # keda template scopes to its exact read calls (oci/catalog/keda/
   # resourceset.yaml). Adding one is a statement there and a word here.
   keda_services = ["sqs", "cloudwatch", "kinesis", "dynamodb"]
+  # The policies kyverno_policies renders, by what turns them on: what
+  # kube.kyverno_policies.enforce may name. The chart's lists are those of
+  # kyverno-policies 3.9.1 (templates/baseline, templates/restricted); the
+  # socle's are in oci/catalog/kyverno-policies/resourceset.yaml.
+  kyverno_policies = {
+    baseline = [
+      "disallow-capabilities", "disallow-host-namespaces", "disallow-host-path",
+      "disallow-host-ports", "disallow-host-process", "disallow-privileged-containers",
+      "disallow-proc-mount", "disallow-selinux", "restrict-apparmor-profiles",
+      "restrict-seccomp", "restrict-sysctls",
+    ]
+    restricted = [
+      "disallow-capabilities-strict", "disallow-privilege-escalation", "require-run-as-non-root-user",
+      "require-run-as-nonroot", "restrict-seccomp-strict", "restrict-volume-types",
+    ]
+    socle = ["require-requests", "disallow-latest-tag"]
+    # Rendered only when allowed_registries names at least one registry.
+    registries = ["restrict-image-registries"]
+  }
 
   modules = { for m, d in local.catalog : m => merge(d, try(var.kube[m], {})) }
 

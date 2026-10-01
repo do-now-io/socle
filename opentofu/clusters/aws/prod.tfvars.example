@@ -86,6 +86,15 @@ kube = {
   # Traces are off by default (VictoriaTraces is pre-GA; an upgrade may drop
   # stored traces). Turning them on:
   # victoria_traces = { enabled = true, storage_size = "" }
+  # The admission layer is off by default. The engine and the socle's policy
+  # set, every policy reporting (Audit); enforce turns a policy into a refusal
+  # the API server applies itself (docs/catalog/kyverno-policies.md):
+  # kyverno          = { enabled = true }
+  # kyverno_policies = {
+  #   enabled            = true
+  #   enforce            = ["disallow-privileged-containers"]
+  #   allowed_registries = ["ghcr.io", "registry.k8s.io", "public.ecr.aws"]
+  # }
   hello = {
     replicas = 2
   }

@@ -640,6 +640,87 @@ variable "kube" {
     condition     = !can(var.kube.keda.values_secret) || try(var.kube.keda.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.keda.values_secret)), true)
     error_message = "kube.keda.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
   }
+
+  # --- kyverno — docs/catalog/kyverno.md -------------------------------------
+  # values is free-form on purpose, minus one rule: no secret material. The
+  # kyverno chart takes registry credentials for image verification inline,
+  # in imagePullSecrets (registry, username, password): refused — the client
+  # creates that Secret himself and names it in existingImagePullSecrets, or
+  # puts the whole block in values_secret. And an extraEnvVars entry, on any
+  # of the four controllers or the admission init container, whose name looks
+  # like a credential and carries a literal value (valueFrom is fine).
+  validation {
+    condition = (
+      !can(var.kube.kyverno.values)
+      || !can(keys(var.kube.kyverno.values))
+      || (
+        length(try(keys(var.kube.kyverno.values.imagePullSecrets), [])) == 0
+        && alltrue([
+          for e in concat(
+            try(tolist(var.kube.kyverno.values.admissionController.container.extraEnvVars), []),
+            try(tolist(var.kube.kyverno.values.admissionController.initContainer.extraEnvVars), []),
+            try(tolist(var.kube.kyverno.values.backgroundController.extraEnvVars), []),
+            try(tolist(var.kube.kyverno.values.cleanupController.extraEnvVars), []),
+            try(tolist(var.kube.kyverno.values.reportsController.extraEnvVars), []),
+          ) :
+          !(can(e.value) && can(regex("(?i)(secret|password|passwd|token|api_?key|access_?key|private_?key|credential)", try(e.name, ""))))
+        ])
+      )
+    )
+    error_message = "kube.kyverno.values must not carry secrets: imagePullSecrets with credentials, and an extraEnvVars entry with a literal value named like a credential, are refused. Create the registry Secret yourself and name it in existingImagePullSecrets, or put the values in a Secret in the kyverno namespace named in kube.kyverno.values_secret."
+  }
+
+  validation {
+    condition     = !can(var.kube.kyverno.values_secret) || try(var.kube.kyverno.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.kyverno.values_secret)), true)
+    error_message = "kube.kyverno.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
+  }
+
+  # --- kyverno_policies — docs/catalog/kyverno-policies.md -------------------
+  # The policies' kinds are the engine's CRDs: without kyverno, the release
+  # waits on its dependency forever and the socle never converges.
+  validation {
+    condition     = !can(keys(var.kube)) || !try(var.kube.kyverno_policies.enabled, false) || try(var.kube.kyverno.enabled, false)
+    error_message = "kube.kyverno_policies needs the engine: set kube.kyverno.enabled = true as well."
+  }
+
+  validation {
+    condition     = !can(var.kube.kyverno_policies.profile) || try(contains(["baseline", "restricted"], var.kube.kyverno_policies.profile), true)
+    error_message = "kube.kyverno_policies.profile must be baseline (the Pod Security Standards' baseline profile) or restricted (baseline plus the restricted policies)."
+  }
+
+  # enforce may only name a policy this configuration renders: a restricted
+  # one with profile = restricted, the registry one with an allow-list. A
+  # name nothing renders would be a switch that silently does nothing.
+  validation {
+    condition = !can(var.kube.kyverno_policies.enforce) || try(alltrue([
+      for p in tolist(var.kube.kyverno_policies.enforce) : contains(concat(
+        local.kyverno_policies.baseline,
+        local.kyverno_policies.socle,
+        try(var.kube.kyverno_policies.profile, "baseline") == "restricted" ? local.kyverno_policies.restricted : [],
+        length(try(tolist(var.kube.kyverno_policies.allowed_registries), [])) > 0 ? local.kyverno_policies.registries : [],
+      ), p)
+    ]), true)
+    error_message = "kube.kyverno_policies.enforce names a policy this configuration does not render. Baseline and socle: ${join(", ", concat(local.kyverno_policies.baseline, local.kyverno_policies.socle))}; with profile = restricted also ${join(", ", local.kyverno_policies.restricted)}; with allowed_registries also restrict-image-registries."
+  }
+
+  # A registry as an image reference starts with it: a host (a dot, a port
+  # or localhost), optionally a path under it. No scheme, no trailing slash,
+  # no tag — the policy matches the prefix plus a slash, so ghcr.io never
+  # admits ghcr.io.evil.example.
+  validation {
+    condition = !can(var.kube.kyverno_policies.allowed_registries) || try(alltrue([
+      for r in tolist(var.kube.kyverno_policies.allowed_registries) :
+      can(regex("^(localhost|[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+)(:[0-9]{1,5})?(/[a-z0-9]+([._-][a-z0-9]+)*)*$", r))
+    ]), true)
+    error_message = "kube.kyverno_policies.allowed_registries entries must be registry hosts, optionally with a port and a path under them, such as ghcr.io, registry.k8s.io or ghcr.io/acme: lowercase, no scheme, no trailing slash. A Docker Hub image is docker.io/<path>."
+  }
+
+  # The kyverno-policies chart carries no credential, so values has no path
+  # to refuse; only the Secret's name is checked.
+  validation {
+    condition     = !can(var.kube.kyverno_policies.values_secret) || try(var.kube.kyverno_policies.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.kyverno_policies.values_secret)), true)
+    error_message = "kube.kyverno_policies.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
+  }
 }
 
 # ---------------------------------------------------------------------------

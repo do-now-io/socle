@@ -1,0 +1,317 @@
+# The kyverno_policies module: the socle's baseline policy set, on the kyverno
+# module's engine. The Pod Security Standards from the official
+# kyverno-policies chart — baseline, or restricted — as CEL ValidatingPolicy
+# objects, plus three of the socle's own: CPU and memory requests required,
+# no `latest` tag, and the client's registries allow-list when he names one.
+# Off by default, and refused at plan without kyverno on.
+# Design and measurements: docs/catalog/kyverno-policies.md.
+#
+# Every policy is in Audit: a violation is admitted and reported. A policy the
+# client names in kube.kyverno_policies.enforce is switched to Deny AND
+# compiled by Kyverno into a native ValidatingAdmissionPolicy (the
+# postRenderers patch below): the API server enforces it itself, with no
+# webhook in the path, so an Enforce policy still holds with Kyverno down —
+# and nothing else depends on Kyverno being up. Audit policies go through
+# Kyverno's webhook with failurePolicy Ignore: Kyverno down admits, never
+# blocks. kube-system, flux-system and kyverno are excluded from every policy,
+# in admission, in the native policy and in the background scan alike.
+#
+# resourcesTemplate rather than resources: the enforce list, the allow-list
+# policy and the Secret in valuesFrom only exist under a condition, and the
+# operator's block `<< if >>`/`<< end >>` is text templating.
+#
+# Values: no spec.values on the HelmRelease. The socle's defaults are a
+# ConfigMap listed first in valuesFrom, the client's second, his Secret last —
+# later wins (docs/flux-catalog.md §6). The custom policies are Helm templates
+# inside that document: the chart passes customPolicies through tpl, so they
+# read the same failurePolicy, the same per-policy action and the same
+# exclusions as the chart's own.
+#
+# Every other rule is the hello module's: inputsFrom the one provider, the
+# reconcile toggle on each resource, values tested never presence.
+apiVersion: fluxcd.controlplane.io/v1
+kind: ResourceSet
+metadata:
+  name: kyverno-policies
+  namespace: flux-system
+spec:
+  inputsFrom:
+    - apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSetInputProvider
+      name: socle
+  wait: true
+  resourcesTemplate: |
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: kyverno-policies
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.kyverno_policies.enabled >>enabled<< else >>disabled<< end >>
+    ---
+    apiVersion: source.toolkit.fluxcd.io/v1
+    kind: OCIRepository
+    metadata:
+      name: kyverno-policies-chart
+      namespace: kyverno-policies
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.kyverno_policies.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 1h
+      url: oci://ghcr.io/kyverno/charts/kyverno-policies
+      layerSelector:
+        mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+        operation: copy
+      ref:
+        tag: 3.9.1  # appVersion v1.19.1
+    ---
+    # The socle's own chart values. (No template delimiters of the operator
+    # in these comments: it templates them too.)
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: kyverno-policies-socle-values
+      namespace: kyverno-policies
+      labels:
+        reconcile.fluxcd.io/watch: Enabled
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.kyverno_policies.enabled >>enabled<< else >>disabled<< end >>
+    data:
+      values.yaml: |
+        # CEL ValidatingPolicy, the chart's default and Kyverno's direction;
+        # the legacy ClusterPolicy kind is deprecated upstream.
+        policyType: ValidatingPolicy
+        podSecurityStandard: << inputs.modules.kyverno_policies.profile | quote >>
+        podSecuritySeverity: medium
+        # Every policy reports; none refuses unless the client says so.
+        validationFailureAction: Audit
+        << if inputs.modules.kyverno_policies.enforce >>
+        validationFailureActionByPolicy:
+          << range inputs.modules.kyverno_policies.enforce >>
+          << . >>: Enforce
+          << end >>
+        << end >>
+        # Kyverno's webhook down admits rather than refuses: an Audit policy
+        # has nothing to refuse, and an Enforce one is native (see above).
+        failurePolicy: Ignore
+        # Out of every policy, in admission and in the background scan: the
+        # control plane, Flux, and Kyverno itself.
+        vpolExclude:
+          excludeNamespaces: [kube-system, flux-system, kyverno]
+        # The socle's own components, where a policy and their job disagree.
+        # A per-policy entry replaces the list above, so it repeats it.
+        vpolExcludeByPolicy:
+          # otel_agent reads every container's log from /var/log/pods: a
+          # read-only hostPath, as root, every capability dropped
+          # (docs/catalog/otel-agent.md).
+          disallow-host-path:
+            excludeNamespaces: [kube-system, flux-system, kyverno, otel-agent]
+          restrict-volume-types:
+            excludeNamespaces: [kube-system, flux-system, kyverno, otel-agent]
+          require-run-as-nonroot:
+            excludeNamespaces: [kube-system, flux-system, kyverno, otel-agent]
+          require-run-as-non-root-user:
+            excludeNamespaces: [kube-system, flux-system, kyverno, otel-agent]
+        customPolicies:
+          - |
+            apiVersion: policies.kyverno.io/v1beta1
+            kind: ValidatingPolicy
+            metadata:
+              name: require-requests
+              annotations:
+                policies.kyverno.io/title: Require CPU and memory requests
+                policies.kyverno.io/category: Socle
+                policies.kyverno.io/severity: {{ .Values.podSecuritySeverity }}
+                policies.kyverno.io/subject: Pod
+                policies.kyverno.io/description: >-
+                  A container without requests is scheduled on nothing and
+                  evicted first: every container requests CPU and memory.
+            spec:
+              failurePolicy: {{ .Values.failurePolicy }}
+              matchConstraints:
+                resourceRules:
+                  - apiGroups: [""]
+                    apiVersions: [v1]
+                    operations: [CREATE, UPDATE]
+                    resources: [pods]
+              {{- include "kyverno-policies.vpolExcludeMatchConditions"
+                    (include "kyverno-policies.policyVpolExclude" (dict "name" "require-requests" "values" .Values) | fromYaml)
+                  | nindent 2 }}
+              validations:
+                - expression: >-
+                    object.spec.containers.all(c, has(c.resources) && has(c.resources.requests)
+                    && 'cpu' in c.resources.requests && 'memory' in c.resources.requests)
+                  message: Every container must request CPU and memory (spec.containers[*].resources.requests).
+              validationActions: {{ include "kyverno-policies.policyValidationActions"
+                  (dict "name" "require-requests" "values" .Values) | nindent 4 }}
+          - |
+            apiVersion: policies.kyverno.io/v1beta1
+            kind: ValidatingPolicy
+            metadata:
+              name: disallow-latest-tag
+              annotations:
+                policies.kyverno.io/title: Disallow the latest tag
+                policies.kyverno.io/category: Socle
+                policies.kyverno.io/severity: {{ .Values.podSecuritySeverity }}
+                policies.kyverno.io/subject: Pod
+                policies.kyverno.io/description: >-
+                  An image with no tag, or tagged latest, is a different image
+                  on every pull: every image is pinned by a tag or a digest.
+            spec:
+              failurePolicy: {{ .Values.failurePolicy }}
+              matchConstraints:
+                resourceRules:
+                  - apiGroups: [""]
+                    apiVersions: [v1]
+                    operations: [CREATE, UPDATE]
+                    resources: [pods]
+              {{- include "kyverno-policies.vpolExcludeMatchConditions"
+                    (include "kyverno-policies.policyVpolExclude" (dict "name" "disallow-latest-tag" "values" .Values) | fromYaml)
+                  | nindent 2 }}
+              validations:
+                # A digest pins whatever the tag says; otherwise the last path
+                # segment carries the tag (a registry port is in the first).
+                - expression: >-
+                    object.spec.containers.all(c, c.image.contains('@')
+                    || (c.image.split('/')[c.image.split('/').size() - 1].contains(':') && !c.image.endsWith(':latest')))
+                    && (!has(object.spec.initContainers) || object.spec.initContainers.all(c, c.image.contains('@')
+                    || (c.image.split('/')[c.image.split('/').size() - 1].contains(':') && !c.image.endsWith(':latest'))))
+                  message: Every image must be pinned by a tag other than latest, or by a digest.
+              validationActions: {{ include "kyverno-policies.policyValidationActions"
+                  (dict "name" "disallow-latest-tag" "values" .Values) | nindent 4 }}
+          << if inputs.modules.kyverno_policies.allowed_registries >>
+          - |
+            apiVersion: policies.kyverno.io/v1beta1
+            kind: ValidatingPolicy
+            metadata:
+              name: restrict-image-registries
+              annotations:
+                policies.kyverno.io/title: Restrict image registries
+                policies.kyverno.io/category: Socle
+                policies.kyverno.io/severity: {{ .Values.podSecuritySeverity }}
+                policies.kyverno.io/subject: Pod
+                policies.kyverno.io/description: >-
+                  Images only from the registries the client allowed, in
+                  kube.kyverno_policies.allowed_registries.
+            spec:
+              failurePolicy: {{ .Values.failurePolicy }}
+              matchConstraints:
+                resourceRules:
+                  - apiGroups: [""]
+                    apiVersions: [v1]
+                    operations: [CREATE, UPDATE]
+                    resources: [pods]
+              {{- include "kyverno-policies.vpolExcludeMatchConditions"
+                    (include "kyverno-policies.policyVpolExclude" (dict "name" "restrict-image-registries" "values" .Values) | fromYaml)
+                  | nindent 2 }}
+              variables:
+                - name: allowed
+                  expression: >-
+                    [<< range $i, $r := inputs.modules.kyverno_policies.allowed_registries >><< if $i >>, << end >>'<< $r >>/'<< end >>]
+                # Each image as the runtime pulls it: a first segment without
+                # a dot, a port or localhost is a Docker Hub path.
+                - name: images
+                  expression: >-
+                    (object.spec.containers.map(c, c.image)
+                    + (has(object.spec.initContainers) ? object.spec.initContainers.map(c, c.image) : []))
+                    .map(i, i.split('/').size() > 1
+                    && (i.split('/')[0].contains('.') || i.split('/')[0].contains(':') || i.split('/')[0] == 'localhost')
+                    ? i : 'docker.io/' + i)
+              validations:
+                - expression: >-
+                    variables.images.all(i, variables.allowed.exists(r, i.startsWith(r)))
+                  message: >-
+                    Images must come from an allowed registry: << join ", " inputs.modules.kyverno_policies.allowed_registries >>.
+              validationActions: {{ include "kyverno-policies.policyValidationActions"
+                  (dict "name" "restrict-image-registries" "values" .Values) | nindent 4 }}
+          << end >>
+    ---
+    # The client's own chart values, as he wrote them in
+    # kube.kyverno_policies.values, merged over the socle's document above —
+    # the client wins wherever the two meet. A list he sets (customPolicies,
+    # vpolExclude.excludeNamespaces) replaces the socle's whole.
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: kyverno-policies-client-values
+      namespace: kyverno-policies
+      labels:
+        reconcile.fluxcd.io/watch: Enabled
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.kyverno_policies.enabled >>enabled<< else >>disabled<< end >>
+    data:
+      values.yaml: |<< toYaml inputs.modules.kyverno_policies.values | nindent 4 >>
+    ---
+    apiVersion: helm.toolkit.fluxcd.io/v2
+    kind: HelmRelease
+    metadata:
+      name: kyverno-policies
+      namespace: kyverno-policies
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.kyverno_policies.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 10m
+      releaseName: kyverno-policies
+      # The policies' kinds are the engine's CRDs, and the chart reads the
+      # engine's version off its Deployment: installed after it, never before.
+      dependsOn:
+        - name: kyverno
+          namespace: kyverno
+      chartRef:
+        kind: OCIRepository
+        name: kyverno-policies-chart
+      valuesFrom:
+        - kind: ConfigMap
+          name: kyverno-policies-socle-values
+          valuesKey: values.yaml
+        - kind: ConfigMap
+          name: kyverno-policies-client-values
+          valuesKey: values.yaml
+        << if inputs.modules.kyverno_policies.values_secret >>
+        - kind: Secret
+          name: << inputs.modules.kyverno_policies.values_secret | quote >>
+          valuesKey: values.yaml
+          optional: true
+        << end >>
+      # Every policy matches Pods only: the pod-controller autogen, which
+      # would also match each Deployment, StatefulSet, Job…, is off. Kyverno
+      # only compiles a policy into a native ValidatingAdmissionPolicy with
+      # that autogen off, and decides once, on the status it reads at that
+      # moment (measured on 1.19.1: a policy created with autogen on and
+      # switched later keeps "skip generating ValidatingAdmissionPolicy: pod
+      # controllers autogen is enabled" until its spec changes again). Off
+      # from the first install, the switch below always takes.
+      #
+      # An Enforce policy is then compiled by Kyverno into a native
+      # ValidatingAdmissionPolicy and its binding, owned by the policy: the
+      # API server refuses a violation itself, Kyverno up or down. A
+      # Deployment that violates it is admitted; its pods are refused, at the
+      # ReplicaSet, which says so in its events.
+      postRenderers:
+        - kustomize:
+            patches:
+              - target:
+                  group: policies.kyverno.io
+                  kind: ValidatingPolicy
+                patch: |
+                  - op: add
+                    path: /spec/autogen
+                    value:
+                      podControllers:
+                        controllers: [none]
+              << range inputs.modules.kyverno_policies.enforce >>
+              - target:
+                  group: policies.kyverno.io
+                  kind: ValidatingPolicy
+                  name: << . >>
+                patch: |
+                  - op: add
+                    path: /spec/autogen/validatingAdmissionPolicy
+                    value:
+                      enabled: true
+              << end >>
+      install:
+        remediation:
+          retries: 3
+      upgrade:
+        remediation:
+          retries: 3

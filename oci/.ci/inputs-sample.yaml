@@ -103,6 +103,23 @@
             requests:
               memory: 160Mi
       values_secret: keda-values
+    kyverno:
+      enabled: true
+      values:
+        admissionController:
+          container:
+            resources:
+              requests:
+                memory: 160Mi
+      values_secret: kyverno-values
+    kyverno_policies:
+      enabled: true
+      profile: restricted
+      enforce: [disallow-privileged-containers, require-requests]
+      allowed_registries: [ghcr.io, registry.k8s.io]
+      values:
+        podSecuritySeverity: high
+      values_secret: kyverno-policies-values
     hello:
       enabled: true
       replicas: 2
