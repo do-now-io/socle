@@ -21,7 +21,7 @@ external-dns migration, are each meant to be a small PR written from this note.
 | Question | Position |
 | --- | --- |
 | What a module declares | Its own managed resources, per cloud: on AWS an `iam.aws.m.upbound.io` `Role` and an `eks.aws.m.upbound.io` `PodIdentityAssociation` — the contract in §3 |
-| What `crossplane` installs | Core; on AWS `provider-{family-aws,aws-iam,aws-eks}` v2.8.1 and `ClusterProviderConfig default` on Pod Identity. No XRD, no Composition, nothing per module. The family is declared as `crossplane-contrib-provider-family-aws`, the name Crossplane gives a dependency it resolves itself: any other name lets it install the family twice, and the duplicate lock entry keeps every provider unhealthy |
+| What `crossplane` installs | Core; on AWS `provider-{family-aws,aws-iam,aws-eks,aws-s3}` v2.8.1 and `ClusterProviderConfig default` on Pod Identity. No XRD, no Composition, nothing per module. The family is declared as `crossplane-contrib-provider-family-aws`, the name Crossplane gives a dependency it resolves itself: any other name lets it install the family twice, and the duplicate lock entry keeps every provider unhealthy |
 | What the foundations still owe | Crossplane's identity, and the **permissions boundary** every module role must carry: an allowlist of services the client writes, empty by default — `opentofu/aws` variable `crossplane` |
 | How a module waits | Its `ResourceSet` `dependsOn` the `crossplane` ResourceSet and uses `steps`: its role first, health-checked Ready, then its workload |
 | Crossplane off | The module takes a pre-made identity by name (`kube.<module>.identity`); neither → refused at plan |
@@ -226,6 +226,34 @@ with it; the cost is about twenty lines of YAML per module per cloud, and the
 contract above keeps them uniform. Where the lines live: in the module's own
 template, one branch per cloud in its `access` step — the module's IAM stays
 next to the module, and a cloud without a branch simply has no role.
+
+### Buckets a module owns
+
+A module that keeps state in object storage owns its bucket as it owns its
+role. The velero module is the first ([velero.md](velero.md) §2); `vmbackup`
+(#46) will be the second. The socle grants that once, as a capability, not
+for one module:
+
+- **The tooling.** This module installs `provider-aws-s3` beside `iam` and
+  `eks`, and the `crossplane-provider-config` child waits for it. It costs
+  one more provider pod, about 320Mi requested.
+- **Crossplane's own identity** gains one statement in `opentofu/aws/iam.tf`,
+  `ManageBucketsUnderTheClusterPrefix`, on `arn:aws:s3:::<cluster>-*`. It
+  may create a bucket, read its configuration, and write its versioning,
+  encryption, public access block, lifecycle and tags. **It has no
+  `s3:Delete*`, no object action, no bucket policy and no ACL**: Crossplane
+  can never delete a bucket of data, nor read what is in it, nor open it to
+  anyone. `tofu test` asserts each of these absences.
+- **The module's bucket** is named `<cluster>-<module>-<account id>`
+  (`inputs.cluster.accountId`; S3 names are global). Its managed resources
+  carry `managementPolicies` without `Delete`: namespaced managed resources
+  have no `deletionPolicy` in Crossplane v2.
+- **The module's role** reaches its bucket's objects only, and the client
+  allows `s3` in `aws.crossplane.allowed_services`.
+
+This is the one change a module that keeps data in a bucket needs in the
+foundations: generic, bounded by the cluster's prefix, and with nothing that
+destroys.
 
 ## 4. How a module waits for its role
 

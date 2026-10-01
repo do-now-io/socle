@@ -256,6 +256,32 @@ resource "aws_iam_role_policy" "crossplane" {
           "arn:aws:eks:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:podidentityassociation/${var.cluster_name}/*",
         ]
       },
+      {
+        # A module's own bucket, as a module's own role: under a prefix the
+        # cluster owns (docs/catalog/crossplane.md §3, docs/catalog/velero.md
+        # §8). Create it, read its configuration, write its versioning,
+        # encryption, public access block, lifecycle and tags — the bucket
+        # ARN only, so no object is ever read or written. No delete of any
+        # kind: Crossplane can never remove a bucket of backups, whatever a
+        # managed resource's deletionPolicy says.
+        Sid    = "ManageBucketsUnderTheClusterPrefix"
+        Effect = "Allow"
+        Action = [
+          "s3:CreateBucket",
+          "s3:ListBucket",
+          "s3:GetBucket*",
+          "s3:GetAccelerateConfiguration",
+          "s3:GetEncryptionConfiguration",
+          "s3:GetLifecycleConfiguration",
+          "s3:GetReplicationConfiguration",
+          "s3:PutBucketTagging",
+          "s3:PutBucketVersioning",
+          "s3:PutBucketPublicAccessBlock",
+          "s3:PutEncryptionConfiguration",
+          "s3:PutLifecycleConfiguration",
+        ]
+        Resource = "arn:aws:s3:::${var.cluster_name}-*"
+      },
     ]
   })
 }

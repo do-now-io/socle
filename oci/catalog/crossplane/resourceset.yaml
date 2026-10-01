@@ -162,7 +162,8 @@ spec:
       resourcesTemplate: |
         << if eq inputs.cloud "aws" >>
         # IAM for the modules' roles, EKS for their Pod Identity
-        # associations: what every module's AWS access is made of. One
+        # associations: what every module's AWS access is made of; S3 for
+        # the buckets a module owns. One
         # ServiceAccount name for every AWS provider pod, so the foundations
         # can write its Pod Identity association before the cluster has a
         # node: Crossplane otherwise names it after the ProviderRevision, a
@@ -229,6 +230,21 @@ spec:
           package: xpkg.crossplane.io/crossplane-contrib/provider-aws-eks:v2.8.1
           runtimeConfigRef:
             name: provider-aws
+        ---
+        # S3 for the buckets a module owns, as it owns its role: the velero
+        # module's (docs/catalog/velero.md). Crossplane's own identity may
+        # create and configure buckets under the cluster's name prefix, and
+        # never delete one (opentofu/aws/iam.tf).
+        apiVersion: pkg.crossplane.io/v1
+        kind: Provider
+        metadata:
+          name: provider-aws-s3
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
+        spec:
+          package: xpkg.crossplane.io/crossplane-contrib/provider-aws-s3:v2.8.1
+          runtimeConfigRef:
+            name: provider-aws
         << end >>
     - name: config
       resourcesTemplate: |
@@ -255,6 +271,11 @@ spec:
             - apiVersion: pkg.crossplane.io/v1
               kind: Provider
               name: provider-aws-eks
+              ready: true
+              readyExpr: status.conditions.exists(c, c.type == 'Healthy' && c.status == 'True')
+            - apiVersion: pkg.crossplane.io/v1
+              kind: Provider
+              name: provider-aws-s3
               ready: true
               readyExpr: status.conditions.exists(c, c.type == 'Healthy' && c.status == 'True')
           wait: true

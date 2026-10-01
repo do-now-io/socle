@@ -73,6 +73,10 @@ locals {
       environment = var.environment
       owner       = var.owner
       region      = var.region
+      # The cloud account the cluster runs in, on aws: S3 bucket names are
+      # global, so a module's bucket carries it (docs/catalog/velero.md).
+      # Empty elsewhere.
+      accountId = local.account_id
     }
     socle = {
       url        = var.artifact_url
@@ -101,6 +105,12 @@ locals {
     # `public` and `private`, in `namespace`, and a route may attach to
     # their `https` listener. `certificateArn` — on aws, the ACM certificate
     # their load balancers terminate TLS with; empty elsewhere.
+    # What the cluster offers for volumes, from the add-ons this module
+    # installed: `snapshots` — the CSI snapshot controller and its CRDs are
+    # there, so a template may render a VolumeSnapshotClass.
+    storage = {
+      snapshots = local.eks_addon_installed.snapshot_controller
+    }
     gateway = {
       className      = local.gateway_class_name
       shared         = local.shared_gateways

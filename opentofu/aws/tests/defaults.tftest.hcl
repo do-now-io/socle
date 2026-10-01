@@ -353,7 +353,7 @@ run "crossplane_identity_creates_only_bounded_roles" {
     error_message = "the boundary must always deny identity and account services."
   }
   assert {
-    condition     = alltrue([for st in jsondecode(aws_iam_role_policy.crossplane[0].policy).Statement : st.Resource == "arn:aws:iam::000000000000:role/socle/socle-test/*" if !contains(["PodIdentityAssociationsOnThisCluster", "ReadAnyRoleInTheAccount"], st.Sid)])
+    condition     = alltrue([for st in jsondecode(aws_iam_role_policy.crossplane[0].policy).Statement : st.Resource == "arn:aws:iam::000000000000:role/socle/socle-test/*" if !contains(["PodIdentityAssociationsOnThisCluster", "ReadAnyRoleInTheAccount", "ManageBucketsUnderTheClusterPrefix"], st.Sid)])
     error_message = "every mutating IAM statement of the Crossplane identity must be scoped to roles under /socle/<cluster>/."
   }
   assert {
@@ -371,6 +371,25 @@ run "crossplane_identity_creates_only_bounded_roles" {
   assert {
     condition     = !anytrue(flatten([for st in jsondecode(aws_iam_role_policy.crossplane[0].policy).Statement : [for a in flatten([st.Action]) : contains(["iam:AttachRolePolicy", "iam:DeleteRolePermissionsBoundary", "iam:CreatePolicy", "iam:CreatePolicyVersion", "iam:*", "*"], a)]]))
     error_message = "the Crossplane identity must not attach managed policies, remove a boundary or write policies."
+  }
+  # docs/catalog/velero.md §8: a module's bucket, never its deletion, never
+  # its objects.
+  assert {
+    condition = one([
+      for st in jsondecode(aws_iam_role_policy.crossplane[0].policy).Statement :
+      st.Resource == "arn:aws:s3:::socle-test-*" && contains(st.Action, "s3:CreateBucket")
+      if st.Sid == "ManageBucketsUnderTheClusterPrefix"
+    ])
+    error_message = "Crossplane may create buckets only under the cluster's own name prefix."
+  }
+  assert {
+    condition = !anytrue(flatten([
+      for st in jsondecode(aws_iam_role_policy.crossplane[0].policy).Statement : [
+        for a in flatten([st.Action]) :
+        startswith(a, "s3:Delete") || contains(["s3:*", "s3:GetObject", "s3:PutObject", "s3:PutBucketPolicy", "s3:PutBucketAcl", "s3:PutObjectAcl"], a)
+      ]
+    ]))
+    error_message = "the Crossplane identity must never delete a bucket or anything in it, read or write an object, or open a bucket through a policy or an ACL: a bucket of backups outlives every managed resource."
   }
 }
 
