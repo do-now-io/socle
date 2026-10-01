@@ -157,6 +157,16 @@ spec:
               status:
                 (conditions[?type == 'Healthy'] || `[]`):
                   - status: 'True'
+        # S3, for the buckets a module owns (docs/catalog/velero.md).
+        - assert:
+            resource:
+              apiVersion: pkg.crossplane.io/v1
+              kind: Provider
+              metadata:
+                name: provider-aws-s3
+              status:
+                (conditions[?type == 'Healthy'] || `[]`):
+                  - status: 'True'
         - assert:
             resource:
               apiVersion: aws.m.upbound.io/v1beta1

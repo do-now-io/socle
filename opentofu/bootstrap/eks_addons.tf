@@ -16,6 +16,11 @@
 #      needs Cilium for a pod address and CoreDNS to resolve the EC2 API.
 #   3. aws-efs-csi-driver — the same, and off by default: RWX only, a
 #      catalog option rather than a default (§1).
+#   4. snapshot-controller — the CSI snapshot controller and the
+#      VolumeSnapshot CRDs, what a CSI snapshot of an EBS volume needs (the
+#      velero module's, docs/catalog/velero.md). A Deployment with no AWS
+#      identity: it only watches the API server. AWS asks for it before the
+#      EBS driver, so it comes first.
 #
 # Each driver's identity is written here, beside the add-on that runs its
 # pods, and bound through the add-on's own pod_identity_association — the
@@ -30,17 +35,19 @@
 
 locals {
   eks_addon_versions = {
-    pod_identity_agent = "v1.4.0-eksbuild.2"
-    ebs_csi            = "v1.66.0-eksbuild.1"
-    efs_csi            = "v3.4.2-eksbuild.1"
+    pod_identity_agent  = "v1.4.0-eksbuild.2"
+    ebs_csi             = "v1.66.0-eksbuild.1"
+    efs_csi             = "v3.4.2-eksbuild.1"
+    snapshot_controller = "v8.5.0-eksbuild.3"
   }
 
   # The client's surface, and its schema — the defaults ARE the attribute
   # names a client may set.
   eks_addons_schema = {
-    pod_identity_agent = true
-    ebs_csi            = true
-    efs_csi            = false
+    pod_identity_agent  = true
+    ebs_csi             = true
+    efs_csi             = false
+    snapshot_controller = true
   }
   eks_addons = merge(local.eks_addons_schema, var.eks_addons)
 
@@ -68,7 +75,16 @@ locals {
     }]
   })
 
+  # S3 bucket names are global: a module's bucket carries the account
+  # (inputs.cluster.accountId). Read here because this file already holds
+  # what the bootstrap asks of the aws provider.
+  account_id = var.cloud == "aws" ? data.aws_caller_identity.current[0].account_id : ""
+
   no_node_addon_message = "The cluster has no schedulable node (schedulable_nodes = 0), so the EKS add-ons cannot start and AWS reports them DEGRADED. On aws the foundations' bootstrap_node_count sets it; it must be at least 1."
+}
+
+data "aws_caller_identity" "current" {
+  count = var.cloud == "aws" ? 1 : 0
 }
 
 # 1. The Pod Identity Agent. After Cilium only because the nodes are, and
@@ -97,6 +113,32 @@ resource "aws_eks_addon" "pod_identity_agent" {
   }
 
   depends_on = [helm_release.cilium]
+}
+
+# 4. The CSI snapshot controller, before the EBS driver (AWS's order: the
+# driver's snapshotter sidecar looks for the VolumeSnapshot CRDs at start).
+# No identity: it talks to the API server only. A Deployment, so after the
+# network like the drivers.
+resource "aws_eks_addon" "snapshot_controller" {
+  count = local.eks_addon_installed.snapshot_controller ? 1 : 0
+
+  cluster_name  = var.cluster_name
+  addon_name    = "snapshot-controller"
+  addon_version = local.eks_addon_versions.snapshot_controller
+
+  resolve_conflicts_on_create = "OVERWRITE"
+  resolve_conflicts_on_update = "OVERWRITE"
+
+  tags = local.aws_tags
+
+  lifecycle {
+    precondition {
+      condition     = var.schedulable_nodes != 0
+      error_message = local.no_node_addon_message
+    }
+  }
+
+  depends_on = [helm_release.cilium, helm_release.coredns]
 }
 
 # 2. EBS CSI, and its identity. AWS's managed policy, the driver's own list;
@@ -152,6 +194,7 @@ resource "aws_eks_addon" "ebs_csi" {
     helm_release.cilium,
     helm_release.coredns,
     aws_eks_addon.pod_identity_agent,
+    aws_eks_addon.snapshot_controller,
     aws_iam_role_policy_attachment.ebs_csi,
   ]
 }
