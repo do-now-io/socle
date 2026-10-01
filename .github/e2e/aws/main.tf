@@ -89,5 +89,5 @@ module "socle" {
   cilium = { enabled = false }
   # And no EKS add-on API in floci 2.1.0 either (CreateAddon: "Unknown
   # operation", measured 2026-10-01; it exists on nightly). See floci.tfvars.
-  eks_addons = { pod_identity_agent = false, ebs_csi = false }
+  eks_addons = { pod_identity_agent = false, ebs_csi = false, snapshot_controller = false }
 }

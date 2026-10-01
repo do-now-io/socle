@@ -61,7 +61,7 @@ variable "coredns" {
 }
 
 variable "eks_addons" {
-  description = "The EKS-managed add-ons installed once the nodes run: { pod_identity_agent = true, ebs_csi = true, efs_csi = false }, every key optional. The Pod Identity Agent is what every catalog module's AWS identity, Crossplane's included, gets its credentials from; the two storage drivers need it. Versions pinned by the bootstrap module, which validates this."
+  description = "The EKS-managed add-ons installed once the nodes run: { pod_identity_agent = true, ebs_csi = true, efs_csi = false, snapshot_controller = true }, every key optional. The Pod Identity Agent is what every catalog module's AWS identity, Crossplane's included, gets its credentials from; the two storage drivers need it. The snapshot controller is what the velero module's EBS snapshots need. Versions pinned by the bootstrap module, which validates this."
   type        = any
   default     = {}
 }
