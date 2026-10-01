@@ -21,7 +21,7 @@ external-dns migration, are each meant to be a small PR written from this note.
 | Question | Position |
 | --- | --- |
 | What a module declares | Its own managed resources, per cloud: on AWS an `iam.aws.m.upbound.io` `Role` and an `eks.aws.m.upbound.io` `PodIdentityAssociation` — the contract in §3 |
-| What `crossplane` installs | Core; on AWS `provider-{family-aws,aws-iam,aws-eks}` v2.8.1 and `ClusterProviderConfig default` on Pod Identity. No XRD, no Composition, nothing per module |
+| What `crossplane` installs | Core; on AWS `provider-{family-aws,aws-iam,aws-eks}` v2.8.1 and `ClusterProviderConfig default` on Pod Identity. No XRD, no Composition, nothing per module. The family is declared as `crossplane-contrib-provider-family-aws`, the name Crossplane gives a dependency it resolves itself: any other name lets it install the family twice, and the duplicate lock entry keeps every provider unhealthy |
 | What the foundations still owe | Crossplane's identity, and the **permissions boundary** every module role must carry: an allowlist of services the client writes, empty by default — `opentofu/aws` variable `crossplane` |
 | How a module waits | Its `ResourceSet` `dependsOn` the `crossplane` ResourceSet and uses `steps`: its role first, health-checked Ready, then its workload |
 | Crossplane off | The module takes a pre-made identity by name (`kube.<module>.identity`); neither → refused at plan |
@@ -37,7 +37,7 @@ that first one. Everything after it is the cluster's.
 | --- | --- | --- | --- |
 | 1 | Cluster, Crossplane's IAM role, the boundary, the Pod Identity association `crossplane-system/provider-aws` | `opentofu/aws` (`crossplane = {…}`), the client's one apply | part of the apply (~70 s on floci for the whole real root; minutes on real EKS, dominated by the cluster) |
 | 2 | Cilium, CoreDNS (aws, azure) | the bootstrap module, a `helm_release` before flux-operator (PR #37) | PR #37's figure |
-| 3 | Pod Identity Agent | **delegated to the factory** (`docs/aws/eks-managed-scope.md` §1) — open question 3 | EKS add-on, seconds |
+| 3 | Pod Identity Agent | `opentofu/bootstrap/eks_addons.tf`, an `aws_eks_addon` after Cilium and before flux-operator, on by default (#48) | EKS add-on, seconds |
 | 4 | Flux | `opentofu/bootstrap`: operator, instance, envelope | ~60 s (`docs/flux-catalog.md` §11) |
 | 5 | Crossplane core | `oci/catalog/crossplane`, step `core` | 14 s (k3s, `helm install --wait`) |
 | 6 | AWS providers | step `providers` | ~90 s until Healthy (k3s, images pulled cold) |
@@ -92,7 +92,7 @@ kube = {
 | Object | What it is |
 | --- | --- |
 | variable `crossplane` | `object({ allowed_services = optional(list(string), []) })`, default `null` — nothing is created |
-| `aws_iam_policy.crossplane_boundary` | `/socle/<cluster>/crossplane-boundary`: `<service>:*` allowed for each listed service, and **always** an explicit deny of `iam:*`, `sts:*`, `organizations:*`, `account:*`, `sso:*`, `identitystore:*`. Empty list: only the deny — a module role grants nothing |
+| `aws_iam_policy.crossplane_boundary` | `/socle/<cluster>/<cluster>-crossplane-boundary` (the name carries the cluster: policy names are unique per account, whatever the path): `<service>:*` allowed for each listed service, and **always** an explicit deny of `iam:*`, `sts:*`, `organizations:*`, `account:*`, `sso:*`, `identitystore:*`. Empty list: only the deny — a module role grants nothing |
 | `aws_iam_role.crossplane` | `<cluster>-crossplane`, at `/`, trusted by `pods.eks.amazonaws.com` |
 | `aws_iam_role_policy.crossplane` | what it may do, below |
 | `aws_eks_pod_identity_association.crossplane` | `crossplane-system/provider-aws` |
@@ -377,10 +377,12 @@ its Role needs `providerConfigRef: floci`, which the e2e sets with a one-line
    (Crossplane publishes no chart signature a `HelmRepository` can check), and
    provider packages pulled by tag from `xpkg.crossplane.io`, also unverified
    by Flux. Accept, or mirror chart and packages into the socle's registry?
-3. **The Pod Identity Agent** is delegated to the factory in
-   `docs/aws/eks-managed-scope.md`, but nothing in the chain works on real EKS
-   without it — Crossplane's own credentials included. Should the foundations
-   install the add-on when `crossplane` is set?
+3. **The Pod Identity Agent** — settled (#48). Nothing in the chain works on
+   real EKS without it, Crossplane's own credentials included, and a missing
+   agent does not fail: the providers hang on `169.254.170.23` without a log
+   line. The bootstrap module installs it, on by default, and flux-operator
+   waits for it, so no provider ever starts without it. Not the foundations:
+   they provision nothing that needs a pod to run.
 4. **This reverses a documented position**: `opentofu/aws/iam.tf` said no
    Crossplane identity would be built there, because its ServiceAccount did
    not exist yet. The fixed `serviceAccountTemplate` name removes that reason;

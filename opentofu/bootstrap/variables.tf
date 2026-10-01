@@ -147,7 +147,7 @@ variable "kube" {
   # himself must write an IAM policy ARN.
   validation {
     condition     = !can(var.kube.crossplane.permissions_boundary) || try(var.kube.crossplane.permissions_boundary == "" || can(regex("^arn:aws[a-z-]*:iam::[0-9]{12}:policy/.+$", var.kube.crossplane.permissions_boundary)), true)
-    error_message = "kube.crossplane.permissions_boundary must be empty or an IAM policy ARN, such as arn:aws:iam::123456789012:policy/socle/acme-prod/crossplane-boundary."
+    error_message = "kube.crossplane.permissions_boundary must be empty or an IAM policy ARN, such as arn:aws:iam::123456789012:policy/socle/acme-prod/acme-prod-crossplane-boundary."
   }
 
   validation {
@@ -232,6 +232,11 @@ variable "kube" {
       || can(regex("^([a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$", var.kube.argocd.domain))
     )
     error_message = "kube.argocd.domain must be empty or a fully qualified DNS name in lowercase, such as argocd.acme.example: no scheme, no port, no path."
+  }
+
+  validation {
+    condition     = !can(var.kube.argocd.gateway) || try(contains(["private", "public", ""], var.kube.argocd.gateway), true)
+    error_message = "kube.argocd.gateway must be private, public, or empty for no HTTPRoute: the shared Gateway ArgoCD's route attaches to."
   }
 
   # values is free-form on purpose, minus one rule: no secret material. What a
@@ -469,6 +474,47 @@ variable "coredns" {
   }
 }
 
+variable "eks_addons" {
+  description = <<-EOT
+    The EKS-managed add-ons the socle installs on aws once the nodes run, as
+    `{ pod_identity_agent, ebs_csi, efs_csi }`, every key optional:
+    `pod_identity_agent` (true) is what hands every Pod Identity association
+    its credentials — Crossplane's AWS providers included — and flux-operator
+    waits for it; `ebs_csi` (true) is the block-storage driver, with its own
+    role; `efs_csi` (false) the RWX one, with its own role. Both drivers need
+    the agent. Refused on every cloud but aws. Versions pinned in
+    eks_addons.tf.
+  EOT
+  type        = any
+  default     = {}
+  nullable    = false
+
+  validation {
+    condition     = can(keys(var.eks_addons))
+    error_message = "eks_addons must be an object of attributes."
+  }
+
+  validation {
+    condition     = !can(keys(var.eks_addons)) || alltrue([for a in keys(var.eks_addons) : contains(keys(local.eks_addons_schema), a)])
+    error_message = "eks_addons: unknown attribute. Allowed: ${join(", ", keys(local.eks_addons_schema))}."
+  }
+
+  validation {
+    condition     = !can(keys(var.eks_addons)) || alltrue([for a, x in var.eks_addons : !contains(keys(local.eks_addons_schema), a) || x == true || x == false])
+    error_message = "eks_addons: every attribute is a bool, true to install the add-on."
+  }
+
+  validation {
+    condition     = !can(keys(var.eks_addons)) || length(keys(var.eks_addons)) == 0 || var.cloud == "aws"
+    error_message = "eks_addons is only configurable on aws: they are EKS-managed add-ons, and other clouds ship their own drivers and workload identity."
+  }
+
+  validation {
+    condition     = !can(keys(var.eks_addons)) || try(merge(local.eks_addons_schema, var.eks_addons).pod_identity_agent || !(merge(local.eks_addons_schema, var.eks_addons).ebs_csi || merge(local.eks_addons_schema, var.eks_addons).efs_csi), true)
+    error_message = "eks_addons: ebs_csi and efs_csi get their credentials from the Pod Identity Agent; they cannot be installed with pod_identity_agent = false."
+  }
+}
+
 variable "cluster_network" {
   description = <<-EOT
     What Cilium needs to know about the cluster, from the foundations'
@@ -505,6 +551,18 @@ variable "cluster_network" {
     condition     = !local.cilium_installed || var.cluster_network == null || can(regex("^(https://)?[A-Za-z0-9.-]+(:[0-9]+)?/?$", var.cluster_network.api_endpoint))
     error_message = "cluster_network.api_endpoint must be a host name, with or without https:// and a port — what the foundations' cluster_endpoint output is."
   }
+}
+
+variable "gateway_certificate_arn" {
+  description = <<-EOT
+    On aws, the ACM certificate the shared Gateways' load balancers terminate
+    TLS with — the foundations' gateway_certificate_arn output, never the
+    client's. Null or empty on aws means no shared Gateway, and no route
+    attached to one. Unknown at plan on the apply that issues it, which is
+    why nothing validates it here. Ignored elsewhere.
+  EOT
+  type        = string
+  default     = null
 }
 
 variable "schedulable_nodes" {

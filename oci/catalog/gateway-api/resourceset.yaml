@@ -16,6 +16,24 @@
 #
 # The CRDs are orphaned, not deleted, when the module is disabled: deleting a
 # CRD deletes every Gateway and route of every client with it.
+#
+# Then, where inputs.gateway.shared says so, the two shared Gateways every
+# module and the client route through: `public`, internet-facing, and
+# `private`, internal, in gateway-system (docs/catalog/gateway-api.md). A
+# child ResourceSet, because a Gateway can only be applied once its CRD and
+# class exist: it dependsOn gateway-api-cilium being Ready. Routes attach to
+# `https` on 443. On aws the NLB in front of each Gateway terminates TLS
+# with the foundations' ACM certificate and forwards plain HTTP, so `https`
+# is an HTTP listener on 443 and no key exists in the cluster — and there is
+# no port 80: Cilium serves every HTTP listener of a Gateway from one Envoy
+# route table whatever the port, so a redirect on 80 would also answer on
+# 443 and loop, and the routes on 443 would answer in clear on 80 (measured
+# on EKS, docs/catalog/gateway-api.md). On azure, whose load balancer is L4
+# only, Envoy terminates with the certificate in the Secret
+# gateway-system/gateway-tls, which the client creates; 443 is HTTPS there,
+# a separate route table, so `http` on 80 redirects everything to https. Unlike the CRDs, the Gateways are the socle's
+# own: disabling the module or kube.gateway_api.gateways deletes them, and
+# their load balancers with them.
 apiVersion: fluxcd.controlplane.io/v1
 kind: ResourceSet
 metadata:
@@ -83,4 +101,98 @@ spec:
       prune: true
       wait: true
       timeout: 5m
+    << end >>
+    << if inputs.gateway.shared >>
+    ---
+    apiVersion: fluxcd.controlplane.io/v1
+    kind: ResourceSet
+    metadata:
+      name: gateway-api-gateways
+      namespace: flux-system
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.gateway_api.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      dependsOn:
+        - apiVersion: kustomize.toolkit.fluxcd.io/v1
+          kind: Kustomization
+          name: gateway-api-cilium
+          namespace: flux-system
+          ready: true
+      wait: true
+      resources:
+        - apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: << inputs.gateway.namespace >>
+        << range $gw := list "public" "private" >>
+        - apiVersion: gateway.networking.k8s.io/v1
+          kind: Gateway
+          metadata:
+            name: << $gw >>
+            namespace: << inputs.gateway.namespace >>
+          spec:
+            gatewayClassName: << inputs.gateway.className >>
+            # Carried by Cilium onto the LoadBalancer Service it creates for
+            # the Gateway, where the cloud's own service controller reads it.
+            infrastructure:
+              annotations:
+                << if eq inputs.cloud "aws" >>
+                service.beta.kubernetes.io/aws-load-balancer-type: nlb
+                service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+                service.beta.kubernetes.io/aws-load-balancer-ssl-cert: << inputs.gateway.certificateArn | quote >>
+                service.beta.kubernetes.io/aws-load-balancer-ssl-ports: "443"
+                << if eq $gw "private" >>
+                service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+                << end >>
+                << end >>
+                << if and (eq inputs.cloud "azure") (eq $gw "private") >>
+                service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+                << end >>
+                socle.do-now.io/gateway: << $gw >>
+            listeners:
+              << if ne inputs.cloud "aws" >>
+              # Only the redirect below attaches here.
+              - name: http
+                protocol: HTTP
+                port: 80
+                allowedRoutes:
+                  namespaces:
+                    from: Same
+              << end >>
+              - name: https
+                port: 443
+                << if eq inputs.cloud "aws" >>
+                # TLS is the NLB's; Envoy receives plain HTTP on 443.
+                protocol: HTTP
+                << else >>
+                protocol: HTTPS
+                tls:
+                  mode: Terminate
+                  certificateRefs:
+                    - kind: Secret
+                      name: gateway-tls
+                << end >>
+                allowedRoutes:
+                  namespaces:
+                    from: All
+        << end >>
+        << if ne inputs.cloud "aws" >>
+        - apiVersion: gateway.networking.k8s.io/v1
+          kind: HTTPRoute
+          metadata:
+            name: https-redirect
+            namespace: << inputs.gateway.namespace >>
+          spec:
+            parentRefs:
+              - name: public
+                sectionName: http
+              - name: private
+                sectionName: http
+            rules:
+              - filters:
+                  - type: RequestRedirect
+                    requestRedirect:
+                      scheme: https
+                      statusCode: 301
+        << end >>
     << end >>

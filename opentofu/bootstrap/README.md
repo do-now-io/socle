@@ -1,8 +1,9 @@
 # Socle bootstrap — Flux, and the inputs the catalog renders from
 
-One module for four clouds, `helm` as its only provider. It installs
-`flux-operator`, a `FluxInstance`, and two literal objects: the client's inputs
-and the root source. After that OpenTofu owns those three releases and nothing
+One module for four clouds. `helm` installs everything that runs in the
+cluster — `flux-operator`, a `FluxInstance`, and two literal objects: the
+client's inputs and the root source; on aws, `aws` adds the EKS-managed
+add-ons and their roles. After that OpenTofu owns those three releases and nothing
 else: the operator renders the catalog from the inputs, Flux converges it.
 
 ```hcl
@@ -26,7 +27,9 @@ The design, and the measurements behind it: [docs/flux-catalog.md](../../docs/fl
 
 In the same root as the foundations module, in one apply — see
 `opentofu/clusters/<cloud>/`. It configures no provider itself; the root passes
-the foundations module's `helm_kubernetes` output to the `helm` provider.
+the foundations module's `helm_kubernetes` output to the `helm` provider, and
+on aws its own `aws` provider serves both modules. Elsewhere `aws` has no
+resource here and is never configured.
 
 ## The catalog schema
 
@@ -37,6 +40,7 @@ type, is an error at plan, with the allowed list in the message.
 | Module | Attribute | Default | Meaning |
 | --- | --- | --- | --- |
 | `gateway_api` | `enabled` | `true` | Gateway API standard CRDs from upstream, pinned by commit, and Cilium's `cilium` class on aws and azure. Offered on aws, azure and scaleway; GKE owns its own. Disabling orphans the CRDs |
+| `gateway_api` | `gateways` | `true` | The shared Gateways `gateway-system/public` (internet-facing) and `private` (internal), HTTPS on 443, on aws and azure — on aws once the foundations issued `gateway_certificate`, with no port 80 yet; on azure HTTP on 80 redirects to HTTPS ([design note](../../docs/catalog/gateway-api.md)) |
 | `crossplane` | `enabled` | `false` | Deploy Crossplane and, per cloud, its IAM providers — the tooling through which each catalog module declares its own cloud role ([design note](../../docs/catalog/crossplane.md)). Turning it off leaves the CRDs and orphans every module role still declared |
 | `crossplane` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan |
 | `crossplane` | `values_secret` | `""` | Name of a Secret in `crossplane-system` with a `values.yaml` key, created by the client, merged last |
@@ -49,7 +53,8 @@ type, is an error at plan, with the allowed list in the message.
 | `external_dns` | `values_secret` | `""` | Name of a Secret in `external-dns` with a `values.yaml` key, created by the client, merged last |
 | `argocd` | `enabled` | `true` | Deploy ArgoCD, the client's GitOps layer ([design note](../../docs/catalog/argocd.md)) |
 | `argocd` | `admin_enabled` | `true` | Keep the local `admin` account; `false` once SSO exists |
-| `argocd` | `domain` | `""` | Host ArgoCD is served at (`configs.cm.url`, later the HTTPRoute); empty means no URL |
+| `argocd` | `domain` | `""` | Host ArgoCD is served at (`configs.cm.url` and the HTTPRoute); empty means no URL and no route |
+| `argocd` | `gateway` | `"private"` | Shared Gateway its HTTPRoute attaches to: `private`, `public`, or `""` for none |
 | `argocd` | `ha` | `false` | The chart's HA layout: Redis HA, two replicas of server, repo-server and applicationset |
 | `argocd` | `values` | `{}` | The client's own chart values (accounts, RBAC, repositories, SSO connectors, exclusions), merged over the socle's defaults, client wins. Secrets refused at plan |
 | `argocd` | `values_secret` | `""` | Name of a Secret in `argocd` with a `values.yaml` key, created by the client, merged last — where the private keys and client secrets go |
@@ -99,6 +104,24 @@ templates see what was decided as `inputs.cilium.{installed, gatewayApi,
 hubble}`. The design and what was measured are in
 [docs/catalog/cilium.md](../../docs/catalog/cilium.md).
 
+## EKS add-ons, once the nodes run
+
+On `aws` the Pod Identity Agent, EBS CSI and EFS CSI stay EKS-managed
+add-ons ([managed scope](../../docs/aws/eks-managed-scope.md)), and this
+module creates them — the foundations provision nothing that needs a pod.
+The Pod Identity Agent comes after Cilium and before `flux-operator`: every
+catalog module that talks to AWS, Crossplane first, gets its credentials from
+it, and without it they hang without an error (#48). The two drivers come
+after CoreDNS, each with its own role bound through the add-on's
+`pod_identity_association`, outside `/socle/<cluster>/`.
+
+```hcl
+eks_addons = { efs_csi = true }   # optional: pod_identity_agent (true), ebs_csi (true), efs_csi (false)
+```
+
+Versions are pinned in `eks_addons.tf` and move with the socle release. The
+drivers need the agent; turning it off with either on is refused at plan.
+
 ## What is decided for you
 
 | Decision | Position |
@@ -113,6 +136,8 @@ hubble}`. The design and what was measured are in
 | Namespace | `flux-system`, fixed |
 | CNI on aws and azure | Cilium 1.20.2, pinned here: ENI IPAM on aws, BYOCNI overlay on azure, kube-proxy replacement on both |
 | DNS on aws | CoreDNS by Helm after Cilium; the EKS add-on cannot exist before a CNI |
+| Identity on aws | the Pod Identity Agent add-on, before Flux, pinned; IRSA absent |
+| Storage on aws | EBS CSI add-on on by default, EFS CSI on request, each with its own Pod Identity role |
 
 ## Reading the result
 
@@ -129,7 +154,7 @@ apply proves the objects were deposited, not that they converged. The root
 ## Testing
 
 `tofu test` covers the interface — one failing case per validation, and the
-defaults and normalisation with a mocked helm provider. Convergence is proven
+defaults and normalisation with mocked helm and aws providers. Convergence is proven
 by `publish-artifact.yaml`'s `e2e-aws-root` and `e2e-aws-catalog` jobs, which
 apply on floci against the artifact the same commit published; the
 integration legs plan only.
@@ -140,6 +165,7 @@ integration legs plan only.
 | Name | Version |
 |------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.10 |
+| <a name="requirement_aws"></a> [aws](#requirement\_aws) | >= 6.0, < 7.0 |
 | <a name="requirement_helm"></a> [helm](#requirement\_helm) | >= 3.0, < 4.0 |
 
 ## Modules
@@ -150,6 +176,13 @@ No modules.
 
 | Name | Type |
 |------|------|
+| [aws_eks_addon.ebs_csi](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_addon) | resource |
+| [aws_eks_addon.efs_csi](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_addon) | resource |
+| [aws_eks_addon.pod_identity_agent](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_addon) | resource |
+| [aws_iam_role.ebs_csi](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
+| [aws_iam_role.efs_csi](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
+| [aws_iam_role_policy_attachment.ebs_csi](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
+| [aws_iam_role_policy_attachment.efs_csi](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [helm_release.cilium](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 | [helm_release.coredns](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 | [helm_release.instance](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
@@ -170,8 +203,10 @@ No modules.
 | <a name="input_cluster_network"></a> [cluster\_network](#input\_cluster\_network) | What Cilium needs to know about the cluster, from the foundations'<br/>outputs, never from the client: `api_endpoint`, the API server as EKS<br/>returns it (https://host) or AKS does (a bare FQDN), for kube-proxy<br/>replacement; `service_cidr`, the service range, whose `.10` is CoreDNS's<br/>address on aws; `pod_cidr`, Cilium's pool on azure, where the VNet holds<br/>nodes only. Required wherever the socle installs Cilium, ignored<br/>elsewhere. | <pre>object({<br/>    api_endpoint = string<br/>    service_cidr = optional(string)<br/>    pod_cidr     = optional(string)<br/>  })</pre> | `null` | no |
 | <a name="input_coredns"></a> [coredns](#input\_coredns) | The CoreDNS the socle installs on aws, right after Cilium, as<br/>`{ values }`: `values` ({}) is any CoreDNS chart value, merged over the<br/>socle's so the client wins — extra zones, forwarders, plugins. The chart<br/>has no value that takes secret material inline; a Secret is mounted by<br/>name through `extraSecrets`, or read through `env[].valueFrom`. Refused<br/>where the socle installs no CoreDNS: every cloud but aws, and aws with<br/>cilium.enabled = false. Chart version pinned in cilium.tf. | `any` | `{}` | no |
 | <a name="input_cosign_identity"></a> [cosign\_identity](#input\_cosign\_identity) | Keyless identity the artifact's signature must match, as issuer and subject regexes. Defaults to the socle's release workflow on main, so production never consumes a branch build by accident. Override on a dev cluster testing a branch. Null means this default. Verification cannot be disabled. | <pre>object({<br/>    issuer  = string<br/>    subject = string<br/>  })</pre> | <pre>{<br/>  "issuer": "^https://token\\.actions\\.githubusercontent\\.com$",<br/>  "subject": "^https://github\\.com/do-now-io/socle/\\.github/workflows/publish-artifact\\.yaml@refs/heads/main$"<br/>}</pre> | no |
+| <a name="input_eks_addons"></a> [eks\_addons](#input\_eks\_addons) | The EKS-managed add-ons the socle installs on aws once the nodes run, as<br/>`{ pod_identity_agent, ebs_csi, efs_csi }`, every key optional:<br/>`pod_identity_agent` (true) is what hands every Pod Identity association<br/>its credentials — Crossplane's AWS providers included — and flux-operator<br/>waits for it; `ebs_csi` (true) is the block-storage driver, with its own<br/>role; `efs_csi` (false) the RWX one, with its own role. Both drivers need<br/>the agent. Refused on every cloud but aws. Versions pinned in<br/>eks\_addons.tf. | `any` | `{}` | no |
 | <a name="input_flux_components"></a> [flux\_components](#input\_flux\_components) | Flux controllers to install. The image automation pair is absent by default: the socle's version moves through a reviewed tfvars change, not through a controller rewriting tags. | `list(string)` | <pre>[<br/>  "source-controller",<br/>  "kustomize-controller",<br/>  "helm-controller",<br/>  "notification-controller"<br/>]</pre> | no |
 | <a name="input_flux_version"></a> [flux\_version](#input\_flux\_version) | Flux version the operator installs and keeps converged. 2.x tracks the latest 2 series; an exact version pins it. | `string` | `"2.x"` | no |
+| <a name="input_gateway_certificate_arn"></a> [gateway\_certificate\_arn](#input\_gateway\_certificate\_arn) | On aws, the ACM certificate the shared Gateways' load balancers terminate<br/>TLS with — the foundations' gateway\_certificate\_arn output, never the<br/>client's. Null or empty on aws means no shared Gateway, and no route<br/>attached to one. Unknown at plan on the apply that issues it, which is<br/>why nothing validates it here. Ignored elsewhere. | `string` | `null` | no |
 | <a name="input_helm_timeout_seconds"></a> [helm\_timeout\_seconds](#input\_helm\_timeout\_seconds) | How long to wait for each release to become ready. The instance release is the slow one: its health check waits for the operator to converge the controllers. | `number` | `600` | no |
 | <a name="input_instance_size"></a> [instance\_size](#input\_instance\_size) | Resource profile the operator applies to the controllers. Empty is the operator's own default; small, medium and large scale requests and limits together. | `string` | `""` | no |
 | <a name="input_kube"></a> [kube](#input\_kube) | The catalog modules this cluster enables and their values, as<br/>`{ <module> = { <attribute> = <value> } }`. List only what differs from<br/>the catalog's defaults; an absent module is at its default. Module names<br/>are snake\_case. Typed `any` on purpose: a map(any) refuses two modules with<br/>different attributes, and an object type silently drops a misspelt<br/>attribute — the validations below are what makes a typo an error at plan.<br/>The schema is catalog.tf; the README lists it module by module. | `any` | `{}` | no |
@@ -189,6 +224,7 @@ No modules.
 | <a name="output_artifact"></a> [artifact](#output\_artifact) | The socle artifact, as OCI URL and tag. |
 | <a name="output_cilium"></a> [cilium](#output\_cilium) | Whether this module installed Cilium (aws, azure: the clouds whose foundations create a cluster with no CNI), with the chart versions it pinned. installed is false where the cloud operates Cilium, or when cilium.enabled is false. |
 | <a name="output_cosign_identity"></a> [cosign\_identity](#output\_cosign\_identity) | Keyless identity the artifact's signature is verified against, on every reconciliation. |
+| <a name="output_eks_addons"></a> [eks\_addons](#output\_eks\_addons) | The EKS-managed add-ons this module installed (aws only), each as its pinned version, and for the two storage drivers the ARN of the role their controller runs as. Null for an add-on not installed. |
 | <a name="output_flux_version"></a> [flux\_version](#output\_flux\_version) | Flux version the operator converges the controllers to. |
 | <a name="output_inputs"></a> [inputs](#output\_inputs) | What this module ships into the cluster as the ResourceSetInputProvider's defaultValues, after normalisation against the catalog. The catalog's templates read exactly these paths. |
 | <a name="output_namespace"></a> [namespace](#output\_namespace) | Namespace holding the operator, the Flux controllers and the socle's inputs. |

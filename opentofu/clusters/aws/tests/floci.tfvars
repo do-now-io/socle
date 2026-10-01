@@ -51,3 +51,11 @@ kube = {
 cilium = {
   enabled = false
 }
+
+# floci records EKS add-ons as metadata only, and not before a release later
+# than the one CI pins (1.5.34 has no add-on API at all): its k3s runs no
+# add-on workload either way. The e2e proves the catalog, not AWS's packaging.
+eks_addons = {
+  pod_identity_agent = false
+  ebs_csi            = false
+}

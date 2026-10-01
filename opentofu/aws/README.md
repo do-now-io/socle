@@ -53,7 +53,7 @@ Every default traces back to a research document. The short version:
 | Pod Identity exclusively, IRSA absent | enforced | [managed scope](../../docs/aws/eks-managed-scope.md) |
 | VPC CNI and kube-proxy refused — never installed at all (`bootstrap_self_managed_addons = false`) | enforced | [managed scope](../../docs/aws/eks-managed-scope.md) |
 | End of standard support: AWS upgrades the cluster rather than billing extended support (`STANDARD`) | enforced | [managed scope](../../docs/aws/eks-managed-scope.md) |
-| EBS CSI, EFS CSI and the Pod Identity Agent stay EKS-managed add-ons — installed by the factory, not here; CoreDNS is installed by the bootstrap module after Cilium | absent | [managed scope](../../docs/aws/eks-managed-scope.md), [catalog/cilium](../../docs/catalog/cilium.md) |
+| EBS CSI, EFS CSI and the Pod Identity Agent stay EKS-managed add-ons — installed by the bootstrap module once the nodes run, not here; CoreDNS is installed by the bootstrap module after Cilium | absent | [managed scope](../../docs/aws/eks-managed-scope.md), [catalog/cilium](../../docs/catalog/cilium.md) |
 | Workload identities (Crossplane, EBS CSI) belong to the layer that installs their pods | absent | [managed scope](../../docs/aws/eks-managed-scope.md) |
 
 ## Also decided, not from research
@@ -101,9 +101,11 @@ and tested, so these are refusals:
   unresolved bug on EKS IPv6 clusters.
 - **Security groups for pods** — a VPC CNI (ENI trunking) feature; Socle
   doesn't run VPC CNI. Cilium already covers the same ground in eBPF.
-- **Gateway API / ALB vs NLB configuration** — the AWS Load Balancer
-  Controller is a factory component delivered through the socle OCI
-  artifact, like Karpenter and Cilium, not provisioned by this module.
+- **Gateway API load balancers** — the socle's two Gateways get NLBs from
+  EKS's in-tree service controller, through annotations on the Service
+  Cilium creates for each ([gateway-api](../../docs/catalog/gateway-api.md)).
+  This module provisions only the certificate they terminate TLS with
+  (`gateway_certificate`).
 - **DynamoDB Gateway endpoint** — dropped: no cited Socle use case, here or
   in the observability service-coverage table. S3 keeps its own citation.
 - **IRSA, or any toggle for it** — Pod Identity is the only mechanism this
@@ -189,6 +191,8 @@ No modules.
 
 | Name | Type |
 |------|------|
+| [aws_acm_certificate.gateway](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/acm_certificate) | resource |
+| [aws_acm_certificate_validation.gateway](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/acm_certificate_validation) | resource |
 | [aws_cloudwatch_log_group.cluster](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_log_group) | resource |
 | [aws_cloudwatch_log_group.flow_logs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_log_group) | resource |
 | [aws_eip.nat](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eip) | resource |
@@ -212,6 +216,7 @@ No modules.
 | [aws_kms_key.secrets](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/kms_key) | resource |
 | [aws_launch_template.bootstrap](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/launch_template) | resource |
 | [aws_nat_gateway.socle](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/nat_gateway) | resource |
+| [aws_route53_record.gateway_certificate_validation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route53_record) | resource |
 | [aws_route_table.private](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route_table) | resource |
 | [aws_route_table.public](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route_table) | resource |
 | [aws_route_table_association.private](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route_table_association) | resource |
@@ -226,6 +231,7 @@ No modules.
 | [aws_iam_policy_document.cilium_operator](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.node_ecr_pull](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/region) | data source |
+| [aws_route53_zone.gateway](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/route53_zone) | data source |
 
 ## Inputs
 
@@ -246,6 +252,7 @@ No modules.
 | <a name="input_create_vpc"></a> [create\_vpc](#input\_create\_vpc) | Create the VPC, or attach to one the consumer already manages. | `bool` | `true` | no |
 | <a name="input_crossplane"></a> [crossplane](#input\_crossplane) | Give the catalog's crossplane module its AWS identity — the one the socle<br/>cannot make for itself: an IAM role, bound through EKS Pod Identity to<br/>crossplane-system/provider-aws, allowed to create roles under<br/>/socle/<cluster\_name>/ only, and only carrying the permissions boundary<br/>this module writes. allowed\_services is that boundary: the AWS services<br/>(IAM action prefixes, such as route53 or s3) any module's role may be<br/>granted. Empty grants nothing; iam, sts, organizations, account, sso and<br/>identitystore are refused. Which resources of those services a module<br/>reaches is its own role's policy. Null, the default, creates nothing. The<br/>client root passes the boundary's ARN into kube.crossplane. | <pre>object({<br/>    allowed_services = optional(list(string), [])<br/>  })</pre> | `null` | no |
 | <a name="input_force_update_version"></a> [force\_update\_version](#input\_force\_update\_version) | Force the control plane version update even if Upgrade Insights reports<br/>blocking findings. Default false: Upgrade Insights is a mandatory<br/>pre-check, never sufficient alone (it only sees the client's own<br/>removed-API usage, over a rolling 30-day audit-log window that both<br/>misses infrequent calls and over-reports fixed ones) — but AWS's own<br/>blocking of `update-cluster-version` on ERROR findings is currently<br/>rolled back, so this module does not assume AWS enforces the check<br/>either. | `bool` | `false` | no |
+| <a name="input_gateway_certificate"></a> [gateway\_certificate](#input\_gateway\_certificate) | The ACM certificate the socle's two Gateways terminate TLS with, at the<br/>load balancer: `domain` and `*.domain`, validated by DNS in the public<br/>Route 53 zone named `domain` — found by name, no zone ID to copy. `zone`<br/>names that zone instead when `domain` is a subdomain of it, such as<br/>domain = "sbx.acme.example" in zone = "acme.example". Every route<br/>published through a Gateway — ArgoCD's included — is then<br/>`<name>.<domain>`. Null, the default, creates nothing, and the bootstrap<br/>module creates no Gateway: the socle never serves a route in clear text. | <pre>object({<br/>    domain = string<br/>    zone   = optional(string)<br/>  })</pre> | `null` | no |
 | <a name="input_log_retention_days"></a> [log\_retention\_days](#input\_log\_retention\_days) | Retention for the log groups this module creates — the control plane's and the VPC flow logs'. Set explicitly because a log group left to AWS never expires. | `number` | `90` | no |
 | <a name="input_private_subnet_ids"></a> [private\_subnet\_ids](#input\_private\_subnet\_ids) | Existing private subnet IDs, one per AZ in availability\_zones. Required when create\_vpc is false — this module carves its own subnets out of vpc\_cidr only when it also creates the VPC. | `list(string)` | `[]` | no |
 | <a name="input_public_subnet_ids"></a> [public\_subnet\_ids](#input\_public\_subnet\_ids) | Existing public subnet IDs, one per AZ in availability\_zones. Required when create\_vpc is false — same reasoning as private\_subnet\_ids. | `list(string)` | `[]` | no |
@@ -266,6 +273,7 @@ No modules.
 | <a name="output_cluster_name"></a> [cluster\_name](#output\_cluster\_name) | Name of the EKS cluster. |
 | <a name="output_crossplane_permissions_boundary_arn"></a> [crossplane\_permissions\_boundary\_arn](#output\_crossplane\_permissions\_boundary\_arn) | ARN of the permissions boundary every role Crossplane creates must carry — what kube.crossplane.permissions\_boundary takes, and what the client root passes for you. Null when crossplane is not set. |
 | <a name="output_crossplane_role_arn"></a> [crossplane\_role\_arn](#output\_crossplane\_role\_arn) | ARN of the IAM role the catalog's crossplane module's AWS providers run as, through Pod Identity. Null when crossplane is not set. |
+| <a name="output_gateway_certificate_arn"></a> [gateway\_certificate\_arn](#output\_gateway\_certificate\_arn) | ARN of the issued ACM certificate the socle's Gateways terminate TLS with — what the bootstrap module's gateway\_certificate\_arn takes, and what the client root passes for you. Null when gateway\_certificate is not set. |
 | <a name="output_helm_kubernetes"></a> [helm\_kubernetes](#output\_helm\_kubernetes) | Drop-in value for the helm provider's kubernetes attribute, so a root configures it in one line. Carries no credential: the exec plugin obtains a short-lived token from the caller's ambient AWS credentials at call time, exactly as the aws provider itself authenticates. |
 | <a name="output_oidc_issuer_url"></a> [oidc\_issuer\_url](#output\_oidc\_issuer\_url) | The cluster's OIDC issuer. Checklist requirement, not this module's identity mechanism — Pod Identity is, IRSA is absent, and nothing here provisions an OIDC trust relationship against it. Null on an emulated cluster that reports no identity (floci), so an apply there still converges. |
 | <a name="output_private_subnet_ids"></a> [private\_subnet\_ids](#output\_private\_subnet\_ids) | Private subnet IDs, one per AZ. |
