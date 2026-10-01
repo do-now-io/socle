@@ -10,6 +10,10 @@ AKS and Scaleway Kapsule.
 Pick your cloud, pick your modules. Socle ships as one signed OCI artifact
 pulled by Flux: upgrading your whole platform means bumping one version in Git.
 
+[![Socle in 22 seconds](docs/assets/socle-demo.gif)](docs/assets/socle-demo.mp4)
+
+<sub>Click the animation for the full-quality video with sound.</sub>
+
 ## How it works
 
 - **Foundations** — one OpenTofu root module per cloud: network, managed
