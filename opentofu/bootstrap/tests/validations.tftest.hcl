@@ -774,3 +774,101 @@ run "kube_refuses_victoria_traces_values_secret_that_is_not_a_secret_name" {
   variables { kube = { victoria_traces = { values_secret = "VT_Values" } } }
   expect_failures = [var.kube]
 }
+
+# --- keda — docs/catalog/keda.md -------------------------------------------
+
+run "keda_refuses_a_service_it_cannot_scope" {
+  command = plan
+  variables {
+    region = "eu-west-3"
+    kube = {
+      crossplane = { enabled = true }
+      keda       = { enabled = true, services = ["sqs", "rds"] }
+    }
+  }
+  expect_failures = [var.kube]
+}
+
+run "keda_refuses_a_wildcard_service" {
+  command = plan
+  variables {
+    region = "eu-west-3"
+    kube = {
+      crossplane = { enabled = true }
+      keda       = { enabled = true, services = ["*"] }
+    }
+  }
+  expect_failures = [var.kube]
+}
+
+run "keda_refuses_a_service_without_crossplane" {
+  command = plan
+  variables {
+    region = "eu-west-3"
+    kube   = { keda = { enabled = true, services = ["sqs"] } }
+  }
+  expect_failures = [var.kube]
+}
+
+run "keda_refuses_a_service_outside_aws" {
+  command = plan
+  variables {
+    cloud           = "gcp"
+    cluster_network = null
+    region          = "europe-west1"
+    kube = {
+      crossplane = { enabled = true }
+      keda       = { enabled = true, services = ["sqs"] }
+    }
+  }
+  expect_failures = [var.kube]
+}
+
+run "keda_with_a_service_on_aws_refuses_an_empty_region" {
+  command = plan
+  variables {
+    kube = {
+      crossplane = { enabled = true }
+      keda       = { enabled = true, services = ["sqs"] }
+    }
+  }
+  expect_failures = [var.kube]
+}
+
+run "keda_refuses_services_that_are_not_a_list" {
+  command = plan
+  variables { kube = { keda = { services = "sqs" } } }
+  expect_failures = [var.kube]
+}
+
+run "keda_refuses_a_credential_in_values_env" {
+  command = plan
+  variables { kube = { keda = { values = { operator = { env = [{ name = "AWS_SECRET_ACCESS_KEY", value = "wJalrXUtnFEMI" }] } } } } }
+  expect_failures = [var.kube]
+}
+
+run "keda_refuses_a_secret_among_extra_objects" {
+  command = plan
+  variables {
+    kube = {
+      keda = {
+        values = {
+          extraObjects = [{ apiVersion = "v1", kind = "Secret", metadata = { name = "sqs-keys" }, stringData = { k = "v" } }]
+        }
+      }
+    }
+  }
+  expect_failures = [var.kube]
+}
+
+run "keda_refuses_values_that_are_not_an_object" {
+  command = plan
+  variables { kube = { keda = { values = "webhooks: {}" } } }
+  expect_failures = [var.kube]
+}
+
+run "keda_refuses_an_invalid_values_secret_name" {
+  command = plan
+  variables { kube = { keda = { values_secret = "My_Values" } } }
+  expect_failures = [var.kube]
+}

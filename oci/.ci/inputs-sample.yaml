@@ -94,6 +94,15 @@
       storage_size: 10Gi
       values: {}
       values_secret: ""
+    keda:
+      enabled: true
+      services: [sqs, cloudwatch]
+      values:
+        resources:
+          operator:
+            requests:
+              memory: 160Mi
+      values_secret: keda-values
     hello:
       enabled: true
       replicas: 2
