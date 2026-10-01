@@ -183,6 +183,7 @@ jobs:
           cluster: socle-e2e
           tag: ${{ inputs.tag }}
           cosign-identity: ${{ inputs.cosign_identity }}
+          floci: ${{ job.services.floci.id }}
       - name: The Checks tab names the failing step
         if: always()
         uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6.5.0
@@ -338,6 +339,7 @@ jobs:
           cluster: socle-e2e-catalog
           tag: ${{ inputs.tag }}
           cosign-identity: ${{ inputs.cosign_identity }}
+          floci: ${{ job.services.floci.id }}
       - name: The Checks tab names the failing step
         if: always()
         uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6.5.0
