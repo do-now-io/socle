@@ -6,9 +6,10 @@ application's own objects, and restores them. One catalog module, AWS only in
 v1. Issue #58; the catalog contract is [docs/flux-catalog.md](../flux-catalog.md)
 §6, the cloud-access contract [crossplane.md](crossplane.md) §3.
 
-> Status: **design, agreed on 2026-10-01, not implemented yet.** Every
-> position below is a decision; §9 lists what the implementation must measure
-> before this note can say "measured".
+> Status: **implemented, draft PR.** Designed and agreed on 2026-10-01. The
+> chart, its values and a real backup and restore were measured on a local
+> k3s against floci's S3 (§9, *Measured*). The floci CI run and the sandbox
+> proof are still to come.
 
 | Question | Position |
 | --- | --- |
@@ -19,7 +20,7 @@ v1. Issue #58; the catalog contract is [docs/flux-catalog.md](../flux-catalog.md
 | Policies | Seven (frequency, retention) pairs by default, each one `Schedule`; the client lists its own in `kube.velero.policies` |
 | EBS volumes | CSI snapshots, native, kept in EBS; the bucket holds the metadata |
 | EFS volumes | File-system backup (node-agent, Kopia) into the bucket — the EFS CSI driver has no snapshots |
-| Bucket | The module's own, through Crossplane: versioned, SSE-S3, public access blocked, noncurrent versions expired after 30 days, `deletionPolicy: Orphan` |
+| Bucket | The module's own, through Crossplane: versioned, SSE-S3, public access blocked, noncurrent versions expired after 30 days, never deleted (`managementPolicies` without `Delete`, and no `s3:Delete*` for Crossplane) |
 | Cloud access | The module's own IAM role through Crossplane: S3 object actions on its bucket only. No EC2: the EBS CSI driver takes the snapshots with its own role |
 | Restore | An ops runbook (§7), never self-service: an application may choose its policy, never restore |
 
@@ -61,9 +62,13 @@ Every object carries the reconcile toggle. The ServiceAccount is fixed,
 | `BucketPublicAccessBlock` | all four switches on |
 | `BucketLifecycleConfiguration` | noncurrent versions expire after 30 days; incomplete multipart uploads aborted after 7 |
 
-**Every one of them is `deletionPolicy: Orphan`.** Turning the module off, or
-uninstalling the socle, deletes the Kubernetes objects and leaves the bucket,
-its settings and every backup in place. A rebuilt cluster with the same name
+**None of them can delete anything.** Namespaced managed resources have no
+`deletionPolicy` in Crossplane v2. Each one carries
+`managementPolicies: [Observe, Create, Update, LateInitialize]` instead, without
+`Delete`. Turning the module off, or uninstalling the socle, deletes the
+Kubernetes objects and leaves the bucket, its settings and every backup in
+place. Crossplane's own identity has no `s3:Delete*` action either (§8), so
+the guarantee holds even if a managed resource is edited by hand. A rebuilt cluster with the same name
 in the same account adopts the bucket by its external name (§7, scenario 2).
 
 Velero deleting a backup at its TTL deletes the objects; versioning keeps
@@ -152,7 +157,7 @@ One resource-policy ConfigMap, referenced by every `Schedule`'s
 | --- | --- |
 | `csi.driver: ebs.csi.aws.com` | `snapshot` |
 | `csi.driver: efs.csi.aws.com` | `fs-backup` |
-| anything else | `skip` |
+| anything else | Velero's fallback: no snapshot location and no fs-backup annotation, so skipped |
 
 So a chart sets the two labels and nothing Velero-specific: no
 `backup.velero.io/backup-volumes` annotation per volume.
@@ -174,7 +179,7 @@ warnings in its UI; the audit annotation is what a dashboard can count.
 | `enabled` | `false` | on aws: needs `kube.crossplane.enabled`, the cluster's region and its account id — refused otherwise, naming the missing piece |
 | `policies` | the seven pairs of §3 | a list of `{ frequency, retention, schedule }`; `frequency` and `retention` RFC 1123 label values, `retention` matching `^[0-9]+(h\|d)$`, `schedule` five cron fields, no pair twice |
 | `node_agent` | `eks_addons.efs_csi` | a bool; off, no privileged DaemonSet and the namespace stays `restricted`. On without EFS is allowed (a client's own NFS volumes, through `values`) |
-| `values` | `{}` | the chart's secret-bearing paths refused: `credentials.secretContents`, `credentials.extraEnvVars` (a Secret is named, through `credentials.existingSecret`, never inlined) |
+| `values` | `{}` | the chart's secret-bearing paths refused: `credentials.secretContents`, `credentials.extraEnvVars`, a Secret in `extraObjects`, a `configuration.extraEnvVars` entry with a literal value named like a credential. A Secret is named through `credentials.existingSecret`, never inlined |
 | `values_secret` | `""` | an RFC 1123 Secret name, merged last |
 
 Velero with Crossplane off is refused at plan in v1: without Crossplane there
@@ -186,8 +191,11 @@ is out of scope (§10).
 In `velero-socle-values`, each overridable through `values` as the contract
 says:
 
-- **`configuration.features: EnableCSI`**, `snapshotsEnabled: true`,
-  `deployNodeAgent` from `node_agent`;
+- **`configuration.features: EnableCSI` only where the snapshot controller
+  is** (`inputs.storage.snapshots`). Without its CRDs every backup ends
+  `PartiallyFailed` on the missing `VolumeSnapshot` kinds, measured on k3s.
+  `snapshotsEnabled: false`, since CSI snapshots need no
+  `VolumeSnapshotLocation`. `deployNodeAgent` comes from `node_agent`;
 - **one `BackupStorageLocation` `default`**: provider `aws`, the module's
   bucket, region `inputs.cluster.region`, no prefix; **no
   `VolumeSnapshotLocation`** — CSI snapshots need none;
@@ -196,8 +204,12 @@ says:
 - **`upgradeCRDs: true`, `cleanUpCRDs: false`**: turning the module off keeps
   the CRDs, so the `Backup` objects a re-enable re-syncs from the bucket find
   their kind;
-- **the restricted security context** on the server and the maintenance jobs;
-  the node-agent is the one privileged pod;
+- **the restricted security context** on the server, the CRD upgrade job and
+  the maintenance jobs: uid 65532, no privilege escalation, a read-only root
+  filesystem. Kopia needs two `emptyDir`s for that, `/udmrepo` and `/.cache`
+  (`$HOME` is `/` for the image's user). Without them the repository never
+  initialises: `mkdir /udmrepo` then `mkdir /.cache: read-only file system`,
+  measured. The node-agent is the one privileged pod;
 - **requests sized from the e2e** (§9), the chart's limits kept;
 - **the plugin as an init container**, pinned with the chart.
 
@@ -211,9 +223,10 @@ applications.
 - The child `velero-workload` `dependsOn` the `Bucket`, the `Role` and the
   `PodIdentityAssociation`, `readyExpr` on `Ready=True`
   ([external-dns.md](external-dns.md): steps alone do not order this).
-- **Off: the module first, Crossplane after** — Crossplane's own warning. With
-  `Orphan`, turning the module off deletes nothing in AWS but still needs the
-  provider to release the finalizers.
+- **Off: the module first, Crossplane after** — Crossplane's own warning.
+  The bucket's resources have no `Delete` in their management policies, so
+  turning the module off deletes nothing in S3. The role is still deleted,
+  and the provider must be there to release the finalizers.
 
 ## 7. Restore — the deliverable
 
@@ -271,14 +284,16 @@ as it manages roles under its path — a capability of the socle, which
    `s3:Delete*`, no object action**: Crossplane can never delete a bucket of
    backups nor read what is in it, whatever a managed resource says. Each
    action is listed — no `s3:*` — and `tofu test` asserts the absences.
-3. **`opentofu/bootstrap`**: `inputs.cluster.account_id`, from
+3. **`opentofu/bootstrap`**: `inputs.cluster.accountId`, from
    `data.aws_caller_identity` on aws (floci answers `000000000000`); empty
    elsewhere.
 4. **`opentofu/bootstrap/eks_addons.tf`**: the `snapshot-controller` EKS
    add-on (its CRDs come with it), on by default, created **before**
-   `aws-ebs-csi-driver` as AWS requires; and its state in the inputs, so the
-   `VolumeSnapshotClass` renders only when the CRDs exist (floci has no add-on
-   API: no class there).
+   `aws-ebs-csi-driver` as AWS requires, pinned at `v8.5.0-eksbuild.3`. Its
+   state reaches the inputs as `inputs.storage.snapshots`, so the
+   `VolumeSnapshotClass` and `EnableCSI` render only when the CRDs exist.
+   floci has no add-on API, so neither renders there, and both floci roots
+   turn the add-on off.
 
 ## 9. Proof
 
@@ -297,7 +312,7 @@ tests prove what that allows, the seams as steps of their own:
 | | the bucket in S3 | Bucket `socle-e2e-catalog-velero-000000000000` exists, versioned, `AES256`, public access blocked, its lifecycle rule — from `status.atProvider`, and the one `script` reading floci's S3 |
 | | the role | IAM role under `/socle/socle-e2e-catalog/`, its `bucket` policy on that bucket only, no `ec2:` |
 | | floci seam, second half | The association `Synced=False`; one minute later still no `HelmRelease` |
-| | off, Orphan | Module off, then Crossplane off: the namespace gone, **the bucket still in S3** |
+| | off, bucket kept | Module off, then Crossplane off: the namespace gone, **the bucket still in S3** |
 | | on with static keys | Velero on with Crossplane off through the inputs (the plan refuses it; the test bypasses it — floci's missing Pod Identity is the seam), a Secret with test keys, `s3Url` at floci, `node_agent` on, a client `values` mapping local-path volumes to `fs-backup`: the `BackupStorageLocation` `Available` on the orphaned bucket |
 | | values precedence | A key the socle sets, overridden by `values`, then by the Secret of `values_secret`, then both cleared |
 | | the seven `Schedule`s | Their cron, TTL, selector and volume policy as §3 renders them |
@@ -305,12 +320,32 @@ tests prove what that allows, the seams as steps of their own:
 | | restore | The namespace deleted; the `Restore` `Completed`; the file read back from the restored PVC |
 | | re-sync | Module off and on: the `Backup` reappears, re-read from the bucket — scenario 2 in small |
 | | warning | A Deployment with `retention: 31d`: `kubectl apply` prints the policy's warning, and the Deployment is created |
-| `velero-destroyed` (`destroyed`, `aws`) | | After the socle's uninstall, the bucket is still in S3 |
 
-To measure while implementing, before relying on it: path-style addressing in
-the provider's S3 calls to floci; the node-agent's host path on floci's k3s
-(`/var/lib/kubelet/pods`); the job staying under the e2e budget with a backup
-and a restore.
+There is no `destroyed` test. The root job runs every module's `destroyed`
+tests and never turns Velero on, so a bucket assertion there would fail. The
+bucket's survival is asserted in the `module` phase instead, after each off.
+
+### Measured, on a local k3s against floci 2.1.0 (2026-10-01)
+
+The second half of the e2e, run by hand with the values the template renders
+(`flux-operator build rset`, then `helm install` of chart 12.2.0):
+
+| What | Result |
+| --- | --- |
+| The server under Pod Security `restricted`, CRD upgrade job included | Running; the `BackupStorageLocation` `Available` on floci's S3, path-style, `checksumAlgorithm: ""` |
+| The node-agent, namespace `privileged` | Rolled out on k3s's `/var/lib/kubelet/pods` |
+| A `local-path` claim with `volumeType: local`, the pair `daily`/`7d` on every object | Backup `Completed` in 10 s, one `PodVolumeBackup` `Completed` (the 26-byte file) |
+| The namespace deleted, then restored | `Restore` `Completed` in 10 s; a new claim `Bound`, Velero's `restore-wait` init container, the file read back unchanged |
+| A `Backup` object deleted, the bucket kept | Re-read from the bucket within the sync period: scenario 2 in small |
+| The admission policy | `daily-31d` warned with the policy's message and admitted; `daily-7d` silent |
+| The bucket's five resources, through the Terraform AWS provider 6.67 (what provider-upjet-aws wraps) against floci, path-style | Created; the second plan empty |
+
+Two defects that only a real backup showed, both fixed in the template: the
+read-only root filesystem blocked Kopia (above), and `EnableCSI` without the
+snapshot CRDs failed every backup (above).
+
+Still to measure, in CI: the Crossplane S3 provider itself against floci, and
+the job's time with a backup and a restore against the 20-minute budget.
 
 ### On the sandbox account — the proof floci cannot give
 
@@ -322,8 +357,9 @@ and a restore.
 3. The same on EFS through the node-agent.
 4. Scenario 2: the socle destroyed and re-applied, the backups listed again,
    one namespace restored.
-5. Crossplane cannot delete the bucket: a managed resource switched to
-   `deletionPolicy: Delete` and deleted fails with AccessDenied.
+5. Crossplane cannot delete the bucket: the `Bucket` given
+   `managementPolicies: ["*"]` and deleted fails with AccessDenied, and the
+   bucket stays.
 
 ### Static
 

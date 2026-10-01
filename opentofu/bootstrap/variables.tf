@@ -721,6 +721,73 @@ variable "kube" {
     condition     = !can(var.kube.kyverno_policies.values_secret) || try(var.kube.kyverno_policies.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.kyverno_policies.values_secret)), true)
     error_message = "kube.kyverno_policies.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
   }
+
+  # --- velero — docs/catalog/velero.md --------------------------------------
+  # On aws the module's bucket and role are Crossplane managed resources: with
+  # Crossplane off there is neither, and Velero would run with nowhere to
+  # write. A client's own bucket and identity are out of scope in v1.
+  validation {
+    condition     = !can(keys(var.kube)) || var.cloud != "aws" || !try(var.kube.velero.enabled, false) || try(var.kube.crossplane.enabled, false) == true
+    error_message = "kube.velero on aws needs kube.crossplane.enabled = true: the module's bucket and its IAM role are Crossplane managed resources (docs/catalog/velero.md). Turn Crossplane on, and allow s3 in the foundations' aws.crossplane.allowed_services."
+  }
+
+  # The bucket and the Pod Identity association are regional.
+  validation {
+    condition     = !can(keys(var.kube)) || var.cloud != "aws" || !try(var.kube.velero.enabled, false) || var.region != ""
+    error_message = "kube.velero on aws needs the cluster's region: the bucket and the module's Pod Identity association are regional. Pass region to the bootstrap module (the aws root wires var.aws.region)."
+  }
+
+  # policies: each entry becomes one Schedule named <frequency>-<retention>,
+  # selecting the two labels an application's chart sets. Both values are
+  # label values and part of an object name; retention is the TTL, in hours
+  # or days; schedule is a five-field cron expression, as Velero takes it.
+  validation {
+    condition = !can(var.kube.velero.policies) || try(alltrue([
+      for p in tolist(var.kube.velero.policies) :
+      can(keys(p))
+      && length(setsubtract(keys(p), ["frequency", "retention", "schedule"])) == 0
+      && length(keys(p)) == 3
+      && can(regex("^[a-z0-9]([a-z0-9-]{0,22}[a-z0-9])?$", p.frequency))
+      && can(regex("^[1-9][0-9]{0,4}(h|d)$", p.retention))
+      && can(regex("^\\S+( \\S+){4}$", p.schedule))
+    ]), false)
+    error_message = "kube.velero.policies must be a list of { frequency, retention, schedule }: frequency 1 to 24 lowercase letters, digits or dashes (such as daily), retention a whole number of hours or days (such as 48h or 30d), schedule a five-field cron expression (such as \"0 2 * * *\"), and nothing else."
+  }
+
+  validation {
+    condition = !can(var.kube.velero.policies) || try(
+      length(distinct([for p in tolist(var.kube.velero.policies) : "${p.frequency}-${p.retention}"])) == length(tolist(var.kube.velero.policies)),
+      true,
+    )
+    error_message = "kube.velero.policies names a (frequency, retention) pair twice: each pair is one Schedule, named after it."
+  }
+
+  # values is free-form on purpose, minus one rule: no secret material. Velero's
+  # chart turns credentials.secretContents into a Secret and
+  # credentials.extraEnvVars into environment variables of every pod, and
+  # extraObjects may hold a Secret. A Secret the client creates is named
+  # through credentials.existingSecret, which carries no secret itself.
+  validation {
+    condition = (
+      !can(var.kube.velero.values)
+      || !can(keys(var.kube.velero.values))
+      || (
+        length(try(keys(var.kube.velero.values.credentials.secretContents), [])) == 0
+        && length(try(keys(var.kube.velero.values.credentials.extraEnvVars), [])) == 0
+        && !anytrue(try([for o in var.kube.velero.values.extraObjects : try(o.kind == "Secret", false)], []))
+        && alltrue([
+          for e in try(tolist(var.kube.velero.values.configuration.extraEnvVars), []) :
+          !(can(e.value) && can(regex("(?i)(secret|password|passwd|token|api_?key|access_?key|private_?key)", try(e.name, ""))))
+        ])
+      )
+    )
+    error_message = "kube.velero.values must not carry secrets: credentials.secretContents, credentials.extraEnvVars, a Secret in extraObjects and a configuration.extraEnvVars entry with a literal value named like a credential are refused. Create the Secret in the velero namespace and name it in credentials.existingSecret, or put chart values in a Secret named in kube.velero.values_secret."
+  }
+
+  validation {
+    condition     = !can(var.kube.velero.values_secret) || try(var.kube.velero.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.velero.values_secret)), true)
+    error_message = "kube.velero.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -839,13 +906,15 @@ variable "coredns" {
 variable "eks_addons" {
   description = <<-EOT
     The EKS-managed add-ons the socle installs on aws once the nodes run, as
-    `{ pod_identity_agent, ebs_csi, efs_csi }`, every key optional:
+    `{ pod_identity_agent, ebs_csi, efs_csi, snapshot_controller }`, every
+    key optional:
     `pod_identity_agent` (true) is what hands every Pod Identity association
     its credentials — Crossplane's AWS providers included — and flux-operator
     waits for it; `ebs_csi` (true) is the block-storage driver, with its own
     role; `efs_csi` (false) the RWX one, with its own role. Both drivers need
-    the agent. Refused on every cloud but aws. Versions pinned in
-    eks_addons.tf.
+    the agent. `snapshot_controller` (true) is the CSI snapshot controller
+    and its CRDs, what the velero module's EBS snapshots need. Refused on
+    every cloud but aws. Versions pinned in eks_addons.tf.
   EOT
   type        = any
   default     = {}
