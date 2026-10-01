@@ -541,6 +541,13 @@ is read from the conventional commits since it.
   `GITHUB_TOKEN` may delete org package versions, else a fine-grained PAT is
   needed — comes after this branch merges. A nested package name is
   `%2F`-encoded in the packages API path (`socle%2Fflux-modules`).
+  **Measured 2026-10-01**: `GITHUB_TOKEN` does delete the versions (run
+  36871472243, 6 s after the branch was deleted). The corollary: merging a
+  PR while its e2e run is still in flight deletes the tag that run's clusters
+  pull — on run 36869897012 the `external-dns` job's last `root` suite found
+  the OCIRepository `MANIFEST_UNKNOWN` four minutes after the merge, every
+  other job having finished its re-check earlier. Wait for `e2e` before
+  merging, or re-run on `main`.
 - **Tested how**: the branch path runs in CI on every push of this branch.
   `compute-tag.sh` is exercised on a throwaway git repository with a stubbed
   `crane`: docs-only → patch, feat → minor, existing alphas → N+1, the release
