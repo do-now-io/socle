@@ -54,7 +54,7 @@ inputs:
     description: The identity Flux verifies against, as the HCL object the roots take.
     required: true
   floci:
-    description: Name or id of the floci container (the service container's id).
+    description: Id of the floci service container (`job.services.floci.id`); modes apply and destroy read it.
     default: floci
 
 runs:
@@ -164,3 +164,27 @@ runs:
         tofu destroy "${args[@]}"
         echo "| \`tofu destroy${MODE/destroy-socle/ -target=module.socle}\` of \`${{ inputs.root }}\` | ${SECONDS}s |" \
           >> "$GITHUB_STEP_SUMMARY"
+
+    # floci's CreateCluster starts two containers through the Docker socket:
+    # the k3s node and an ECR backing registry (`floci-ecr-registry`).
+    # DeleteCluster stops the node and leaves the registry running, with its
+    # endpoint on the job's network, so the runner's own cleanup logged
+    # "Docker network rm failed with exit code 1" on every job (measured,
+    # run 36869897012, `has active endpoints`). Everything on floci's
+    # networks that is not floci goes, so the runner's `docker network rm`
+    # finds the network empty (measured, run 36875732463: one container
+    # removed, `/floci-ecr-registry`, no warning).
+    - name: Remove what floci left on the job network
+      if: always() && inputs.mode == 'destroy'
+      shell: bash
+      env:
+        FLOCI: ${{ inputs.floci }}
+      run: |
+        self="$(docker inspect "$FLOCI" --format '{{.Id}}')"
+        for network in $(docker inspect "$FLOCI" --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}'); do
+          for container in $(docker network inspect "$network" --format '{{range $id, $_ := .Containers}}{{$id}} {{end}}'); do
+            [ "$container" = "$self" ] && continue
+            echo "removing $(docker inspect "$container" --format '{{.Name}}') from $network"
+            docker rm --force "$container" > /dev/null
+          done
+        done

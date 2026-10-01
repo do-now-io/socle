@@ -624,8 +624,13 @@ runner's localhost. `.github/actions/e2e-cluster` is the only place a shell
 runs: a registered IAM key (floci 2.x rejects `test`/`test` on the EKS token
 webhook), `tofu init` and `apply` of the root, a kubeconfig carrying a
 ServiceAccount token (floci refuses the presigned `aws eks get-token` after
-60 s and Chainsaw does not re-run the plugin); and `tofu destroy` at the end.
-No pull secret: the package is public. Everything else is a Chainsaw suite.
+60 s and Chainsaw does not re-run the plugin); `tofu destroy` at the end,
+then the removal of what floci's `DeleteCluster` leaves running on the job's
+network — the ECR backing registry it started with the cluster
+(`floci-ecr-registry`), whose endpoint made the runner's own cleanup warn
+`Docker network rm failed` on every job (measured, run 36869897012; gone on
+36875732463). No pull secret: the package is public. Everything else is a
+Chainsaw suite.
 
 - `root (<cloud>)` applies the real `opentofu/clusters/<cloud>` once with
   `.github/e2e/<cloud>/floci.tfvars` (floci does not read back several EKS
