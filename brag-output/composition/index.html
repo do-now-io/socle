@@ -1,0 +1,948 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <title>Socle — one line in Git</title>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <script src="assets/music/audio-data.js"></script>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: #070b10;
+      }
+
+      :root {
+        --bg: #070b10;
+        --panel: #0e1620;
+        --panel-bar: #121c28;
+        --line: #1c2836;
+        --text: #e8eef5;
+        --muted: #93a6bd;
+        --comment: #7d90a8;
+        --accent: #2dd4bf;
+        --green: #4ade80;
+        --amber: #f6c177;
+        /* Driven per-frame from the music bed (see AUDIO_DATA below). */
+        --energy: 0;
+        --bass: 0;
+      }
+
+      #root {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--text);
+        font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+        font-feature-settings: "tnum" 1;
+      }
+
+      /* Untimed full-bleed ambience — needs its own positioning. */
+      #ambient {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background:
+          radial-gradient(
+            1100px 680px at 50% 46%,
+            rgba(45, 212, 191, calc(0.045 + var(--energy) * 0.05)) 0%,
+            rgba(45, 212, 191, 0) 70%
+          ),
+          radial-gradient(1400px 900px at 50% 50%, rgba(7, 11, 16, 0) 40%, rgba(0, 0, 0, 0.55) 100%);
+      }
+
+      .clip {
+        position: absolute;
+        inset: 0;
+      }
+      .inner {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .mono {
+        font-family: "JetBrains Mono", ui-monospace, monospace;
+        font-variant-ligatures: none;
+      }
+      .tok-key {
+        color: var(--text);
+      }
+      .tok-plain {
+        color: var(--muted);
+      }
+      .tok-str {
+        color: var(--accent);
+      }
+      .tok-num {
+        color: var(--amber);
+      }
+      .tok-comment {
+        color: var(--comment);
+      }
+
+      /* ---------- Scene 1 — the one line ---------- */
+      #s1-stack {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 26px;
+      }
+      #s1-line {
+        position: relative;
+        display: block;
+        white-space: nowrap;
+        font-size: 58px;
+        font-weight: 500;
+        letter-spacing: 0.01em;
+      }
+      #s1-line .ch {
+        opacity: 0;
+      }
+      #s1-caret {
+        display: block;
+        position: absolute;
+        top: 6px;
+        left: 0;
+        height: 62px;
+        background: var(--accent);
+        opacity: 0.85;
+      }
+      #s1-rule {
+        display: block;
+        width: 100%;
+        height: 2px;
+        background: linear-gradient(90deg, var(--accent), rgba(45, 212, 191, 0.12));
+        opacity: 0.9;
+      }
+      #s1-comment {
+        display: block;
+        font-size: 30px;
+        letter-spacing: 0.01em;
+      }
+
+      /* ---------- Shared: terminal panel ---------- */
+      .panel {
+        display: block;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow:
+          0 0 calc(34px + var(--energy) * 40px) rgba(45, 212, 191, calc(0.04 + var(--energy) * 0.06)),
+          0 24px 60px rgba(0, 0, 0, 0.5);
+      }
+      .panel-bar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 0 22px;
+        height: 54px;
+        background: var(--panel-bar);
+        border-bottom: 1px solid var(--line);
+      }
+      .panel-dot {
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        background: #26384a;
+      }
+      .panel-name {
+        margin-left: 10px;
+        color: var(--muted);
+        font-size: 22px;
+        letter-spacing: 0.02em;
+      }
+      .panel-body {
+        display: block;
+        padding: 34px 40px 36px;
+      }
+      .code-line {
+        display: block;
+        white-space: pre;
+        line-height: 1.62;
+      }
+      .code-line.focus {
+        position: relative;
+      }
+      .code-line.focus::before {
+        content: "";
+        position: absolute;
+        left: -40px;
+        top: 4px;
+        bottom: 4px;
+        width: 3px;
+        background: var(--accent);
+        border-radius: 2px;
+      }
+
+      /* ---------- Scene 2 ---------- */
+      #s2-stack {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 40px;
+      }
+      #s2-head {
+        display: block;
+        font-size: 46px;
+        font-weight: 500;
+        letter-spacing: -0.01em;
+      }
+      #s2-panel {
+        width: 1000px;
+      }
+      #s2-panel .panel-body {
+        font-size: 26px;
+      }
+      #s2-aws,
+      #s2-kube {
+        display: block;
+      }
+
+      /* ---------- Scene 3 ---------- */
+      #s3-wrap {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 48px;
+      }
+      #s3-head {
+        display: block;
+        font-size: 48px;
+        font-weight: 500;
+        letter-spacing: -0.012em;
+      }
+      #s3-cols {
+        display: flex;
+        align-items: center;
+        gap: 56px;
+      }
+      #s3-panel {
+        width: 790px;
+      }
+      #s3-panel .panel-body {
+        font-size: 22px;
+        padding: 26px 32px 28px;
+      }
+      #s3-panel .code-line.focus::before {
+        left: -32px;
+      }
+      #s3-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 224px);
+        gap: 14px;
+      }
+      .chip {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 62px;
+        padding: 0 10px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        color: var(--text);
+        font-size: 20px;
+        letter-spacing: 0.01em;
+        opacity: 0;
+      }
+
+      /* ---------- Scene 4 ---------- */
+      #s4-wrap {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 72px;
+      }
+      #s4-chain {
+        display: flex;
+        align-items: center;
+        gap: 48px;
+      }
+      .node {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 18px;
+      }
+      #s4-artifact {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        width: 480px;
+        height: 148px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+      }
+      #s4-artifact .reg {
+        font-size: 25px;
+        color: var(--text);
+        letter-spacing: 0.01em;
+      }
+      #s4-artifact .dig {
+        font-size: 20px;
+        color: var(--muted);
+      }
+      #s4-cosign {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 22px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        color: var(--muted);
+        font-size: 21px;
+        letter-spacing: 0.02em;
+      }
+      #s4-cosign .tick {
+        opacity: 0;
+        font-size: 22px;
+      }
+      #s4-verified {
+        opacity: 0;
+      }
+      #s4-flux {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 16px;
+        width: 268px;
+      }
+      #s4-flux .lbl {
+        font-size: 21px;
+        color: var(--muted);
+        letter-spacing: 0.06em;
+      }
+      #s4-flux .wire {
+        display: block;
+        width: 100%;
+        height: 2px;
+        background: linear-gradient(90deg, rgba(45, 212, 191, 0.25), var(--accent));
+      }
+      #s4-clouds-group {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 20px;
+      }
+      #s4-clouds {
+        display: grid;
+        grid-template-columns: repeat(2, 212px);
+        gap: 16px;
+      }
+      .cloud {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 86px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        font-size: 26px;
+        letter-spacing: 0.08em;
+      }
+      .state {
+        font-size: 21px;
+        letter-spacing: 0.08em;
+        color: var(--green);
+      }
+      #s4-claim {
+        display: block;
+        font-size: 40px;
+        font-weight: 500;
+        letter-spacing: -0.008em;
+      }
+
+      /* ---------- Scene 5 ---------- */
+      #s5-stack {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 26px;
+      }
+      #s5-line {
+        display: block;
+        font-size: 24px;
+        color: var(--muted);
+        letter-spacing: 0.02em;
+        margin-bottom: 18px;
+      }
+      #s5-mark {
+        display: block;
+        font-size: 152px;
+        font-weight: 600;
+        letter-spacing: 0.16em;
+        margin-right: -0.16em;
+        line-height: 1.05;
+        text-shadow: 0 0 calc(22px + var(--bass) * 46px)
+          rgba(45, 212, 191, calc(0.05 + var(--bass) * 0.12));
+      }
+      #s5-rule {
+        display: block;
+        width: 460px;
+        height: 1px;
+        background: var(--accent);
+        opacity: 0.85;
+      }
+      #s5-tag {
+        display: block;
+        font-size: 28px;
+        color: var(--muted);
+        letter-spacing: 0.02em;
+      }
+      #s5-url {
+        display: block;
+        font-size: 24px;
+        color: var(--accent);
+        letter-spacing: 0.02em;
+      }
+      #s5-foot {
+        position: absolute;
+        right: 56px;
+        bottom: 44px;
+        font-size: 18px;
+        color: var(--muted);
+        letter-spacing: 0.04em;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-width="1920"
+      data-height="1080"
+      data-duration="22.4"
+    >
+      <div id="ambient"></div>
+
+      <!-- ===================== Scene 1 — the one line ===================== -->
+      <section id="s1" class="clip" data-start="0" data-duration="4.8" data-track-index="0">
+        <div class="inner" id="s1-inner">
+          <div id="s1-stack">
+            <code id="s1-line" class="mono"></code>
+            <span id="s1-rule"></span>
+            <code id="s1-comment" class="mono tok-comment"># the only line an upgrade touches</code>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== Scene 2 — one file, one apply ===================== -->
+      <section id="s2" class="clip" data-start="4.4" data-duration="4.74" data-track-index="1">
+        <div class="inner" id="s2-inner">
+          <div id="s2-stack">
+            <span id="s2-head">One file. One apply.</span>
+            <div id="s2-panel" class="panel">
+              <div class="panel-bar">
+                <span class="panel-dot"></span>
+                <span class="panel-dot"></span>
+                <span class="panel-dot"></span>
+                <span class="panel-name mono">clusters/prod.tfvars</span>
+              </div>
+              <code class="panel-body mono">
+                <span class="code-line focus"
+                  ><span class="tok-key">socle_version</span><span class="tok-plain"> = </span
+                  ><span class="tok-str">"1.4.2"</span></span
+                >
+                <span class="code-line"> </span>
+                <span id="s2-aws">
+                  <span class="code-line"
+                    ><span class="tok-key">aws</span><span class="tok-plain"> = {</span></span
+                  >
+                  <span class="code-line"
+                    ><span class="tok-key">  region             </span
+                    ><span class="tok-plain">= </span><span class="tok-str">"eu-west-3"</span></span
+                  >
+                  <span class="code-line"
+                    ><span class="tok-key">  cluster_name       </span
+                    ><span class="tok-plain">= </span><span class="tok-str">"acme-prod"</span></span
+                  >
+                  <span class="code-line"
+                    ><span class="tok-key">  environment        </span
+                    ><span class="tok-plain">= </span><span class="tok-str">"prod"</span></span
+                  >
+                  <span class="code-line"
+                    ><span class="tok-key">  kubernetes_version </span
+                    ><span class="tok-plain">= </span><span class="tok-str">"1.34"</span></span
+                  >
+                  <span class="code-line"><span class="tok-plain">}</span></span>
+                  <span class="code-line"> </span>
+                </span>
+                <span id="s2-kube">
+                  <span class="code-line"
+                    ><span class="tok-key">kube</span><span class="tok-plain"> = {</span></span
+                  >
+                  <span class="code-line"
+                    ><span class="tok-key">  cert_manager </span
+                    ><span class="tok-plain">= { acme_email = </span
+                    ><span class="tok-str">"ops@acme.example"</span
+                    ><span class="tok-plain"> }</span></span
+                  >
+                  <span class="code-line"
+                    ><span class="tok-key">  external_dns </span
+                    ><span class="tok-plain">= { domain_filters = [</span
+                    ><span class="tok-str">"acme.example"</span
+                    ><span class="tok-plain">] }</span></span
+                  >
+                  <span class="code-line"
+                    ><span class="tok-key">  monitoring   </span
+                    ><span class="tok-plain">= { enabled = </span
+                    ><span class="tok-num">true</span><span class="tok-plain"> }</span></span
+                  >
+                  <span class="code-line"><span class="tok-plain">}</span></span>
+                </span>
+              </code>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== Scene 3 — pick your modules ===================== -->
+      <section id="s3" class="clip" data-start="8.74" data-duration="4.77" data-track-index="2">
+        <div class="inner" id="s3-inner">
+          <div id="s3-wrap">
+            <span id="s3-head">Pick your cloud. Pick your modules.</span>
+            <div id="s3-cols">
+              <div id="s3-panel" class="panel">
+                <div class="panel-bar">
+                  <span class="panel-dot"></span>
+                  <span class="panel-dot"></span>
+                  <span class="panel-dot"></span>
+                  <span class="panel-name mono">clusters/prod.tfvars</span>
+                </div>
+                <code class="panel-body mono">
+                  <span class="code-line focus"
+                    ><span class="tok-key">kube</span><span class="tok-plain"> = {</span></span
+                  >
+                  <span class="code-line"
+                    ><span class="tok-key">  cert_manager </span
+                    ><span class="tok-plain">= { acme_email = </span
+                    ><span class="tok-str">"ops@acme.example"</span
+                    ><span class="tok-plain"> }</span></span
+                  >
+                  <span class="code-line"
+                    ><span class="tok-key">  external_dns </span
+                    ><span class="tok-plain">= { domain_filters = [</span
+                    ><span class="tok-str">"acme.example"</span
+                    ><span class="tok-plain">] }</span></span
+                  >
+                  <span class="code-line"
+                    ><span class="tok-key">  monitoring   </span
+                    ><span class="tok-plain">= { enabled = </span
+                    ><span class="tok-num">true</span><span class="tok-plain"> }</span></span
+                  >
+                  <span class="code-line"><span class="tok-plain">}</span></span>
+                </code>
+              </div>
+              <div id="s3-grid">
+                <span class="chip mono g1">crossplane</span>
+                <span class="chip mono g1">cilium</span>
+                <span class="chip mono g1">gateway-api</span>
+                <span class="chip mono g1">cert-manager</span>
+                <span class="chip mono g2">external-dns</span>
+                <span class="chip mono g2">argocd</span>
+                <span class="chip mono g2">grafana</span>
+                <span class="chip mono g2">victoria-metrics</span>
+                <span class="chip mono g3">victoria-logs</span>
+                <span class="chip mono g3">victoria-traces</span>
+                <span class="chip mono g3">otel-agent</span>
+                <span class="chip mono g3">otel-gateway</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== Scene 4 — signed, pulled, reconciled ===================== -->
+      <section id="s4" class="clip" data-start="13.11" data-duration="5.85" data-track-index="3">
+        <div class="inner" id="s4-inner">
+          <div id="s4-wrap">
+            <div id="s4-chain">
+              <div class="node" id="s4-artifact-node">
+                <div id="s4-artifact">
+                  <span class="reg mono">ghcr.io/do-now-io/socle</span>
+                  <span class="dig mono">sha256:4f1c…</span>
+                </div>
+                <span id="s4-cosign" class="mono"
+                  ><span class="tick">✓</span><span>cosign</span
+                  ><span id="s4-verified">verified</span></span
+                >
+              </div>
+              <div id="s4-flux">
+                <span class="lbl mono">flux pull</span>
+                <span class="wire" id="s4-wire"></span>
+              </div>
+              <div id="s4-clouds-group">
+                <div id="s4-clouds">
+                  <span class="cloud mono">EKS</span>
+                  <span class="cloud mono">GKE</span>
+                  <span class="cloud mono">AKS</span>
+                  <span class="cloud mono">Kapsule</span>
+                </div>
+                <span class="state mono" id="s4-state">reconciled</span>
+              </div>
+            </div>
+            <span id="s4-claim">100% GitOps. No out-of-band scripts.</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== Scene 5 — the wordmark ===================== -->
+      <section id="s5" class="clip" data-start="18.56" data-duration="3.84" data-track-index="4">
+        <div class="inner" id="s5-inner">
+          <div id="s5-stack">
+            <code id="s5-line" class="mono">socle_version = "1.4.2"</code>
+            <span id="s5-mark">SOCLE</span>
+            <span id="s5-rule"></span>
+            <code id="s5-tag" class="mono">Pick your cloud. Pick your modules.</code>
+            <code id="s5-url" class="mono">github.com/do-now-io/socle</code>
+          </div>
+          <span id="s5-foot" class="mono">pre-0.1.0 · under active construction</span>
+        </div>
+      </section>
+
+      <!-- ===================== Audio ===================== -->
+      <!-- Music bed: steady at 0.30, 1.2s fade-out under the wordmark. -->
+      <audio
+        id="music"
+        src="assets/music/happy-beats-business-moves-vol-12-by-ende-dot-app.mp3"
+        data-start="0"
+        data-duration="22.4"
+        data-track-index="10"
+        data-automation='{"version":1,"lanes":[{"target":"volume","points":[{"t":0,"v":0.3},{"t":21.2,"v":0.3},{"t":22.4,"v":0}]}]}'
+      ></audio>
+
+      <!-- Scene 1 — one keypress every other character of the typed line. -->
+      <audio id="kp-1" src="assets/sfx/keyboard/keypress-003.wav" data-start="0.40" data-track-index="11" data-volume="0.34"></audio>
+      <audio id="kp-2" src="assets/sfx/keyboard/keypress-011.wav" data-start="0.50" data-track-index="12" data-volume="0.32"></audio>
+      <audio id="kp-3" src="assets/sfx/keyboard/keypress-018.wav" data-start="0.60" data-track-index="13" data-volume="0.35"></audio>
+      <audio id="kp-4" src="assets/sfx/keyboard/keypress-007.wav" data-start="0.70" data-track-index="14" data-volume="0.33"></audio>
+      <audio id="kp-5" src="assets/sfx/keyboard/keypress-025.wav" data-start="0.80" data-track-index="15" data-volume="0.34"></audio>
+      <audio id="kp-6" src="assets/sfx/keyboard/keypress-014.wav" data-start="0.90" data-track-index="16" data-volume="0.32"></audio>
+      <audio id="kp-7" src="assets/sfx/keyboard/keypress-030.wav" data-start="1.00" data-track-index="17" data-volume="0.35"></audio>
+      <audio id="kp-8" src="assets/sfx/keyboard/keypress-005.wav" data-start="1.10" data-track-index="18" data-volume="0.33"></audio>
+      <audio id="kp-9" src="assets/sfx/keyboard/keypress-021.wav" data-start="1.20" data-track-index="19" data-volume="0.34"></audio>
+      <audio id="kp-10" src="assets/sfx/keyboard/keypress-012.wav" data-start="1.30" data-track-index="20" data-volume="0.32"></audio>
+      <audio id="kp-11" src="assets/sfx/keyboard/keypress-028.wav" data-start="1.40" data-track-index="21" data-volume="0.35"></audio>
+      <audio id="kp-12" src="assets/sfx/keyboard/keypress-019.wav" data-start="1.50" data-track-index="22" data-volume="0.33"></audio>
+
+      <!-- Scene 2 — one soft settle per config block. Nothing during the 7.0-8.6s hold. -->
+      <audio id="sfx-aws" src="assets/sfx/impact/impactSoft_medium_000.ogg" data-start="4.95" data-track-index="23" data-volume="0.48"></audio>
+      <audio id="sfx-kube" src="assets/sfx/impact/impactSoft_medium_003.ogg" data-start="5.45" data-track-index="24" data-volume="0.48"></audio>
+
+      <!-- Scene 3 — one cue per chip group, not per chip. -->
+      <audio id="sfx-g1" src="assets/sfx/casino/card-slide-1.ogg" data-start="9.25" data-track-index="25" data-volume="0.50"></audio>
+      <audio id="sfx-g2" src="assets/sfx/casino/card-slide-1.ogg" data-start="10.33" data-track-index="26" data-volume="0.50"></audio>
+      <audio id="sfx-g3" src="assets/sfx/casino/card-slide-1.ogg" data-start="11.42" data-track-index="27" data-volume="0.50"></audio>
+
+      <!-- Scene 4 — dry chain hits; the verification gets the one brighter accent. -->
+      <audio id="sfx-artifact" src="assets/sfx/interface/click_003.ogg" data-start="13.62" data-track-index="28" data-volume="0.55"></audio>
+      <audio id="sfx-verified" src="assets/sfx/impact/impactSoft_medium_001.ogg" data-start="14.70" data-track-index="29" data-volume="0.62"></audio>
+      <audio id="sfx-clouds" src="assets/sfx/interface/click_003.ogg" data-start="16.90" data-track-index="30" data-volume="0.55"></audio>
+
+      <!-- Scene 5 — the only bell in the video; rings over the music fade. -->
+      <audio id="sfx-mark" src="assets/sfx/impact/impactBell_heavy_000.ogg" data-start="18.52" data-track-index="31" data-volume="0.58"></audio>
+    </div>
+
+    <script>
+      // The hook line, as three syntax segments. 23 characters total, monospace,
+      // so the caret advances by an exact 1/23 of the line per step.
+      const HOOK_SEGMENTS = [
+        ["socle_version", "tok-key"],
+        [" = ", "tok-plain"],
+        ['"1.4.2"', "tok-str"],
+      ];
+      const HOOK_CHARS = 23;
+      const TYPE_START = 0.4;
+      const TYPE_STEP = 0.05;
+      const TYPE_DURATION = TYPE_STEP * (HOOK_CHARS - 1); // 1.10s
+
+      function buildHookLine() {
+        const host = document.getElementById("s1-line");
+        for (const [text, cls] of HOOK_SEGMENTS) {
+          for (const char of text) {
+            const span = document.createElement("span");
+            span.className = "ch " + cls;
+            span.textContent = char;
+            host.appendChild(span);
+          }
+        }
+        const caret = document.createElement("span");
+        caret.id = "s1-caret";
+        host.appendChild(caret);
+        return { host, caret };
+      }
+
+      function buildTimeline() {
+        const { host, caret } = buildHookLine();
+        const lineWidth = host.getBoundingClientRect().width;
+        const charWidth = lineWidth / HOOK_CHARS;
+        caret.style.width = charWidth + "px";
+
+        const root = document.getElementById("root");
+        const tl = gsap.timeline({ paused: true });
+
+        /* ---------------- Scene 1 — the one line (0.00 → 4.80) ---------------- */
+        tl.to(
+          "#s1-line .ch",
+          { opacity: 1, duration: 0.01, ease: "none", stagger: TYPE_STEP },
+          TYPE_START,
+        );
+        tl.fromTo(
+          caret,
+          { x: 0 },
+          { x: lineWidth, duration: TYPE_DURATION, ease: "steps(" + HOOK_CHARS + ")" },
+          TYPE_START,
+        );
+        tl.to(caret, { opacity: 0, duration: 0.25, ease: "power1.out" }, 1.95);
+        tl.fromTo(
+          "#s1-rule",
+          { scaleX: 0, transformOrigin: "left center" },
+          { scaleX: 1, duration: 0.55, ease: "power3.out" },
+          2.0,
+        );
+        tl.fromTo(
+          "#s1-comment",
+          { opacity: 0, y: 10 },
+          { opacity: 1, y: 0, duration: 0.45, ease: "power2.out" },
+          2.0,
+        );
+        // Hold the full hook settled 2.45 → 4.40, then hand over.
+        tl.to("#s1-inner", { opacity: 0, duration: 0.4, ease: "power1.inOut" }, 4.4);
+
+        /* ------------- Scene 2 — one file, one apply (4.40 → 9.14) ------------- */
+        tl.fromTo(
+          "#s2-inner",
+          { opacity: 0 },
+          { opacity: 1, duration: 0.4, ease: "power1.inOut" },
+          4.4,
+        );
+        tl.fromTo(
+          "#s2-panel",
+          { scale: 0.975, transformOrigin: "center center" },
+          { scale: 1, duration: 0.6, ease: "power3.out" },
+          4.45,
+        );
+        tl.fromTo(
+          "#s2-aws",
+          { opacity: 0, y: 12 },
+          { opacity: 1, y: 0, duration: 0.35, ease: "power2.out" },
+          5.0,
+        );
+        tl.fromTo(
+          "#s2-kube",
+          { opacity: 0, y: 12 },
+          { opacity: 1, y: 0, duration: 0.35, ease: "power2.out" },
+          5.5,
+        );
+        tl.fromTo(
+          "#s2-head",
+          { opacity: 0, y: 12 },
+          { opacity: 1, y: 0, duration: 0.45, ease: "power2.out" },
+          6.2,
+        );
+        // 7.00 → 8.60 is a deliberate silent hold on the complete file.
+        tl.to("#s2-inner", { opacity: 0, duration: 0.4, ease: "power1.inOut" }, 8.74);
+
+        /* ------------ Scene 3 — pick your modules (8.74 → 13.51) ------------ */
+        // beat-locked: 8.74s (strong cue, intensity 1.00)
+        tl.fromTo(
+          "#s3-inner",
+          { opacity: 0 },
+          { opacity: 1, duration: 0.4, ease: "power1.inOut" },
+          8.74,
+        );
+        tl.fromTo(
+          "#s3-head",
+          { opacity: 0, y: 12 },
+          { opacity: 1, y: 0, duration: 0.4, ease: "power2.out" },
+          8.95,
+        );
+        tl.fromTo(
+          "#s3-panel",
+          { opacity: 0, x: -24 },
+          { opacity: 1, x: 0, duration: 0.5, ease: "power3.out" },
+          8.95,
+        );
+        // beat-grid: chip groups at 9.29s, 10.37s, 11.46s (every other beat @ 109.96 BPM)
+        const CHIP_GROUPS = [
+          [".chip.g1", 9.29],
+          [".chip.g2", 10.37],
+          [".chip.g3", 11.46],
+        ];
+        for (const [selector, at] of CHIP_GROUPS) {
+          tl.fromTo(
+            selector,
+            { opacity: 0, y: 16, scale: 0.96, transformOrigin: "center center" },
+            {
+              opacity: 1,
+              y: 0,
+              scale: 1,
+              duration: 0.3,
+              ease: "power2.out",
+              stagger: 0.04,
+            },
+            at,
+          );
+        }
+        // All twelve chips hold settled 11.90 → 13.11.
+        tl.to("#s3-inner", { opacity: 0, duration: 0.4, ease: "power1.inOut" }, 13.11);
+
+        /* --------- Scene 4 — signed, pulled, reconciled (13.11 → 18.96) --------- */
+        // beat-locked: 13.11s (strong cue, intensity 0.98)
+        tl.fromTo(
+          "#s4-inner",
+          { opacity: 0 },
+          { opacity: 1, duration: 0.4, ease: "power1.inOut" },
+          13.11,
+        );
+        // The chain is laid out at full width from the start, so offset it right
+        // while only the artifact exists — the frame stays composed, then the
+        // chain extends leftward into place as Flux and the clouds arrive.
+        tl.fromTo(
+          "#s4-chain",
+          { x: 402 },
+          { x: 0, duration: 0.95, ease: "power2.inOut" },
+          15.7,
+        );
+        // beat-grid: chain steps at 13.64 / 14.73 / 15.84 / 16.93
+        tl.fromTo(
+          "#s4-artifact",
+          { opacity: 0, y: 18 },
+          { opacity: 1, y: 0, duration: 0.4, ease: "power2.out" },
+          13.64,
+        );
+        tl.fromTo(
+          "#s4-cosign",
+          { opacity: 0, y: 10 },
+          { opacity: 1, y: 0, duration: 0.35, ease: "power2.out" },
+          14.2,
+        );
+        // The one colour change in the video.
+        tl.to(
+          "#s4-cosign",
+          { color: "#4ade80", borderColor: "#4ade80", duration: 0.35, ease: "power2.out" },
+          14.73,
+        );
+        tl.to(
+          "#s4-cosign .tick, #s4-verified",
+          { opacity: 1, duration: 0.25, ease: "power2.out" },
+          14.73,
+        );
+        tl.fromTo(
+          "#s4-flux .lbl",
+          { opacity: 0 },
+          { opacity: 1, duration: 0.35, ease: "power1.out" },
+          15.84,
+        );
+        tl.fromTo(
+          "#s4-wire",
+          { scaleX: 0, transformOrigin: "left center" },
+          { scaleX: 1, duration: 0.55, ease: "power2.inOut" },
+          15.84,
+        );
+        tl.fromTo(
+          ".cloud",
+          { opacity: 0, y: 14 },
+          { opacity: 1, y: 0, duration: 0.35, ease: "power2.out", stagger: 0.09 },
+          16.93,
+        );
+        tl.to(".cloud", { borderColor: "#4ade80", duration: 0.3, stagger: 0.1 }, 17.25);
+        tl.fromTo(
+          "#s4-state",
+          { opacity: 0 },
+          { opacity: 1, duration: 0.35, ease: "power1.out" },
+          17.4,
+        );
+        tl.fromTo(
+          "#s4-claim",
+          { opacity: 0, y: 12 },
+          { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" },
+          17.47,
+        );
+        tl.to("#s4-inner", { opacity: 0, duration: 0.4, ease: "power1.inOut" }, 18.56);
+
+        /* ---------------- Scene 5 — the wordmark (18.56 → 22.40) ---------------- */
+        // beat-locked: 18.56s (strong cue, intensity 0.99)
+        tl.fromTo(
+          "#s5-inner",
+          { opacity: 0 },
+          { opacity: 1, duration: 0.4, ease: "power1.inOut" },
+          18.56,
+        );
+        tl.fromTo(
+          "#s5-line",
+          { opacity: 0 },
+          { opacity: 1, duration: 0.35, ease: "power1.out" },
+          18.56,
+        );
+        tl.fromTo(
+          "#s5-mark",
+          { opacity: 0, y: 26, scale: 0.97, transformOrigin: "center center" },
+          { opacity: 1, y: 0, scale: 1, duration: 0.75, ease: "power3.out" },
+          18.6,
+        );
+        tl.fromTo(
+          "#s5-rule",
+          { scaleX: 0, transformOrigin: "center center" },
+          { scaleX: 1, duration: 0.5, ease: "power3.out" },
+          19.05,
+        );
+        tl.fromTo("#s5-tag", { opacity: 0 }, { opacity: 1, duration: 0.4 }, 19.25);
+        tl.fromTo("#s5-url", { opacity: 0 }, { opacity: 1, duration: 0.4 }, 19.5);
+        tl.fromTo("#s5-foot", { opacity: 0 }, { opacity: 1, duration: 0.4 }, 19.8);
+        // Settled 20.20 → 22.10, then fade to the background colour.
+        tl.to("#s5-inner", { opacity: 0, duration: 0.28, ease: "power1.in" }, 22.1);
+
+        /* ------------- Audio-reactive: pre-extracted, sampled per frame -------------
+           AUDIO_DATA.frames[i] = [rms, bass, treble], normalized 0-1 over this window.
+           Only two CSS custom properties are driven; they feed the ambient wash, the
+           panel edge glow and the wordmark's presence. No waveform, no bars, no pulse
+           on text size. */
+        if (typeof AUDIO_DATA !== "undefined") {
+          for (let f = 0; f < AUDIO_DATA.frames.length; f++) {
+            const frame = AUDIO_DATA.frames[f];
+            tl.call(
+              (function (energy, bass) {
+                return function () {
+                  root.style.setProperty("--energy", energy.toFixed(3));
+                  root.style.setProperty("--bass", bass.toFixed(3));
+                };
+              })(frame[0], frame[1]),
+              [],
+              f / AUDIO_DATA.fps,
+            );
+          }
+        }
+
+        window.__timelines["main"] = tl;
+        tl.seek(0);
+      }
+
+      if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(buildTimeline);
+      } else {
+        buildTimeline();
+      }
+    </script>
+  </body>
+</html>

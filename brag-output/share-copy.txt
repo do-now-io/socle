@@ -1,0 +1,3 @@
+Introducing Socle: an open source GitOps distribution for EKS, GKE, AKS and Kapsule.
+One cosign-signed OCI artifact, pulled by Flux — upgrading the whole platform is one line in Git.
+github.com/do-now-io/socle (pre-0.1.0, under active construction)
