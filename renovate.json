@@ -4,6 +4,7 @@
     "config:best-practices",
     ":dependencyDashboard"
   ],
+  "dependencyDashboardApproval": true,
   "timezone": "Europe/Paris",
   "schedule": ["before 6am on monday"],
   "labels": ["dependencies"],
