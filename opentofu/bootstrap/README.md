@@ -87,6 +87,13 @@ type, is an error at plan, with the allowed list in the message.
 | `hello` | `enabled` | `true` | Deploy podinfo as a proof the pipeline works |
 | `hello` | `replicas` | `1` | Replicas of the podinfo Deployment |
 | `hello` | `message` | `"hello from socle"` | Message podinfo serves |
+| `keda` | `enabled` | `false` | Deploy KEDA, event-driven autoscaling: a `ScaledObject` scales a Deployment on a queue's depth, a cron window or a PromQL query, and down to zero ([design note](../../docs/catalog/keda.md)). Off: it does nothing until a `ScaledObject` exists |
+| `keda` | `services` | `[]` | AWS services KEDA's own role may **read**, from `sqs`, `cloudwatch`, `kinesis`, `dynamodb`: one read-only statement per service named, declared through Crossplane, no role when empty. Needs `crossplane` on and the same services in the foundations' `aws.crossplane.allowed_services`; aws only for now |
+| `keda` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan |
+| `keda` | `values_secret` | `""` | Name of a Secret in `keda` with a `values.yaml` key, created by the client, merged last |
+| `hello` | `enabled` | `true` | Deploy podinfo as a proof the pipeline works |
+| `hello` | `replicas` | `1` | Replicas of the podinfo Deployment |
+| `hello` | `message` | `"hello from socle"` | Message podinfo serves |
 
 The schema lives in `catalog.tf`; the templates in `oci/catalog/<module>/`;
 each `oci/clusters/<cloud>/kustomization.yaml` lists the modules that cloud

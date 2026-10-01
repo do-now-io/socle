@@ -408,6 +408,13 @@ wait_ready external-dns
 if kubectl get namespace external-dns > /dev/null 2>&1; then
   echo "::error::external-dns is disabled but its namespace exists"; exit 1
 fi
+# keda is off by default (it does nothing until a ScaledObject exists): Ready
+# here proves the template renders on the real operator and that a disabled
+# module applies nothing.
+wait_ready keda
+if kubectl get namespace keda > /dev/null 2>&1; then
+  echo "::error::keda is disabled but its namespace exists"; exit 1
+fi
 wait_ready hello
 # Gateway API for every client: the gateway_api module brings the standard
 # CRDs from upstream, pinned by commit, through Flux — nothing is vendored.

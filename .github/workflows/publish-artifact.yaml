@@ -355,6 +355,17 @@ jobs:
       EXTERNAL_DNS_CROSSPLANE_KUBE: >-
         {hello={replicas=1},crossplane={enabled=true,values={resourcesRBACManager={requests={memory="48Mi"}}}},
         external_dns={enabled=true,domain_filters=["e2e.socle.test"]}}
+      # keda's own AWS access: one service named, so the role reads SQS and
+      # nothing else — .github/scripts/e2e/keda.sh access asserts both.
+      KEDA_CROSSPLANE_KUBE: >-
+        {hello={replicas=1},crossplane={enabled=true,values={resourcesRBACManager={requests={memory="48Mi"}}}},
+        keda={enabled=true,services=["sqs"]}}
+      # keda on as a client without a cloud role would write it, one value
+      # overriding a socle default (the operator's memory request, 128Mi in
+      # the socle's document).
+      KEDA_KUBE: >-
+        {hello={replicas=1},keda={enabled=true,values={resources={operator={requests={memory="160Mi"}}}}}}
+      EXPECT_OPERATOR_MEMORY: 160Mi
       EXPECT_ARGOCD: "true"        # catalog.tf: argocd.enabled defaults to true
       EXPECT_VICTORIA_METRICS: "true"    # catalog.tf: victoria_metrics.enabled defaults to true
       EXPECT_VM_MAX_HOURLY_SERIES: "100000"  # no client value here: the socle's own default
@@ -708,6 +719,12 @@ jobs:
           "$GITHUB_WORKSPACE/.github/scripts/e2e/external-dns.sh" access
           apply '{hello={replicas=1},crossplane={enabled=true,values={resourcesRBACManager={requests={memory="48Mi"}}}}}'
           "$GITHUB_WORKSPACE/.github/scripts/e2e/external-dns.sh" access-off
+          # keda's own AWS access, scoped to the one service named: its Role
+          # reaches floci's IAM with the sqs read only, its workload waits.
+          apply "$KEDA_CROSSPLANE_KUBE"
+          "$GITHUB_WORKSPACE/.github/scripts/e2e/keda.sh" access
+          apply '{hello={replicas=1},crossplane={enabled=true,values={resourcesRBACManager={requests={memory="48Mi"}}}}}'
+          "$GITHUB_WORKSPACE/.github/scripts/e2e/keda.sh" access-off
           apply '{hello={replicas=1}}'
           "$GITHUB_WORKSPACE/.github/scripts/e2e/crossplane.sh" off
       - name: A second plan is empty
@@ -781,6 +798,28 @@ jobs:
           done
           echo "::error::namespace external-dns still present after 180 s"
           exit 1
+      # keda is off by default (catalog.tf). Turned on here with Crossplane
+      # off and no service named — a client with a cron or credential-based
+      # trigger — then a Deployment scaled from zero on an SQS queue in
+      # floci, then off: .github/scripts/e2e/keda.sh says what each phase
+      # asserts, and what floci cannot prove.
+      - name: KEDA turns on and scales a Deployment from zero on an SQS queue's depth
+        run: |
+          tofu apply -input=false -auto-approve \
+            -var "socle_version=$TAG" \
+            -var "cosign_identity=$COSIGN" \
+            -var artifact_pull_secret=ghcr-auth \
+            -var "kube=$KEDA_KUBE"
+          "$GITHUB_WORKSPACE/.github/scripts/e2e/keda.sh" on
+          "$GITHUB_WORKSPACE/.github/scripts/e2e/keda.sh" scale
+      - name: Disabling keda garbage-collects it, the CRDs stay
+        run: |
+          tofu apply -input=false -auto-approve \
+            -var "socle_version=$TAG" \
+            -var "cosign_identity=$COSIGN" \
+            -var artifact_pull_secret=ghcr-auth \
+            -var 'kube={hello={replicas=1}}'
+          "$GITHUB_WORKSPACE/.github/scripts/e2e/keda.sh" off
       - name: What the cluster looked like when it failed
         if: failure()
         run: |
@@ -810,6 +849,10 @@ jobs:
             echo "Crossplane and its AWS provider with a client value beating the socle's, a"
             echo "module-shaped \`Role\` becoming an IAM role in floci and going when deleted,"
             echo "turning it off garbage-collecting its HelmRelease, and a second \`tofu plan\` empty."
+            echo "Then \`kube.keda\`: with Crossplane on and \`services=[\"sqs\"]\`, a Role whose one policy"
+            echo "reads SQS and nothing else, the workload withheld until the association; with"
+            echo "Crossplane off, KEDA converging with the client's value beating the socle's, a"
+            echo "Deployment scaled 1 → 0 → 2 → 0 on an SQS queue's depth, and off leaving the CRDs."
             echo "verified, \`socle-root\`, \`hello\` and \`argocd\` Ready with \`hello/podinfo\` at"
             echo "1 replica and \`argocd-server\` Available, then \`enabled=false\` on both modules"
             echo "garbage-collecting their HelmReleases off the cluster, re-enabling bringing"

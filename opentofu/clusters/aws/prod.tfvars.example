@@ -30,7 +30,7 @@ aws = {
   # allowed_services is the ceiling of every role a catalog module gets:
   # add a service when you enable a module that uses it (route53 for
   # external_dns). Empty grants nothing.
-  # crossplane = { allowed_services = ["route53"] }
+  # crossplane = { allowed_services = ["route53", "sqs"] }
 
   # The ACM certificate of the two shared Gateways, public (internet-facing)
   # and private (internal): acme.example and *.acme.example, validated in
@@ -89,6 +89,11 @@ kube = {
   hello = {
     replicas = 2
   }
+  # Event-driven autoscaling. services names the AWS services KEDA's own role
+  # may read, one read-only statement each (docs/catalog/keda.md); every one
+  # must also be in aws.crossplane.allowed_services above. Leave it out for
+  # cron, Prometheus, Kafka, RabbitMQ or Redis triggers: no cloud role needed.
+  # keda = { enabled = true, services = ["sqs"] }
 }
 
 # Cilium is installed before Flux with these defaults; list only what

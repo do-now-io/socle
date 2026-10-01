@@ -235,6 +235,66 @@ run "external_dns_values_pass_through_and_a_credential_by_reference_is_allowed" 
   }
 }
 
+run "keda_is_off_by_default_with_no_cloud_role" {
+  command = plan
+
+  assert {
+    condition     = output.inputs.modules.keda.enabled == false && output.inputs.modules.keda.services == [] && output.inputs.modules.keda.values == {} && output.inputs.modules.keda.values_secret == ""
+    error_message = "keda must default to off — it does nothing until a ScaledObject exists — with no service named: the operator gets a cloud role only for the services the client lists."
+  }
+}
+
+run "keda_with_named_services_and_crossplane_on_aws_passes_with_the_region" {
+  command = plan
+  variables {
+    region = "eu-west-3"
+    kube = {
+      crossplane = { enabled = true }
+      keda       = { enabled = true, services = ["sqs", "cloudwatch"] }
+    }
+  }
+
+  assert {
+    condition     = output.inputs.modules.keda.enabled && output.inputs.modules.keda.services == ["sqs", "cloudwatch"] && output.inputs.cluster.region == "eu-west-3"
+    error_message = "the services, the module and the region must reach the inputs as written: the template builds one read-only statement per service from them."
+  }
+}
+
+run "keda_on_without_a_service_needs_neither_crossplane_nor_a_region" {
+  command = plan
+  variables {
+    kube = { keda = { enabled = true } }
+  }
+
+  assert {
+    condition     = output.inputs.modules.keda.enabled && length(output.inputs.modules.keda.services) == 0
+    error_message = "KEDA with cron, Prometheus or credential-based triggers needs no cloud role: on with an empty list must plan without Crossplane."
+  }
+}
+
+run "keda_values_pass_through_and_a_credential_by_reference_is_allowed" {
+  command = plan
+  variables {
+    kube = {
+      keda = {
+        values = {
+          resources = { operator = { requests = { memory = "160Mi" } } }
+          operator = { env = [{
+            name      = "AWS_SECRET_ACCESS_KEY"
+            valueFrom = { secretKeyRef = { name = "mine", key = "k" } }
+          }] }
+        }
+        values_secret = "keda-values"
+      }
+    }
+  }
+
+  assert {
+    condition     = output.inputs.modules.keda.values.resources.operator.requests.memory == "160Mi" && output.inputs.modules.keda.values_secret == "keda-values"
+    error_message = "values and values_secret must reach the inputs as written."
+  }
+}
+
 run "scaleway_is_a_plain_kubernetes_cluster_for_the_operator" {
   command = plan
   variables {

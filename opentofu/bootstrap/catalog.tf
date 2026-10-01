@@ -199,6 +199,23 @@ locals {
       values        = {}
       values_secret = ""
     }
+    # KEDA: event-driven autoscaling — a ScaledObject scales a Deployment on a
+    # queue's depth, a cron window or a PromQL query, and down to zero. Off
+    # by default: KEDA does nothing until a client writes a ScaledObject.
+    # services names the AWS services the operator's OWN role may read —
+    # sqs, cloudwatch, kinesis, dynamodb — and the module declares that role
+    # through Crossplane with one read-only statement per service named,
+    # nothing for the rest, no role at all when the list is empty
+    # (docs/catalog/keda.md). A non-empty list needs kube.crossplane on and
+    # each service in the foundations' aws.crossplane.allowed_services;
+    # refused at plan otherwise (variables.tf). Cron, Prometheus, Kafka,
+    # RabbitMQ and Redis triggers need no cloud, so no entry.
+    keda = {
+      enabled       = false
+      services      = []
+      values        = {}
+      values_secret = ""
+    }
   }
 
   # Which clouds a module exists on. Absent = every cloud. A module listed
@@ -211,6 +228,11 @@ locals {
   catalog_clouds = {
     gateway_api = ["aws", "azure", "scaleway"]
   }
+
+  # The AWS services kube.keda.services may name: those whose scaler the
+  # keda template scopes to its exact read calls (oci/catalog/keda/
+  # resourceset.yaml). Adding one is a statement there and a word here.
+  keda_services = ["sqs", "cloudwatch", "kinesis", "dynamodb"]
 
   modules = { for m, d in local.catalog : m => merge(d, try(var.kube[m], {})) }
 

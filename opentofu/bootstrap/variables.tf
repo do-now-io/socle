@@ -572,6 +572,74 @@ variable "kube" {
     condition     = !can(var.kube.victoria_traces.values_secret) || try(var.kube.victoria_traces.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.victoria_traces.values_secret)), true)
     error_message = "kube.victoria_traces.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
   }
+
+  # --- keda — docs/catalog/keda.md -------------------------------------------
+  # services is the list of AWS services KEDA's own role may read. Each entry
+  # is one the module knows how to scope to the scaler's exact read calls;
+  # anything else is refused, with the list — a service the module cannot
+  # scope would otherwise get nothing, silently. RDS has no scaler: its
+  # metrics are read through cloudwatch.
+  validation {
+    condition     = !can(keys(var.kube)) || alltrue([for x in try(tolist(var.kube.keda.services), []) : contains(local.keda_services, x)])
+    error_message = "kube.keda.services: unknown service. KEDA's own role can read ${join(", ", local.keda_services)} — the AWS scalers the module scopes. RDS metrics go through cloudwatch; a cron, Prometheus, Kafka, RabbitMQ or Redis trigger needs no entry."
+  }
+
+  # A named service is a role, and only Crossplane creates one: without it the
+  # list would render nothing and the client's ScaledObjects would fail at the
+  # AWS API. With Crossplane off, leave the list empty and bind keda/keda-operator
+  # to an identity made outside the socle.
+  validation {
+    condition     = !can(keys(var.kube)) || length(try(tolist(var.kube.keda.services), [])) == 0 || try(var.kube.crossplane.enabled, false)
+    error_message = "kube.keda.services names a service, so KEDA needs its own cloud role, which only Crossplane creates: set kube.crossplane.enabled = true (and aws.crossplane.allowed_services in the foundations, naming the same services), or leave services empty and bind keda/keda-operator to an identity you made yourself."
+  }
+
+  # The role is declared for AWS only, on the cloud where the crossplane
+  # module has a provider. Elsewhere the client annotates keda-operator
+  # through values (GKE Workload Identity, AKS workload identity).
+  validation {
+    condition     = !can(keys(var.kube)) || length(try(tolist(var.kube.keda.services), [])) == 0 || var.cloud == "aws"
+    error_message = "kube.keda.services is offered on aws only for now: no other cloud has a Crossplane provider in the socle yet. Every scaler still works: reference a Secret from a TriggerAuthentication, or bind an identity you made to keda-operator through values (podIdentity.gcp, podIdentity.azureWorkload). Leave services empty."
+  }
+
+  # The Pod Identity association is regional; the socle's ClusterProviderConfig
+  # carries no region, so an empty one would reach AWS as an invalid
+  # association rather than fail here.
+  validation {
+    condition     = !can(keys(var.kube)) || var.cloud != "aws" || length(try(tolist(var.kube.keda.services), [])) == 0 || var.region != ""
+    error_message = "kube.keda.services with kube.crossplane on AWS needs the cluster's region: the module's Pod Identity association is regional. Pass region to the bootstrap module (the aws root wires var.aws.region)."
+  }
+
+  # values is free-form on purpose, minus one rule: no secret material. What a
+  # client writes there ends up in the OpenTofu state and in a ConfigMap on
+  # the cluster. The keda chart takes no credential of its own; the places
+  # one could still be smuggled in are refused: a Secret among extraObjects,
+  # and an env entry of any of the three pods whose name says it carries one
+  # and whose value is a literal (valueFrom is fine). Those go through
+  # values_secret instead — or, better, through a TriggerAuthentication.
+  validation {
+    condition = (
+      !can(var.kube.keda.values)
+      || !can(keys(var.kube.keda.values))
+      || (
+        !anytrue(try([for o in var.kube.keda.values.extraObjects : try(o.kind == "Secret", false)], []))
+        && alltrue([
+          for e in concat(
+            try(tolist(var.kube.keda.values.env), []),
+            try(tolist(var.kube.keda.values.operator.env), []),
+            try(tolist(var.kube.keda.values.metricsServer.env), []),
+            try(tolist(var.kube.keda.values.webhooks.env), []),
+          ) :
+          !(can(e.value) && can(regex("(?i)(secret|password|passwd|token|api_?key|access_?key|private_?key|credential)", try(e.name, ""))))
+        ])
+      )
+    )
+    error_message = "kube.keda.values must not carry secrets: a Secret in extraObjects, and an env entry (env, operator.env, metricsServer.env, webhooks.env) with a literal value whose name looks like a credential (AWS_SECRET_ACCESS_KEY, *_TOKEN, …), are refused. Put them in a Secret in the keda namespace and name it in kube.keda.values_secret — or reference it from a TriggerAuthentication, which is what KEDA is for."
+  }
+
+  validation {
+    condition     = !can(var.kube.keda.values_secret) || try(var.kube.keda.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.keda.values_secret)), true)
+    error_message = "kube.keda.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
+  }
 }
 
 # ---------------------------------------------------------------------------
