@@ -20,6 +20,7 @@ resources:
   - ../../catalog/victoria-traces/resourceset.yaml
   - ../../catalog/keda/resourceset.yaml
   - ../../catalog/hello/resourceset.yaml
+  - ../../catalog/metrics-server/resourceset.yaml
 patches:
   - path: hello-color.patch.yaml
     target:

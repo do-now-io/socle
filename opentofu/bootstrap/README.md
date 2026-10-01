@@ -91,6 +91,10 @@ type, is an error at plan, with the allowed list in the message.
 | `keda` | `services` | `[]` | AWS services KEDA's own role may **read**, from `sqs`, `cloudwatch`, `kinesis`, `dynamodb`: one read-only statement per service named, declared through Crossplane, no role when empty. Needs `crossplane` on and the same services in the foundations' `aws.crossplane.allowed_services`; aws only for now |
 | `keda` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan |
 | `keda` | `values_secret` | `""` | Name of a Secret in `keda` with a `values.yaml` key, created by the client, merged last |
+| `metrics_server` | `enabled` | `true` | Serve the `metrics.k8s.io` API that `kubectl top` and every HPA on CPU or memory read. Offered on aws only; the other clouds ship their own ([design note](../../docs/catalog/metrics-server.md)) |
+| `metrics_server` | `ha` | `false` | Two replicas spread across nodes, with a disruption budget |
+| `metrics_server` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. `--kubelet-insecure-tls` refused at plan |
+| `metrics_server` | `values_secret` | `""` | Name of a Secret in `metrics-server` with a `values.yaml` key, created by the client, merged last |
 | `hello` | `enabled` | `true` | Deploy podinfo as a proof the pipeline works |
 | `hello` | `replicas` | `1` | Replicas of the podinfo Deployment |
 | `hello` | `message` | `"hello from socle"` | Message podinfo serves |

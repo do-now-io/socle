@@ -216,6 +216,21 @@ locals {
       values        = {}
       values_secret = ""
     }
+    # metrics-server: serves the metrics.k8s.io API, the latest CPU and memory
+    # of every node and pod, read by kubectl top and by every
+    # HorizontalPodAutoscaler on CPU or memory. Not monitoring: no history.
+    # On by default: without it every such HPA stays blind, which a client
+    # finds out under load, and it needs no client input. aws only — gcp,
+    # azure and scaleway ship their own, and a second one cannot coexist
+    # (catalog_clouds below). ha runs two replicas, spread across nodes, with
+    # a disruption budget. values and values_secret as every module; the plan
+    # refuses --kubelet-insecure-tls in values — docs/catalog/metrics-server.md.
+    metrics_server = {
+      enabled       = true
+      ha            = false
+      values        = {}
+      values_secret = ""
+    }
   }
 
   # Which clouds a module exists on. Absent = every cloud. A module listed
@@ -226,7 +241,8 @@ locals {
   # block by shape: one `name = ["cloud", ...]` per line.
   # var.kube refuses at plan a module this map does not offer on var.cloud.
   catalog_clouds = {
-    gateway_api = ["aws", "azure", "scaleway"]
+    gateway_api    = ["aws", "azure", "scaleway"]
+    metrics_server = ["aws"]
   }
 
   # The AWS services kube.keda.services may name: those whose scaler the
