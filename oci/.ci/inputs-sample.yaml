@@ -145,6 +145,13 @@
         configuration:
           logLevel: debug
       values_secret: velero-values
+    metrics_server:
+      enabled: true
+      ha: false
+      values:
+        args:
+          - --v=2
+      values_secret: metrics-server-values
     hello:
       enabled: true
       replicas: 2

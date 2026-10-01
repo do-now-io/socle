@@ -17,7 +17,8 @@
 # modules: that is Chainsaw's, in the job.
 # What it cannot: floci's k3s is one node with flannel and CoreDNS already
 # there (cilium.enabled = false on every root it applies), and floci
-# validates nothing of what IAM grants.
+# validates nothing of what IAM grants. k3s's own metrics-server is removed,
+# so the socle's runs as it would on EKS, which ships none.
 #
 # floci 2.x facts this encodes, measured on 2.1.0 (2026-09-30):
 # - the EKS token webhook rejects the well-known `test`/`test` pair, so a
@@ -99,6 +100,16 @@ runs:
         echo "floci $version at $ip, key ${key%%	*}"
         echo "| floci | $version at $ip |" >> "$GITHUB_STEP_SUMMARY"
 
+    # floci's k3s ships a metrics-server; EKS ships none, and the socle's
+    # metrics_server module installs its own, on by default. The two cannot
+    # coexist: one APIService per API group and version, and the chart's
+    # cluster-wide RBAC objects carry the same names as k3s's. So k3s's is
+    # removed beside the apply, as soon as k3s has applied it — seconds after
+    # its container starts, minutes before Flux exists — and not after the
+    # apply, when the catalog may already be rendering. A .skip beside each
+    # packaged manifest keeps k3s from re-applying it at its next start (a
+    # .skip alone removes nothing), then the delete. A k3s that ships none
+    # leaves nothing to do. docs/catalog/metrics-server.md.
     - name: tofu init and apply
       if: inputs.mode == 'apply'
       shell: bash
@@ -108,14 +119,37 @@ runs:
         KUBE: ${{ inputs.kube }}
         TAG: ${{ inputs.tag }}
         COSIGN: ${{ inputs.cosign-identity }}
+        CLUSTER: ${{ inputs.cluster }}
       run: |
         args=(-input=false -var "socle_version=$TAG" -var "cosign_identity=$COSIGN")
         [ -z "$VAR_FILE" ] || args+=(-var-file "$GITHUB_WORKSPACE/$VAR_FILE")
         [ -z "$KUBE" ] || args+=(-var "kube=$KUBE")
         tofu init -input=false > /dev/null
+        k3s_metrics_server() {
+          c="floci-eks-$CLUSTER" dir=/var/lib/rancher/k3s/server/manifests/metrics-server
+          for _ in $(seq 1 300); do
+            docker exec "$c" kubectl get --raw /readyz > /dev/null 2>&1 && break
+            sleep 2
+          done
+          docker exec "$c" kubectl get --raw /readyz > /dev/null || { echo "k3s in $c never answered"; return 1; }
+          docker exec "$c" test -d "$dir" || { echo "k3s ships no metrics-server: nothing to remove"; return 0; }
+          for _ in $(seq 1 60); do
+            docker exec "$c" kubectl get apiservice v1beta1.metrics.k8s.io > /dev/null 2>&1 && break
+            sleep 2
+          done
+          docker exec "$c" sh -c "for f in $dir/*.yaml; do touch \"\$f.skip\"; done"
+          docker exec "$c" kubectl delete --ignore-not-found --wait -f "$dir/"
+        }
+        k3s_metrics_server > "$RUNNER_TEMP/k3s-metrics-server.log" 2>&1 &
+        remover=$!
         SECONDS=0
         tofu apply -auto-approve "${args[@]}"
         echo "| \`tofu apply\` of \`${{ inputs.root }}\` | ${SECONDS}s |" >> "$GITHUB_STEP_SUMMARY"
+        status=0
+        wait "$remover" || status=$?
+        cat "$RUNNER_TEMP/k3s-metrics-server.log"
+        [ "$status" = 0 ] || { echo "::error::k3s's own metrics-server could not be removed"; exit 1; }
+        echo "| k3s's own metrics-server | removed while the apply ran |" >> "$GITHUB_STEP_SUMMARY"
 
     # The kubeconfig Chainsaw reads carries a ServiceAccount token, not the
     # `aws eks get-token` exec plugin `update-kubeconfig` writes: floci 2.x

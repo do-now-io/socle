@@ -97,6 +97,10 @@ type, is an error at plan, with the allowed list in the message.
 | `keda` | `services` | `[]` | AWS services KEDA's own role may **read**, from `sqs`, `cloudwatch`, `kinesis`, `dynamodb`: one read-only statement per service named, declared through Crossplane, no role when empty. Needs `crossplane` on and the same services in the foundations' `aws.crossplane.allowed_services`; aws only for now |
 | `keda` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan |
 | `keda` | `values_secret` | `""` | Name of a Secret in `keda` with a `values.yaml` key, created by the client, merged last |
+| `metrics_server` | `enabled` | `true` | Serve the `metrics.k8s.io` API that `kubectl top` and every HPA on CPU or memory read. Offered on aws only; the other clouds ship their own ([design note](../../docs/catalog/metrics-server.md)) |
+| `metrics_server` | `ha` | `false` | Two replicas spread across nodes, with a disruption budget |
+| `metrics_server` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. `--kubelet-insecure-tls` refused at plan |
+| `metrics_server` | `values_secret` | `""` | Name of a Secret in `metrics-server` with a `values.yaml` key, created by the client, merged last |
 | `external_secrets` | `enabled` | `false` | Deploy External Secrets Operator: an `ExternalSecret` becomes a `Secret` read from the cloud's secret manager, kept in step when it rotates ([design note](../../docs/catalog/external-secrets.md)). Pair it with `reloader` |
 | `external_secrets` | `prefixes` | `[<cluster_name>]` | On AWS with `crossplane` on: the module's own **read-only** role reads `secret:<prefix>/*` in the cluster's region for each prefix, and the `ClusterSecretStore` `secret-manager` is created on it. Needs `secretsmanager` in the foundations' `aws.crossplane.allowed_services`. `[]`: no role, no store |
 | `external_secrets` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan |

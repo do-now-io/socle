@@ -25,6 +25,7 @@ resources:
   - ../../catalog/reloader/resourceset.yaml
   - ../../catalog/velero/resourceset.yaml
   - ../../catalog/hello/resourceset.yaml
+  - ../../catalog/metrics-server/resourceset.yaml
 patches:
   - path: hello-color.patch.yaml
     target:
