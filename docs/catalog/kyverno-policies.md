@@ -108,13 +108,23 @@ disagree. A per-policy exclusion replaces the global list, so it repeats it.
 | --- | --- | --- |
 | `otel-agent` | `disallow-host-path`, and with `restricted` `restrict-volume-types`, `require-run-as-nonroot`, `require-run-as-non-root-user` | It reads every container's log from `/var/log/pods`: a read-only hostPath, as root, every capability dropped ([otel-agent.md](otel-agent.md)) |
 
-Under `restricted`, the socle's components that do not pass are listed by the
-e2e, which prints every failing policy per namespace after a background scan.
-On the local k3s, with `hello` only, `podinfo` fails
-`disallow-privilege-escalation`, `require-run-as-nonroot` and
-`restrict-seccomp-strict`. The CI run, with every default module, gives the
-full table below. Each line is either a fix in that module's values or an
-exemption here, decided module by module.
+Under `restricted`, the e2e prints every failing policy per namespace after a
+background scan. On floci, with every default module on (run 36870726028):
+
+| Namespace | Fails under `restricted` |
+| --- | --- |
+| `hello` | `disallow-privilege-escalation`, `require-run-as-nonroot`, `restrict-seccomp-strict` |
+| `otel-agent` | `restrict-seccomp-strict` |
+| `otel-gateway` | `disallow-privilege-escalation`, `require-run-as-nonroot`, `restrict-seccomp-strict` |
+| `victoria-logs` | `restrict-seccomp-strict` |
+| `victoria-metrics` | `disallow-privilege-escalation`, `require-run-as-nonroot`, `restrict-seccomp-strict` |
+
+`argocd` and `grafana` report no failure. Each line above is a `securityContext` the module's values
+can set, not an exemption: `seccompProfile: RuntimeDefault`,
+`allowPrivilegeEscalation: false`, `runAsNonRoot: true`. They are left for a
+follow-up, module by module, since each changes a running workload. Until
+then, `restricted` reports the socle's own components, in Audit, which is
+what Audit is for.
 
 ## What the client may set — `kube.kyverno_policies`
 
@@ -148,8 +158,24 @@ A client's own policies belong with his applications, in his GitOps, not in
 On a local k3s 1.34.1 with flux-operator 0.60.0, through the real Flux path,
 every step of the module's Chainsaw test passed. That run's cleanup then timed
 out deleting the `busybox` pod, whose `sleep` ignores SIGTERM: the test now
-gives it no grace period. A rerun on the same machine lost its node to another
-cluster sharing the Docker host, so the green end-to-end run is CI's.
+gives it no grace period.
+
+On floci, the `kyverno-policies (aws)` job of run 36870726028 was green end to
+end:
+
+| Step | Measured |
+| --- | --- |
+| Both modules on, to the policies' release Ready | 64 s |
+| A privileged pod in Audit, reported, and its series in VictoriaMetrics | 38 s |
+| `enforce`, the native policy, the pod refused | 2 s |
+| Kyverno's admission at 0: `podinfo` to 2, the privileged pod refused, a pod without requests admitted | 5 s |
+| Back to three admission replicas | 49 s |
+| `allowed_registries` reported, then removed | 15 s |
+| `restricted` and its scan | 64 s, 60 of them waiting for the scan |
+| Values order | 9 s |
+| Off, the policies then the engine | 39 s |
+
+The job took 9m36s, `tofu destroy` and the empty-cluster suite included.
 
 | Step | Measured |
 | --- | --- |

@@ -218,7 +218,8 @@ locals {
     }
     # The admission layer (docs/catalog/kyverno.md): the Kyverno engine —
     # admission controller (three replicas behind a PodDisruptionBudget),
-    # background, cleanup and reports controllers — from the official chart,
+    # background and reports controllers, no cleanup controller — from the
+    # official chart,
     # and no policy: those are kyverno_policies'. Off by default: an admission
     # webhook on every cluster is something a client opts into. No cloud
     # access. Its webhooks never see kube-system or flux-system. values and

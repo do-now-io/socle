@@ -3,7 +3,8 @@
 #   health   the disabled shape: the ResourceSet Ready with nothing rendered,
 #            no namespace.
 #   module   on: three admission replicas behind a PodDisruptionBudget, the
-#            three leader-elected controllers, the webhooks' namespace
+#            two leader-elected controllers and no cleanup controller, the
+#            webhooks' namespace
 #            exclusions in Kyverno's own config, the dashboard for Grafana;
 #            the whole valuesFrom order on the reports controller's memory;
 #            off: the release gone, and with it every webhook configuration
@@ -111,7 +112,8 @@ spec:
                 namespace: kyverno
               spec:
                 minAvailable: 1
-        # The three leader-elected controllers, one replica each.
+        # The two leader-elected controllers, one replica each; no cleanup
+        # controller, whose webhook outlives the uninstall.
         - assert:
             resource:
               apiVersion: apps/v1
@@ -124,18 +126,13 @@ spec:
               status:
                 (conditions[?type == 'Available'] || `[]`):
                   - status: 'True'
-        - assert:
+        - error:
             resource:
               apiVersion: apps/v1
               kind: Deployment
               metadata:
                 name: kyverno-cleanup-controller
                 namespace: kyverno
-              spec:
-                replicas: 1
-              status:
-                (conditions[?type == 'Available'] || `[]`):
-                  - status: 'True'
         - assert:
             resource:
               apiVersion: apps/v1

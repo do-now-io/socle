@@ -209,8 +209,6 @@ spec:
                 exit 0
               fi
               wait_series 'kyverno_validating_policy_results_total{policy_name="disallow-privileged-containers",result="fail"}'
-              check_dashboard kyverno kyverno-grafana-grafana kyverno-dashboard.json 'kyverno_[a-z_]+' \
-                || echo "(informative: the panels above without series need a policy kind the socle does not ship)"
       catch:
         - describe:
             apiVersion: v1
