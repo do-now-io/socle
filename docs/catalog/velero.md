@@ -227,6 +227,8 @@ applications.
   The bucket's resources have no `Delete` in their management policies, so
   turning the module off deletes nothing in S3. The role is still deleted,
   and the provider must be there to release the finalizers.
+- **Off: no `Restore` left.** Its finalizer is the server's, and the server
+  goes with the module: the namespace would stay Terminating (§7, step 6).
 
 ## 7. Restore — the deliverable
 
@@ -253,6 +255,12 @@ kubeconfig. The runbook ships in this note and the sandbox proves it (§9).
    --details` shows no error, the PVCs are `Bound`.
 5. **Resume the Argo CD sync.** The restored objects are those Git describes:
    Argo CD adopts them.
+6. **Delete the `Restore`** once checked: `velero restore delete <restore>`.
+   It carries a finalizer, `restores.velero.io/external-resources-finalizer`,
+   that only the server releases. A `Restore` left in place holds the
+   `velero` namespace Terminating when the module is turned off (measured,
+   run 36977771047). If that already happened:
+   `kubectl -n velero patch restore <restore> --type merge -p '{"metadata":{"finalizers":null}}'`.
 
 ### Scenario 2 — the cluster lost, rebuilt with the same name, account and region
 
@@ -321,7 +329,7 @@ tests prove what that allows, the seams as steps of their own:
 | | the seven `Schedule`s | Their cron, TTL, selector and volume policy as §3 renders them |
 | | backup | A labelled Deployment writes a file into a PVC; a `Backup` from the `daily-7d` template `Completed`, its `PodVolumeBackup` `Completed` |
 | | restore | The namespace deleted; the `Restore` `Completed`; the file read back from the restored PVC |
-| | re-sync | Module off and on: the `Backup` reappears, re-read from the bucket — scenario 2 in small |
+| | re-sync | The `Backup` object deleted: it reappears, re-read from the bucket at the next sync — scenario 2 in small |
 | | warning | A Deployment with `retention: 31d`: `kubectl apply` prints the policy's warning, and the Deployment is created |
 
 There is no `destroyed` test. The root job runs every module's `destroyed`
