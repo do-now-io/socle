@@ -771,6 +771,8 @@ spec:
                           useSecret: true
                           existingSecret: velero-floci
                         configuration:
+                          # The re-sync step waits on it: 10 s, not 1 min.
+                          backupSyncPeriod: 10s
                           backupStorageLocation:
                             - name: default
                               provider: aws
@@ -1314,6 +1316,23 @@ spec:
                 sleep 2
               done
               echo "after the restore the file holds '$got', expected '$PROOF'"; exit 1
+        # §7, last step: the Restore deleted once checked, while the server
+        # runs. Its finalizer (restores.velero.io/external-resources-finalizer)
+        # is the server's to release; left in place, it holds the namespace
+        # Terminating once the module goes (run 36977771047).
+        - delete:
+            ref:
+              apiVersion: velero.io/v1
+              kind: Restore
+              name: e2e-restore
+              namespace: velero
+        - error:
+            resource:
+              apiVersion: velero.io/v1
+              kind: Restore
+              metadata:
+                name: e2e-restore
+                namespace: velero
       catch:
         - describe:
             apiVersion: velero.io/v1
@@ -1363,84 +1382,17 @@ spec:
               echo "$out"
               echo "$out" | grep -q 'daily-31d, which is not a backup policy' || { echo "no warning for daily-31d"; exit 1; }
               kubectl -n e2e-velero get deployment mistyped > /dev/null
-    # Scenario 2 in small: the module off — its namespace, the Backup objects
-    # with it — and on again: Velero re-reads the backup from the bucket.
-    # The release must be idle before the module goes (external-dns's
-    # finding, docs/flux-catalog.md §8).
-    - name: off and on again, the backup is re-read from the bucket
-      timeouts:
-        error: 5m
+    # Scenario 2 in small: what a rebuilt cluster does. The Backup object
+    # deleted — the bucket keeps the backup — and Velero re-reads it from the
+    # bucket at its next sync.
+    - name: the backup object deleted, the backup is re-read from the bucket
       try:
-        - assert:
-            resource:
-              apiVersion: helm.toolkit.fluxcd.io/v2
-              kind: HelmRelease
-              metadata:
-                name: velero
-                namespace: velero
-              status:
-                (conditions[?type == 'Ready'] || `[]`):
-                  - status: 'True'
-                (conditions[?type == 'Released'] || `[]`):
-                  - status: 'True'
-                (length(conditions[?type == 'Reconciling'] || `[]`)): 0
-        - patch:
-            resource:
-              apiVersion: fluxcd.controlplane.io/v1
-              kind: ResourceSetInputProvider
-              metadata:
-                name: socle
-                namespace: flux-system
-              spec:
-                defaultValues:
-                  modules:
-                    velero:
-                      enabled: false
-        - error:
-            resource:
-              apiVersion: v1
-              kind: Namespace
-              metadata:
-                name: velero
-        - script:
-            env:
-              - name: AWS_ENDPOINT_URL
-                value: http://localhost:4566
-              - name: BUCKET
-                value: ($values.bucket)
-            content: |
-              . ./s3.sh
-              bucket_survives
-        - apply:
-            resource:
-              apiVersion: v1
-              kind: Namespace
-              metadata:
-                name: velero
-        - apply:
-            resource:
-              apiVersion: v1
-              kind: Secret
-              metadata:
-                name: velero-floci
-                namespace: velero
-              stringData:
-                cloud: |
-                  [default]
-                  aws_access_key_id = test
-                  aws_secret_access_key = test
-        - patch:
-            resource:
-              apiVersion: fluxcd.controlplane.io/v1
-              kind: ResourceSetInputProvider
-              metadata:
-                name: socle
-                namespace: flux-system
-              spec:
-                defaultValues:
-                  modules:
-                    velero:
-                      enabled: true
+        - delete:
+            ref:
+              apiVersion: velero.io/v1
+              kind: Backup
+              name: e2e-backup
+              namespace: velero
         - assert:
             resource:
               apiVersion: velero.io/v1
