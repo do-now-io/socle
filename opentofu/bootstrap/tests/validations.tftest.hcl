@@ -994,3 +994,66 @@ run "reloader_refuses_an_unknown_attribute" {
   variables { kube = { reloader = { auto_reload_all = true } } }
   expect_failures = [var.kube]
 }
+
+# --- external_secrets — docs/catalog/external-secrets.md -------------------
+
+run "external_secrets_refuses_a_wildcard_prefix" {
+  command = plan
+  variables { kube = { external_secrets = { prefixes = ["*"] } } }
+  expect_failures = [var.kube]
+}
+
+run "external_secrets_refuses_a_prefix_with_a_trailing_slash" {
+  command = plan
+  variables { kube = { external_secrets = { prefixes = ["acme/"] } } }
+  expect_failures = [var.kube]
+}
+
+run "external_secrets_refuses_a_prefix_with_an_empty_segment" {
+  command = plan
+  variables { kube = { external_secrets = { prefixes = ["acme//prod"] } } }
+  expect_failures = [var.kube]
+}
+
+run "external_secrets_refuses_prefixes_that_are_not_a_list" {
+  command = plan
+  variables { kube = { external_secrets = { prefixes = "acme" } } }
+  expect_failures = [var.kube]
+}
+
+run "external_secrets_with_crossplane_on_aws_refuses_an_empty_region" {
+  command = plan
+  variables {
+    kube = {
+      crossplane       = { enabled = true }
+      external_secrets = { enabled = true }
+    }
+  }
+  expect_failures = [var.kube]
+}
+
+run "external_secrets_refuses_a_literal_credential_in_extra_env" {
+  command = plan
+  variables { kube = { external_secrets = { values = { extraEnv = [{ name = "AWS_SECRET_ACCESS_KEY", value = "wJalrXUtnFEMI" }] } } } }
+  expect_failures = [var.kube]
+}
+
+run "external_secrets_refuses_a_secret_among_extra_objects" {
+  command = plan
+  variables {
+    kube = {
+      external_secrets = {
+        values = {
+          extraObjects = [{ apiVersion = "v1", kind = "Secret", metadata = { name = "aws-keys" }, stringData = { k = "v" } }]
+        }
+      }
+    }
+  }
+  expect_failures = [var.kube]
+}
+
+run "external_secrets_refuses_an_invalid_values_secret_name" {
+  command = plan
+  variables { kube = { external_secrets = { values_secret = "ESO_Values" } } }
+  expect_failures = [var.kube]
+}

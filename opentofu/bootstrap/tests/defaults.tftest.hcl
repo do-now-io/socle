@@ -103,6 +103,10 @@ run "defaults_are_the_recommended_position" {
     error_message = "kyverno_policies must default to the baseline profile, every policy in Audit, no registry allow-list."
   }
   assert {
+    condition     = output.inputs.modules.external_secrets.enabled == false && output.inputs.modules.external_secrets.prefixes == ["socle-test"] && output.inputs.modules.external_secrets.values == {} && output.inputs.modules.external_secrets.values_secret == ""
+    error_message = "external_secrets must default to OFF, with the cluster name as its one prefix: the role it declares when turned on reads only secrets under <cluster>/."
+  }
+  assert {
     condition     = output.inputs.modules.reloader.enabled == false && output.inputs.modules.reloader.values == {} && output.inputs.modules.reloader.values_secret == ""
     error_message = "reloader must default to OFF: it reads every ConfigMap and Secret of the cluster, a grant the client chooses (docs/catalog/reloader.md)."
   }
@@ -986,5 +990,68 @@ run "reloader_values_pass_through_and_an_existing_secret_is_allowed" {
   assert {
     condition     = output.inputs.modules.reloader.enabled && output.inputs.modules.reloader.values.reloader.logFormat == "json" && output.inputs.modules.reloader.values_secret == "reloader-values"
     error_message = "values and values_secret must reach the inputs as written; a credential referenced through env.existing is not a literal and must pass."
+  }
+}
+
+run "external_secrets_with_crossplane_on_aws_passes_with_the_region_and_its_prefixes" {
+  command = plan
+  variables {
+    region = "eu-west-3"
+    kube = {
+      crossplane       = { enabled = true }
+      external_secrets = { enabled = true, prefixes = ["socle-test", "shared/platform"] }
+    }
+  }
+
+  assert {
+    condition     = output.inputs.modules.external_secrets.enabled && output.inputs.modules.external_secrets.prefixes == ["socle-test", "shared/platform"] && output.inputs.cluster.region == "eu-west-3"
+    error_message = "the prefixes and the region must reach the inputs as written: the template scopes the role's ARNs from them."
+  }
+}
+
+run "external_secrets_without_crossplane_needs_no_region" {
+  command = plan
+  variables {
+    kube = { external_secrets = { enabled = true } }
+  }
+
+  assert {
+    condition     = output.inputs.modules.external_secrets.enabled && output.inputs.modules.crossplane.enabled == false
+    error_message = "ESO with Crossplane off installs the operator alone, the client bringing his stores: it must plan without a region."
+  }
+}
+
+run "external_secrets_with_no_prefix_needs_no_region" {
+  command = plan
+  variables {
+    kube = {
+      crossplane       = { enabled = true }
+      external_secrets = { enabled = true, prefixes = [] }
+    }
+  }
+
+  assert {
+    condition     = length(output.inputs.modules.external_secrets.prefixes) == 0
+    error_message = "an empty prefixes list means no role and no store: it must plan without a region."
+  }
+}
+
+run "external_secrets_values_pass_through_and_an_endpoint_is_not_a_credential" {
+  command = plan
+  variables {
+    kube = {
+      external_secrets = {
+        values = {
+          log      = { level = "debug" }
+          extraEnv = [{ name = "AWS_SECRETSMANAGER_ENDPOINT", value = "http://localhost:4566" }]
+        }
+        values_secret = "external-secrets-values"
+      }
+    }
+  }
+
+  assert {
+    condition     = output.inputs.modules.external_secrets.values.log.level == "debug" && output.inputs.modules.external_secrets.values_secret == "external-secrets-values"
+    error_message = "values and values_secret must reach the inputs as written; AWS_SECRETSMANAGER_ENDPOINT names an endpoint, not a credential."
   }
 }

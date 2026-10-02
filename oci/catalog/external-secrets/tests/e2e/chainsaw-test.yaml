@@ -1,0 +1,987 @@
+# The external_secrets module's proof (docs/catalog/external-secrets.md). Off
+# by default, so `health` proves the disabled shape only. The `module` phase,
+# on aws, in two halves:
+#
+# 1. Against floci's Secrets Manager, with Crossplane off — the client's own
+#    path when the socle declares no role: the operator on with
+#    AWS_SECRETSMANAGER_ENDPOINT pointed at floci through
+#    kube.external_secrets.values, no socle store; a ClusterSecretStore the
+#    client makes on static keys; a secret under the cluster's prefix seeded
+#    in floci, an ExternalSecret turning it into a Secret, the value rotated
+#    in floci and the Secret following, and a workload annotated for
+#    reloader rolled by it — #56's proof, end to end. Then the whole
+#    valuesFrom order, off with the CRDs kept, back on adopting them, off.
+#    Seeding and rotating in floci are the two `script`s here.
+# 2. The module's own AWS access, with Crossplane on: its Role reaches
+#    floci's IAM under /socle/<cluster>/ with a read-only policy scoped to
+#    the prefix — proven from what Crossplane reports — and the workload and
+#    the socle's store are withheld while the association is not Ready. The
+#    two floci seams (providerConfigRef: floci, the association never
+#    syncing) are steps of their own, to delete the day floci serves Pod
+#    Identity; that day the socle's store, secret-manager, is asserted Ready
+#    instead.
+#
+# Not provable on floci: the association reaching EKS, the controller getting
+# the role's credentials, IAM enforcing the prefix and the boundary — the
+# sandbox's (docs/catalog/external-secrets.md).
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: external-secrets-health
+  labels:
+    phase: health
+    cloud: any
+    platform: any
+spec:
+  description: Off by default, the ResourceSet is Ready and renders nothing.
+  timeouts:
+    assert: 3m
+    error: 1m
+  steps:
+    - name: the ResourceSet is Ready with nothing in its inventory
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: external-secrets
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (length(inventory.entries || `[]`)): 0
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: external-secrets
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: external-secrets
+---
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: external-secrets-module
+  labels:
+    phase: module
+    cloud: aws
+    platform: floci
+spec:
+  description: >-
+    A secret rotated in floci's Secrets Manager reaches its Secret and rolls
+    the annotated workload; the client's values win; the CRDs survive off;
+    with Crossplane on, the module's read-only Role reaches floci's IAM.
+  timeouts:
+    assert: 5m
+    error: 5m
+    exec: 2m
+    # A namespace delete waits for its content to go: 15 s, Chainsaw's
+    # default, is not enough for a Deployment's pods (measured on floci).
+    delete: 2m
+    cleanup: 2m
+  steps:
+    - name: a secret under the cluster's prefix is seeded in floci's Secrets Manager
+      try:
+        - script:
+            env:
+              - name: AWS_ENDPOINT_URL
+                value: http://localhost:4566
+              - name: KEY
+                value: (join('/', [$values.cluster, 'e2e-app']))
+            content: |
+              aws secretsmanager delete-secret --secret-id "$KEY" --force-delete-without-recovery > /dev/null 2>&1 || true
+              aws secretsmanager create-secret --name "$KEY" --secret-string first --query Name --output text
+    # Crossplane off: no role, no socle store. The endpoint is a value of the
+    # client's, as kube.external_secrets.values carries it; the memory request
+    # is a key the socle sets (64Mi), which the client's 96Mi must beat.
+    - name: enabled through kube with Crossplane off, the operator runs, the client's value wins, no socle store
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    external_secrets:
+                      enabled: true
+                      values:
+                        extraEnv:
+                          - name: AWS_SECRETSMANAGER_ENDPOINT
+                            value: (join('', ['http://', $values.floci_ip, ':4566']))
+                        resources:
+                          requests:
+                            memory: 96Mi
+                    reloader:
+                      enabled: true
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: external-secrets
+                labels:
+                  pod-security.kubernetes.io/enforce: restricted
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: external-secrets
+                namespace: external-secrets
+              spec:
+                template:
+                  spec:
+                    serviceAccountName: external-secrets
+                    (containers[?name == 'external-secrets'] || `[]`):
+                      - (contains(args || `[]`, '--enable-push-secret-reconciler=false')): true
+                        resources:
+                          requests:
+                            memory: 96Mi
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: external-secrets-webhook
+                namespace: external-secrets
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: external-secrets-cert-controller
+                namespace: external-secrets
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: reloader
+                namespace: reloader
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - error:
+            resource:
+              apiVersion: external-secrets.io/v1
+              kind: ClusterSecretStore
+              metadata:
+                name: secret-manager
+        - error:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: external-secrets-store
+                namespace: flux-system
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: external-secrets
+            name: external-secrets
+        - events:
+            namespace: external-secrets
+        - podLogs:
+            namespace: external-secrets
+            tail: 40
+    # What a client without Crossplane does: his own store, on keys he holds.
+    # floci accepts any key on Secrets Manager.
+    - name: a ClusterSecretStore of the client's, on static keys, is Ready
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: floci-credentials
+                namespace: external-secrets
+              stringData:
+                access-key-id: test
+                secret-access-key: test
+        - apply:
+            resource:
+              apiVersion: external-secrets.io/v1
+              kind: ClusterSecretStore
+              metadata:
+                name: floci
+              spec:
+                provider:
+                  aws:
+                    service: SecretsManager
+                    region: eu-west-3
+                    auth:
+                      secretRef:
+                        accessKeyIDSecretRef:
+                          name: floci-credentials
+                          namespace: external-secrets
+                          key: access-key-id
+                        secretAccessKeySecretRef:
+                          name: floci-credentials
+                          namespace: external-secrets
+                          key: secret-access-key
+        - assert:
+            resource:
+              apiVersion: external-secrets.io/v1
+              kind: ClusterSecretStore
+              metadata:
+                name: floci
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: external-secrets.io/v1
+            kind: ClusterSecretStore
+            name: floci
+        - podLogs:
+            namespace: external-secrets
+            selector: app.kubernetes.io/name=external-secrets
+            tail: 40
+    # 'first' and 'second', base64: Zmlyc3Q= and c2Vjb25k.
+    - name: an ExternalSecret turns the seeded secret into a Secret, read by a workload annotated for reloader
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: eso-e2e
+        - apply:
+            resource:
+              apiVersion: external-secrets.io/v1
+              kind: ExternalSecret
+              metadata:
+                name: eso-e2e-app
+                namespace: eso-e2e
+              spec:
+                refreshInterval: 10s
+                secretStoreRef:
+                  kind: ClusterSecretStore
+                  name: floci
+                target:
+                  name: eso-e2e-app
+                data:
+                  - secretKey: PASSWORD
+                    remoteRef:
+                      key: (join('/', [$values.cluster, 'e2e-app']))
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: eso-e2e-app
+                namespace: eso-e2e
+              data:
+                PASSWORD: Zmlyc3Q=
+        - apply:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: app
+                namespace: eso-e2e
+                annotations:
+                  reloader.stakater.com/auto: 'true'
+              spec:
+                replicas: 1
+                selector:
+                  matchLabels: {app: app}
+                template:
+                  metadata:
+                    labels: {app: app}
+                  spec:
+                    containers:
+                      - name: pause
+                        image: registry.k8s.io/pause:3.10
+                        envFrom:
+                          - secretRef: {name: eso-e2e-app}
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: app
+                namespace: eso-e2e
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: external-secrets.io/v1
+            kind: ExternalSecret
+            namespace: eso-e2e
+        - events:
+            namespace: eso-e2e
+        - podLogs:
+            namespace: external-secrets
+            selector: app.kubernetes.io/name=external-secrets
+            tail: 40
+    - name: the value rotated in floci reaches the Secret, and reloader rolls the workload
+      try:
+        - script:
+            env:
+              - name: AWS_ENDPOINT_URL
+                value: http://localhost:4566
+              - name: KEY
+                value: (join('/', [$values.cluster, 'e2e-app']))
+            content: |
+              aws secretsmanager put-secret-value --secret-id "$KEY" --secret-string second --query VersionId --output text
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: eso-e2e-app
+                namespace: eso-e2e
+              data:
+                PASSWORD: c2Vjb25k
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: app
+                namespace: eso-e2e
+              spec:
+                template:
+                  metadata:
+                    (contains(annotations."reloader.stakater.com/last-reloaded-from" || '', 'eso-e2e-app')): true
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Namespace
+              name: eso-e2e
+        - delete:
+            ref:
+              apiVersion: external-secrets.io/v1
+              kind: ClusterSecretStore
+              name: floci
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Secret
+              name: floci-credentials
+              namespace: external-secrets
+      catch:
+        - describe:
+            apiVersion: external-secrets.io/v1
+            kind: ExternalSecret
+            namespace: eso-e2e
+        - describe:
+            apiVersion: apps/v1
+            kind: Deployment
+            namespace: eso-e2e
+        - podLogs:
+            namespace: reloader
+            tail: 40
+      finally:
+        - script:
+            env:
+              - name: AWS_ENDPOINT_URL
+                value: http://localhost:4566
+              - name: KEY
+                value: (join('/', [$values.cluster, 'e2e-app']))
+            content: |
+              aws secretsmanager delete-secret --secret-id "$KEY" --force-delete-without-recovery > /dev/null 2>&1 || true
+    # The rest of valuesFrom's order (docs/flux-catalog.md §6): 96Mi in
+    # values beat the socle's 64Mi above; 112Mi in the Secret the client
+    # names in values_secret beat values; both cleared, the socle's 64Mi.
+    - name: kube.external_secrets.values_secret is merged last, over values and the socle
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: external-secrets-e2e-values
+                namespace: external-secrets
+                labels:
+                  reconcile.fluxcd.io/watch: Enabled
+              stringData:
+                values.yaml: |
+                  resources:
+                    requests:
+                      memory: 112Mi
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    external_secrets:
+                      values_secret: external-secrets-e2e-values
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: external-secrets
+                namespace: external-secrets
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'external-secrets'] || `[]`):
+                      - resources:
+                          requests:
+                            memory: 112Mi
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    external_secrets:
+                      values_secret: ''
+                      values:
+                        extraEnv: null
+                        resources: null
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: external-secrets
+                namespace: external-secrets
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'external-secrets'] || `[]`):
+                      - resources:
+                          requests:
+                            memory: 64Mi
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Secret
+              name: external-secrets-e2e-values
+              namespace: external-secrets
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: external-secrets
+            name: external-secrets
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 40
+    # The CRDs are kept (helm.sh/resource-policy: keep): turning the module
+    # off never deletes a client's ExternalSecrets or SecretStores.
+    - name: enabled = false garbage-collects the operator and keeps the CRDs
+      try:
+        # The release must be idle before the module goes: helm-controller
+        # honours a deletion only once the running action returns, and the
+        # values step above has just driven an upgrade (docs/flux-catalog.md §8).
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: external-secrets
+                namespace: external-secrets
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'Released'] || `[]`):
+                  - status: 'True'
+                (length(conditions[?type == 'Reconciling'] || `[]`)): 0
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    external_secrets:
+                      enabled: false
+        - error:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: external-secrets
+                namespace: external-secrets
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: external-secrets
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: external-secrets
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (length(inventory.entries || `[]`)): 0
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: externalsecrets.external-secrets.io
+              status:
+                (conditions[?type == 'Established'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: clustersecretstores.external-secrets.io
+              status:
+                (conditions[?type == 'Established'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: external-secrets
+        - podLogs:
+            namespace: flux-system
+            selector: app.kubernetes.io/name=flux-operator
+            tail: 40
+    # Helm adopts the CRDs it left behind: their release annotations name
+    # this release, in this namespace.
+    - name: back on, the release adopts the CRDs it kept, then off again
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    external_secrets:
+                      enabled: true
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: external-secrets
+                namespace: external-secrets
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'Released'] || `[]`):
+                  - status: 'True'
+                (length(conditions[?type == 'Reconciling'] || `[]`)): 0
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    external_secrets:
+                      enabled: false
+                    reloader:
+                      enabled: false
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: external-secrets
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: reloader
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: external-secrets
+            name: external-secrets
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 60
+    # Second half: the module's own AWS access (docs/catalog/crossplane.md
+    # §3), with Crossplane on and the default prefix, the cluster's name.
+    - name: with Crossplane on, the module declares its Role and its association
+      # 99 s cold (docs/catalog/crossplane.md §7); ~5 min when the providers
+      # re-adopt CRDs a previous install left behind.
+      timeouts:
+        assert: 8m
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    crossplane:
+                      enabled: true
+                      # The boundary the root wires from the foundations: the
+                      # Role must carry it. floci ignores it at IAM; the object
+                      # is what is asserted (docs/catalog/crossplane.md §7).
+                      permissions_boundary: arn:aws:iam::000000000000:policy/socle-e2e-catalog-crossplane-boundary
+                    external_secrets:
+                      enabled: true
+        # In the order their CRDs appear — an assert on a kind whose CRD is
+        # not there yet fails at once.
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: crossplane
+                namespace: crossplane-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: pkg.crossplane.io/v1
+              kind: Provider
+              metadata:
+                name: provider-aws-iam
+              status:
+                (conditions[?type == 'Healthy'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: pkg.crossplane.io/v1
+              kind: Provider
+              metadata:
+                name: provider-aws-eks
+              status:
+                (conditions[?type == 'Healthy'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: iam.aws.m.upbound.io/v1beta1
+              kind: Role
+              metadata:
+                name: external-secrets
+                namespace: external-secrets
+                annotations:
+                  crossplane.io/external-name: (join('', [$values.cluster, '-external-secrets']))
+              spec:
+                forProvider:
+                  path: (join('', ['/socle/', $values.cluster, '/']))
+                  permissionsBoundary: arn:aws:iam::000000000000:policy/socle-e2e-catalog-crossplane-boundary
+        - assert:
+            resource:
+              apiVersion: eks.aws.m.upbound.io/v1beta1
+              kind: PodIdentityAssociation
+              metadata:
+                name: external-secrets
+                namespace: external-secrets
+              spec:
+                forProvider:
+                  namespace: external-secrets
+                  serviceAccount: external-secrets
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+        - describe:
+            apiVersion: pkg.crossplane.io/v1
+            kind: Provider
+        - events:
+            namespace: crossplane-system
+        - podLogs:
+            namespace: crossplane-system
+            tail: 40
+    # floci seam: the module leaves providerConfigRef at its default, the
+    # socle's Pod Identity ClusterProviderConfig, which floci cannot serve.
+    # floci's own is named after the fact. Deleted the day floci serves Pod
+    # Identity.
+    # skipDelete: the last step removes these two itself, before Crossplane
+    # goes — Chainsaw's own cleanup would run after, when no provider is left
+    # to release the ClusterProviderConfig, and time out.
+    - name: 'floci seam: a ClusterProviderConfig with static keys, and the module''s resources pointed at it'
+      skipDelete: true
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: floci-credentials
+                namespace: crossplane-system
+              stringData:
+                credentials: |
+                  [default]
+                  aws_access_key_id = test
+                  aws_secret_access_key = test
+        - apply:
+            resource:
+              apiVersion: aws.m.upbound.io/v1beta1
+              kind: ClusterProviderConfig
+              metadata:
+                name: floci
+              spec:
+                credentials:
+                  source: Secret
+                  secretRef:
+                    namespace: crossplane-system
+                    name: floci-credentials
+                    key: credentials
+                endpoint:
+                  hostnameImmutable: true
+                  services: [iam, eks, sts]
+                  url:
+                    type: Static
+                    static: (join('', ['http://', $values.floci_ip, ':4566']))
+                skip_credentials_validation: true
+                skip_metadata_api_check: true
+                skip_region_validation: true
+                skip_requesting_account_id: true
+        - patch:
+            resource:
+              apiVersion: iam.aws.m.upbound.io/v1beta1
+              kind: Role
+              metadata:
+                name: external-secrets
+                namespace: external-secrets
+              spec:
+                providerConfigRef:
+                  kind: ClusterProviderConfig
+                  name: floci
+        - patch:
+            resource:
+              apiVersion: eks.aws.m.upbound.io/v1beta1
+              kind: PodIdentityAssociation
+              metadata:
+                name: external-secrets
+                namespace: external-secrets
+              spec:
+                providerConfigRef:
+                  kind: ClusterProviderConfig
+                  name: floci
+    - name: the Role becomes an IAM role under /socle/<cluster>/, read-only on the cluster's prefix
+      try:
+        - assert:
+            resource:
+              apiVersion: iam.aws.m.upbound.io/v1beta1
+              kind: Role
+              metadata:
+                name: external-secrets
+                namespace: external-secrets
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                atProvider:
+                  arn: (join('', ['arn:aws:iam::000000000000:role/socle/', $values.cluster, '/', $values.cluster, '-external-secrets']))
+                  (contains(assumeRolePolicy || '', 'pods.eks.amazonaws.com')): true
+                  (inlinePolicy[?name == 'secretsmanager'] || `[]`):
+                    - (contains(policy || '', 'secretsmanager:GetSecretValue')): true
+                      (contains(policy || '', 'secretsmanager:DescribeSecret')): true
+                      (contains(policy || '', join('', [':secret:', $values.cluster, '/*']))): true
+                      (contains(policy || '', 'ListSecrets')): false
+                      (contains(policy || '', 'PutSecretValue')): false
+      catch:
+        - describe:
+            apiVersion: iam.aws.m.upbound.io/v1beta1
+            kind: Role
+            namespace: external-secrets
+            name: external-secrets
+        - podLogs:
+            namespace: crossplane-system
+            selector: pkg.crossplane.io/provider=provider-aws-iam
+            tail: 40
+    # floci seam, second half: the association never syncs (floci 2.1.0 has
+    # no association API), so the workload's dependsOn is never met: one full
+    # minute after the Role turned into IAM, still no HelmRelease, and no
+    # socle store. Asserted as such so that the day it syncs this step fails
+    # and goes with the seam above.
+    - name: 'floci seam: the association cannot sync, so the workload and the socle''s store are withheld'
+      try:
+        - assert:
+            resource:
+              apiVersion: eks.aws.m.upbound.io/v1beta1
+              kind: PodIdentityAssociation
+              metadata:
+                name: external-secrets
+                namespace: external-secrets
+              status:
+                (conditions[?type == 'Synced'] || `[]`):
+                  - status: 'False'
+        - sleep:
+            duration: 60s
+        - error:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: external-secrets
+                namespace: external-secrets
+        - error:
+            resource:
+              apiVersion: external-secrets.io/v1
+              kind: ClusterSecretStore
+              metadata:
+                name: secret-manager
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: external-secrets-workload
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'False'
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+        - describe:
+            apiVersion: eks.aws.m.upbound.io/v1beta1
+            kind: PodIdentityAssociation
+            namespace: external-secrets
+            name: external-secrets
+    # The association's finalizer waits on an API floci does not have:
+    # released by hand, the only thing done here a real cluster does not
+    # need. Then the module off deletes the IAM role and the namespace goes;
+    # Crossplane off last (turning both off at once leaves the managed
+    # resources with no provider to delete them).
+    - name: off, the IAM role is deleted and the namespace goes
+      try:
+        - patch:
+            resource:
+              apiVersion: eks.aws.m.upbound.io/v1beta1
+              kind: PodIdentityAssociation
+              metadata:
+                name: external-secrets
+                namespace: external-secrets
+                finalizers: []
+        # No idle gate here: with Crossplane on and floci's association never
+        # Ready, the workload is withheld — there is no release to wait for.
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    external_secrets:
+                      enabled: false
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: external-secrets
+        - script:
+            env:
+              - name: AWS_ENDPOINT_URL
+                value: http://localhost:4566
+              - name: ROLE
+                value: (join('', [$values.cluster, '-external-secrets']))
+            content: |
+              for _ in $(seq 1 30); do
+                aws iam get-role --role-name "$ROLE" > /dev/null 2>&1 || exit 0
+                sleep 2
+              done
+              echo "IAM role $ROLE survived the module turned off"; exit 1
+        - delete:
+            ref:
+              apiVersion: aws.m.upbound.io/v1beta1
+              kind: ClusterProviderConfig
+              name: floci
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Secret
+              name: floci-credentials
+              namespace: crossplane-system
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    crossplane:
+                      enabled: false
+                      permissions_boundary: ''
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: crossplane-system
+      catch:
+        - describe:
+            apiVersion: v1
+            kind: Namespace
+            name: external-secrets
+        - describe:
+            apiVersion: iam.aws.m.upbound.io/v1beta1
+            kind: Role
+            namespace: external-secrets
+            name: external-secrets
+        - podLogs:
+            namespace: flux-system
+            selector: app.kubernetes.io/name=flux-operator
+            tail: 40

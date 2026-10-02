@@ -110,11 +110,12 @@ and every option is documented in
 | --- | --- | :---: | --- |
 | [`argocd`](docs/catalog/argocd.md) | GitOps for your applications. Flux runs the socle, and ArgoCD runs your apps | on | |
 | [`gateway_api`](docs/catalog/gateway-api.md) | Gateway API CRDs and the shared `public` and `private` Gateways | on | Built into GKE on GCP |
-| [`crossplane`](docs/catalog/crossplane.md) | Lets each module declare its own cloud IAM | off | Needed by `external_dns`, and by `keda` for cloud scalers |
+| [`crossplane`](docs/catalog/crossplane.md) | Lets each module declare its own cloud IAM | off | Needed by `external_dns`, and by `keda` and `external_secrets` for their cloud access |
 | [`external_dns`](docs/catalog/external-dns.md) | Publishes routes into the cloud's DNS zone | off | Turned on for you on AWS once a certificate is set |
 | [`keda`](docs/catalog/keda.md) | Event-driven autoscaling, down to zero | off | |
 | [`kyverno`](docs/catalog/kyverno.md) | The Kyverno admission engine, with no policy | off | Its webhooks never see the socle's namespaces |
 | [`kyverno_policies`](docs/catalog/kyverno-policies.md) | Pod Security Standards, requests required, no `latest` tag, a registry allow-list, all in Audit; `enforce` makes a policy a native refusal | off | Needs `kyverno`; judges your applications, never the socle |
+| [`external_secrets`](docs/catalog/external-secrets.md) | Kubernetes Secrets read from the cloud's secret manager, kept in step when they rotate | off | On AWS with `crossplane`: its own read-only role on a name prefix, and the `secret-manager` store |
 | [`reloader`](docs/catalog/reloader.md) | Rolls a workload when a ConfigMap or Secret it reads changes | off | Opt-in per workload, by annotation |
 | [`victoria_metrics`](docs/catalog/victoria-metrics.md) | Metrics storage | on | [Monitoring stack](docs/monitoring.md) |
 | [`victoria_logs`](docs/catalog/victoria-logs.md) | Logs storage | on | 〃 |

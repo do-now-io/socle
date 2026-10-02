@@ -120,6 +120,13 @@
       values:
         podSecuritySeverity: high
       values_secret: kyverno-policies-values
+    external_secrets:
+      enabled: true
+      prefixes: [t, shared/platform]
+      values:
+        log:
+          level: debug
+      values_secret: external-secrets-values
     reloader:
       enabled: true
       values:
