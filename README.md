@@ -113,6 +113,8 @@ and every option is documented in
 | [`crossplane`](docs/catalog/crossplane.md) | Lets each module declare its own cloud IAM | off | Needed by `external_dns`, and by `keda` for cloud scalers |
 | [`external_dns`](docs/catalog/external-dns.md) | Publishes routes into the cloud's DNS zone | off | Turned on for you on AWS once a certificate is set |
 | [`keda`](docs/catalog/keda.md) | Event-driven autoscaling, down to zero | off | |
+| [`kyverno`](docs/catalog/kyverno.md) | The Kyverno admission engine, with no policy | off | Its webhooks never see the socle's namespaces |
+| [`kyverno_policies`](docs/catalog/kyverno-policies.md) | Pod Security Standards, requests required, no `latest` tag, a registry allow-list, all in Audit; `enforce` makes a policy a native refusal | off | Needs `kyverno`; judges your applications, never the socle |
 | [`victoria_metrics`](docs/catalog/victoria-metrics.md) | Metrics storage | on | [Monitoring stack](docs/monitoring.md) |
 | [`victoria_logs`](docs/catalog/victoria-logs.md) | Logs storage | on | 〃 |
 | [`victoria_traces`](docs/catalog/victoria-traces.md) | Traces storage | off | Pre-GA upstream |
