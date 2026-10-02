@@ -324,6 +324,56 @@ spec:
     # path-style addressing (floci answers one host). Deleted the day floci
     # serves Pod Identity. skipDelete: the off step removes them itself,
     # before Crossplane goes.
+    # floci seam, DNS: the SDK prefixes S3 Control's host with the account
+    # (000000000000.<endpoint host>), and an IP takes no prefix — "lookup
+    # 000000000000.172.18.0.2: no such host" (run 36876844601). k3s's CoreDNS
+    # imports coredns-custom: a template answers floci's address for every
+    # name under floci.e2e, and floci serves any Host. Deleted with the other
+    # seams.
+    - name: 'floci seam: every name under floci.e2e resolves to floci, in the cluster'
+      skipDelete: true
+      try:
+        # The mount syncs within a minute and CoreDNS reloads every 30 s.
+        - script:
+            timeout: 4m
+            env:
+              - name: FLOCI_IP
+                value: ($values.floci_ip)
+            content: |
+              kubectl -n kube-system apply -f - <<EOF
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: coredns-custom
+                namespace: kube-system
+              data:
+                floci.server: |
+                  floci.e2e:53 {
+                    template IN A floci.e2e {
+                      answer "{{ .Name }} 60 IN A $FLOCI_IP"
+                    }
+                    # No IPv6: an empty answer, not SERVFAIL, which a resolver
+                    # asking A and AAAA together may take for a failure.
+                    template IN AAAA floci.e2e {
+                      rcode NOERROR
+                    }
+                  }
+              EOF
+              for _ in $(seq 1 40); do
+                if kubectl -n kube-system run floci-dns-probe --image=docker.io/library/busybox:1.37 --restart=Never --rm -i --quiet \
+                     -- nslookup 000000000000.floci.e2e 2>/dev/null | grep -q "Address: $FLOCI_IP$"; then
+                  echo "000000000000.floci.e2e resolves in the cluster"; exit 0
+                fi
+                kubectl -n kube-system delete pod floci-dns-probe --ignore-not-found > /dev/null 2>&1
+                sleep 5
+              done
+              kubectl -n kube-system get configmap coredns-custom -o yaml
+              echo "000000000000.floci.e2e never resolved"; exit 1
+      catch:
+        - podLogs:
+            namespace: kube-system
+            selector: k8s-app=kube-dns
+            tail: 30
     - name: 'floci seam: a ClusterProviderConfig with static keys, and the module''s resources pointed at it'
       skipDelete: true
       try:
@@ -359,7 +409,8 @@ spec:
                   services: [iam, eks, sts, s3, s3control]
                   url:
                     type: Static
-                    static: (join('', ['http://', $values.floci_ip, ':4566']))
+                    # A name, so that S3 Control's account prefix resolves too.
+                    static: http://floci.e2e:4566
                 s3_use_path_style: true
                 skip_credentials_validation: true
                 skip_metadata_api_check: true
@@ -639,6 +690,12 @@ spec:
               kind: Secret
               name: floci-credentials
               namespace: crossplane-system
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: ConfigMap
+              name: coredns-custom
+              namespace: kube-system
         - patch:
             resource:
               apiVersion: fluxcd.controlplane.io/v1
