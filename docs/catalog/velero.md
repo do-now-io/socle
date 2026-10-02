@@ -310,7 +310,8 @@ tests prove what that allows, the seams as steps of their own:
 | --- | --- | --- |
 | `velero-health` (`health`, `any`) | | Off by default: the ResourceSet Ready, an empty inventory, no `velero` namespace |
 | `velero-module-aws` (`module`, `aws`) | crossplane and velero on | The module renders the bucket's five objects, the Role and the association |
-| | floci seam | floci's `ClusterProviderConfig` (with `s3`), the managed resources pointed at it |
+| | floci seam, DNS | Every name under `floci.e2e` resolves to floci in the cluster, through k3s's `coredns-custom`. The SDK prefixes S3 Control's host with the account, and an IP takes no prefix |
+| | floci seam | floci's `ClusterProviderConfig` at `http://floci.e2e:4566`, with `s3` and `s3control`, the managed resources pointed at it |
 | | the bucket in S3 | Bucket `socle-e2e-catalog-velero-000000000000` exists, versioned, `AES256`, public access blocked, its lifecycle rule — from `status.atProvider`, and the one `script` reading floci's S3 |
 | | the role | IAM role under `/socle/socle-e2e-catalog/`, its `bucket` policy on that bucket only, no `ec2:` |
 | | floci seam, second half | The association `Synced=False`; one minute later still no `HelmRelease` |
