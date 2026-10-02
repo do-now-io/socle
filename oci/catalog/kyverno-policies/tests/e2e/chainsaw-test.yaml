@@ -68,7 +68,6 @@ spec:
   timeouts:
     assert: 5m
     error: 5m
-    exec: 5m
   steps:
     - name: kyverno and kyverno_policies on, the baseline set converges in Audit
       try:
@@ -198,16 +197,6 @@ spec:
                 kind: Pod
                 name: privileged-audit
               (length(results[?policy == 'disallow-privileged-containers' && result == 'fail'] || `[]`) > `0`): true
-        # The same verdict, as the engine counts it for the dashboard: the
-        # series reaches VictoriaMetrics through otel_gateway's scrape.
-        - script:
-            content: |
-              . ./vm.sh
-              if ! kubectl -n victoria-metrics get service victoria-metrics > /dev/null 2>&1; then
-                echo "victoria_metrics is off on this root: the metric is not checked"
-                exit 0
-              fi
-              wait_series 'kyverno_validating_policy_results_total{policy_name="disallow-privileged-containers",result="fail"}'
       catch:
         - describe:
             apiVersion: v1
@@ -260,25 +249,21 @@ spec:
               spec:
                 policyName: vpol-disallow-privileged-containers
                 validationActions: [Deny]
-        # The binding exists before the API server applies it: its admission
-        # plugin loads a new policy from an informer, and a pod created in
-        # between is admitted (measured on floci, run 36874477467: created 3 s
-        # after the binding). A server-side dry run goes through admission and
-        # creates nothing: retried until the native policy refuses.
-        - script:
-            content: |
-              probe='{"spec":{"containers":[{"name":"vap-probe","image":"registry.k8s.io/pause:3.10",
-                "securityContext":{"privileged":true}}]}}'
-              for i in $(seq 1 30); do
-                out="$(kubectl -n "$NAMESPACE" run vap-probe --image=registry.k8s.io/pause:3.10 \
-                  --dry-run=server --overrides="$probe" 2>&1)"
-                case "$out" in
-                  *ValidatingAdmissionPolicy*) echo "native policy enforced after $((i * 2)) s"; exit 0;;
-                esac
-                sleep 2
-              done
-              echo "the native policy never refused: $out"
-              exit 1
+        # The binding exists before the API server applies it: the API server
+        # compiles the native policy (observedGeneration), then its admission
+        # plugin loads it from an informer, and a pod created in between is
+        # admitted (measured on floci, run 36874477467: 3 s after the binding;
+        # 4 s from creation to the first refusal on a later run). Compiled,
+        # then ten seconds for the informer, before the refusal is asserted.
+        - assert:
+            resource:
+              apiVersion: admissionregistration.k8s.io/v1
+              kind: ValidatingAdmissionPolicy
+              metadata:
+                name: vpol-disallow-privileged-containers
+              (status.observedGeneration == metadata.generation): true
+        - sleep:
+            duration: 10s
         - create:
             resource:
               apiVersion: v1
@@ -577,28 +562,73 @@ spec:
               kind: ValidatingPolicy
               metadata:
                 name: restrict-seccomp-strict
-        # The background scan reports what already runs; after a pass, no
-        # failure in any namespace but Chainsaw's own: the socle's components
-        # are out of scope, restricted or not.
-        - script:
-            content: |
-              sleep 60
-              kubectl get policyreports -A -o json | python3 -c '
-              import sys, json, collections
-              fails = collections.defaultdict(set)
-              for r in json.load(sys.stdin)["items"]:
-                  ns = r["metadata"]["namespace"]
-                  if ns.startswith("chainsaw-"):
-                      continue
-                  for x in r.get("results", []):
-                      if x.get("result") == "fail":
-                          fails[ns].add(x["policy"])
-              for ns in sorted(fails):
-                  print(f"  {ns}: {", ".join(sorted(fails[ns]))}")
-              if fails:
-                  print("failures reported in socle namespaces, which are out of scope")
-                  sys.exit(1)
-              print("restricted profile: no failure reported outside the test namespace")'
+        # The background scan judges what already runs. privileged-audit,
+        # created in the Audit step, sets no runAsNonRoot: a restricted
+        # failure on its report can only come from that scan — the proof it
+        # ran. The socle's pods went through the same pass: no namespace the
+        # socle renders carries a failure. Listed: the five the first CI run
+        # (36870726028) found failing before the scope existed, and argocd
+        # and grafana.
+        - assert:
+            timeout: 3m
+            resource:
+              apiVersion: wgpolicyk8s.io/v1alpha2
+              kind: PolicyReport
+              metadata:
+                namespace: ($namespace)
+              scope:
+                kind: Pod
+                name: privileged-audit
+              (length(results[?policy == 'require-run-as-nonroot' && result == 'fail'] || `[]`) > `0`): true
+        - error:
+            resource:
+              apiVersion: wgpolicyk8s.io/v1alpha2
+              kind: PolicyReport
+              metadata:
+                namespace: hello
+              (length(results[?result == 'fail'] || `[]`) > `0`): true
+        - error:
+            resource:
+              apiVersion: wgpolicyk8s.io/v1alpha2
+              kind: PolicyReport
+              metadata:
+                namespace: otel-agent
+              (length(results[?result == 'fail'] || `[]`) > `0`): true
+        - error:
+            resource:
+              apiVersion: wgpolicyk8s.io/v1alpha2
+              kind: PolicyReport
+              metadata:
+                namespace: otel-gateway
+              (length(results[?result == 'fail'] || `[]`) > `0`): true
+        - error:
+            resource:
+              apiVersion: wgpolicyk8s.io/v1alpha2
+              kind: PolicyReport
+              metadata:
+                namespace: victoria-metrics
+              (length(results[?result == 'fail'] || `[]`) > `0`): true
+        - error:
+            resource:
+              apiVersion: wgpolicyk8s.io/v1alpha2
+              kind: PolicyReport
+              metadata:
+                namespace: victoria-logs
+              (length(results[?result == 'fail'] || `[]`) > `0`): true
+        - error:
+            resource:
+              apiVersion: wgpolicyk8s.io/v1alpha2
+              kind: PolicyReport
+              metadata:
+                namespace: argocd
+              (length(results[?result == 'fail'] || `[]`) > `0`): true
+        - error:
+            resource:
+              apiVersion: wgpolicyk8s.io/v1alpha2
+              kind: PolicyReport
+              metadata:
+                namespace: grafana
+              (length(results[?result == 'fail'] || `[]`) > `0`): true
         - patch:
             resource:
               apiVersion: fluxcd.controlplane.io/v1

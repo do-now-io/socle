@@ -76,9 +76,10 @@ namespaces stay excluded.
 
 The refusal is not instant. The API server's admission plugin loads a new
 binding from an informer: on floci, a pod created 3 s after the binding
-appeared was admitted (run 36874477467). The e2e therefore waits on a
-server-side dry run until the native policy refuses, then asserts the
-refusal. A client enforcing a policy should expect the same few seconds.
+appeared was admitted (run 36874477467), and the first refusal came 4 s
+after creation on a later run. The e2e asserts the native policy compiled
+(`status.observedGeneration`), waits ten seconds, then asserts the refusal.
+A client enforcing a policy should expect the same few seconds.
 
 Two facts of Kyverno 1.19.1 shaped this, both measured:
 
@@ -126,9 +127,10 @@ not, a privileged pod in each:
 | Enforce, Kyverno up | Admitted | Refused by the native policy |
 | Enforce, Kyverno down | Admitted | Refused by the native policy |
 
-The e2e proves it on floci: a privileged pod in `hello` admitted under
-Enforce, and, after a `restricted` background scan with every default module
-on, no failure reported in any namespace but the test's own.
+The e2e proves it on floci, with Chainsaw's own operations and no script: a
+privileged pod in `hello` admitted under Enforce; then, once a `restricted`
+background scan has reported the test's own pod, no `PolicyReport` with a
+failure in any socle namespace.
 
 Before this scope, the first CI run (36870726028) reported the socle's own
 components under `restricted`: `hello`, `otel-gateway` and `victoria-metrics`
@@ -183,7 +185,7 @@ end:
 | Step | Measured |
 | --- | --- |
 | Both modules on, to the policies' release Ready | 64 s |
-| A privileged pod in Audit, reported, and its series in VictoriaMetrics | 38 s |
+| A privileged pod in Audit, reported | 38 s |
 | `enforce`, the native policy, the pod refused | 2 s |
 | Kyverno's admission at 0: `podinfo` to 2, the privileged pod refused, a pod without requests admitted | 5 s |
 | Back to three admission replicas | 49 s |

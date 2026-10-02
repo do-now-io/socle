@@ -156,9 +156,11 @@ The Kyverno dashboard comes with the chart, as a `ConfigMap` labelled
 `grafana_dashboard: "1"` that [`grafana`](grafana.md)'s sidecar loads. Its
 variable is a Prometheus datasource, so it resolves to VictoriaMetrics. CEL
 policies count under `kyverno_validating_policy_results_total`, not under the
-legacy `kyverno_policy_results_total`. The chart's dashboard reads both. The
-e2e asserts the CEL series in VictoriaMetrics, and lists which panels have
-data.
+legacy `kyverno_policy_results_total`. The chart's dashboard reads both.
+Measured on floci: the CEL series of a reported pod reached VictoriaMetrics.
+The e2e does not query it: that would take a script, and the scrape is
+`otel_gateway`'s proof; it asserts the annotations and the dashboard's
+ConfigMap instead.
 
 ## Why Kyverno and not OPA Gatekeeper
 
