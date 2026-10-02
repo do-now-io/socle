@@ -12,7 +12,7 @@
 locals {
   # Stamped onto every resource that takes tags, so cost can be attributed and
   # orphans can be found. Bumped with the module's own tag.
-  socle_version = "0.0.0" # x-release-please-version
+  socle_version = "0.1.0" # x-release-please-version
 
   # Scaleway tags are a flat list of strings, not a map, so the standard set is
   # rendered as key=value. The version is normalised the way it is on the other
