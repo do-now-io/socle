@@ -118,9 +118,13 @@ spec:
         config:
           # Namespaces no webhook of Kyverno's ever sees: the control plane's
           # own and Flux's, so that no policy, however it is set, can stand
-          # between Flux and what it applies. The chart excludes its own
-          # namespace on top (excludeKyvernoNamespace). A client who replaces
-          # this list through values replaces it whole: he keeps these two.
+          # between Flux and what it applies; and every namespace the socle
+          # renders — the operator labels each with the namespace of the
+          # ResourceSet that rendered it, flux-system for the socle's. Kyverno
+          # judges the client's applications, never the socle's own
+          # components. The chart excludes its own namespace on top
+          # (excludeKyvernoNamespace). A client who replaces this selector
+          # through values replaces it whole: he keeps these expressions.
           webhooks:
             namespaceSelector:
               matchExpressions:
@@ -128,6 +132,10 @@ spec:
                   operator: NotIn
                   values:
                     - kube-system
+                    - flux-system
+                - key: resourceset.fluxcd.controlplane.io/namespace
+                  operator: NotIn
+                  values:
                     - flux-system
         # The chart's dashboard, as a ConfigMap labelled grafana_dashboard,
         # which the grafana module's sidecar loads from every namespace.
