@@ -2,7 +2,7 @@ apiVersion: v2
 name: socle
 # Equals VERSION. The helm provider re-applies a local chart only when its
 # version or its values change, so a template fix ships with a release bump.
-version: 0.0.0 # x-release-please-version
+version: 0.1.0 # x-release-please-version
 description: >-
   Two literal objects the socle bootstrap deposits: the client's inputs and the
   root source. Helm is the applier here, not the templater; the only template
