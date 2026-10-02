@@ -250,6 +250,34 @@ locals {
       values             = {}
       values_secret      = ""
     }
+    # Backup and restore of what GitOps cannot restore — the data in the
+    # applications' EBS and EFS volumes, with their objects
+    # (docs/catalog/velero.md). AWS only in v1, and off by default: it needs
+    # Crossplane, which makes its bucket and its role. Nothing is backed up
+    # unless an application opts in, its chart labelling every object of its
+    # release with socle.do-now.io/backup-frequency and
+    # socle.do-now.io/backup-retention: each entry of policies is one such
+    # pair, rendered as one Schedule, and a pair absent from it backs nothing
+    # up — a warning at admission says so. EBS volumes are CSI snapshots, EFS
+    # volumes a file-system backup through the node-agent, a privileged
+    # DaemonSet installed only when node_agent is on (by default when the EFS
+    # driver is). values and values_secret as every module; credentials are
+    # refused in values.
+    velero = {
+      enabled = false
+      policies = [
+        { frequency = "hourly", retention = "24h", schedule = "0 * * * *" },
+        { frequency = "hourly", retention = "48h", schedule = "0 * * * *" },
+        { frequency = "daily", retention = "7d", schedule = "0 2 * * *" },
+        { frequency = "daily", retention = "30d", schedule = "0 2 * * *" },
+        { frequency = "weekly", retention = "30d", schedule = "30 2 * * 0" },
+        { frequency = "weekly", retention = "90d", schedule = "30 2 * * 0" },
+        { frequency = "monthly", retention = "90d", schedule = "0 3 1 * *" },
+      ]
+      node_agent    = local.eks_addons.efs_csi
+      values        = {}
+      values_secret = ""
+    }
   }
 
   # Which clouds a module exists on. Absent = every cloud. A module listed
@@ -261,6 +289,7 @@ locals {
   # var.kube refuses at plan a module this map does not offer on var.cloud.
   catalog_clouds = {
     gateway_api = ["aws", "azure", "scaleway"]
+    velero      = ["aws"]
   }
 
   # The AWS services kube.keda.services may name: those whose scaler the

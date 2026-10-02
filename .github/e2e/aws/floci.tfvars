@@ -72,6 +72,7 @@ cilium = {
 # runs no add-on workload either way. The e2e proves the catalog, not AWS's
 # packaging.
 eks_addons = {
-  pod_identity_agent = false
-  ebs_csi            = false
+  pod_identity_agent  = false
+  ebs_csi             = false
+  snapshot_controller = false
 }

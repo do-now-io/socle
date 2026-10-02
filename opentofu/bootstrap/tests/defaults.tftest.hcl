@@ -10,6 +10,10 @@ mock_provider "aws" {
   mock_resource "aws_iam_role" {
     defaults = { arn = "arn:aws:iam::000000000000:role/socle-test-mock" }
   }
+  # inputs.cluster.accountId: a module's bucket name carries it.
+  mock_data "aws_caller_identity" {
+    defaults = { account_id = "000000000000" }
+  }
 }
 
 variables {
@@ -776,16 +780,16 @@ run "efs_csi_is_installed_on_request_with_its_own_role" {
 run "every_eks_addon_can_be_turned_off" {
   command = plan
   variables {
-    eks_addons = { pod_identity_agent = false, ebs_csi = false }
+    eks_addons = { pod_identity_agent = false, ebs_csi = false, snapshot_controller = false }
   }
 
   assert {
-    condition     = length(aws_eks_addon.pod_identity_agent) == 0 && length(aws_eks_addon.ebs_csi) == 0 && length(aws_iam_role.ebs_csi) == 0 && length(aws_eks_addon.efs_csi) == 0
+    condition     = length(aws_eks_addon.pod_identity_agent) == 0 && length(aws_eks_addon.ebs_csi) == 0 && length(aws_iam_role.ebs_csi) == 0 && length(aws_eks_addon.efs_csi) == 0 && length(aws_eks_addon.snapshot_controller) == 0
     error_message = "a cluster that brings its own — the e2e test double — must be able to turn every add-on off, and the roles go with them."
   }
   assert {
-    condition     = output.eks_addons.pod_identity_agent == null && output.eks_addons.ebs_csi == null
-    error_message = "an add-on not installed must be null in the output."
+    condition     = output.eks_addons.pod_identity_agent == null && output.eks_addons.ebs_csi == null && output.eks_addons.snapshot_controller == null && output.inputs.storage.snapshots == false
+    error_message = "an add-on not installed must be null in the output, and the templates told there are no snapshots."
   }
 }
 
@@ -959,5 +963,89 @@ run "kyverno_policies_turn_on_with_enforce_and_an_allow_list" {
   assert {
     condition     = output.inputs.modules.kyverno_policies.enforce == ["disallow-privileged-containers", "require-run-as-nonroot", "restrict-image-registries"] && length(output.inputs.modules.kyverno_policies.allowed_registries) == 4
     error_message = "enforce and allowed_registries must reach the inputs as set."
+  }
+}
+
+# --- velero — docs/catalog/velero.md ---
+
+run "velero_is_off_by_default_with_the_seven_policies" {
+  command = plan
+
+  assert {
+    condition     = output.inputs.modules.velero.enabled == false && output.inputs.modules.velero.node_agent == false && output.inputs.modules.velero.values_secret == ""
+    error_message = "velero must be off by default — it needs Crossplane — and without the node-agent while the EFS driver is off: no privileged DaemonSet for nothing."
+  }
+  assert {
+    condition = [for p in output.inputs.modules.velero.policies : "${p.frequency}-${p.retention}"] == [
+      "hourly-24h", "hourly-48h", "daily-7d", "daily-30d", "weekly-30d", "weekly-90d", "monthly-90d",
+    ]
+    error_message = "the seven default pairs are the menu every application chooses from (docs/catalog/velero.md §3)."
+  }
+  assert {
+    condition     = one([for p in output.inputs.modules.velero.policies : p.schedule if p.frequency == "monthly"]) == "0 3 1 * *"
+    error_message = "the monthly pair runs at 03:00 on the first, an hour after the daily ones."
+  }
+}
+
+run "the_cluster_account_and_the_snapshot_controller_reach_the_inputs_on_aws" {
+  command = plan
+
+  assert {
+    condition     = output.inputs.cluster.accountId == "000000000000" && output.inputs.storage.snapshots == true
+    error_message = "on aws the account (the bucket's name carries it) and the snapshot controller's presence must reach the templates."
+  }
+  assert {
+    condition     = aws_eks_addon.snapshot_controller[0].addon_name == "snapshot-controller" && can(regex("^v[0-9]+\\.[0-9]+\\.[0-9]+-eksbuild\\.[0-9]+$", aws_eks_addon.snapshot_controller[0].addon_version)) && output.eks_addons.snapshot_controller.version == aws_eks_addon.snapshot_controller[0].addon_version
+    error_message = "the snapshot controller is an EKS add-on, pinned, on by default."
+  }
+}
+
+run "no_account_and_no_snapshots_off_aws" {
+  command = plan
+  variables {
+    cloud           = "gcp"
+    cluster_network = null
+  }
+
+  assert {
+    condition     = output.inputs.cluster.accountId == "" && output.inputs.storage.snapshots == false && length(aws_eks_addon.snapshot_controller) == 0
+    error_message = "elsewhere there is no AWS account to read and no EKS add-on."
+  }
+}
+
+run "velero_turns_on_with_crossplane_its_own_policies_and_the_node_agent" {
+  command = plan
+  variables {
+    region = "eu-west-3"
+    kube = {
+      crossplane = { enabled = true }
+      velero = {
+        enabled    = true
+        node_agent = true
+        policies   = [{ frequency = "daily", retention = "14d", schedule = "15 1 * * *" }]
+        values     = { credentials = { useSecret = true, existingSecret = "velero-keys" } }
+      }
+    }
+  }
+
+  assert {
+    condition     = output.inputs.modules.velero.enabled && output.inputs.modules.velero.node_agent && length(output.inputs.modules.velero.policies) == 1 && output.inputs.modules.velero.policies[0].retention == "14d"
+    error_message = "the client's list replaces the seven pairs, and the node-agent switch reaches the inputs."
+  }
+  assert {
+    condition     = output.inputs.modules.velero.values.credentials.existingSecret == "velero-keys"
+    error_message = "naming a Secret the client created is not a secret: it must pass."
+  }
+}
+
+run "velero_runs_the_node_agent_by_default_when_the_efs_driver_is_on" {
+  command = plan
+  variables {
+    eks_addons = { efs_csi = true }
+  }
+
+  assert {
+    condition     = output.inputs.modules.velero.node_agent == true
+    error_message = "EFS has no CSI snapshots: with its driver on, the node-agent is what backs its volumes up."
   }
 }

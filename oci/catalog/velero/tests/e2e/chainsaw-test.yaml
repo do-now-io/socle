@@ -1,0 +1,1499 @@
+# The velero module's proof (docs/catalog/velero.md §9). Off by default, so
+# `health` proves the disabled shape only. The `module` phase, on aws, in two
+# halves:
+#
+# 1. The module's own AWS resources, with Crossplane on: its bucket reaches
+#    floci's S3 versioned, encrypted, public access blocked, with its
+#    lifecycle — read from what Crossplane reports and from S3 itself — its
+#    Role floci's IAM under /socle/<cluster>/ with the bucket policy only, and
+#    the workload is withheld while the association is not Ready. Then off:
+#    the role goes, the bucket stays. The floci seams (providerConfigRef:
+#    floci, the association never syncing) are steps of their own, to delete
+#    the day floci serves Pod Identity.
+# 2. A backup and a restore, for real, into that orphaned bucket. floci has
+#    no Pod Identity, so Velero runs with Crossplane off and static test keys
+#    (the plan refuses velero without Crossplane; this test writes the inputs
+#    directly — the seam). The server under Pod Security restricted; the
+#    whole valuesFrom order; the node-agent; a labelled application's file
+#    in a PersistentVolumeClaim backed up by the node-agent (floci's k3s has
+#    no CSI snapshots, so a client value maps its local-path volumes to
+#    fs-backup), its namespace deleted, restored, the file read back; the
+#    module off and on again re-reads the backup from the bucket; an
+#    unknown pair warned at admission.
+#
+# Not provable on floci: the association reaching EKS, the pod getting the
+# role's credentials, IAM enforcing the policy and the boundary, EBS CSI
+# snapshots — the sandbox's (docs/catalog/velero.md §9).
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: velero-health
+  labels:
+    phase: health
+    cloud: any
+    platform: any
+spec:
+  description: Off by default, the ResourceSet is Ready and renders nothing.
+  timeouts:
+    assert: 3m
+    error: 1m
+  steps:
+    - name: the ResourceSet is Ready with nothing in its inventory
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: velero
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (length(inventory.entries || `[]`)): 0
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: velero
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: velero
+---
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: velero-module-aws
+  labels:
+    phase: module
+    cloud: aws
+    platform: any
+spec:
+  description: >-
+    The module's bucket and role through Crossplane, the bucket kept when the
+    module goes; then a backup and a restore with the data, into that bucket.
+  timeouts:
+    assert: 5m
+    error: 3m
+    exec: 3m
+    delete: 3m
+  steps:
+    # First half: the module's own AWS resources (docs/catalog/velero.md §2).
+    - name: with Crossplane on, the module declares its bucket, its Role and its association
+      # 99 s cold (docs/catalog/crossplane.md §7), one provider more here;
+      # ~5 min when the providers re-adopt CRDs a previous install left.
+      timeouts:
+        assert: 8m
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    crossplane:
+                      enabled: true
+                      permissions_boundary: arn:aws:iam::000000000000:policy/socle-e2e-catalog-crossplane-boundary
+                    velero:
+                      enabled: true
+        # In the order their CRDs appear: the release (core), the providers
+        # Healthy (their CRDs), then the module's objects.
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: crossplane
+                namespace: crossplane-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: pkg.crossplane.io/v1
+              kind: Provider
+              metadata:
+                name: provider-aws-s3
+              status:
+                (conditions[?type == 'Healthy'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: pkg.crossplane.io/v1
+              kind: Provider
+              metadata:
+                name: provider-aws-iam
+              status:
+                (conditions[?type == 'Healthy'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: pkg.crossplane.io/v1
+              kind: Provider
+              metadata:
+                name: provider-aws-eks
+              status:
+                (conditions[?type == 'Healthy'] || `[]`):
+                  - status: 'True'
+        # A Provider is Healthy before every CRD it brings is served, and
+        # an assert on a kind not served yet fails at once instead of
+        # retrying (run 36869780420): the S3 CRDs Established first, then
+        # the crossplane ResourceSet Ready — what the velero ResourceSet
+        # waits for before it renders anything.
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: buckets.s3.aws.m.upbound.io
+              status:
+                (conditions[?type == 'Established'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: bucketversionings.s3.aws.m.upbound.io
+              status:
+                (conditions[?type == 'Established'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: bucketserversideencryptionconfigurations.s3.aws.m.upbound.io
+              status:
+                (conditions[?type == 'Established'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: bucketpublicaccessblocks.s3.aws.m.upbound.io
+              status:
+                (conditions[?type == 'Established'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: bucketlifecycleconfigurations.s3.aws.m.upbound.io
+              status:
+                (conditions[?type == 'Established'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: roles.iam.aws.m.upbound.io
+              status:
+                (conditions[?type == 'Established'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: podidentityassociations.eks.aws.m.upbound.io
+              status:
+                (conditions[?type == 'Established'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: crossplane-provider-config
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        # Never Delete: the bucket outlives every managed resource.
+        - assert:
+            resource:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: Bucket
+              metadata:
+                name: velero
+                namespace: velero
+                annotations:
+                  crossplane.io/external-name: ($values.bucket)
+              spec:
+                (contains(managementPolicies, 'Delete')): false
+                (contains(managementPolicies, '*')): false
+                forProvider:
+                  region: eu-west-3
+        - assert:
+            resource:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: BucketVersioning
+              metadata:
+                name: velero
+                namespace: velero
+              spec:
+                (contains(managementPolicies, 'Delete')): false
+        - assert:
+            resource:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: BucketServerSideEncryptionConfiguration
+              metadata:
+                name: velero
+                namespace: velero
+              spec:
+                (contains(managementPolicies, 'Delete')): false
+        - assert:
+            resource:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: BucketPublicAccessBlock
+              metadata:
+                name: velero
+                namespace: velero
+              spec:
+                (contains(managementPolicies, 'Delete')): false
+        - assert:
+            resource:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: BucketLifecycleConfiguration
+              metadata:
+                name: velero
+                namespace: velero
+              spec:
+                (contains(managementPolicies, 'Delete')): false
+        - assert:
+            resource:
+              apiVersion: iam.aws.m.upbound.io/v1beta1
+              kind: Role
+              metadata:
+                name: velero-server
+                namespace: velero
+                annotations:
+                  crossplane.io/external-name: (join('', [$values.cluster, '-velero']))
+              spec:
+                forProvider:
+                  path: (join('', ['/socle/', $values.cluster, '/']))
+                  permissionsBoundary: arn:aws:iam::000000000000:policy/socle-e2e-catalog-crossplane-boundary
+        - assert:
+            resource:
+              apiVersion: eks.aws.m.upbound.io/v1beta1
+              kind: PodIdentityAssociation
+              metadata:
+                name: velero-server
+                namespace: velero
+              spec:
+                forProvider:
+                  namespace: velero
+                  serviceAccount: velero-server
+        # Off by default, so no privileged namespace.
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: velero
+                labels:
+                  pod-security.kubernetes.io/enforce: restricted
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+        - describe:
+            apiVersion: pkg.crossplane.io/v1
+            kind: Provider
+        - events:
+            namespace: crossplane-system
+        - podLogs:
+            namespace: crossplane-system
+            tail: 40
+    # floci seam: the module leaves providerConfigRef at its default, the
+    # socle's Pod Identity ClusterProviderConfig, which floci cannot serve.
+    # floci's own is named after the fact, with S3 among its services and
+    # path-style addressing (floci answers one host). Deleted the day floci
+    # serves Pod Identity. skipDelete: the off step removes them itself,
+    # before Crossplane goes.
+    # floci seam, DNS: the SDK prefixes S3 Control's host with the account
+    # (000000000000.<endpoint host>), and an IP takes no prefix — "lookup
+    # 000000000000.172.18.0.2: no such host" (run 36876844601). k3s's CoreDNS
+    # imports coredns-custom: a template answers floci's address for every
+    # name under floci.e2e, and floci serves any Host. Deleted with the other
+    # seams.
+    - name: 'floci seam: every name under floci.e2e resolves to floci, in the cluster'
+      skipDelete: true
+      try:
+        # The mount syncs within a minute and CoreDNS reloads every 30 s.
+        - script:
+            timeout: 4m
+            env:
+              - name: FLOCI_IP
+                value: ($values.floci_ip)
+            content: |
+              kubectl -n kube-system apply -f - <<EOF
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: coredns-custom
+                namespace: kube-system
+              data:
+                floci.server: |
+                  floci.e2e:53 {
+                    template IN A floci.e2e {
+                      answer "{{ .Name }} 60 IN A $FLOCI_IP"
+                    }
+                    # No IPv6: an empty answer, not SERVFAIL, which a resolver
+                    # asking A and AAAA together may take for a failure.
+                    template IN AAAA floci.e2e {
+                      rcode NOERROR
+                    }
+                  }
+              EOF
+              for _ in $(seq 1 40); do
+                if kubectl -n kube-system run floci-dns-probe --image=docker.io/library/busybox:1.37 --restart=Never --rm -i --quiet \
+                     -- nslookup 000000000000.floci.e2e 2>/dev/null | grep -q "Address: $FLOCI_IP$"; then
+                  echo "000000000000.floci.e2e resolves in the cluster"; exit 0
+                fi
+                kubectl -n kube-system delete pod floci-dns-probe --ignore-not-found > /dev/null 2>&1
+                sleep 5
+              done
+              kubectl -n kube-system get configmap coredns-custom -o yaml
+              echo "000000000000.floci.e2e never resolved"; exit 1
+      catch:
+        - podLogs:
+            namespace: kube-system
+            selector: k8s-app=kube-dns
+            tail: 30
+    - name: 'floci seam: a ClusterProviderConfig with static keys, and the module''s resources pointed at it'
+      skipDelete: true
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: floci-credentials
+                namespace: crossplane-system
+              stringData:
+                credentials: |
+                  [default]
+                  aws_access_key_id = test
+                  aws_secret_access_key = test
+        - apply:
+            resource:
+              apiVersion: aws.m.upbound.io/v1beta1
+              kind: ClusterProviderConfig
+              metadata:
+                name: floci
+              spec:
+                credentials:
+                  source: Secret
+                  secretRef:
+                    namespace: crossplane-system
+                    name: floci-credentials
+                    key: credentials
+                endpoint:
+                  hostnameImmutable: true
+                  # s3control: the provider reads a bucket's tags through S3
+                  # Control ListTagsForResource (run 36873861215).
+                  services: [iam, eks, sts, s3, s3control]
+                  url:
+                    type: Static
+                    # A name, so that S3 Control's account prefix resolves too.
+                    static: http://floci.e2e:4566
+                s3_use_path_style: true
+                skip_credentials_validation: true
+                skip_metadata_api_check: true
+                skip_region_validation: true
+                skip_requesting_account_id: true
+        - patch:
+            resource:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: Bucket
+              metadata:
+                name: velero
+                namespace: velero
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: floci}
+        - patch:
+            resource:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: BucketVersioning
+              metadata:
+                name: velero
+                namespace: velero
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: floci}
+        - patch:
+            resource:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: BucketServerSideEncryptionConfiguration
+              metadata:
+                name: velero
+                namespace: velero
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: floci}
+        - patch:
+            resource:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: BucketPublicAccessBlock
+              metadata:
+                name: velero
+                namespace: velero
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: floci}
+        - patch:
+            resource:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: BucketLifecycleConfiguration
+              metadata:
+                name: velero
+                namespace: velero
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: floci}
+        - patch:
+            resource:
+              apiVersion: iam.aws.m.upbound.io/v1beta1
+              kind: Role
+              metadata:
+                name: velero-server
+                namespace: velero
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: floci}
+        - patch:
+            resource:
+              apiVersion: eks.aws.m.upbound.io/v1beta1
+              kind: PodIdentityAssociation
+              metadata:
+                name: velero-server
+                namespace: velero
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: floci}
+    - name: the bucket is in S3, versioned, encrypted, public access blocked, with its lifecycle
+      try:
+        - assert:
+            resource:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: Bucket
+              metadata:
+                name: velero
+                namespace: velero
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                atProvider:
+                  arn: (join('', ['arn:aws:s3:::', $values.bucket]))
+        - assert:
+            resource:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: BucketVersioning
+              metadata:
+                name: velero
+                namespace: velero
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: BucketServerSideEncryptionConfiguration
+              metadata:
+                name: velero
+                namespace: velero
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: BucketPublicAccessBlock
+              metadata:
+                name: velero
+                namespace: velero
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: BucketLifecycleConfiguration
+              metadata:
+                name: velero
+                namespace: velero
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - script:
+            env:
+              - name: AWS_ENDPOINT_URL
+                value: http://localhost:4566
+              - name: BUCKET
+                value: ($values.bucket)
+            content: |
+              . ./s3.sh
+              bucket_settings
+      catch:
+        - describe:
+            apiVersion: s3.aws.m.upbound.io/v1beta1
+            kind: Bucket
+            namespace: velero
+        - describe:
+            apiVersion: s3.aws.m.upbound.io/v1beta1
+            kind: BucketLifecycleConfiguration
+            namespace: velero
+        - podLogs:
+            namespace: crossplane-system
+            selector: pkg.crossplane.io/provider=provider-aws-s3
+            tail: 60
+    - name: the Role becomes an IAM role under /socle/<cluster>/ that reaches the bucket and nothing else
+      try:
+        - assert:
+            resource:
+              apiVersion: iam.aws.m.upbound.io/v1beta1
+              kind: Role
+              metadata:
+                name: velero-server
+                namespace: velero
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                atProvider:
+                  arn: (join('', ['arn:aws:iam::000000000000:role/socle/', $values.cluster, '/', $values.cluster, '-velero']))
+                  (contains(assumeRolePolicy || '', 'pods.eks.amazonaws.com')): true
+                  (inlinePolicy[?name == 'bucket'] || `[]`):
+                    - (contains(policy || '', join('', ['"arn:aws:s3:::', $values.bucket, '"']))): true
+                      (contains(policy || '', join('', ['"arn:aws:s3:::', $values.bucket, '/*"']))): true
+                      (contains(policy || '', 's3:PutObject')): true
+                      (contains(policy || '', 'ec2:')): false
+                      (contains(policy || '', 's3:*')): false
+                      (contains(policy || '', 'DeleteBucket')): false
+      catch:
+        - describe:
+            apiVersion: iam.aws.m.upbound.io/v1beta1
+            kind: Role
+            namespace: velero
+            name: velero-server
+        - podLogs:
+            namespace: crossplane-system
+            selector: pkg.crossplane.io/provider=provider-aws-iam
+            tail: 40
+    # floci seam, second half: the association never syncs (floci 2.1.0 has
+    # no association API), so the workload's dependsOn is never met: one full
+    # minute after the bucket and the role turned Ready, still no
+    # HelmRelease. The day it syncs this step fails and goes with the seam.
+    - name: 'floci seam: the association cannot sync, so the workload is withheld'
+      try:
+        - assert:
+            resource:
+              apiVersion: eks.aws.m.upbound.io/v1beta1
+              kind: PodIdentityAssociation
+              metadata:
+                name: velero-server
+                namespace: velero
+              status:
+                (conditions[?type == 'Synced'] || `[]`):
+                  - status: 'False'
+        - sleep:
+            duration: 60s
+        - error:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: velero
+                namespace: velero
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: velero-workload
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'False'
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: velero-workload
+    # The association's finalizer waits on an API floci does not have:
+    # released by hand. Then the module off: the IAM role is deleted, the
+    # namespace goes — and the bucket stays, its managed resources having no
+    # Delete. Crossplane off last.
+    - name: off, the IAM role is deleted, the namespace goes, the bucket stays
+      try:
+        - patch:
+            resource:
+              apiVersion: eks.aws.m.upbound.io/v1beta1
+              kind: PodIdentityAssociation
+              metadata:
+                name: velero-server
+                namespace: velero
+                finalizers: []
+        # No idle gate: the workload is withheld, there is no release.
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    velero:
+                      enabled: false
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: velero
+        - script:
+            env:
+              - name: AWS_ENDPOINT_URL
+                value: http://localhost:4566
+              - name: BUCKET
+                value: ($values.bucket)
+              - name: ROLE
+                value: (join('', [$values.cluster, '-velero']))
+            content: |
+              . ./s3.sh
+              gone=""
+              for _ in $(seq 1 30); do
+                aws iam get-role --role-name "$ROLE" > /dev/null 2>&1 || { gone=1; break; }
+                sleep 2
+              done
+              [ -n "$gone" ] || { echo "IAM role $ROLE survived the module turned off"; exit 1; }
+              bucket_survives
+              bucket_settings
+        - delete:
+            ref:
+              apiVersion: aws.m.upbound.io/v1beta1
+              kind: ClusterProviderConfig
+              name: floci
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Secret
+              name: floci-credentials
+              namespace: crossplane-system
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: ConfigMap
+              name: coredns-custom
+              namespace: kube-system
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    crossplane:
+                      enabled: false
+                      permissions_boundary: ''
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: crossplane-system
+      catch:
+        - describe:
+            apiVersion: v1
+            kind: Namespace
+            name: velero
+        - describe:
+            apiVersion: s3.aws.m.upbound.io/v1beta1
+            kind: Bucket
+            namespace: velero
+        - podLogs:
+            namespace: flux-system
+            selector: app.kubernetes.io/name=flux-operator
+            tail: 40
+    # Second half: a backup and a restore into the bucket the first half
+    # left. floci seam: static test keys and floci's endpoint as a pod sees
+    # it, through the chart's own credentials and storage location values.
+    - name: 'floci seam: the static keys Velero reads instead of Pod Identity'
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: velero
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: velero-floci
+                namespace: velero
+              stringData:
+                cloud: |
+                  [default]
+                  aws_access_key_id = test
+                  aws_secret_access_key = test
+    - name: on with static keys, the server under restricted, the bucket Available, the seven Schedules
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    velero:
+                      enabled: true
+                      node_agent: false
+                      values:
+                        credentials:
+                          useSecret: true
+                          existingSecret: velero-floci
+                        configuration:
+                          # The re-sync step waits on it: 10 s, not 1 min.
+                          backupSyncPeriod: 10s
+                          backupStorageLocation:
+                            - name: default
+                              provider: aws
+                              bucket: ($values.bucket)
+                              default: true
+                              config:
+                                region: eu-west-3
+                                s3Url: (join('', ['http://', $values.floci_ip, ':4566']))
+                                s3ForcePathStyle: 'true'
+                                checksumAlgorithm: ''
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: velero
+                labels:
+                  pod-security.kubernetes.io/enforce: restricted
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: velero
+                namespace: velero
+              spec:
+                template:
+                  spec:
+                    serviceAccountName: velero-server
+                    (initContainers[?name == 'velero-plugin-for-aws'] || `[]`):
+                      - image: docker.io/velero/velero-plugin-for-aws:v1.14.4
+                    # No CSI snapshot controller on floci's k3s: no EnableCSI,
+                    # which would fail every backup on the missing kinds.
+                    (containers[?name == 'velero'] || `[]`):
+                      - (contains(args || `[]`, '--features=EnableCSI')): false
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: velero.io/v1
+              kind: BackupStorageLocation
+              metadata:
+                name: default
+                namespace: velero
+              status:
+                phase: Available
+        - assert:
+            resource:
+              apiVersion: velero.io/v1
+              kind: Schedule
+              metadata:
+                name: velero-hourly-24h
+                namespace: velero
+              spec:
+                schedule: '0 * * * *'
+                template:
+                  ttl: 24h
+                  storageLocation: default
+                  labelSelector:
+                    matchLabels:
+                      socle.do-now.io/backup-frequency: hourly
+                      socle.do-now.io/backup-retention: 24h
+                  resourcePolicy:
+                    kind: configmap
+                    name: velero-volume-policy
+        - assert:
+            resource:
+              apiVersion: velero.io/v1
+              kind: Schedule
+              metadata:
+                name: velero-daily-30d
+                namespace: velero
+              spec:
+                schedule: '0 2 * * *'
+                template:
+                  ttl: 720h
+        - assert:
+            resource:
+              apiVersion: velero.io/v1
+              kind: Schedule
+              metadata:
+                name: velero-weekly-90d
+                namespace: velero
+              spec:
+                schedule: '30 2 * * 0'
+                template:
+                  ttl: 2160h
+        - assert:
+            resource:
+              apiVersion: velero.io/v1
+              kind: Schedule
+              metadata:
+                name: velero-monthly-90d
+                namespace: velero
+              spec:
+                schedule: '0 3 1 * *'
+                template:
+                  ttl: 2160h
+        - script:
+            content: |
+              n="$(kubectl -n velero get schedules.velero.io -o name | wc -l | tr -d ' ')"
+              [ "$n" = 7 ] || { kubectl -n velero get schedules.velero.io; echo "$n Schedules, expected the seven default pairs"; exit 1; }
+              echo "7 Schedules"
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: velero-volume-policy
+                namespace: velero
+              (contains(data."policy.yaml", 'ebs.csi.aws.com')): true
+              (contains(data."policy.yaml", 'efs.csi.aws.com')): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: node-agent
+                namespace: velero
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: velero
+            name: velero
+        - describe:
+            apiVersion: velero.io/v1
+            kind: BackupStorageLocation
+            namespace: velero
+        - describe:
+            apiVersion: v1
+            kind: Pod
+            namespace: velero
+        - events:
+            namespace: velero
+        - podLogs:
+            namespace: velero
+            selector: app.kubernetes.io/name=velero
+            tail: 60
+    # A key the socle sets (the server's memory request, 128Mi), overridden
+    # by values (160Mi), overridden again by the Secret named in
+    # values_secret (192Mi), merged last; then both cleared, the socle's back.
+    - name: kube.velero.values_secret is merged last, over values and the socle
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: velero-e2e-values
+                namespace: velero
+                labels:
+                  reconcile.fluxcd.io/watch: Enabled
+              stringData:
+                values.yaml: |
+                  resources:
+                    requests:
+                      memory: 192Mi
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    velero:
+                      values:
+                        resources:
+                          requests:
+                            memory: 160Mi
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: velero
+                namespace: velero
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'velero'] || `[]`):
+                      - resources:
+                          requests:
+                            memory: 160Mi
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    velero:
+                      values_secret: velero-e2e-values
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: velero
+                namespace: velero
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'velero'] || `[]`):
+                      - resources:
+                          requests:
+                            memory: 192Mi
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    velero:
+                      values_secret: ''
+                      values:
+                        resources: null
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: velero
+                namespace: velero
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'velero'] || `[]`):
+                      - resources:
+                          requests:
+                            memory: 128Mi
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Secret
+              name: velero-e2e-values
+              namespace: velero
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: velero
+            name: velero
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 40
+    # node_agent: the DaemonSet, and the namespace privileged for it. floci's
+    # k3s provisions local-path volumes, no CSI driver: a client value adds
+    # them to the volume policy as fs-backup, the way EFS volumes are by
+    # default.
+    - name: node_agent on, the namespace privileged, local-path volumes by file-system backup
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    velero:
+                      node_agent: true
+                      values:
+                        configMaps:
+                          volume-policy:
+                            data:
+                              policy.yaml: |
+                                version: v1
+                                volumePolicies:
+                                  - conditions:
+                                      storageClass: [local-path]
+                                    action:
+                                      type: fs-backup
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: velero
+                labels:
+                  pod-security.kubernetes.io/enforce: privileged
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: node-agent
+                namespace: velero
+              status:
+                (numberReady > `0`): true
+                (numberReady == desiredNumberScheduled): true
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: velero-volume-policy
+                namespace: velero
+              (contains(data."policy.yaml", 'local-path')): true
+      catch:
+        - describe:
+            apiVersion: apps/v1
+            kind: DaemonSet
+            namespace: velero
+        - events:
+            namespace: velero
+    # The application a chart would render: every object labelled with the
+    # pair. The file goes into the claim once; the restore must bring it back.
+    # volumeType: local makes local-path provision a `local` volume, which
+    # the node-agent reads — it does not back up hostPath volumes.
+    - name: a labelled application writes a file into its volume
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: e2e-velero
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: PersistentVolumeClaim
+              metadata:
+                name: data
+                namespace: e2e-velero
+                labels:
+                  socle.do-now.io/backup-frequency: daily
+                  socle.do-now.io/backup-retention: 7d
+                annotations:
+                  volumeType: local
+              spec:
+                accessModes: [ReadWriteOnce]
+                storageClassName: local-path
+                resources:
+                  requests:
+                    storage: 64Mi
+        - apply:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: app
+                namespace: e2e-velero
+                labels:
+                  socle.do-now.io/backup-frequency: daily
+                  socle.do-now.io/backup-retention: 7d
+              spec:
+                replicas: 1
+                selector:
+                  matchLabels:
+                    app: e2e-velero
+                template:
+                  metadata:
+                    labels:
+                      app: e2e-velero
+                      socle.do-now.io/backup-frequency: daily
+                      socle.do-now.io/backup-retention: 7d
+                  spec:
+                    containers:
+                      - name: app
+                        image: docker.io/library/busybox:1.37
+                        command:
+                          - sh
+                          - -c
+                          - '[ -s /data/proof ] || echo "$PROOF" > /data/proof; exec sleep 86400'
+                        env:
+                          - name: PROOF
+                            value: ($values.proof)
+                        volumeMounts:
+                          - name: data
+                            mountPath: /data
+                    volumes:
+                      - name: data
+                        persistentVolumeClaim:
+                          claimName: data
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: app
+                namespace: e2e-velero
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - script:
+            env:
+              - name: PROOF
+                value: ($values.proof)
+            content: |
+              for _ in $(seq 1 30); do
+                got="$(kubectl -n e2e-velero exec deploy/app -- cat /data/proof 2>/dev/null || true)"
+                [ "$got" = "$PROOF" ] && { echo "the file holds: $got"; exit 0; }
+                sleep 2
+              done
+              echo "the file holds '$got', expected '$PROOF'"; exit 1
+      catch:
+        - describe:
+            apiVersion: v1
+            kind: Pod
+            namespace: e2e-velero
+        - describe:
+            apiVersion: v1
+            kind: PersistentVolumeClaim
+            namespace: e2e-velero
+    # A Backup from the daily-7d template, taken now rather than at 02:00:
+    # the same selector, TTL, storage location and volume policy.
+    - name: a backup of the daily-7d pair completes, the volume backed up by the node-agent
+      try:
+        - apply:
+            resource:
+              apiVersion: velero.io/v1
+              kind: Backup
+              metadata:
+                name: e2e-backup
+                namespace: velero
+              spec:
+                ttl: 168h0m0s
+                includedNamespaces: ['*']
+                storageLocation: default
+                labelSelector:
+                  matchLabels:
+                    socle.do-now.io/backup-frequency: daily
+                    socle.do-now.io/backup-retention: 7d
+                resourcePolicy:
+                  kind: configmap
+                  name: velero-volume-policy
+        - assert:
+            resource:
+              apiVersion: velero.io/v1
+              kind: Backup
+              metadata:
+                name: e2e-backup
+                namespace: velero
+              status:
+                phase: Completed
+        - assert:
+            resource:
+              apiVersion: velero.io/v1
+              kind: PodVolumeBackup
+              metadata:
+                namespace: velero
+                labels:
+                  velero.io/backup-name: e2e-backup
+              spec:
+                volume: data
+              status:
+                phase: Completed
+      catch:
+        - describe:
+            apiVersion: velero.io/v1
+            kind: Backup
+            namespace: velero
+            name: e2e-backup
+        - describe:
+            apiVersion: velero.io/v1
+            kind: PodVolumeBackup
+            namespace: velero
+        - podLogs:
+            namespace: velero
+            selector: app.kubernetes.io/name=velero
+            tail: 80
+        - podLogs:
+            namespace: velero
+            selector: name=node-agent
+            tail: 60
+    # §7, scenario 1, without Argo CD on floci: the namespace deleted, the
+    # restore, the file back.
+    - name: the namespace deleted and restored, the file read back
+      timeouts:
+        error: 5m
+      try:
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Namespace
+              name: e2e-velero
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: e2e-velero
+        - apply:
+            resource:
+              apiVersion: velero.io/v1
+              kind: Restore
+              metadata:
+                name: e2e-restore
+                namespace: velero
+              spec:
+                backupName: e2e-backup
+                includedNamespaces: [e2e-velero]
+        - assert:
+            resource:
+              apiVersion: velero.io/v1
+              kind: Restore
+              metadata:
+                name: e2e-restore
+                namespace: velero
+              status:
+                phase: Completed
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: app
+                namespace: e2e-velero
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - script:
+            env:
+              - name: PROOF
+                value: ($values.proof)
+            content: |
+              for _ in $(seq 1 30); do
+                got="$(kubectl -n e2e-velero exec deploy/app -- cat /data/proof 2>/dev/null || true)"
+                [ "$got" = "$PROOF" ] && { echo "restored, the file holds: $got"; exit 0; }
+                sleep 2
+              done
+              echo "after the restore the file holds '$got', expected '$PROOF'"; exit 1
+        # §7, last step: the Restore deleted once checked, while the server
+        # runs. Its finalizer (restores.velero.io/external-resources-finalizer)
+        # is the server's to release; left in place, it holds the namespace
+        # Terminating once the module goes (run 36977771047).
+        - delete:
+            ref:
+              apiVersion: velero.io/v1
+              kind: Restore
+              name: e2e-restore
+              namespace: velero
+        - error:
+            resource:
+              apiVersion: velero.io/v1
+              kind: Restore
+              metadata:
+                name: e2e-restore
+                namespace: velero
+      catch:
+        - describe:
+            apiVersion: velero.io/v1
+            kind: Restore
+            namespace: velero
+            name: e2e-restore
+        - describe:
+            apiVersion: velero.io/v1
+            kind: PodVolumeRestore
+            namespace: velero
+        - describe:
+            apiVersion: v1
+            kind: Pod
+            namespace: e2e-velero
+        - podLogs:
+            namespace: velero
+            selector: app.kubernetes.io/name=velero
+            tail: 80
+    # The policy warns, never refuses: the Deployment is created, the warning
+    # printed to whoever applied it.
+    - name: a pair that is not a policy is warned at admission, and admitted
+      try:
+        - script:
+            content: |
+              out="$(kubectl apply -f - 2>&1 <<'EOF'
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: mistyped
+                namespace: e2e-velero
+                labels:
+                  socle.do-now.io/backup-frequency: daily
+                  socle.do-now.io/backup-retention: 31d
+              spec:
+                replicas: 0
+                selector:
+                  matchLabels: { app: mistyped }
+                template:
+                  metadata:
+                    labels: { app: mistyped }
+                  spec:
+                    containers:
+                      - name: app
+                        image: docker.io/library/busybox:1.37
+              EOF
+              )"
+              echo "$out"
+              echo "$out" | grep -q 'daily-31d, which is not a backup policy' || { echo "no warning for daily-31d"; exit 1; }
+              kubectl -n e2e-velero get deployment mistyped > /dev/null
+    # Scenario 2 in small: what a rebuilt cluster does. The Backup object
+    # deleted — the bucket keeps the backup — and Velero re-reads it from the
+    # bucket at its next sync.
+    - name: the backup object deleted, the backup is re-read from the bucket
+      try:
+        - delete:
+            ref:
+              apiVersion: velero.io/v1
+              kind: Backup
+              name: e2e-backup
+              namespace: velero
+        - assert:
+            resource:
+              apiVersion: velero.io/v1
+              kind: Backup
+              metadata:
+                name: e2e-backup
+                namespace: velero
+              status:
+                phase: Completed
+      catch:
+        - describe:
+            apiVersion: velero.io/v1
+            kind: BackupStorageLocation
+            namespace: velero
+        - podLogs:
+            namespace: velero
+            selector: app.kubernetes.io/name=velero
+            tail: 60
+    # Leaves the inputs as it found them: the module off, its values cleared.
+    - name: off, the namespace goes, the bucket stays
+      timeouts:
+        error: 5m
+      try:
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: velero
+                namespace: velero
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'Released'] || `[]`):
+                  - status: 'True'
+                (length(conditions[?type == 'Reconciling'] || `[]`)): 0
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Namespace
+              name: e2e-velero
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    velero:
+                      enabled: false
+                      node_agent: false
+                      values:
+                        credentials: null
+                        configuration: null
+                        configMaps: null
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: velero
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (length(inventory.entries || `[]`)): 0
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: velero
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: e2e-velero
+        - script:
+            env:
+              - name: AWS_ENDPOINT_URL
+                value: http://localhost:4566
+              - name: BUCKET
+                value: ($values.bucket)
+            content: |
+              . ./s3.sh
+              bucket_survives
+      catch:
+        - describe:
+            apiVersion: v1
+            kind: Namespace
+            name: velero
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: velero
+            name: velero
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 40
