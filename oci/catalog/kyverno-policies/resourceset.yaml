@@ -6,6 +6,11 @@
 # Off by default, and refused at plan without kyverno on.
 # Design and measurements: docs/catalog/kyverno-policies.md.
 #
+# Scope: the client's applications. Every namespace the socle renders is out
+# of every policy — the operator labels each with the namespace of the
+# ResourceSet that rendered it, flux-system for the socle's — and so are
+# kube-system, flux-system and kyverno, by name.
+#
 # Every policy is in Audit: a violation is admitted and reported. A policy the
 # client names in kube.kyverno_policies.enforce is switched to Deny AND
 # compiled by Kyverno into a native ValidatingAdmissionPolicy (the
@@ -93,24 +98,11 @@ spec:
         # Kyverno's webhook down admits rather than refuses: an Audit policy
         # has nothing to refuse, and an Enforce one is native (see above).
         failurePolicy: Ignore
-        # Out of every policy, in admission and in the background scan: the
-        # control plane, Flux, and Kyverno itself.
+        # Out of every policy, in admission and in the background scan, by
+        # name: the control plane, Flux, and Kyverno itself. The socle's own
+        # namespaces go by label (the postRenderers patch below).
         vpolExclude:
           excludeNamespaces: [kube-system, flux-system, kyverno]
-        # The socle's own components, where a policy and their job disagree.
-        # A per-policy entry replaces the list above, so it repeats it.
-        vpolExcludeByPolicy:
-          # otel_agent reads every container's log from /var/log/pods: a
-          # read-only hostPath, as root, every capability dropped
-          # (docs/catalog/otel-agent.md).
-          disallow-host-path:
-            excludeNamespaces: [kube-system, flux-system, kyverno, otel-agent]
-          restrict-volume-types:
-            excludeNamespaces: [kube-system, flux-system, kyverno, otel-agent]
-          require-run-as-nonroot:
-            excludeNamespaces: [kube-system, flux-system, kyverno, otel-agent]
-          require-run-as-non-root-user:
-            excludeNamespaces: [kube-system, flux-system, kyverno, otel-agent]
         customPolicies:
           - |
             apiVersion: policies.kyverno.io/v1beta1
@@ -272,6 +264,12 @@ spec:
           valuesKey: values.yaml
           optional: true
         << end >>
+      # Every policy skips the namespaces the socle renders: a
+      # namespaceSelector on the label the operator puts on each, which the
+      # native ValidatingAdmissionPolicy inherits and the background scan
+      # honours. Without it, Kyverno reports the socle's own components and,
+      # in Enforce, could refuse their pods.
+      #
       # Every policy matches Pods only: the pod-controller autogen, which
       # would also match each Deployment, StatefulSet, Job…, is off. Kyverno
       # only compiles a policy into a native ValidatingAdmissionPolicy with
@@ -293,6 +291,13 @@ spec:
                   group: policies.kyverno.io
                   kind: ValidatingPolicy
                 patch: |
+                  - op: add
+                    path: /spec/matchConstraints/namespaceSelector
+                    value:
+                      matchExpressions:
+                        - key: resourceset.fluxcd.controlplane.io/namespace
+                          operator: NotIn
+                          values: [flux-system]
                   - op: add
                     path: /spec/autogen
                     value:

@@ -16,7 +16,7 @@ client opts into, not something the socle ships unasked.
 | What | The official `kyverno` chart, `oci://ghcr.io/kyverno/charts/kyverno:3.9.1` (Kyverno v1.19.1), one `HelmRelease` in namespace `kyverno` |
 | Default | **Off** |
 | Shape | Admission controller ×3 with a PodDisruptionBudget (`minAvailable: 1`); background and reports controllers ×1; **no cleanup controller** |
-| Webhooks | Never see `kube-system`, `flux-system` or `kyverno` |
+| Webhooks | Never see `kube-system`, `flux-system`, `kyverno`, nor any namespace the socle renders: Kyverno judges the client's applications only |
 | Metrics | `prometheus.io/*` annotations on `:8000` for every controller, scraped by [`otel_gateway`](otel-gateway.md) |
 | Dashboard | The chart's own, a `ConfigMap` labelled `grafana_dashboard`, loaded by [`grafana`](grafana.md) |
 | Cloud access | None: no role, no Crossplane |
@@ -28,12 +28,17 @@ The issue's first question. An admission webhook that is down can block every
 apply in the cluster, Flux included. The answer has three layers, each
 measured:
 
-1. **The webhooks never see the control plane or Flux.** Kyverno's
-   `config.webhooks.namespaceSelector` excludes `kube-system` and
-   `flux-system`, and the chart excludes its own namespace. Every webhook
-   Kyverno registers carries both selectors (measured on the live
-   `ValidatingWebhookConfiguration`). Whatever policy a client writes, Flux's
-   own objects never wait on Kyverno.
+1. **The webhooks never see the control plane, Flux or the socle.**
+   Kyverno's `config.webhooks.namespaceSelector` excludes `kube-system` and
+   `flux-system` by name, and every namespace the socle renders by label:
+   flux-operator labels each namespace a ResourceSet renders with
+   `resourceset.fluxcd.controlplane.io/namespace`, the ResourceSet's own
+   namespace, `flux-system` for the socle's. The chart excludes its own
+   namespace on top. Every webhook Kyverno registers carries these selectors
+   (measured on the live `ValidatingWebhookConfiguration`). Whatever policy a
+   client writes, neither Flux nor a socle component ever waits on Kyverno.
+   A client whose own ResourceSets live in `flux-system` would see their
+   namespaces excluded too: his belong elsewhere, or in his ArgoCD.
 2. **Audit goes through Kyverno, and fails open.** The policies' webhooks are
    registered with `failurePolicy: Ignore`. Kyverno down admits. Nothing to
    refuse is lost, since an Audit policy refuses nothing.

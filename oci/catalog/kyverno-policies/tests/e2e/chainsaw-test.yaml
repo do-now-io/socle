@@ -9,7 +9,9 @@
 #            then every named attribute (profile, allowed_registries), the
 #            whole valuesFrom order, and off — the policies and their native
 #            twins gone. The test pods live in Chainsaw's own namespace, which
-#            no policy excludes.
+#            no policy excludes; the socle's own namespaces are out of scope,
+#            and the test proves it in hello: a privileged pod admitted there
+#            in Enforce, and no failure reported in any socle namespace.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -96,7 +98,8 @@ spec:
                   - status: 'True'
         # The chart's baseline profile and the socle's two unconditional
         # policies, each in Audit, its webhook in Ignore, the control plane,
-        # Flux and Kyverno excluded, the pod-controller autogen off.
+        # Flux and Kyverno excluded by name, the socle's namespaces by label,
+        # the pod-controller autogen off.
         - assert:
             resource:
               apiVersion: policies.kyverno.io/v1beta1
@@ -109,6 +112,12 @@ spec:
                 autogen:
                   podControllers:
                     controllers: [none]
+                matchConstraints:
+                  namespaceSelector:
+                    matchExpressions:
+                      - key: resourceset.fluxcd.controlplane.io/namespace
+                        operator: NotIn
+                        values: [flux-system]
                 (matchConditions[?name == 'exclude-namespaces'] || `[]`):
                   - (contains(expression, 'flux-system')): true
                     (contains(expression, 'kube-system')): true
@@ -131,16 +140,6 @@ spec:
                 name: disallow-latest-tag
               spec:
                 validationActions: [Audit]
-        # otel_agent's hostPath, exempted by name on the one policy it fails.
-        - assert:
-            resource:
-              apiVersion: policies.kyverno.io/v1beta1
-              kind: ValidatingPolicy
-              metadata:
-                name: disallow-host-path
-              spec:
-                (matchConditions[?name == 'exclude-namespaces'] || `[]`):
-                  - (contains(expression, 'otel-agent')): true
         # No allow-list named, no registry policy; baseline, no restricted one.
         - error:
             resource:
@@ -300,6 +299,26 @@ spec:
               - check:
                   ($error != null): true
                   (contains($error, 'disallow-privileged-containers')): true
+        # The same pod in a namespace the socle renders — hello's — is out of
+        # scope: admitted, Enforce or not. Kyverno judges applications, not
+        # the socle's own components.
+        - create:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                name: privileged-socle
+                namespace: hello
+              spec:
+                containers:
+                  - name: pause
+                    image: registry.k8s.io/pause:3.10
+                    resources:
+                      requests:
+                        cpu: 10m
+                        memory: 16Mi
+                    securityContext:
+                      privileged: true
       catch:
         - describe:
             apiVersion: policies.kyverno.io/v1beta1
@@ -529,9 +548,7 @@ spec:
             apiVersion: wgpolicyk8s.io/v1alpha2
             kind: PolicyReport
             namespace: ($namespace)
-    # restricted: the chart's six restricted policies on top of baseline. The
-    # script prints what each says of the socle's own components — the
-    # measurement behind docs/catalog/kyverno-policies.md, not an assertion.
+    # restricted: the chart's six restricted policies on top of baseline.
     - name: kube.kyverno_policies.profile = restricted adds the restricted policies
       try:
         - patch:
@@ -554,17 +571,17 @@ spec:
                 name: require-run-as-nonroot
               spec:
                 validationActions: [Audit]
-                (matchConditions[?name == 'exclude-namespaces'] || `[]`):
-                  - (contains(expression, 'otel-agent')): true
         - assert:
             resource:
               apiVersion: policies.kyverno.io/v1beta1
               kind: ValidatingPolicy
               metadata:
                 name: restrict-seccomp-strict
+        # The background scan reports what already runs; after a pass, no
+        # failure in any namespace but Chainsaw's own: the socle's components
+        # are out of scope, restricted or not.
         - script:
             content: |
-              # The background scan reports what already runs; give it a pass.
               sleep 60
               kubectl get policyreports -A -o json | python3 -c '
               import sys, json, collections
@@ -576,11 +593,12 @@ spec:
                   for x in r.get("results", []):
                       if x.get("result") == "fail":
                           fails[ns].add(x["policy"])
-              print("restricted profile, failing policies per socle namespace:")
               for ns in sorted(fails):
                   print(f"  {ns}: {", ".join(sorted(fails[ns]))}")
-              if not fails:
-                  print("  none")'
+              if fails:
+                  print("failures reported in socle namespaces, which are out of scope")
+                  sys.exit(1)
+              print("restricted profile: no failure reported outside the test namespace")'
         - patch:
             resource:
               apiVersion: fluxcd.controlplane.io/v1

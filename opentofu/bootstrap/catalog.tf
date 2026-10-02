@@ -235,6 +235,8 @@ locals {
     # official kyverno-policies chart as CEL ValidatingPolicy objects, plus
     # requests required and the latest tag refused. Off by default, and
     # refused without kyverno. Every policy in Audit: reported, admitted.
+    # Scope: the client's applications — every namespace the socle renders is
+    # out of every policy, by the operator's label.
     # profile is baseline or restricted (baseline plus six). enforce names the
     # policies the client switches to Enforce, each compiled into a native
     # ValidatingAdmissionPolicy that the API server applies with Kyverno up or

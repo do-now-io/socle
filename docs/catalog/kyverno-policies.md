@@ -13,7 +13,7 @@ under the module contract. **Off by default**, and refused at plan without
 | Kind | CEL `ValidatingPolicy` (`policies.kyverno.io`), the chart's default and Kyverno's direction; the legacy `ClusterPolicy` is deprecated upstream |
 | Default | **Off**; when on, the Pod Security Standards *baseline* profile plus the socle's two policies, every one in **Audit** |
 | Enforce | Per policy, the client's switch: `enforce`. An enforced policy becomes a native `ValidatingAdmissionPolicy` |
-| Excluded | `kube-system`, `flux-system`, `kyverno`, from every policy, in admission, natively and in background scans |
+| Scope | **The client's applications.** Every namespace the socle renders is out, by the operator's label; `kube-system`, `flux-system`, `kyverno` by name. In admission, natively and in background scans |
 | Cloud access | None |
 | Client surface | `enabled`, `profile`, `enforce`, `allowed_registries`, `values`, `values_secret` |
 
@@ -100,37 +100,48 @@ with `profile = "restricted"`, `restrict-image-registries` with an allow-list.
 Any other name is refused at plan, since it would be a switch that silently
 does nothing.
 
-## Exclusions, and the socle's own components
+## Scope: the client's applications, never the socle
 
-Every policy excludes `kube-system`, `flux-system` and `kyverno` by a CEL
-`matchCondition` on the request's namespace. It applies at admission, in the
-native policy and in background scans alike. Measured: no report in any of the
-three.
+The policies judge what the client deploys, not the socle's own charts, which
+he does not control. Two exclusions do it, on every policy, in admission, in
+the native policy and in background scans alike:
 
-The socle's own components are exempted by name, where a policy and their job
-disagree. A per-policy exclusion replaces the global list, so it repeats it.
+- **The socle's namespaces, by label.** flux-operator labels every namespace
+  a ResourceSet renders with `resourceset.fluxcd.controlplane.io/namespace`,
+  the ResourceSet's own namespace: `flux-system` for every socle module. The
+  post-renderer adds a `namespaceSelector` on that label to each policy, and
+  Kyverno copies it into the native `ValidatingAdmissionPolicy`. A new module
+  is covered with nothing to add here. The engine's webhooks carry the same
+  selector ([kyverno.md](kyverno.md#failure-policy-what-happens-when-kyverno-is-down)).
+- **`kube-system`, `flux-system` and `kyverno`, by name**, through the chart's
+  `vpolExclude`. They are not rendered by a ResourceSet, so they carry no
+  label.
 
-| Namespace | Policies | Why |
+Measured on a local k3s 1.34, with a namespace labelled as the socle's and one
+not, a privileged pod in each:
+
+| | Socle namespace | Application namespace |
 | --- | --- | --- |
-| `otel-agent` | `disallow-host-path`, and with `restricted` `restrict-volume-types`, `require-run-as-nonroot`, `require-run-as-non-root-user` | It reads every container's log from `/var/log/pods`: a read-only hostPath, as root, every capability dropped ([otel-agent.md](otel-agent.md)) |
+| Audit | Admitted, no report | Admitted, reported |
+| Enforce, Kyverno up | Admitted | Refused by the native policy |
+| Enforce, Kyverno down | Admitted | Refused by the native policy |
 
-Under `restricted`, the e2e prints every failing policy per namespace after a
-background scan. On floci, with every default module on (run 36870726028):
+The e2e proves it on floci: a privileged pod in `hello` admitted under
+Enforce, and, after a `restricted` background scan with every default module
+on, no failure reported in any namespace but the test's own.
 
-| Namespace | Fails under `restricted` |
-| --- | --- |
-| `hello` | `disallow-privilege-escalation`, `require-run-as-nonroot`, `restrict-seccomp-strict` |
-| `otel-agent` | `restrict-seccomp-strict` |
-| `otel-gateway` | `disallow-privilege-escalation`, `require-run-as-nonroot`, `restrict-seccomp-strict` |
-| `victoria-logs` | `restrict-seccomp-strict` |
-| `victoria-metrics` | `disallow-privilege-escalation`, `require-run-as-nonroot`, `restrict-seccomp-strict` |
+Before this scope, the first CI run (36870726028) reported the socle's own
+components under `restricted`: `hello`, `otel-gateway` and `victoria-metrics`
+failed `disallow-privilege-escalation`, `require-run-as-nonroot` and
+`restrict-seccomp-strict`; `otel-agent` and `victoria-logs` failed
+`restrict-seccomp-strict`. Hardening those modules' `securityContext` is
+still worth doing, as the socle's own hygiene. It no longer blocks a client
+who enforces a policy.
 
-`argocd` and `grafana` report no failure. Each line above is a `securityContext` the module's values
-can set, not an exemption: `seccompProfile: RuntimeDefault`,
-`allowPrivilegeEscalation: false`, `runAsNonRoot: true`. They are left for a
-follow-up, module by module, since each changes a running workload. Until
-then, `restricted` reports the socle's own components, in Audit, which is
-what Audit is for.
+A client's third-party charts, an ingress controller or an operator he
+installs himself, live in his namespaces and are judged like his
+applications. He exempts them through `values` (`vpolExclude`, keeping the
+three names above).
 
 ## What the client may set — `kube.kyverno_policies`
 
@@ -140,7 +151,7 @@ what Audit is for.
 | `profile` | `"baseline"` | string | `baseline` or `restricted` |
 | `enforce` | `[]` | list | Policies switched to Enforce, each made native; only names this configuration renders |
 | `allowed_registries` | `[]` | list | Registry hosts, optionally with a port and a path: `ghcr.io`, `registry.k8s.io`, `ghcr.io/acme`, `localhost:5000`. No scheme, no trailing slash |
-| `values` | `{}` | object | Any `kyverno-policies` chart value, the client's winning. A list he sets replaces the socle's whole: `customPolicies` drops the socle's two, `vpolExclude.excludeNamespaces` drops the three namespaces |
+| `values` | `{}` | object | Any `kyverno-policies` chart value, the client's winning. A list he sets replaces the socle's whole: `customPolicies` drops the socle's two, `vpolExclude.excludeNamespaces` drops the three names. The socle's namespaces stay out: their selector is not in `values` |
 | `values_secret` | `""` | string | A Secret in `kyverno-policies` with a `values.yaml` key, merged last |
 
 The chart carries no credential, so `values` has no path to refuse.
@@ -190,7 +201,7 @@ The job took 9m36s, `tofu destroy` and the empty-cluster suite included.
 | `enforce = ["disallow-privileged-containers"]` | Native policy and binding in 6 s; the pod refused by the API server |
 | Kyverno's admission at 0 replicas | Flux scales `podinfo` to 2 in 15 s; the privileged pod still refused; a pod without requests admitted |
 | `allowed_registries = ["registry.k8s.io"]` | `busybox:1.37` admitted and reported `restrict-image-registries: fail` |
-| `profile = "restricted"` | The six restricted policies rendered, `otel-agent` exempted where listed |
+| `profile = "restricted"` | The six restricted policies rendered |
 | Values order | Severity annotation: socle `medium`, `values` `high`, Secret `low` on the live policy; cleared, `medium` |
 | Off | Policies, native policies and namespace gone in 11 s |
 

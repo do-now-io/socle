@@ -146,7 +146,8 @@ spec:
                 (conditions[?type == 'Available'] || `[]`):
                   - status: 'True'
         # Kyverno's own config carries the namespaces no webhook of its sees:
-        # the control plane's and Flux's, on top of its own.
+        # the control plane's and Flux's, every namespace the socle renders
+        # (by the operator's label), on top of its own.
         - assert:
             resource:
               apiVersion: v1
@@ -157,6 +158,7 @@ spec:
               data:
                 (contains(webhooks, 'flux-system')): true
                 (contains(webhooks, 'kube-system')): true
+                (contains(webhooks, 'resourceset.fluxcd.controlplane.io/namespace')): true
         # The chart's dashboard, labelled for the grafana module's sidecar.
         - assert:
             resource:
