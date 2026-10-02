@@ -258,6 +258,23 @@ locals {
     # default: it reads every ConfigMap and Secret of the cluster, a grant the
     # client chooses (docs/catalog/reloader.md). No named attribute; values and
     # values_secret as every module.
+    # External Secrets Operator: an ExternalSecret becomes a Kubernetes Secret
+    # read from the cloud's own secret manager, kept in step when the value
+    # rotates there (pair it with reloader for the pods to roll). Off by
+    # default. On AWS with crossplane on, the module declares its own
+    # READ-ONLY role — GetSecretValue and DescribeSecret on secret:<prefix>/*
+    # for each prefix, in the cluster's region — and one ClusterSecretStore,
+    # secret-manager, on it. prefixes defaults to the cluster name; empty
+    # means no role and no store. Elsewhere, or with crossplane off, the
+    # operator is installed alone and the client brings his stores
+    # (docs/catalog/external-secrets.md). values and values_secret as every
+    # module, secrets refused there.
+    external_secrets = {
+      enabled       = false
+      prefixes      = [var.cluster_name]
+      values        = {}
+      values_secret = ""
+    }
     reloader = {
       enabled       = false
       values        = {}

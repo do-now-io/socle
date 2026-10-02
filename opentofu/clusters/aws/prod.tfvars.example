@@ -29,8 +29,9 @@ aws = {
   # Crossplane's own AWS identity, the one the socle cannot create for itself.
   # allowed_services is the ceiling of every role a catalog module gets:
   # add a service when you enable a module that uses it (route53 for
-  # external_dns). Empty grants nothing.
-  # crossplane = { allowed_services = ["route53", "sqs"] }
+  # external_dns, sqs for keda, secretsmanager for external_secrets). Empty
+  # grants nothing.
+  # crossplane = { allowed_services = ["route53", "sqs", "secretsmanager"] }
 
   # The ACM certificate of the two shared Gateways, public (internet-facing)
   # and private (internal): acme.example and *.acme.example, validated in
@@ -95,6 +96,13 @@ kube = {
   #   enforce            = ["disallow-privileged-containers"]
   #   allowed_registries = ["ghcr.io", "registry.k8s.io", "public.ecr.aws"]
   # }
+  # Secrets from AWS Secrets Manager: with kube.crossplane on, the module's own
+  # read-only role reads secret:<prefix>/* (default prefix: the cluster name)
+  # and the ClusterSecretStore secret-manager serves it to every namespace
+  # (docs/catalog/external-secrets.md). reloader rolls the workloads annotated
+  # reloader.stakater.com/auto when those Secrets rotate.
+  # external_secrets = { enabled = true }
+  # reloader         = { enabled = true }
   hello = {
     replicas = 2
   }

@@ -758,6 +758,65 @@ variable "kube" {
     condition     = !can(var.kube.reloader.values_secret) || try(var.kube.reloader.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.reloader.values_secret)), true)
     error_message = "kube.reloader.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
   }
+
+  # --- external_secrets — docs/catalog/external-secrets.md -------------------
+  # prefixes scope the module's own read-only role: GetSecretValue and
+  # DescribeSecret on secret:<prefix>/* for each. A prefix is a Secrets
+  # Manager name path — the characters a secret name allows, segments
+  # separated by "/", none empty — and never a wildcard: "*" or a trailing
+  # "/" would widen the role past what the client named.
+  validation {
+    condition = !can(var.kube.external_secrets.prefixes) || try(alltrue([
+      for p in tolist(var.kube.external_secrets.prefixes) :
+      can(regex("^[A-Za-z0-9_+=.@-]+(/[A-Za-z0-9_+=.@-]+)*$", p)) && length(p) <= 256
+    ]), false)
+    error_message = "kube.external_secrets.prefixes must be a list of Secrets Manager name paths such as \"acme-prod\" or \"shared/platform\": letters, digits and _+=.@-, segments separated by \"/\", no leading or trailing \"/\", no wildcard. The role reads secret:<prefix>/* for each."
+  }
+
+  # The Pod Identity association is regional and so is the role's ARN scope;
+  # the socle's ClusterProviderConfig carries no region, so an empty one would
+  # reach AWS as an invalid association and a policy that matches nothing.
+  validation {
+    condition = (
+      !can(keys(var.kube)) || var.cloud != "aws" || var.region != ""
+      || !try(var.kube.external_secrets.enabled, false)
+      || !try(var.kube.crossplane.enabled, false)
+      || length(try(tolist(var.kube.external_secrets.prefixes), [var.cluster_name])) == 0
+    )
+    error_message = "kube.external_secrets with kube.crossplane on AWS needs the cluster's region: the module's role is scoped to secrets in that region and its Pod Identity association is regional. Pass region to the bootstrap module (the aws root wires var.aws.region)."
+  }
+
+  # values is free-form on purpose, minus one rule: no secret material. What a
+  # client writes there ends up in the OpenTofu state and in a ConfigMap on
+  # the cluster. ESO's chart takes no credential of its own — a store's
+  # credentials are a Secret its auth block names — so the places one could
+  # still be smuggled in are refused: a Secret among extraObjects, and an
+  # extraEnv entry of any of the three pods whose name says it carries one
+  # and whose value is a literal (valueFrom is fine). AWS_SECRETSMANAGER_ENDPOINT
+  # is an endpoint, not a credential, and passes.
+  validation {
+    condition = (
+      !can(var.kube.external_secrets.values)
+      || !can(keys(var.kube.external_secrets.values))
+      || (
+        !anytrue(try([for o in var.kube.external_secrets.values.extraObjects : try(o.kind == "Secret", false)], []))
+        && alltrue([
+          for e in concat(
+            try(tolist(var.kube.external_secrets.values.extraEnv), []),
+            try(tolist(var.kube.external_secrets.values.webhook.extraEnv), []),
+            try(tolist(var.kube.external_secrets.values.certController.extraEnv), []),
+          ) :
+          !(can(e.value) && can(regex("(?i)(secret_?access|client_?secret|password|passwd|token|api_?key|access_?key|private_?key|credential)", try(e.name, ""))))
+        ])
+      )
+    )
+    error_message = "kube.external_secrets.values must not carry secrets: a Secret in extraObjects, and an extraEnv entry (extraEnv, webhook.extraEnv, certController.extraEnv) with a literal value whose name looks like a credential (AWS_SECRET_ACCESS_KEY, *_TOKEN, …), are refused. Put them in a Secret in the external-secrets namespace and name it in kube.external_secrets.values_secret — or, for a store's credentials, in a Secret the store's auth block references."
+  }
+
+  validation {
+    condition     = !can(var.kube.external_secrets.values_secret) || try(var.kube.external_secrets.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.external_secrets.values_secret)), true)
+    error_message = "kube.external_secrets.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
+  }
 }
 
 # ---------------------------------------------------------------------------

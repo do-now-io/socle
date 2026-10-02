@@ -1,0 +1,325 @@
+# The external-secrets module: External Secrets Operator, which turns an
+# ExternalSecret into a Kubernetes Secret read from the cloud's own secret
+# manager, and keeps it in step when the value rotates there. Pair it with the
+# reloader module for the pods that read those Secrets to roll.
+# docs/catalog/external-secrets.md holds the design; the rules of
+# docs/flux-catalog.md §6 apply: inputsFrom the one provider, the reconcile
+# toggle on EACH resource, values tested never presence.
+#
+# Values, in the order helm-controller merges them, later winning
+# (docs/flux-catalog.md §6): external-secrets-socle-values, the socle's
+# defaults below; external-secrets-client-values, kube.external_secrets.values;
+# then the client's Secret when they name one. No inline `values:` on the
+# HelmRelease — helm-controller merges it last, so it would beat the client on
+# every key.
+#
+# Cloud access (docs/catalog/external-secrets.md): on AWS with Crossplane on
+# and at least one prefix, the module declares its own IAM role through
+# Crossplane (docs/catalog/crossplane.md §3) — READ-ONLY, GetSecretValue and
+# DescribeSecret on secret:<prefix>/* in the cluster's region for each prefix
+# in kube.external_secrets.prefixes (default: the cluster name), never `*`,
+# no write, no ListSecrets — bound by Pod Identity to the controller's
+# ServiceAccount, and one ClusterSecretStore named secret-manager on it.
+# Anywhere else the operator is installed alone and the client brings his
+# stores.
+#
+# Three layers, so that each object is applied once what it needs exists:
+# - this ResourceSet: the Namespace and, on AWS, the Role and the Pod
+#   Identity association binding it to external-secrets/external-secrets;
+# - external-secrets-workload, a child ResourceSet holding the chart, which
+#   dependsOn the Role and the association being Ready: EKS Pod Identity
+#   injects the credentials at pod admission, and a pod admitted before its
+#   association never gets them (docs/catalog/external-dns.md);
+# - external-secrets-store, a child ResourceSet holding the ClusterSecretStore,
+#   which dependsOn the HelmRelease being Ready: the store's CRD is one the
+#   chart installs, and ESO's validating webhook must answer for it to apply.
+# This ResourceSet dependsOn the crossplane one, which always exists and is
+# Ready trivially when Crossplane is off.
+#
+# resourcesTemplate rather than resources: the role, the store and the
+# optional Secret entry are conditional text.
+#
+# Fixed by decision, not exposed through a named attribute (values can still
+# override any of it):
+# - the chart, from the project's own OCI repository on GHCR, pinned exactly.
+# - the CRDs are kept on uninstall (helm.sh/resource-policy: keep): turning the
+#   module off removes the operator, never the client's ExternalSecrets and
+#   SecretStores, as the Gateway API CRDs survive gateway_api.
+# - PushSecret and ClusterPushSecret are not reconciled: the socle's role is
+#   read-only, and writing to the cloud from the cluster is out of v1.
+# - the ServiceAccount is external-secrets in namespace external-secrets: the
+#   subject the module's own cloud identity is bound to. The webhook and the
+#   cert controller talk to no cloud.
+apiVersion: fluxcd.controlplane.io/v1
+kind: ResourceSet
+metadata:
+  name: external-secrets
+  namespace: flux-system
+spec:
+  inputsFrom:
+    - apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSetInputProvider
+      name: socle
+  # The crossplane ResourceSet exists on every cloud; Ready when Crossplane
+  # is off, and once its providers and their CRDs are Healthy when it is on.
+  dependsOn:
+    - apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSet
+      name: crossplane
+      namespace: flux-system
+      ready: true
+  wait: true
+  resourcesTemplate: |
+    << $access := and (eq inputs.cloud "aws") inputs.modules.crossplane.enabled inputs.modules.external_secrets.prefixes ->>
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: external-secrets
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.external_secrets.enabled >>enabled<< else >>disabled<< end >>
+      labels:
+        # The three pods run non-root, read-only, no capabilities, default
+        # seccomp (the chart's own security contexts): restricted holds, and
+        # pins it.
+        pod-security.kubernetes.io/enforce: restricted
+    << if $access >>
+    ---
+    # The module's own AWS access, docs/catalog/crossplane.md §3. Under
+    # /socle/<cluster>/ and carrying Crossplane's boundary when the root wired
+    # one: Crossplane's own policy refuses any other role. Inline policy only.
+    #
+    # Read-only and scoped by name: the two calls an ExternalSecret's
+    # remoteRef makes (GetSecretValue for the value, DescribeSecret for the
+    # version and the metadata), on the secrets under each prefix in the
+    # cluster's region. The account id is not among the inputs, so the ARN
+    # names any account: the role can only ever be used in the account it
+    # lives in. ListSecrets and BatchGetSecretValue are left out — they take
+    # no resource scope, so they would list every secret of the account —
+    # and with them dataFrom.find.
+    << $arns := list ->>
+    << range $p := inputs.modules.external_secrets.prefixes ->>
+    << $arns = append $arns (printf "arn:aws:secretsmanager:%s:*:secret:%s/*" inputs.cluster.region $p) ->>
+    << end ->>
+    << $actions := list "secretsmanager:GetSecretValue" "secretsmanager:DescribeSecret" ->>
+    << $read := dict "Sid" "ReadSecretsUnderThePrefixes" "Effect" "Allow" "Action" $actions "Resource" $arns ->>
+    apiVersion: iam.aws.m.upbound.io/v1beta1
+    kind: Role
+    metadata:
+      name: external-secrets
+      namespace: external-secrets
+      annotations:
+        # IAM names are account-wide and two clusters may share an account.
+        crossplane.io/external-name: << inputs.cluster.name >>-external-secrets
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.external_secrets.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      forProvider:
+        path: /socle/<< inputs.cluster.name >>/
+        << if inputs.modules.crossplane.permissions_boundary >>
+        permissionsBoundary: << inputs.modules.crossplane.permissions_boundary | quote >>
+        << end >>
+        assumeRolePolicy: |
+          {
+            "Version": "2012-10-17",
+            "Statement": [{
+              "Effect": "Allow",
+              "Principal": {"Service": "pods.eks.amazonaws.com"},
+              "Action": ["sts:AssumeRole", "sts:TagSession"]
+            }]
+          }
+        inlinePolicy:
+          - name: secretsmanager
+            policy: << dict "Version" "2012-10-17" "Statement" (list $read) | toJson | quote >>
+    ---
+    apiVersion: eks.aws.m.upbound.io/v1beta1
+    kind: PodIdentityAssociation
+    metadata:
+      name: external-secrets
+      namespace: external-secrets
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.external_secrets.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      forProvider:
+        # Required: the socle's ClusterProviderConfig names no region, and
+        # OpenTofu refuses this combination with an empty one.
+        region: << inputs.cluster.region >>
+        clusterName: << inputs.cluster.name >>
+        namespace: external-secrets
+        serviceAccount: external-secrets
+        roleArnRef:
+          name: external-secrets
+    << end >>
+    ---
+    # The workload, in a child ResourceSet so that it can wait on the
+    # association explicitly: a managed resource not yet created carries no
+    # Ready condition at all, which a step's health check reads as healthy.
+    apiVersion: fluxcd.controlplane.io/v1
+    kind: ResourceSet
+    metadata:
+      name: external-secrets-workload
+      namespace: flux-system
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.external_secrets.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      << if $access >>
+      dependsOn:
+        - apiVersion: iam.aws.m.upbound.io/v1beta1
+          kind: Role
+          name: external-secrets
+          namespace: external-secrets
+          ready: true
+          readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
+        - apiVersion: eks.aws.m.upbound.io/v1beta1
+          kind: PodIdentityAssociation
+          name: external-secrets
+          namespace: external-secrets
+          ready: true
+          readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
+      << end >>
+      wait: true
+      resources:
+      - apiVersion: source.toolkit.fluxcd.io/v1
+        kind: OCIRepository
+        metadata:
+          name: external-secrets-chart
+          namespace: external-secrets
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if inputs.modules.external_secrets.enabled >>enabled<< else >>disabled<< end >>
+        spec:
+          interval: 1h
+          url: oci://ghcr.io/external-secrets/charts/external-secrets
+          layerSelector:
+            mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+            operation: copy
+          ref:
+            tag: 2.11.0  # appVersion v2.11.0
+      # The socle's defaults. Everything the client may override through values.
+      - apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: external-secrets-socle-values
+          namespace: external-secrets
+          labels:
+            # helm-controller watches a valuesFrom ConfigMap only with this label;
+            # without it, a change here waits for the next interval (10m).
+            reconcile.fluxcd.io/watch: Enabled
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if inputs.modules.external_secrets.enabled >>enabled<< else >>disabled<< end >>
+        data:
+          values.yaml: |
+            fullnameOverride: external-secrets
+            installCRDs: true
+            crds:
+              annotations:
+                helm.sh/resource-policy: keep
+            serviceAccount:
+              create: true
+              name: external-secrets
+            # The role is read-only; nothing in the cluster writes to the cloud.
+            processPushSecret: false
+            processClusterPushSecret: false
+            resources:
+              requests:
+                cpu: 10m
+                memory: 64Mi
+              limits:
+                memory: 256Mi
+            # Scraped by the otel_gateway module, which reads these annotations.
+            podAnnotations:
+              prometheus.io/scrape: "true"
+              prometheus.io/port: "8080"
+            webhook:
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  memory: 128Mi
+            certController:
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  memory: 128Mi
+      # The client's own chart values, as written in kube.external_secrets.values.
+      # OpenTofu refuses secrets in there.
+      - apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: external-secrets-client-values
+          namespace: external-secrets
+          labels:
+            reconcile.fluxcd.io/watch: Enabled
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if inputs.modules.external_secrets.enabled >>enabled<< else >>disabled<< end >>
+        data:
+          values.yaml: |<< toYaml inputs.modules.external_secrets.values | nindent 8 >>
+      - apiVersion: helm.toolkit.fluxcd.io/v2
+        kind: HelmRelease
+        metadata:
+          name: external-secrets
+          namespace: external-secrets
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if inputs.modules.external_secrets.enabled >>enabled<< else >>disabled<< end >>
+        spec:
+          interval: 10m
+          releaseName: external-secrets
+          chartRef:
+            kind: OCIRepository
+            name: external-secrets-chart
+          # Merged in this order, later wins; nothing inline after them. The
+          # client's Secret needs the reconcile.fluxcd.io/watch: Enabled label
+          # too for a change to apply before the next interval.
+          valuesFrom:
+            - kind: ConfigMap
+              name: external-secrets-socle-values
+              valuesKey: values.yaml
+            - kind: ConfigMap
+              name: external-secrets-client-values
+              valuesKey: values.yaml
+            << if inputs.modules.external_secrets.values_secret >>
+            - kind: Secret
+              name: << inputs.modules.external_secrets.values_secret | quote >>
+              valuesKey: values.yaml
+              optional: true
+            << end >>
+          install:
+            remediation:
+              retries: 3
+          upgrade:
+            remediation:
+              retries: 3
+    << if $access >>
+    ---
+    # The socle's one store, on the module's own role: no auth block, so the
+    # controller's default credential chain — the Pod Identity association
+    # above. A ClusterSecretStore, so every namespace may reference it: the
+    # IAM prefixes, not the store, bound what it reads
+    # (docs/catalog/external-secrets.md). Per-namespace SecretStores, and
+    # stores on other backends, are the client's.
+    apiVersion: fluxcd.controlplane.io/v1
+    kind: ResourceSet
+    metadata:
+      name: external-secrets-store
+      namespace: flux-system
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.external_secrets.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      dependsOn:
+        - apiVersion: helm.toolkit.fluxcd.io/v2
+          kind: HelmRelease
+          name: external-secrets
+          namespace: external-secrets
+          ready: true
+      wait: true
+      resources:
+      - apiVersion: external-secrets.io/v1
+        kind: ClusterSecretStore
+        metadata:
+          name: secret-manager
+        spec:
+          provider:
+            aws:
+              service: SecretsManager
+              region: << inputs.cluster.region >>
+    << end >>
