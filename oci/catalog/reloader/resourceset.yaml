@@ -1,0 +1,158 @@
+# The reloader module: Stakater Reloader, which rolls a workload when a
+# ConfigMap or a Secret it reads changes. The other half of external_secrets
+# — a Secret that ESO rotates under a pod that never re-reads it changes
+# nothing — and useful alone for ConfigMaps. docs/catalog/reloader.md holds
+# the design; the rules of docs/flux-catalog.md §6 apply: inputsFrom the one
+# provider, the reconcile toggle on EACH resource, values tested never
+# presence.
+#
+# Values, in the order helm-controller merges them, later winning
+# (docs/flux-catalog.md §6): reloader-socle-values, the socle's defaults
+# below; reloader-client-values, kube.reloader.values; then the client's
+# Secret when they name one. No inline `values:` on the HelmRelease —
+# helm-controller merges it last, so it would beat the client on every key.
+#
+# Fixed by decision, not exposed through a named attribute:
+# - opt-in only. A workload is rolled when it carries one of Reloader's
+#   annotations (reloader.stakater.com/auto, or the configmap./secret.
+#   reloader.stakater.com/reload lists); autoReloadAll stays false, and
+#   OpenTofu refuses it in kube.reloader.values. Rolling every workload of
+#   the cluster on any change it reads is a decision per workload, not the
+#   socle's.
+# - the annotations strategy: a reload writes
+#   reloader.stakater.com/last-reloaded-from on the pod template, rather than
+#   the default strategy's STAKATER_* environment variable. Both change the
+#   pod template; an annotation is what a GitOps diff can be told to ignore,
+#   an injected env entry is not.
+# - one replica, no leader election: a change made while Reloader restarts
+#   is not seen, and HA (reloader.enableHA) or syncAfterRestart is values
+#   away for a client who cannot afford that window.
+#
+# resourcesTemplate rather than resources: the optional Secret entry in
+# valuesFrom is conditional text, which the structured list cannot carry.
+apiVersion: fluxcd.controlplane.io/v1
+kind: ResourceSet
+metadata:
+  name: reloader
+  namespace: flux-system
+spec:
+  inputsFrom:
+    - apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSetInputProvider
+      name: socle
+  wait: true
+  resourcesTemplate: |
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: reloader
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.reloader.enabled >>enabled<< else >>disabled<< end >>
+      labels:
+        # The pod runs non-root, read-only, no capabilities, default seccomp
+        # (the socle's values below): restricted holds, and pins it.
+        pod-security.kubernetes.io/enforce: restricted
+    ---
+    apiVersion: source.toolkit.fluxcd.io/v1
+    kind: OCIRepository
+    metadata:
+      name: reloader-chart
+      namespace: reloader
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.reloader.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 1h
+      # The project's own OCI chart, beside its image on GHCR.
+      url: oci://ghcr.io/stakater/charts/reloader
+      layerSelector:
+        mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+        operation: copy
+      ref:
+        tag: 2.2.18  # appVersion v1.4.22
+    ---
+    # The socle's defaults. Everything the client may override through values.
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: reloader-socle-values
+      namespace: reloader
+      labels:
+        # helm-controller watches a valuesFrom ConfigMap only with this label;
+        # without it, a change here waits for the next interval (10m).
+        reconcile.fluxcd.io/watch: Enabled
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.reloader.enabled >>enabled<< else >>disabled<< end >>
+    data:
+      values.yaml: |
+        fullnameOverride: reloader
+        reloader:
+          autoReloadAll: false
+          reloadStrategy: annotations
+          readOnlyRootFileSystem: true
+          deployment:
+            containerSecurityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: [ALL]
+            # GOMEMLIMIT is read from the memory limit by the chart.
+            resources:
+              requests:
+                cpu: 10m
+                memory: 64Mi
+              limits:
+                memory: 256Mi
+            # Scraped by the otel_gateway module, which reads these annotations.
+            pod:
+              annotations:
+                prometheus.io/scrape: "true"
+                prometheus.io/port: "9090"
+    ---
+    # The client's own chart values, as written in kube.reloader.values.
+    # OpenTofu refuses secrets and autoReloadAll in there.
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: reloader-client-values
+      namespace: reloader
+      labels:
+        reconcile.fluxcd.io/watch: Enabled
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.reloader.enabled >>enabled<< else >>disabled<< end >>
+    data:
+      values.yaml: |<< toYaml inputs.modules.reloader.values | nindent 4 >>
+    ---
+    apiVersion: helm.toolkit.fluxcd.io/v2
+    kind: HelmRelease
+    metadata:
+      name: reloader
+      namespace: reloader
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.reloader.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 10m
+      releaseName: reloader
+      chartRef:
+        kind: OCIRepository
+        name: reloader-chart
+      # Merged in this order, later wins; nothing inline after them. The
+      # client's Secret needs the reconcile.fluxcd.io/watch: Enabled label too
+      # for a change to apply before the next interval.
+      valuesFrom:
+        - kind: ConfigMap
+          name: reloader-socle-values
+          valuesKey: values.yaml
+        - kind: ConfigMap
+          name: reloader-client-values
+          valuesKey: values.yaml
+        << if inputs.modules.reloader.values_secret >>
+        - kind: Secret
+          name: << inputs.modules.reloader.values_secret | quote >>
+          valuesKey: values.yaml
+          optional: true
+        << end >>
+      install:
+        remediation:
+          retries: 3
+      upgrade:
+        remediation:
+          retries: 3

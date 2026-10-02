@@ -120,6 +120,12 @@
       values:
         podSecuritySeverity: high
       values_secret: kyverno-policies-values
+    reloader:
+      enabled: true
+      values:
+        reloader:
+          logFormat: json
+      values_secret: reloader-values
     hello:
       enabled: true
       replicas: 2
