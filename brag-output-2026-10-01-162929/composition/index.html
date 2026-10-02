@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <title>Socle — part 2, the real cluster</title>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <script src="assets/music/audio-data.js"></script>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: #070b10;
+      }
+
+      /* Part 1's tokens, unchanged. */
+      :root {
+        --bg: #070b10;
+        --panel: #0e1620;
+        --panel-bar: #121c28;
+        --line: #1c2836;
+        --text: #e8eef5;
+        --muted: #93a6bd;
+        --comment: #7d90a8;
+        --accent: #2dd4bf;
+        --green: #4ade80;
+        --amber: #f6c177;
+        /* Driven per-frame from the music bed (see AUDIO_DATA below). */
+        --energy: 0;
+        --bass: 0;
+      }
+
+      #root {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--text);
+        font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+        font-feature-settings: "tnum" 1;
+      }
+
+      #ambient {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background:
+          radial-gradient(
+            1100px 680px at 50% 52%,
+            rgba(45, 212, 191, calc(0.045 + var(--energy) * 0.05)) 0%,
+            rgba(45, 212, 191, 0) 70%
+          ),
+          radial-gradient(1400px 900px at 50% 50%, rgba(7, 11, 16, 0) 40%, rgba(0, 0, 0, 0.55) 100%);
+      }
+
+      .mono {
+        font-family: "JetBrains Mono", ui-monospace, monospace;
+        font-variant-ligatures: none;
+      }
+      .tok-key {
+        color: var(--text);
+      }
+      .tok-plain {
+        color: var(--muted);
+      }
+      .tok-str {
+        color: var(--accent);
+      }
+
+      /* ---------- Footage scenes: untimed wrappers, opacity owned by the timeline.
+         The <video> inside each is the timed element (never nest it in a timed node). */
+      .scene {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 30px;
+        opacity: 0;
+      }
+      .cap {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+      }
+      .eyebrow {
+        display: block;
+        font-size: 22px;
+        color: var(--muted);
+        letter-spacing: 0.06em;
+      }
+      .eyebrow.ok {
+        color: var(--green);
+      }
+      .head {
+        display: block;
+        font-size: 46px;
+        font-weight: 500;
+        letter-spacing: -0.01em;
+      }
+
+      /* Part 1's terminal panel, now a window for real footage. */
+      .panel {
+        display: block;
+        width: 1442px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow:
+          0 0 calc(34px + var(--energy) * 40px) rgba(45, 212, 191, calc(0.04 + var(--energy) * 0.06)),
+          0 24px 60px rgba(0, 0, 0, 0.5);
+      }
+      .panel-bar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 0 22px;
+        height: 54px;
+        background: var(--panel-bar);
+        border-bottom: 1px solid var(--line);
+      }
+      .panel-dot {
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        background: #26384a;
+      }
+      .panel-name {
+        margin-left: 10px;
+        color: var(--muted);
+        font-size: 22px;
+        letter-spacing: 0.02em;
+      }
+      .panel-tag {
+        margin-left: auto;
+        color: var(--comment);
+        font-size: 18px;
+        letter-spacing: 0.04em;
+      }
+      .viewport {
+        position: relative;
+        display: block;
+        width: 1440px;
+        height: 720px;
+        overflow: hidden;
+        background: #000;
+      }
+      /* A camera: the full source frame, moved and scaled to reframe a crop. */
+      .cam {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 1920px;
+        height: 1080px;
+      }
+      .cam.browser {
+        height: 960px;
+      }
+      .cam video.clip {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+
+      /* ---------- Scene 7 — the wordmark (part 1's block) ---------- */
+      #s7 {
+        gap: 26px;
+      }
+      #s7-line {
+        display: block;
+        font-size: 24px;
+        letter-spacing: 0.02em;
+        margin-bottom: 18px;
+      }
+      #s7-mark {
+        display: block;
+        font-size: 152px;
+        font-weight: 600;
+        letter-spacing: 0.16em;
+        margin-right: -0.16em;
+        line-height: 1.05;
+        text-shadow: 0 0 calc(22px + var(--bass) * 46px)
+          rgba(45, 212, 191, calc(0.05 + var(--bass) * 0.12));
+      }
+      #s7-rule {
+        display: block;
+        width: 460px;
+        height: 1px;
+        background: var(--accent);
+        opacity: 0.85;
+      }
+      #s7-tag {
+        display: block;
+        font-size: 28px;
+        color: var(--muted);
+        letter-spacing: 0.02em;
+      }
+      #s7-url {
+        display: block;
+        font-size: 24px;
+        color: var(--accent);
+        letter-spacing: 0.02em;
+      }
+      #s7-foot {
+        position: absolute;
+        right: 56px;
+        bottom: 44px;
+        font-size: 18px;
+        color: var(--muted);
+        letter-spacing: 0.04em;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-width="1920"
+      data-height="1080"
+      data-duration="24.5"
+    >
+      <div id="ambient"></div>
+
+      <!-- ===================== Scene 1 — same line, a real cluster ===================== -->
+      <div class="scene" data-layout-allow-overlap="true" id="s1">
+        <div class="cap">
+          <span class="eyebrow mono">part 2 · the real cluster</span>
+          <span class="head">Same line. A real cluster.</span>
+        </div>
+        <div class="panel">
+          <div class="panel-bar">
+            <span class="panel-dot"></span><span class="panel-dot"></span><span class="panel-dot"></span>
+            <span class="panel-name mono">opentofu/clusters/aws/prod.tfvars</span>
+            <span class="panel-tag mono">eks · eu-west-3</span>
+          </div>
+          <div class="viewport">
+            <div data-layout-allow-overflow="true" class="cam" id="cam-01a">
+              <video id="v01a" class="clip" src="assets/video/01-tfvars.mp4" data-start="0" data-duration="2.45" data-media-start="2.6" data-track-index="0" muted playsinline></video>
+            </div>
+            <div data-layout-allow-overflow="true" class="cam" id="cam-01b">
+              <video id="v01b" class="clip" src="assets/video/01-tfvars.mp4" data-start="2.2" data-duration="1.55" data-media-start="10.3" data-track-index="1" muted playsinline></video>
+            </div>
+            <div data-layout-allow-overflow="true" class="cam" id="cam-01c">
+              <video id="v01c" class="clip" src="assets/video/01-tfvars.mp4" data-start="3.5" data-duration="1.83" data-media-start="16.6" data-track-index="0" muted playsinline></video>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== Scene 2 — one apply ===================== -->
+      <div class="scene" data-layout-allow-overlap="true" id="s2">
+        <div class="cap">
+          <span class="eyebrow mono">opentofu · foundations + flux bootstrap</span>
+          <span class="head">One apply.</span>
+        </div>
+        <div class="panel">
+          <div class="panel-bar">
+            <span class="panel-dot"></span><span class="panel-dot"></span><span class="panel-dot"></span>
+            <span class="panel-name mono">tofu apply -var-file="prod.tfvars"</span>
+            <span class="panel-tag mono">eks · eu-west-3</span>
+          </div>
+          <div class="viewport">
+            <!-- 02: only the left column (x 360-1040); the right half is blurred. -->
+            <div data-layout-allow-overflow="true" class="cam" id="cam-02p">
+              <video id="v02p" class="clip" src="assets/video/02-tofu-apply.mp4" data-start="4.93" data-duration="1.85" data-media-start="3.4" data-track-index="2" muted playsinline></video>
+            </div>
+            <div data-layout-allow-overflow="true" class="cam" id="cam-02q">
+              <video id="v02q" class="clip" src="assets/video/02-tofu-apply.mp4" data-start="6.53" data-duration="2.15" data-media-start="10" data-playback-rate="4" data-track-index="3" muted playsinline></video>
+            </div>
+            <!-- 03: framed above the blurred cluster_endpoint row. -->
+            <div data-layout-allow-overflow="true" class="cam" id="cam-03">
+              <video id="v03" class="clip" src="assets/video/03-apply-complete.mp4" data-start="8.43" data-duration="2.34" data-media-start="0" data-track-index="2" muted playsinline></video>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== Scene 3 — Flux reconciles the rest ===================== -->
+      <div class="scene" data-layout-allow-overlap="true" id="s3">
+        <div class="cap">
+          <span class="eyebrow mono ok">17 ResourceSets · READY True</span>
+          <span class="head">Flux reconciles the rest.</span>
+        </div>
+        <div class="panel">
+          <div class="panel-bar">
+            <span class="panel-dot"></span><span class="panel-dot"></span><span class="panel-dot"></span>
+            <span class="panel-name mono">kubectl -n flux-system get resourcesets</span>
+            <span class="panel-tag mono">eks · eu-west-3</span>
+          </div>
+          <div class="viewport">
+            <div data-layout-allow-overflow="true" class="cam" id="cam-04">
+              <video id="v04" class="clip" src="assets/video/04-flux-resourcesets.mp4" data-start="10.37" data-duration="4.77" data-media-start="6.6" data-track-index="4" muted playsinline></video>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== Scene 4 — ArgoCD ===================== -->
+      <div class="scene" data-layout-allow-overlap="true" id="s4">
+        <div class="cap">
+          <span class="eyebrow mono">argocd v3.3 · behind the shared Gateway</span>
+          <span class="head">ArgoCD, ready to deploy.</span>
+        </div>
+        <div class="panel">
+          <div class="panel-bar">
+            <span class="panel-dot"></span><span class="panel-dot"></span><span class="panel-dot"></span>
+            <span class="panel-name mono">argocd</span>
+            <span class="panel-tag mono">eks · eu-west-3</span>
+          </div>
+          <div class="viewport">
+            <div data-layout-allow-overflow="true" class="cam browser" id="cam-05">
+              <video id="v05" class="clip" src="assets/video/05-argocd.mp4" data-start="14.74" data-duration="2.58" data-media-start="0.4" data-track-index="5" muted playsinline></video>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== Scene 5 — Grafana ===================== -->
+      <div class="scene" data-layout-allow-overlap="true" id="s5">
+        <div class="cap">
+          <span class="eyebrow mono">opentelemetry → victoriametrics → grafana</span>
+          <span class="head">Metrics from day one.</span>
+        </div>
+        <div class="panel">
+          <div class="panel-bar">
+            <span class="panel-dot"></span><span class="panel-dot"></span><span class="panel-dot"></span>
+            <span class="panel-name mono">grafana · kubernetes / nodes and pods</span>
+            <span class="panel-tag mono">eks · eu-west-3</span>
+          </div>
+          <div class="viewport">
+            <div data-layout-allow-overflow="true" class="cam browser" id="cam-06">
+              <video id="v06" class="clip" src="assets/video/06-grafana-nodes-pods.mp4" data-start="16.92" data-duration="3.11" data-media-start="21" data-track-index="6" muted playsinline></video>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== Scene 6 — 2 · 32 · 0 · 3 ===================== -->
+      <div class="scene" data-layout-allow-overlap="true" id="s6">
+        <div class="cap">
+          <span class="eyebrow mono">nodes ready · pods running · not running · targets up</span>
+          <span class="head">Live, on day one.</span>
+        </div>
+        <div class="panel">
+          <div class="panel-bar">
+            <span class="panel-dot"></span><span class="panel-dot"></span><span class="panel-dot"></span>
+            <span class="panel-name mono">grafana · kubernetes / workloads</span>
+            <span class="panel-tag mono">eks · eu-west-3</span>
+          </div>
+          <div class="viewport">
+            <div data-layout-allow-overflow="true" class="cam browser" id="cam-07">
+              <video id="v07" class="clip" src="assets/video/07-grafana-workloads.mp4" data-start="19.63" data-duration="2.05" data-media-start="1.95" data-playback-rate="0.6" data-track-index="7" muted playsinline></video>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== Scene 7 — the wordmark ===================== -->
+      <div class="scene" data-layout-allow-overlap="true" id="s7">
+        <code id="s7-line" class="mono"
+          ><span class="tok-key">socle_version</span><span class="tok-plain"> = </span
+          ><span class="tok-str">"0.1.0-alpha.9"</span></code
+        >
+        <span id="s7-mark">SOCLE</span>
+        <span id="s7-rule"></span>
+        <code id="s7-tag" class="mono">Pick your cloud. Pick your modules.</code>
+        <code id="s7-url" class="mono">github.com/do-now-io/socle</code>
+        <span id="s7-foot" class="mono">pre-0.1.0 · under active construction</span>
+      </div>
+
+      <!-- ===================== Audio ===================== -->
+      <!-- Music bed: continues part 1's track from 22.37s (a strong cue), 0.30, fade out at the end. -->
+      <audio
+        id="music"
+        src="assets/music/happy-beats-business-moves-vol-12-by-ende-dot-app.mp3"
+        data-start="0"
+        data-duration="24.5"
+        data-media-start="22.37"
+        data-track-index="10"
+        data-automation='{"version":1,"lanes":[{"target":"volume","points":[{"t":0,"v":0},{"t":0.25,"v":0.3},{"t":23.3,"v":0.3},{"t":24.5,"v":0}]}]}'
+      ></audio>
+
+      <!-- Scene 1 — the Enter on tofu apply. -->
+      <audio id="sfx-enter" src="assets/sfx/keyboard/keypress-011.wav" data-start="4.68" data-track-index="11" data-volume="0.40"></audio>
+      <!-- One soft settle per scene; nothing over the scroll or the table. -->
+      <audio id="sfx-s2" src="assets/sfx/impact/impactSoft_medium_000.ogg" data-start="4.90" data-track-index="12" data-volume="0.48"></audio>
+      <audio id="sfx-complete" src="assets/sfx/interface/bong_001.ogg" data-start="8.45" data-track-index="13" data-volume="0.50"></audio>
+      <audio id="sfx-s3" src="assets/sfx/impact/impactSoft_medium_003.ogg" data-start="10.34" data-track-index="14" data-volume="0.48"></audio>
+      <audio id="sfx-s4" src="assets/sfx/casino/card-slide-1.ogg" data-start="14.71" data-track-index="15" data-volume="0.45"></audio>
+      <audio id="sfx-s5" src="assets/sfx/impact/impactSoft_medium_001.ogg" data-start="16.89" data-track-index="16" data-volume="0.45"></audio>
+      <audio id="sfx-s6" src="assets/sfx/impact/impactSoft_medium_004.ogg" data-start="19.60" data-track-index="17" data-volume="0.55"></audio>
+      <!-- The only bell, as in part 1. -->
+      <audio id="sfx-mark" src="assets/sfx/impact/impactBell_heavy_000.ogg" data-start="21.24" data-track-index="18" data-volume="0.58"></audio>
+    </div>
+
+    <script>
+      const VIEW_W = 1440;
+
+      // A crop of the source frame (source pixels) -> camera transform filling the viewport.
+      function frame([x, y, w]) {
+        const scale = VIEW_W / w;
+        return { x: -x * scale, y: -y * scale, scale };
+      }
+
+      // [cam, start, duration, fromRect, toRect, fadeIn]
+      // Rects are [x, y, w] in source pixels; height follows the 2:1 viewport.
+      const SHOTS = [
+        // 01 — lines 1-9 only (line 11 is blurred), socle_version selected.
+        ["#cam-01a", 0, 2.45, [366, 86, 580], [376, 92, 540], false],
+        // 01 — the kube block, argocd line selected.
+        ["#cam-01b", 2.2, 1.55, [400, 500, 960], [410, 505, 930], true],
+        // 01 — same framing; tofu apply is entered in the terminal.
+        ["#cam-01c", 3.5, 1.83, [410, 505, 930], [420, 530, 880], true],
+        // 02 — Plan: 57 to add, left column only.
+        ["#cam-02p", 4.93, 1.85, [360, 502, 680], [372, 520, 640], false],
+        // 02 — the Creating... scroll at x4.
+        ["#cam-02q", 6.53, 2.15, [360, 660, 680], [366, 650, 670], true],
+        // 03 — Apply complete! + artifact, above the blurred endpoint.
+        ["#cam-03", 8.43, 2.34, [350, 545, 620], [360, 556, 596], true],
+        // 04 — the ResourceSets table.
+        ["#cam-04", 10.37, 4.77, [350, 560, 960], [360, 568, 924], false],
+        // 05 — the ArgoCD login.
+        ["#cam-05", 14.74, 2.58, [0, 0, 1920], [60, 30, 1800], false],
+        // 06 — Nodes and pods, per-namespace panels.
+        ["#cam-06", 16.92, 3.11, [440, 0, 1480], [500, 40, 1320], false],
+        // 07 — the four green stats.
+        ["#cam-07", 19.63, 2.05, [450, 120, 1470], [470, 140, 1400], false],
+      ];
+
+      // [scene, in, out] — 0.4s soft crossfades; cuts sit on strong cues.
+      const SCENES = [
+        ["#s1", 0, 4.93],
+        ["#s2", 4.93, 10.37], // beat-locked: 4.93s (source 27.30)
+        ["#s3", 10.37, 14.74], // beat-locked: 10.37s (source 32.74)
+        ["#s4", 14.74, 16.92], // beat-locked: 14.74s (source 37.11)
+        ["#s5", 16.92, 19.63], // beat-locked: 16.92s (source 39.29)
+        ["#s6", 19.63, 21.28],
+      ];
+      const FADE = 0.4;
+
+      function buildTimeline() {
+        const root = document.getElementById("root");
+        const tl = gsap.timeline({ paused: true });
+
+        for (const [cam, at, dur, from, to, fadeIn] of SHOTS) {
+          tl.fromTo(
+            cam,
+            { ...frame(from), transformOrigin: "0 0" },
+            { ...frame(to), duration: dur, ease: "sine.inOut" },
+            at,
+          );
+          if (fadeIn) {
+            tl.fromTo(cam, { opacity: 0 }, { opacity: 1, duration: 0.25, ease: "power1.out" }, at);
+          }
+        }
+
+        for (const [scene, start, end] of SCENES) {
+          tl.fromTo(
+            scene,
+            { opacity: 0 },
+            { opacity: 1, duration: start === 0 ? 0.3 : FADE, ease: "power1.inOut" },
+            start,
+          );
+          // Caption lands on the next beat after the cut, then holds.
+          tl.fromTo(
+            scene + " .cap",
+            { opacity: 0, y: 12 },
+            { opacity: 1, y: 0, duration: 0.45, ease: "power2.out" },
+            start + (start === 0 ? 0.56 : 0.2),
+          );
+          tl.to(scene, { opacity: 0, duration: FADE, ease: "power1.inOut" }, end);
+        }
+
+        /* ---------------- Scene 7 — the wordmark (21.28 → 24.50) ---------------- */
+        // beat-locked: 21.28s (source 43.65, intensity 1.00)
+        tl.fromTo("#s7", { opacity: 0 }, { opacity: 1, duration: FADE, ease: "power1.inOut" }, 21.28);
+        tl.fromTo("#s7-line", { opacity: 0 }, { opacity: 1, duration: 0.35, ease: "power1.out" }, 21.28);
+        tl.fromTo(
+          "#s7-mark",
+          { opacity: 0, y: 26, scale: 0.97, transformOrigin: "center center" },
+          { opacity: 1, y: 0, scale: 1, duration: 0.75, ease: "power3.out" },
+          21.32,
+        );
+        tl.fromTo(
+          "#s7-rule",
+          { scaleX: 0, transformOrigin: "center center" },
+          { scaleX: 1, duration: 0.5, ease: "power3.out" },
+          21.77,
+        );
+        tl.fromTo("#s7-tag", { opacity: 0 }, { opacity: 1, duration: 0.4 }, 21.97);
+        tl.fromTo("#s7-url", { opacity: 0 }, { opacity: 1, duration: 0.4 }, 22.22);
+        tl.fromTo("#s7-foot", { opacity: 0 }, { opacity: 1, duration: 0.4 }, 22.52);
+        // Settled 22.92 → 24.20, then fade to the background colour.
+        tl.to("#s7", { opacity: 0, duration: 0.28, ease: "power1.in" }, 24.2);
+
+        /* ------------- Audio-reactive: pre-extracted, sampled per frame -------------
+           AUDIO_DATA.frames[i] = [rms, bass, treble] for the 22.37 → 46.87s window of the
+           track. Same two properties as part 1: panel edge glow, ambient wash, wordmark. */
+        if (typeof AUDIO_DATA !== "undefined") {
+          for (let f = 0; f < AUDIO_DATA.frames.length; f++) {
+            const frameData = AUDIO_DATA.frames[f];
+            tl.call(
+              (function (energy, bass) {
+                return function () {
+                  root.style.setProperty("--energy", energy.toFixed(3));
+                  root.style.setProperty("--bass", bass.toFixed(3));
+                };
+              })(frameData[0], frameData[1]),
+              [],
+              f / AUDIO_DATA.fps,
+            );
+          }
+        }
+
+        window.__timelines["main"] = tl;
+        tl.seek(0);
+      }
+
+      if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(buildTimeline);
+      } else {
+        buildTimeline();
+      }
+    </script>
+  </body>
+</html>

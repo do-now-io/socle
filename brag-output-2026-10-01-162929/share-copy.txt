@@ -1,0 +1,1 @@
+Socle, part 2: the same one-line promise on a real EKS cluster. One tofu apply, then Flux reconciles 17 ResourceSets, and ArgoCD and Grafana are up on day one.
