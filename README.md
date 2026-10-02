@@ -115,6 +115,7 @@ and every option is documented in
 | [`keda`](docs/catalog/keda.md) | Event-driven autoscaling, down to zero | off | |
 | [`kyverno`](docs/catalog/kyverno.md) | The Kyverno admission engine, with no policy | off | Its webhooks never see the socle's namespaces |
 | [`kyverno_policies`](docs/catalog/kyverno-policies.md) | Pod Security Standards, requests required, no `latest` tag, a registry allow-list, all in Audit; `enforce` makes a policy a native refusal | off | Needs `kyverno`; judges your applications, never the socle |
+| [`reloader`](docs/catalog/reloader.md) | Rolls a workload when a ConfigMap or Secret it reads changes | off | Opt-in per workload, by annotation |
 | [`victoria_metrics`](docs/catalog/victoria-metrics.md) | Metrics storage | on | [Monitoring stack](docs/monitoring.md) |
 | [`victoria_logs`](docs/catalog/victoria-logs.md) | Logs storage | on | 〃 |
 | [`victoria_traces`](docs/catalog/victoria-traces.md) | Traces storage | off | Pre-GA upstream |

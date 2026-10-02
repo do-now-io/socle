@@ -20,6 +20,7 @@ resources:
   - ../../catalog/keda/resourceset.yaml
   - ../../catalog/kyverno/resourceset.yaml
   - ../../catalog/kyverno-policies/resourceset.yaml
+  - ../../catalog/reloader/resourceset.yaml
   - ../../catalog/hello/resourceset.yaml
 patches:
   - path: hello-color.patch.yaml

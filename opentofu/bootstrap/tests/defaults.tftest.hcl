@@ -103,6 +103,10 @@ run "defaults_are_the_recommended_position" {
     error_message = "kyverno_policies must default to the baseline profile, every policy in Audit, no registry allow-list."
   }
   assert {
+    condition     = output.inputs.modules.reloader.enabled == false && output.inputs.modules.reloader.values == {} && output.inputs.modules.reloader.values_secret == ""
+    error_message = "reloader must default to OFF: it reads every ConfigMap and Secret of the cluster, a grant the client chooses (docs/catalog/reloader.md)."
+  }
+  assert {
     condition     = can(regex("refs/heads/main\\$$", output.cosign_identity.subject))
     error_message = "the default cosign identity must trust the release workflow on main only."
   }
@@ -959,5 +963,28 @@ run "kyverno_policies_turn_on_with_enforce_and_an_allow_list" {
   assert {
     condition     = output.inputs.modules.kyverno_policies.enforce == ["disallow-privileged-containers", "require-run-as-nonroot", "restrict-image-registries"] && length(output.inputs.modules.kyverno_policies.allowed_registries) == 4
     error_message = "enforce and allowed_registries must reach the inputs as set."
+  }
+}
+
+run "reloader_values_pass_through_and_an_existing_secret_is_allowed" {
+  command = plan
+  variables {
+    kube = {
+      reloader = {
+        enabled = true
+        values = {
+          reloader = {
+            logFormat  = "json"
+            deployment = { env = { existing = { reloader-alerts = { ALERT_WEBHOOK_URL = "url" } } } }
+          }
+        }
+        values_secret = "reloader-values"
+      }
+    }
+  }
+
+  assert {
+    condition     = output.inputs.modules.reloader.enabled && output.inputs.modules.reloader.values.reloader.logFormat == "json" && output.inputs.modules.reloader.values_secret == "reloader-values"
+    error_message = "values and values_secret must reach the inputs as written; a credential referenced through env.existing is not a literal and must pass."
   }
 }

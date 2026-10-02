@@ -721,6 +721,43 @@ variable "kube" {
     condition     = !can(var.kube.kyverno_policies.values_secret) || try(var.kube.kyverno_policies.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.kyverno_policies.values_secret)), true)
     error_message = "kube.kyverno_policies.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
   }
+
+  # --- reloader — docs/catalog/reloader.md -----------------------------------
+  # Opt-in per workload, by decision: autoReloadAll rolls every Deployment,
+  # StatefulSet and DaemonSet of the cluster on any change to anything it
+  # reads, which is not a default a platform can choose for its tenants. A
+  # client who wants it for one workload writes reloader.stakater.com/auto on
+  # it. (values_secret is never read here, so a Secret could still set it:
+  # that one is the client's own, reviewed outside the socle.)
+  validation {
+    condition     = !can(var.kube.reloader.values) || !can(keys(var.kube.reloader.values)) || try(var.kube.reloader.values.reloader.autoReloadAll, false) != true
+    error_message = "kube.reloader.values.reloader.autoReloadAll is refused: Reloader in the socle is opt-in per workload. Annotate the workloads to roll with reloader.stakater.com/auto: \"true\" (or secret.reloader.stakater.com/reload / configmap.reloader.stakater.com/reload naming the objects)."
+  }
+
+  # values is free-form on purpose, minus one rule: no secret material. What a
+  # client writes there ends up in the OpenTofu state and in a ConfigMap on
+  # the cluster. Reloader's chart turns reloader.deployment.env.secret into a
+  # Secret of its own — its alerting webhook URL is a credential — and
+  # env.open into literal environment variables, so those are the paths
+  # refused: any env.secret entry, and an env.open entry named like a
+  # credential. They go through values_secret, or through env.existing, which
+  # names a Secret the client made.
+  validation {
+    condition = (
+      !can(var.kube.reloader.values)
+      || !can(keys(var.kube.reloader.values))
+      || (
+        length(try(keys(var.kube.reloader.values.reloader.deployment.env.secret), [])) == 0
+        && !anytrue([for k in try(keys(var.kube.reloader.values.reloader.deployment.env.open), []) : can(regex("(?i)(secret|password|passwd|token|webhook|api_?key|access_?key|private_?key|credential)", k))])
+      )
+    )
+    error_message = "kube.reloader.values must not carry secrets: reloader.deployment.env.secret, and a reloader.deployment.env.open entry named like a credential (ALERT_WEBHOOK_URL, *_TOKEN, …), are refused. Create a Secret in the reloader namespace and reference it from reloader.deployment.env.existing, or put the values in a Secret named in kube.reloader.values_secret."
+  }
+
+  validation {
+    condition     = !can(var.kube.reloader.values_secret) || try(var.kube.reloader.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.reloader.values_secret)), true)
+    error_message = "kube.reloader.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
+  }
 }
 
 # ---------------------------------------------------------------------------

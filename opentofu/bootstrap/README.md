@@ -93,13 +93,13 @@ type, is an error at plan, with the allowed list in the message.
 | `kyverno_policies` | `allowed_registries` | `[]` | Registries images may come from (`ghcr.io`, `registry.k8s.io`, `ghcr.io/acme`); empty means no registry policy |
 | `kyverno_policies` | `values` | `{}` | The client's own `kyverno-policies` chart values, merged over the socle's, client wins; a list he sets replaces the socle's whole |
 | `kyverno_policies` | `values_secret` | `""` | Name of a Secret in `kyverno-policies` with a `values.yaml` key, created by the client, merged last |
-| `hello` | `enabled` | `true` | Deploy podinfo as a proof the pipeline works |
-| `hello` | `replicas` | `1` | Replicas of the podinfo Deployment |
-| `hello` | `message` | `"hello from socle"` | Message podinfo serves |
 | `keda` | `enabled` | `false` | Deploy KEDA, event-driven autoscaling: a `ScaledObject` scales a Deployment on a queue's depth, a cron window or a PromQL query, and down to zero ([design note](../../docs/catalog/keda.md)). Off: it does nothing until a `ScaledObject` exists |
 | `keda` | `services` | `[]` | AWS services KEDA's own role may **read**, from `sqs`, `cloudwatch`, `kinesis`, `dynamodb`: one read-only statement per service named, declared through Crossplane, no role when empty. Needs `crossplane` on and the same services in the foundations' `aws.crossplane.allowed_services`; aws only for now |
 | `keda` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan |
 | `keda` | `values_secret` | `""` | Name of a Secret in `keda` with a `values.yaml` key, created by the client, merged last |
+| `reloader` | `enabled` | `false` | Deploy Stakater Reloader: a workload annotated `reloader.stakater.com/auto: "true"` is rolled when a ConfigMap or Secret it reads changes ([design note](../../docs/catalog/reloader.md)). **Off**: it reads every ConfigMap and Secret of the cluster |
+| `reloader` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets and `reloader.autoReloadAll` refused at plan |
+| `reloader` | `values_secret` | `""` | Name of a Secret in `reloader` with a `values.yaml` key, created by the client, merged last |
 | `hello` | `enabled` | `true` | Deploy podinfo as a proof the pipeline works |
 | `hello` | `replicas` | `1` | Replicas of the podinfo Deployment |
 | `hello` | `message` | `"hello from socle"` | Message podinfo serves |

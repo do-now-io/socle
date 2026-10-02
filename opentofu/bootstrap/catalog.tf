@@ -250,6 +250,19 @@ locals {
       values             = {}
       values_secret      = ""
     }
+    # Stakater Reloader: rolls a workload when a ConfigMap or Secret it reads
+    # changes — the other half of external_secrets, whose rotated Secrets a
+    # running pod never re-reads, and useful alone for ConfigMaps. Opt-in per
+    # workload through Reloader's annotations (reloader.stakater.com/auto),
+    # never autoReloadAll, which values refuses (variables.tf). Off by
+    # default: it reads every ConfigMap and Secret of the cluster, a grant the
+    # client chooses (docs/catalog/reloader.md). No named attribute; values and
+    # values_secret as every module.
+    reloader = {
+      enabled       = false
+      values        = {}
+      values_secret = ""
+    }
   }
 
   # Which clouds a module exists on. Absent = every cloud. A module listed

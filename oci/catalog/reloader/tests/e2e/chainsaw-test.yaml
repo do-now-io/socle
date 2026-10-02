@@ -1,0 +1,507 @@
+# The reloader module's proof (docs/catalog/reloader.md). Off by default, so
+# `health` proves the disabled shape only. The `module` phase:
+#   on        the Deployment Available in a restricted namespace, with the
+#             annotations strategy and without --auto-reload-all;
+#   opt-in    two workloads read the same ConfigMap and Secret, one annotated
+#             reloader.stakater.com/auto: a change to the ConfigMap, then to
+#             the Secret, rolls the annotated one, each time naming what
+#             changed, and never touches the other;
+#   values    the whole valuesFrom order on a key the socle sets;
+#   off       garbage-collected, the ResourceSet Ready and empty.
+# Everything is in the cluster: no `script`, nothing floci has to serve.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: reloader-health
+  labels:
+    phase: health
+    cloud: any
+    platform: any
+spec:
+  description: Off by default, the ResourceSet is Ready and renders nothing.
+  timeouts:
+    assert: 3m
+    error: 1m
+  steps:
+    - name: the ResourceSet is Ready with nothing in its inventory
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: reloader
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (length(inventory.entries || `[]`)): 0
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: reloader
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: reloader
+---
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: reloader-module
+  labels:
+    phase: module
+    cloud: any
+    platform: any
+spec:
+  description: >-
+    On, an annotated workload is rolled when what it reads changes and an
+    unannotated one is not; the client's values win; off garbage-collects it.
+  timeouts:
+    assert: 3m
+    error: 3m
+    # A namespace delete waits for its content to go: 15 s, Chainsaw's
+    # default, is not enough for a Deployment's pods (measured on floci).
+    delete: 2m
+    cleanup: 2m
+  steps:
+    - name: enabled = true converges, opt-in, with the annotations strategy, in a restricted namespace
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    reloader:
+                      enabled: true
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: reloader
+                labels:
+                  pod-security.kubernetes.io/enforce: restricted
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: reloader
+                namespace: reloader
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'reloader'] || `[]`):
+                      - (contains(args || `[]`, '--reload-strategy=annotations')): true
+                        (length((args || `[]`)[?starts_with(@, '--auto-reload-all')])): 0
+                        resources:
+                          requests:
+                            memory: 64Mi
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: reloader
+            name: reloader
+        - events:
+            namespace: reloader
+        - podLogs:
+            namespace: reloader
+            tail: 40
+    # Two identical workloads reading the same ConfigMap and Secret; only
+    # `rolled` carries the annotation. reloadOnCreate is off, so the objects
+    # exist before the workloads and only a change counts.
+    - name: two workloads read one ConfigMap and one Secret, one of them annotated
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: reloader-e2e
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: e2e-config
+                namespace: reloader-e2e
+              data:
+                GREETING: first
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: e2e-secret
+                namespace: reloader-e2e
+              stringData:
+                PASSWORD: first
+        - apply:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: rolled
+                namespace: reloader-e2e
+                annotations:
+                  reloader.stakater.com/auto: 'true'
+              spec:
+                replicas: 1
+                selector:
+                  matchLabels: {app: rolled}
+                template:
+                  metadata:
+                    labels: {app: rolled}
+                  spec:
+                    containers:
+                      - name: pause
+                        image: registry.k8s.io/pause:3.10
+                        envFrom:
+                          - configMapRef: {name: e2e-config}
+                          - secretRef: {name: e2e-secret}
+        - apply:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: untouched
+                namespace: reloader-e2e
+              spec:
+                replicas: 1
+                selector:
+                  matchLabels: {app: untouched}
+                template:
+                  metadata:
+                    labels: {app: untouched}
+                  spec:
+                    containers:
+                      - name: pause
+                        image: registry.k8s.io/pause:3.10
+                        envFrom:
+                          - configMapRef: {name: e2e-config}
+                          - secretRef: {name: e2e-secret}
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: rolled
+                namespace: reloader-e2e
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: untouched
+                namespace: reloader-e2e
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+      catch:
+        - events:
+            namespace: reloader-e2e
+    # The annotations strategy writes last-reloaded-from on the pod template:
+    # a JSON naming the kind and the object that changed.
+    - name: a ConfigMap change rolls the annotated workload only
+      try:
+        - patch:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: e2e-config
+                namespace: reloader-e2e
+              data:
+                GREETING: second
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: rolled
+                namespace: reloader-e2e
+              spec:
+                template:
+                  metadata:
+                    (contains(annotations."reloader.stakater.com/last-reloaded-from" || '', 'e2e-config')): true
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: untouched
+                namespace: reloader-e2e
+              spec:
+                template:
+                  metadata:
+                    (contains(keys(annotations || `{}`), 'reloader.stakater.com/last-reloaded-from')): false
+              status:
+                observedGeneration: 1
+      catch:
+        - describe:
+            apiVersion: apps/v1
+            kind: Deployment
+            namespace: reloader-e2e
+        - podLogs:
+            namespace: reloader
+            tail: 40
+    # What external_secrets does to a Secret: its data changes in place.
+    - name: a Secret change rolls the annotated workload again, naming the Secret
+      try:
+        - patch:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: e2e-secret
+                namespace: reloader-e2e
+              stringData:
+                PASSWORD: second
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: rolled
+                namespace: reloader-e2e
+              spec:
+                template:
+                  metadata:
+                    (contains(annotations."reloader.stakater.com/last-reloaded-from" || '', 'e2e-secret')): true
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: untouched
+                namespace: reloader-e2e
+              status:
+                observedGeneration: 1
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Namespace
+              name: reloader-e2e
+      catch:
+        - describe:
+            apiVersion: apps/v1
+            kind: Deployment
+            namespace: reloader-e2e
+        - podLogs:
+            namespace: reloader
+            tail: 40
+    # The order of valuesFrom, proven whole (docs/flux-catalog.md §6): the
+    # socle's 64Mi request, 80Mi in kube.reloader.values, 96Mi in the Secret
+    # the client names in values_secret — merged last; both cleared, 64Mi.
+    - name: kube.reloader.values_secret is merged last, over values and the socle
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: reloader-e2e-values
+                namespace: reloader
+                labels:
+                  reconcile.fluxcd.io/watch: Enabled
+              stringData:
+                values.yaml: |
+                  reloader:
+                    deployment:
+                      resources:
+                        requests:
+                          memory: 96Mi
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    reloader:
+                      values:
+                        reloader:
+                          deployment:
+                            resources:
+                              requests:
+                                memory: 80Mi
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: reloader
+                namespace: reloader
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'reloader'] || `[]`):
+                      - resources:
+                          requests:
+                            memory: 80Mi
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    reloader:
+                      values_secret: reloader-e2e-values
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: reloader
+                namespace: reloader
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'reloader'] || `[]`):
+                      - resources:
+                          requests:
+                            memory: 96Mi
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    reloader:
+                      values_secret: ''
+                      values:
+                        reloader: null
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: reloader
+                namespace: reloader
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'reloader'] || `[]`):
+                      - resources:
+                          requests:
+                            memory: 64Mi
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Secret
+              name: reloader-e2e-values
+              namespace: reloader
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: reloader
+            name: reloader
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 40
+    - name: enabled = false garbage-collects the module
+      try:
+        # The release must be idle before the module goes: helm-controller
+        # honours a deletion only once the running action returns, and the
+        # values step above has just driven an upgrade (docs/flux-catalog.md §8).
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: reloader
+                namespace: reloader
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'Released'] || `[]`):
+                  - status: 'True'
+                (length(conditions[?type == 'Reconciling'] || `[]`)): 0
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    reloader:
+                      enabled: false
+        - error:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: reloader
+                namespace: reloader
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: reloader
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: reloader
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (length(inventory.entries || `[]`)): 0
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: reloader
+        - podLogs:
+            namespace: flux-system
+            selector: app.kubernetes.io/name=flux-operator
+            tail: 40

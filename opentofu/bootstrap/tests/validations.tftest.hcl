@@ -956,3 +956,41 @@ run "kube_refuses_kyverno_policies_values_secret_that_is_not_a_secret_name" {
   variables { kube = { kyverno_policies = { values_secret = "Policies_Values" } } }
   expect_failures = [var.kube]
 }
+
+# --- reloader — docs/catalog/reloader.md -----------------------------------
+
+run "reloader_refuses_auto_reload_all" {
+  command = plan
+  variables { kube = { reloader = { enabled = true, values = { reloader = { autoReloadAll = true } } } } }
+  expect_failures = [var.kube]
+}
+
+run "reloader_refuses_a_literal_secret_env" {
+  command = plan
+  variables { kube = { reloader = { values = { reloader = { deployment = { env = { secret = { ALERT_WEBHOOK_URL = "https://hooks.slack.com/x" } } } } } } } }
+  expect_failures = [var.kube]
+}
+
+run "reloader_refuses_an_open_env_named_like_a_credential" {
+  command = plan
+  variables { kube = { reloader = { values = { reloader = { deployment = { env = { open = { ALERT_WEBHOOK_URL = "https://hooks.slack.com/x" } } } } } } } }
+  expect_failures = [var.kube]
+}
+
+run "reloader_refuses_values_that_are_not_an_object" {
+  command = plan
+  variables { kube = { reloader = { values = "reloader: {}" } } }
+  expect_failures = [var.kube]
+}
+
+run "reloader_refuses_an_invalid_values_secret_name" {
+  command = plan
+  variables { kube = { reloader = { values_secret = "Reloader_Values" } } }
+  expect_failures = [var.kube]
+}
+
+run "reloader_refuses_an_unknown_attribute" {
+  command = plan
+  variables { kube = { reloader = { auto_reload_all = true } } }
+  expect_failures = [var.kube]
+}
