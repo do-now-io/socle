@@ -6,10 +6,10 @@ application's own objects, and restores them. One catalog module, AWS only in
 v1. Issue #58; the catalog contract is [docs/flux-catalog.md](../flux-catalog.md)
 §6, the cloud-access contract [crossplane.md](crossplane.md) §3.
 
-> Status: **implemented, draft PR.** Designed and agreed on 2026-10-01. The
-> chart, its values and a real backup and restore were measured on a local
-> k3s against floci's S3 (§9, *Measured*). The floci CI run and the sandbox
-> proof are still to come.
+> Status: **implemented, draft PR #74.** Designed and agreed on 2026-10-01.
+> The chart, its values and a real backup and restore were measured on a
+> local k3s and in CI on floci (§9, *Measured*). The sandbox proof is still
+> to come.
 
 | Question | Position |
 | --- | --- |
@@ -355,8 +355,21 @@ Two defects that only a real backup showed, both fixed in the template: the
 read-only root filesystem blocked Kopia (above), and `EnableCSI` without the
 snapshot CRDs failed every backup (above).
 
-Still to measure, in CI: the Crossplane S3 provider itself against floci, and
-the job's time with a backup and a restore against the 20-minute budget.
+### Measured, in CI (run 36980161442, 2026-10-02)
+
+Every step of `velero-module-aws` is green on floci, in 18 minutes of the
+job's 20. The run also showed what the local probe could not:
+
+- provider-upjet-aws 2.8.1 reads a bucket's tags through S3 Control
+  (`ListTagsForResource`). Crossplane's grant carries the three tag actions,
+  and the floci seam serves `s3control`.
+- The SDK calls S3 Control at `<account>.<endpoint host>`, which an IP cannot
+  take. A DNS seam of its own resolves every name under `floci.e2e` to floci.
+- A `Restore` left in place holds the namespace once the module goes (§7,
+  step 6).
+
+The time is close to the budget. A step added to this test is a step another
+one has to give back.
 
 ### On the sandbox account — the proof floci cannot give
 
