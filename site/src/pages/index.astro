@@ -6,6 +6,18 @@ import '../styles/tokens.css';
 import Wordmark from '../components/Wordmark.astro';
 import { bannerHtml, released } from '../channel';
 import { modules } from '../catalog.mjs';
+import argo from '../logos/argo.svg?raw';
+import aws from '../logos/aws.svg?raw';
+import azure from '../logos/azure.svg?raw';
+import crossplane from '../logos/crossplane.svg?raw';
+import gcp from '../logos/gcp.svg?raw';
+import grafana from '../logos/grafana.svg?raw';
+import keda from '../logos/keda.svg?raw';
+import kubernetes from '../logos/kubernetes.svg?raw';
+import kyverno from '../logos/kyverno.svg?raw';
+import opentelemetry from '../logos/opentelemetry.svg?raw';
+import scaleway from '../logos/scaleway.svg?raw';
+import victoriametrics from '../logos/victoriametrics.svg?raw';
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 const to = (path: string) => `${base}/${path}`;
@@ -46,6 +58,25 @@ kube = {
   argocd          = { domain = <span class="s">"argocd.acme.example"</span> }
   victoria_traces = { enabled = <span class="k">true</span> }
 }`;
+// The plinth: what the catalog installs stands on the socle, and the socle
+// stands on the four clouds. Modules without a logo of their own are left
+// out here; the catalog section below lists every one.
+const standing = [
+  { svg: argo, name: 'Argo CD', page: 'catalog/argocd/' },
+  { svg: kubernetes, name: 'Gateway API', page: 'catalog/gateway-api/' },
+  { svg: crossplane, name: 'Crossplane', page: 'catalog/crossplane/' },
+  { svg: kyverno, name: 'Kyverno', page: 'catalog/kyverno/' },
+  { svg: keda, name: 'KEDA', page: 'catalog/keda/' },
+  { svg: opentelemetry, name: 'OpenTelemetry', page: 'catalog/otel-gateway/' },
+  { svg: victoriametrics, name: 'VictoriaMetrics', page: 'catalog/victoria-metrics/' },
+  { svg: grafana, name: 'Grafana', page: 'catalog/grafana/' },
+];
+const foundations = [
+  { svg: aws, name: 'AWS', page: 'clouds/aws/' },
+  { svg: gcp, name: 'Google Cloud', page: 'clouds/gcp/' },
+  { svg: azure, name: 'Azure', page: 'clouds/azure/' },
+  { svg: scaleway, name: 'Scaleway', page: 'clouds/scaleway/' },
+];
 const inline = (text: string) => text.replace(/`([^`]+)`/g, '<code>$1</code>');
 ---
 
@@ -103,7 +134,31 @@ const inline = (text: string) => text.replace(/`([^`]+)`/g, '<code>$1</code>');
           {released ? `Latest release: ${socleVersion}.` : 'Nothing is released yet. Every push to main publishes a signed alpha.'}
         </p>
       </div>
-      <div class="plinth" aria-hidden="true"></div>
+      <div class="base">
+        <ul class="standing" aria-label="Modules in the catalog">
+          {
+            standing.map((m, i) => (
+              <li style={`--i: ${i}`}>
+                <a href={to(m.page)} title={m.name} aria-label={m.name}>
+                  <span class="logo" aria-hidden="true" set:html={m.svg} />
+                </a>
+              </li>
+            ))
+          }
+        </ul>
+        <ul class="plinth" aria-label="Clouds it runs on">
+          {
+            foundations.map((c) => (
+              <li>
+                <a href={to(c.page)}>
+                  <span class="logo" aria-hidden="true" set:html={c.svg} />
+                  <span class="name">{c.name}</span>
+                </a>
+              </li>
+            ))
+          }
+        </ul>
+      </div>
     </header>
 
     <main>
@@ -361,14 +416,107 @@ const inline = (text: string) => text.replace(/`([^`]+)`/g, '<code>$1</code>');
     font: 400 0.8125rem var(--font-mono);
     color: var(--ink-muted);
   }
-  /* The page below stands on the hero's plinth: one step of the ground
-     colour rising into the basalt. */
-  .plinth {
-    height: 1.75rem;
-    width: min(64rem, 78%);
+  /* The base of the hero, drawn as what it is: the catalog's modules stand
+     on the socle, and the socle stands on the four clouds — the plinth, one
+     step of the page's ground rising into the basalt. */
+  .base {
+    width: min(64rem, calc(100% - 32px));
     margin: 0 auto;
+  }
+  .standing,
+  .plinth {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-evenly;
+  }
+  .standing {
+    align-items: flex-end;
+    gap: 0.75rem;
+    padding-inline: 4%;
+  }
+  /* No bottom padding: each logo stands on the plinth's top edge. */
+  .standing a {
+    display: block;
+    padding: 0.5rem 0.5rem 0.15rem;
+    color: var(--ink);
+  }
+  .standing a:hover {
+    color: var(--lime);
+  }
+  .standing .logo {
+    display: block;
+    width: clamp(2rem, 4.2vw, 3rem);
+    height: clamp(2rem, 4.2vw, 3rem);
+  }
+  .plinth {
+    gap: 0.5rem 1rem;
+    padding: 1.1rem 1.5rem 1.25rem;
     background: var(--stone);
     border-radius: 3px 3px 0 0;
+  }
+  .plinth a {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.35rem 0.5rem;
+    color: var(--basalt);
+    text-decoration: none;
+    font: 700 1rem/1 var(--font-display);
+    font-stretch: 112%;
+  }
+  .plinth a:hover {
+    color: var(--accent);
+  }
+  .plinth .logo {
+    display: block;
+    width: 1.9rem;
+    height: 1.9rem;
+  }
+  /* Narrow screens: even grids, so no logo is left alone on its line. */
+  @media (max-width: 40rem) {
+    .standing {
+      display: grid;
+      grid-template-columns: repeat(4, auto);
+      justify-content: space-evenly;
+      padding-inline: 0;
+    }
+    .plinth {
+      display: grid;
+      grid-template-columns: repeat(2, auto);
+      justify-content: space-evenly;
+      padding-inline: 0.5rem;
+    }
+  }
+  .logo :global(svg) {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  /* One moment, on load: the plinth rises with its clouds, then each module
+     settles onto it, left to right. Nothing moves after that, and nothing
+     moves at all for a reader who asked for less motion. */
+  @media (prefers-reduced-motion: no-preference) {
+    .plinth {
+      animation: rise 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) 0.15s both;
+    }
+    .standing li {
+      animation: settle 0.5s cubic-bezier(0.3, 1.4, 0.5, 1) calc(0.6s + var(--i) * 0.08s) both;
+    }
+  }
+  @keyframes rise {
+    from {
+      transform: translateY(100%);
+    }
+  }
+  @keyframes settle {
+    from {
+      opacity: 0;
+      transform: translateY(-1.5rem);
+    }
   }
 
   /* ---- sections ---- */
