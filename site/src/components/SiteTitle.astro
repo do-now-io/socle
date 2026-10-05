@@ -1,0 +1,19 @@
+---
+// Starlight's site title, replaced by the wordmark. It links to the landing
+// page of the build being read (latest, dev or a preview).
+import Wordmark from './Wordmark.astro';
+const { siteTitleHref } = Astro.locals.starlightRoute;
+---
+
+<a href={siteTitleHref} class="site-title">
+  <Wordmark />
+</a>
+
+<style>
+  .site-title {
+    display: flex;
+    align-items: center;
+    color: var(--sl-color-white);
+    text-decoration: none;
+  }
+</style>

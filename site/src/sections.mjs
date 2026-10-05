@@ -23,7 +23,8 @@ const sidebar = [
   { label: 'Contributing', slug: 'contributing' },
 ];
 
-const pages = ['index.md', 'contributing.md'];
+// The landing page is not one of them: it is site/src/pages/index.astro.
+const pages = ['contributing.md'];
 const directories = ['getting-started', 'clouds', 'guides', 'architecture', 'decisions', 'reference'];
 
 // The documentation as it stood before the site (#71). It stays readable on

@@ -1,0 +1,595 @@
+---
+// The landing page. Not a Starlight page: it has its own layout, the
+// identity's one bold moment (the wordmark on its plinth), and links into
+// the documentation, which Starlight renders.
+import '../styles/tokens.css';
+import Wordmark from '../components/Wordmark.astro';
+import { bannerHtml } from '../channel';
+import { modules } from '../catalog.mjs';
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const to = (path: string) => `${base}/${path}`;
+const repository = 'https://github.com/do-now-io/socle';
+const banner = bannerHtml();
+const onByDefault = modules.filter((m) => m.enabled).length;
+
+const clouds = [
+  { id: 'aws', cloud: 'AWS', service: 'EKS', note: 'One-apply root ready' },
+  { id: 'gcp', cloud: 'GCP', service: 'GKE', note: 'Foundations ready' },
+  { id: 'azure', cloud: 'Azure', service: 'AKS', note: 'Foundations ready' },
+  { id: 'scaleway', cloud: 'Scaleway', service: 'Kapsule', note: 'Foundations ready' },
+];
+
+const reasons = [
+  ['One apply', 'A single OpenTofu root creates the cluster, installs Flux and hands the catalog over. Then OpenTofu steps away.'],
+  ['One version', '`socle_version` pins the OpenTofu modules and the Flux artifact together. An upgrade is one line in your tfvars.'],
+  ['Signed end to end', 'Both artifacts are signed keyless with cosign, and Flux checks the signature on every reconciliation.'],
+  ['Mistakes fail at plan', 'A misspelt module or attribute is rejected by `tofu plan`, with the allowed values listed.'],
+  ['No out-of-band scripts', 'A module that needs cloud access declares its own IAM through Crossplane. The foundations never change.'],
+  ['Your values win', 'Every module takes any chart value in `values`. Secrets go in `values_secret`, never in the state.'],
+];
+// The README's example, trimmed. HCL braces would be Astro expressions in
+// the template, so it is a string.
+const tfvars = `<span class="c"># clusters/prod.tfvars</span>
+socle_version = <span class="s">"0.1.0"</span>   <span class="c"># the only line an upgrade touches</span>
+
+aws = {
+  region             = <span class="s">"eu-west-3"</span>
+  cluster_name       = <span class="s">"acme-prod"</span>
+  kubernetes_version = <span class="s">"1.34"</span>
+}
+
+kube = {
+  argocd          = { domain = <span class="s">"argocd.acme.example"</span> }
+  victoria_traces = { enabled = <span class="k">true</span> }
+}`;
+const inline = (text: string) => text.replace(/`([^`]+)`/g, '<code>$1</code>');
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>socle: GitOps for managed Kubernetes</title>
+    <meta
+      name="description"
+      content="An open source GitOps distribution for managed Kubernetes clusters, on EKS, GKE, AKS and Scaleway Kapsule."
+    />
+    <link rel="icon" href={to('favicon.svg')} type="image/svg+xml" />
+    <script is:inline>
+      // The theme the documentation pages use (Starlight's own key), so the
+      // landing page never flashes the other one.
+      try {
+        const stored = localStorage.getItem('starlight-theme');
+        const theme =
+          stored === 'light' || stored === 'dark'
+            ? stored
+            : matchMedia('(prefers-color-scheme: light)').matches
+              ? 'light'
+              : 'dark';
+        document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+  </head>
+  <body>
+    {banner && <p class="banner" set:html={banner} />}
+
+    <header class="hero">
+      <nav class="top" aria-label="Site">
+        <a class="home" href={to('')}><Wordmark /></a>
+        <span class="links">
+          <a href={to('getting-started/concepts/')}>Docs</a>
+          <a href={to('catalog/')}>Catalog</a>
+          <a href={repository}>GitHub</a>
+        </span>
+      </nav>
+
+      <div class="stage">
+        <h1 class="mark"><Wordmark size="hero" /></h1>
+        <p class="baseline">The GitOps distribution for managed Kubernetes.</p>
+        <p class="lede">
+          Pick your cloud, pick your modules. Flux pulls one signed artifact, and upgrading the whole platform is one
+          line in Git.
+        </p>
+        <div class="ctas">
+          <a class="btn primary" href={to('getting-started/concepts/')}>Read the docs</a>
+          <a class="btn ghost" href={repository}>View on GitHub</a>
+        </div>
+        <p class="status">Pre-0.1.0. Every push to main publishes a signed alpha; nothing is released yet.</p>
+      </div>
+      <div class="plinth" aria-hidden="true"></div>
+    </header>
+
+    <main>
+      <section class="layers" aria-labelledby="layers-title">
+        <div class="text">
+          <h2 id="layers-title">Three layers, one version</h2>
+          <p>
+            OpenTofu lays the foundations once. Flux keeps the catalog in step with the signed artifact from then on. One
+            version number moves all of it.
+          </p>
+          <a href={to('architecture/overview/')}>How it fits together</a>
+        </div>
+        <ol class="strata" reversed aria-label="The three layers, from the top">
+          <li class="s3">
+            <strong>Upgrades</strong>
+            <span><code>socle_version</code> pins the modules and the artifact together</span>
+          </li>
+          <li class="s2">
+            <strong>Catalog</strong>
+            <span>À la carte modules, one Flux Operator ResourceSet each</span>
+          </li>
+          <li class="s1">
+            <strong>Foundations</strong>
+            <span>Network, cluster, identities and the bootstrap, in one apply</span>
+          </li>
+        </ol>
+      </section>
+
+      <section class="write" aria-labelledby="write-title">
+        <div class="text">
+          <h2 id="write-title">One file per cluster</h2>
+          <p>Under <code>kube</code>, list only what differs from the catalog defaults.</p>
+        </div>
+        <pre class="code"><code set:html={tfvars} /></pre>
+        <ul class="reasons">
+          {
+            reasons.map(([title, text]) => (
+              <li>
+                <strong>{title}</strong>
+                <span set:html={inline(text)} />
+              </li>
+            ))
+          }
+        </ul>
+      </section>
+
+      <section class="clouds" aria-labelledby="clouds-title">
+        <h2 id="clouds-title">Pick your cloud</h2>
+        <ul>
+          {
+            clouds.map((c) => (
+              <li>
+                <a href={to(`clouds/${c.id}/`)}>
+                  <span class="cloud">{c.cloud}</span>
+                  <span class="service">{c.service}</span>
+                  <span class="note">{c.note}</span>
+                </a>
+              </li>
+            ))
+          }
+        </ul>
+      </section>
+
+      <section class="catalog" aria-labelledby="catalog-title">
+        <div class="text">
+          <h2 id="catalog-title">{modules.length} modules in the catalog</h2>
+          <p>
+            {onByDefault} are on by default. Turn any of them on or off with one line under <code>kube</code>.
+          </p>
+          <a href={to('catalog/')}>Browse the catalog</a>
+        </div>
+        <ul class="modules">
+          {
+            modules.map((m) => (
+              <li class:list={{ on: m.enabled }}>
+                <code>{m.name}</code>
+                <span class="visually-hidden">{m.enabled ? ', on by default' : ', off by default'}</span>
+              </li>
+            ))
+          }
+        </ul>
+        <p class="legend"><span class="dot on"></span>on by default <span class="dot"></span>off by default</p>
+      </section>
+    </main>
+
+    <footer>
+      <span>
+        <a href={`${repository}/blob/main/LICENSE`}>Apache-2.0</a>
+        <a href={`${repository}/blob/main/SECURITY.md`}>Security</a>
+        <a href={to('contributing/')}>Contributing</a>
+      </span>
+      <span>by do-now</span>
+    </footer>
+  </body>
+</html>
+
+<style is:global>
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+  html {
+    color-scheme: light dark;
+  }
+  body {
+    margin: 0;
+    background: var(--stone);
+    color: var(--basalt);
+    font: 400 1.0625rem/1.6 var(--font-body);
+    -webkit-font-smoothing: antialiased;
+  }
+  a {
+    color: var(--ultramarine);
+    text-underline-offset: 3px;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ultramarine);
+    outline-offset: 3px;
+  }
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.88em;
+  }
+  h2 {
+    margin: 0;
+    font: 800 clamp(1.75rem, 3.6vw, 2.5rem) / 1.1 var(--font-display);
+    font-stretch: 115%;
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+  }
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+</style>
+
+<style>
+  .banner {
+    margin: 0;
+    padding: 0.55rem 16px;
+    text-align: center;
+    font-size: 0.875rem;
+    background: var(--stone-sunk);
+    border-bottom: 2px solid var(--ochre);
+  }
+
+  /* ---- hero: always basalt, the wordmark standing on its plinth ---- */
+  .hero {
+    --ink: #e6e8e3;
+    --ink-muted: #a2a9af;
+    background: var(--basalt-deep);
+    color: var(--ink);
+    display: flex;
+    flex-direction: column;
+    min-height: min(92vh, 52rem);
+  }
+  :root:not([data-theme='light']) .hero {
+    background: #1b2026;
+  }
+  .top {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 2rem;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    max-width: 76rem;
+    margin: 0 auto;
+    padding: 1.25rem 16px;
+  }
+  .home {
+    color: var(--ink);
+  }
+  .links {
+    display: flex;
+    gap: 1.75rem;
+    font-weight: 600;
+  }
+  .links a {
+    color: var(--ink);
+    text-decoration: none;
+  }
+  .links a:hover {
+    text-decoration: underline;
+  }
+  .stage {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1.5rem;
+    text-align: center;
+    padding: 3rem 16px 4.5rem;
+  }
+  .mark {
+    margin: 0 0 1rem;
+    font-weight: normal;
+    color: var(--ink);
+  }
+  .baseline {
+    margin: 0;
+    max-width: 22ch;
+    font: 800 clamp(1.75rem, 4.4vw, 3.25rem) / 1.08 var(--font-display);
+    font-stretch: 112%;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+  .lede {
+    margin: 0;
+    max-width: 46ch;
+    color: var(--ink-muted);
+    font-size: clamp(1.0625rem, 1.6vw, 1.25rem);
+    text-wrap: pretty;
+  }
+  .ctas {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.9rem;
+    margin-top: 0.75rem;
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    min-height: 3.5rem;
+    padding: 0 2rem;
+    border-radius: 3px;
+    font: 700 1.125rem/1 var(--font-display);
+    font-stretch: 112%;
+    text-decoration: none;
+  }
+  .btn.primary {
+    background: var(--ultramarine-on-dark);
+    color: #14181d;
+    padding-inline: 2.75rem;
+  }
+  .btn.primary:hover {
+    background: #c7ceff;
+  }
+  .btn.ghost {
+    color: var(--ink);
+    box-shadow: inset 0 0 0 1.5px #535b63;
+  }
+  .btn.ghost:hover {
+    box-shadow: inset 0 0 0 1.5px var(--ink);
+  }
+  .hero :focus-visible {
+    outline-color: var(--ultramarine-on-dark);
+  }
+  .status {
+    margin: 0.5rem 0 0;
+    font: 400 0.8125rem var(--font-mono);
+    color: var(--ink-muted);
+  }
+  /* The page below stands on the hero's plinth: one step of the ground
+     colour rising into the basalt. */
+  .plinth {
+    height: 1.75rem;
+    width: min(64rem, 78%);
+    margin: 0 auto;
+    background: var(--stone);
+    border-radius: 3px 3px 0 0;
+  }
+
+  /* ---- sections ---- */
+  main {
+    max-width: 76rem;
+    margin: 0 auto;
+    padding: 0 16px;
+  }
+  section {
+    display: grid;
+    gap: 2rem 4rem;
+    padding-block: clamp(3.5rem, 8vw, 6rem);
+    border-bottom: 1px solid var(--hairline);
+  }
+  /* A grid item is as wide as its content by default; the code block would
+     push the page wider than a phone. */
+  section > * {
+    min-width: 0;
+  }
+  .text {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+  .text p {
+    margin: 0;
+    max-width: 52ch;
+    color: var(--basalt-muted);
+  }
+  .text a {
+    font-weight: 600;
+  }
+  @media (min-width: 900px) {
+    .layers,
+    .catalog {
+      grid-template-columns: 5fr 7fr;
+      align-items: center;
+    }
+    .write {
+      grid-template-columns: 6fr 5fr;
+    }
+    .write .text {
+      grid-column: 1 / -1;
+    }
+  }
+
+  .strata {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .strata li {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 1rem 1.25rem;
+    border-radius: 2px;
+  }
+  .strata strong {
+    font: 800 1.25rem/1.2 var(--font-display);
+    font-stretch: 115%;
+  }
+  .strata span {
+    font-size: 0.9375rem;
+  }
+  .strata .s3 {
+    margin-inline: 14%;
+    background: var(--ultramarine-soft);
+  }
+  .strata .s2 {
+    margin-inline: 7%;
+    background: var(--stone-sunk);
+  }
+  .strata .s1 {
+    background: var(--basalt);
+    color: var(--stone);
+  }
+
+  .code {
+    align-self: start;
+    margin: 0;
+    padding: 1.25rem 1.5rem;
+    overflow-x: auto;
+    background: var(--stone-sunk);
+    border-radius: 3px;
+    font: 400 0.875rem/1.65 var(--font-mono);
+  }
+  .code .c {
+    color: var(--basalt-muted);
+    font-style: italic;
+  }
+  .code .s {
+    color: var(--lichen);
+  }
+  .code .k {
+    color: var(--ultramarine);
+  }
+  .reasons {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 1.25rem;
+    align-content: start;
+  }
+  .reasons li {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding-left: 1rem;
+    border-left: 3px solid var(--basalt);
+  }
+  .reasons strong {
+    font: 700 1.0625rem/1.3 var(--font-display);
+    font-stretch: 112%;
+  }
+  .reasons span {
+    color: var(--basalt-muted);
+    font-size: 0.9375rem;
+  }
+
+  .clouds ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  }
+  .clouds a {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    padding: 1.4rem 1.5rem 1.25rem;
+    background: var(--stone-raised);
+    border: 1px solid var(--hairline);
+    border-bottom: 6px solid var(--basalt);
+    border-radius: 3px;
+    color: var(--basalt);
+    text-decoration: none;
+  }
+  .clouds a:hover {
+    border-bottom-color: var(--ultramarine);
+  }
+  .clouds .cloud {
+    font-size: 0.875rem;
+    color: var(--basalt-muted);
+  }
+  .clouds .service {
+    font: 850 2rem/1.05 var(--font-display);
+    font-stretch: 120%;
+    letter-spacing: -0.02em;
+  }
+  .clouds .note {
+    margin-top: 0.5rem;
+    font-size: 0.875rem;
+    color: var(--basalt-muted);
+  }
+
+  .modules {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .modules li {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.45rem 0.75rem;
+    background: var(--stone-raised);
+    border: 1px solid var(--hairline);
+    border-radius: 2px;
+  }
+  .modules li::before,
+  .dot {
+    content: '';
+    display: inline-block;
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 50%;
+    border: 1.5px solid var(--basalt-muted);
+  }
+  .modules li.on::before,
+  .dot.on {
+    background: var(--lichen);
+    border-color: var(--lichen);
+  }
+  .legend {
+    grid-column: -2 / -1;
+    margin: -1rem 0 0;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.8125rem;
+    color: var(--basalt-muted);
+  }
+  .legend .dot:not(:first-child) {
+    margin-left: 1rem;
+  }
+
+  footer {
+    max-width: 76rem;
+    margin: 0 auto;
+    padding: 2rem 16px 3rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem 2rem;
+    justify-content: space-between;
+    font-size: 0.875rem;
+    color: var(--basalt-muted);
+  }
+  footer span:first-child {
+    display: flex;
+    gap: 1.5rem;
+  }
+  footer a {
+    color: var(--basalt-muted);
+  }
+</style>

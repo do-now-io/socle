@@ -75,6 +75,8 @@ export default defineConfig({
       title: 'Socle',
       description: 'An open source GitOps distribution for managed Kubernetes clusters: EKS, GKE, AKS and Scaleway Kapsule.',
       social: [{ icon: 'github', label: 'GitHub', href: repository }],
+      customCss: ['./src/styles/starlight.css'],
+      components: { SiteTitle: './src/components/SiteTitle.astro' },
       // Rewritten to docs/ by src/route-data.ts.
       editLink: { baseUrl: `${repository}/edit/main/site/` },
       routeMiddleware: './src/route-data.ts',

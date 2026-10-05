@@ -134,6 +134,8 @@ the folder says which:
   `[upgrade](../guides/upgrade.md)`. The site turns a link to one of its pages
   into that page's address, and a link to any other file of the repository
   into its address on GitHub, at the version being read.
+- The landing page is not in `docs/`: it is `site/src/pages/index.astro`,
+  and its module list is read from `catalog.tf` at build time.
 - The navigation follows the folders. A page's place within its folder is
   `sidebar.order` in its frontmatter.
 - To preview the site:

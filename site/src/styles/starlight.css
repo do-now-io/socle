@@ -1,0 +1,62 @@
+/* The socle tokens, mapped onto Starlight's custom properties. Starlight
+   names its scale from the dark theme: --sl-color-white is the text,
+   --sl-color-black the ground, in both themes. */
+@import './tokens.css';
+
+:root {
+  --sl-font: var(--font-body);
+  --sl-font-mono: var(--font-mono);
+  --sl-color-accent-low: #1e2448;
+  --sl-color-accent: #5c6fe0;
+  --sl-color-accent-high: #c7ceff;
+  --sl-color-white: #e6e8e3;
+  --sl-color-gray-1: #d5d9d3;
+  --sl-color-gray-2: #b4bab5;
+  --sl-color-gray-3: #8a929a;
+  --sl-color-gray-4: #535b63;
+  --sl-color-gray-5: #343a40;
+  --sl-color-gray-6: #1c2025;
+  --sl-color-black: #111417;
+}
+
+:root[data-theme='light'] {
+  --sl-color-accent-low: #e1e5f8;
+  --sl-color-accent: #2c3fb8;
+  --sl-color-accent-high: #1e2b85;
+  --sl-color-white: #1b2026;
+  --sl-color-gray-1: #22272c;
+  --sl-color-gray-2: #353c43;
+  --sl-color-gray-3: #535b63;
+  --sl-color-gray-4: #7d857f;
+  --sl-color-gray-5: #cbd0c8;
+  --sl-color-gray-6: #e4e7e0;
+  --sl-color-gray-7: #eef0eb;
+  --sl-color-black: #f2f3ef;
+}
+
+/* Headings in the display face, wide and heavy, as on the landing page. */
+.sl-markdown-content :is(h1, h2, h3),
+h1#_top {
+  font-family: var(--font-display);
+  font-stretch: 112%;
+  letter-spacing: -0.01em;
+}
+h1#_top {
+  font-weight: 850;
+  font-stretch: 118%;
+}
+.sl-markdown-content h2 {
+  font-weight: 800;
+}
+
+/* The banner: a strip of the ground colour with an ochre rule, not a block
+   of accent — it says "unreleased", it does not shout. */
+.sl-banner {
+  background: var(--stone-sunk);
+  color: var(--basalt);
+  border-bottom: 2px solid var(--ochre);
+  font-size: var(--sl-text-sm);
+}
+.sl-banner a {
+  color: var(--ultramarine);
+}
