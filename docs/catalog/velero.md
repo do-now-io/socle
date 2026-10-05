@@ -14,6 +14,25 @@ module's own S3 bucket. Nothing is backed up unless an application asks for
 it with two labels. aws only, off by default. Restoring is an operator's
 task: [Restore a backup](../guides/restore-a-backup.md).
 
+## Getting started
+
+Turn it on with the crossplane it needs, on a cluster whose foundations list
+`s3` in `aws.crossplane.allowed_services`. The seven default policies are
+there at once; label an application to use one.
+
+```hcl title="terraform.tfvars" kube-start="velero"
+kube = {
+  crossplane = { enabled = true }
+  velero = {
+    enabled = true
+  }
+}
+```
+
+After apply, `kubectl -n velero get schedules` lists one `Schedule` per
+policy, and `kubectl -n velero get backupstoragelocations` shows `default`
+`Available`.
+
 ## What it installs
 
 | | |
@@ -130,6 +149,41 @@ Two prerequisites outside `kube`:
   snapshot controller and its CRDs. Without it the socle renders neither
   Velero's CSI feature (`EnableCSI`) nor the `VolumeSnapshotClass`, and EBS
   volumes are not snapshotted.
+
+### Every setting
+
+Every attribute, at its default, and how chart values and secrets go in:
+
+```hcl title="terraform.tfvars" kube-full="velero"
+kube = {
+  velero = {
+    enabled = false # off by default; aws only, needs kube.crossplane.enabled = true
+
+    # One Schedule per { frequency, retention } label pair; setting it replaces the whole list.
+    policies = [
+      { frequency = "hourly", retention = "24h", schedule = "0 * * * *" },
+      { frequency = "hourly", retention = "48h", schedule = "0 * * * *" },
+      { frequency = "daily", retention = "7d", schedule = "0 2 * * *" },
+      { frequency = "daily", retention = "30d", schedule = "0 2 * * *" },
+      { frequency = "weekly", retention = "30d", schedule = "30 2 * * 0" },
+      { frequency = "weekly", retention = "90d", schedule = "30 2 * * 0" },
+      { frequency = "monthly", retention = "90d", schedule = "0 3 1 * *" },
+    ]
+
+    node_agent = false # default: eks_addons.efs_csi; the node-agent for EFS volumes, a privileged DaemonSet
+
+    # Any value of the velero chart 12.2.0; yours win over the socle's.
+    values = {
+      resources     = { limits = { memory = "1Gi" } }
+      configuration = { logFormat = "json" }
+    }
+
+    # A Secret you create in velero, whose values.yaml key holds chart values
+    # that must not reach the OpenTofu state; merged last.
+    values_secret = "velero-values"
+  }
+}
+```
 
 ## Per cloud
 

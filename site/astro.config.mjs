@@ -15,6 +15,7 @@ import starlight from '@astrojs/starlight';
 import { defineConfig } from 'astro/config';
 import starlightLinksValidator from 'starlight-links-validator';
 import { sections } from './src/sections.mjs';
+import { checkKubeExamples } from './src/kube-examples.mjs';
 import remarkSocle, { checkIncludes } from './src/plugins/remark-socle.mjs';
 
 const repoRoot = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -49,6 +50,11 @@ if (strays.length > 0) {
 // Rule 8 again: an include that does not resolve fails the build.
 const unresolved = checkIncludes(repoRoot, docsDir, markdown.filter(sections.covers));
 if (unresolved.length > 0) throw new Error(`docs/: includes that do not resolve:\n  ${unresolved.join('\n  ')}`);
+
+// The module pages' tfvars examples hold to catalog.tf (src/kube-examples.mjs).
+const modulePages = markdown.filter((f) => /^catalog\/[a-z0-9-]+\.md$/.test(f));
+const drifted = checkKubeExamples(repoRoot, docsDir, modulePages);
+if (drifted.length > 0) throw new Error(`docs/catalog: tfvars examples out of step with catalog.tf:\n  ${drifted.join('\n  ')}`);
 
 export default defineConfig({
   site: 'https://do-now-io.github.io',

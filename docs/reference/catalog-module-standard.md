@@ -20,7 +20,7 @@ for a module with chart values.
 | The overlays | a line `../../catalog/<kebab-name>/resourceset.yaml` in each `oci/clusters/<cloud>/kustomization.yaml` that offers it | `check-catalog-clouds.sh`, both directions; the kustomize build of each overlay |
 | Cloud binding | an entry in `catalog_clouds` when the module is not on every cloud: `<snake_name> = ["aws", …]`, one per line | `check-catalog-clouds.sh`; refused at plan on another cloud |
 | The e2e proof | `oci/catalog/<kebab-name>/tests/e2e/chainsaw-test.yaml`, and optionally `values.yaml` beside it | `check-catalog-clouds.sh` fails without the file; `e2e.yaml` runs it |
-| The page | `docs/catalog/<kebab-name>.md`, from [`docs/catalog/_template.md`](https://github.com/do-now-io/socle/blob/main/docs/catalog/_template.md) | rule 6 of [CONTRIBUTING](../contributing.md#the-rules); not checked by CI yet |
+| The page | `docs/catalog/<kebab-name>.md`, from [`docs/catalog/_template.md`](https://github.com/do-now-io/socle/blob/main/docs/catalog/_template.md) | rule 6 of [CONTRIBUTING](../contributing.md#the-rules); the site build checks its frontmatter and its two tfvars blocks |
 | The decisions | `docs/decisions/<kebab-name>.md`, from [`docs/decisions/_template.md`](https://github.com/do-now-io/socle/blob/main/docs/decisions/_template.md) | review |
 
 `check-catalog-clouds.sh` reads `catalog_clouds` by shape: one
@@ -154,3 +154,6 @@ such.
 - [ ] `docs/catalog/<kebab-name>.md` exists with `title`, `description`,
       `category` and `requires` frontmatter, and
       `docs/decisions/<kebab-name>.md` holds its decisions.
+- [ ] The page has a `kube-start` block (the module on, its first settings)
+      and a `kube-full` block listing every attribute of its `catalog.tf`
+      entry; the site build refuses one that drifts from `catalog.tf`.

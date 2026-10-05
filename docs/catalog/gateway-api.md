@@ -11,6 +11,25 @@ socle runs Cilium, and the two Gateways that the catalog's modules and your
 own routes attach to: `public`, internet-facing, and `private`, internal. It
 is **on by default**, on aws, azure and scaleway.
 
+## Getting started
+
+The module is already on, with its Gateways. On aws they also wait for the
+foundations' `aws.gateway_certificate`
+([What you can set](#what-you-can-set)); on azure, for your `gateway-tls`
+Secret before `https` is served.
+
+```hcl title="terraform.tfvars" kube-start="gateway_api"
+kube = {
+  gateway_api = {
+    gateways = true
+  }
+}
+```
+
+After the apply, `kubectl -n flux-system get resourceset gateway-api` is
+Ready and `kubectl -n gateway-system get gateway` lists `public` and
+`private`, each with its load balancer's address.
+
 ## What it installs
 
 | | |
@@ -99,6 +118,19 @@ aws = {
 The foundations issue the certificate and validate it by DNS in the public
 Route 53 zone of that name; ACM renews it. No private key exists in the
 cluster or in the OpenTofu state.
+
+### Every setting
+
+Every attribute, at its default:
+
+```hcl title="terraform.tfvars" kube-full="gateway_api"
+kube = {
+  gateway_api = {
+    enabled  = true # on by default; false orphans the CRDs
+    gateways = true # the shared public and private Gateways; false keeps the CRDs and the class
+  }
+}
+```
 
 ## Per cloud
 

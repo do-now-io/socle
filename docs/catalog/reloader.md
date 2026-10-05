@@ -9,6 +9,21 @@ ask for it when one they read changes. Turn it on with
 [external-secrets](external-secrets.md), whose rotated Secrets a running pod
 never re-reads, or alone for ConfigMaps. Off by default.
 
+## Getting started
+
+Turn it on; it then rolls only the workloads you annotate (below).
+
+```hcl title="terraform.tfvars" kube-start="reloader"
+kube = {
+  reloader = {
+    enabled = true
+  }
+}
+```
+
+After apply, `kubectl -n reloader get deployment reloader` shows it ready;
+change a ConfigMap an annotated workload reads and its pods roll.
+
 ## What it installs
 
 | | |
@@ -69,6 +84,31 @@ you put there is yours to review.
 Narrower than the whole cluster: Reloader's ClusterRole lists and watches
 every ConfigMap and Secret. The chart's scoped mode (`reloader.namespaces`, a
 Role per namespace) is available through `values`.
+
+### Every setting
+
+Every attribute, at its default, and how chart values and secrets go in:
+
+```hcl title="terraform.tfvars" kube-full="reloader"
+kube = {
+  reloader = {
+    enabled = false # off by default; it reads every ConfigMap and Secret of the cluster
+
+    # Any value of the reloader chart 2.2.18; yours win over the socle's.
+    values = {
+      reloader = {
+        logFormat      = "json"
+        ignoreCronJobs = true
+      }
+    }
+
+    # A Secret you create in reloader, whose values.yaml key holds chart values
+    # that must not reach the OpenTofu state, reloader.deployment.env.secret's
+    # ALERT_WEBHOOK_URL say; merged last.
+    values_secret = "reloader-values"
+  }
+}
+```
 
 ## Per cloud
 

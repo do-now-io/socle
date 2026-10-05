@@ -12,6 +12,26 @@ Standards, CPU and memory requests required, the `latest` tag refused, and,
 when you name them, your allowed registries. Every policy reports and refuses
 nothing until you switch it to Enforce, one by one. Off by default.
 
+## Getting started
+
+Turn it on with the kyverno engine it needs. Every policy starts in Audit:
+name your registries now, and switch policies to Enforce once their reports
+are clean.
+
+```hcl title="terraform.tfvars" kube-start="kyverno_policies"
+kube = {
+  kyverno = { enabled = true }
+  kyverno_policies = {
+    enabled            = true
+    profile            = "baseline"
+    allowed_registries = ["ghcr.io/acme", "registry.k8s.io"]
+  }
+}
+```
+
+After apply, `kubectl get validatingpolicies` lists the policies, and
+`kubectl get policyreports -A` shows what each of your namespaces violates.
+
 ## What it installs
 
 | | |
@@ -103,6 +123,34 @@ Your own third-party charts (an ingress controller, an operator) live in your
 namespaces and are judged like your applications. Exempt one through
 `values.vpolExclude`. Your own policies belong with your applications, in your
 GitOps, not in `values.customPolicies`.
+
+### Every setting
+
+Every attribute, at its default, and how chart values and secrets go in:
+
+```hcl title="terraform.tfvars" kube-full="kyverno_policies"
+kube = {
+  kyverno_policies = {
+    enabled            = false      # off by default; needs kube.kyverno.enabled = true
+    profile            = "baseline" # baseline, or restricted (baseline plus six)
+    enforce            = []         # policies switched to Enforce, each made native
+    allowed_registries = []         # registry hosts, optionally a path; adds restrict-image-registries
+
+    # Any value of the kyverno-policies chart 3.9.1; yours win over the socle's.
+    values = {
+      podSecuritySeverity = "high"
+      vpolExclude = {
+        # Replaces the socle's list: keep its three names.
+        excludeNamespaces = ["kube-system", "flux-system", "kyverno", "ingress-nginx"]
+      }
+    }
+
+    # A Secret you create in kyverno-policies, whose values.yaml key holds chart
+    # values kept out of the OpenTofu state; merged last.
+    values_secret = "kyverno-policies-values"
+  }
+}
+```
 
 ## Per cloud
 

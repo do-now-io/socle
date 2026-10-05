@@ -11,6 +11,47 @@ rotates there. Pair it with [reloader](reloader.md) so the pods reading that
 Secret roll. It is **off by default**. On aws with crossplane on, the socle
 also gives it a read-only role and one store; elsewhere you bring the stores.
 
+## Getting started
+
+On aws, let Crossplane's boundary allow Secrets Manager:
+
+```hcl
+# opentofu/clusters/aws, in your tfvars
+aws = { crossplane = { allowed_services = ["secretsmanager"] } }
+```
+
+Then turn the module on with crossplane, and reloader for the pods to roll.
+The role reads the secrets under your cluster's name, `acme-prod/` here:
+
+```hcl title="terraform.tfvars" kube-start="external_secrets"
+kube = {
+  crossplane = { enabled = true }
+  external_secrets = {
+    enabled  = true
+    prefixes = ["acme-prod"]
+  }
+  reloader = { enabled = true }
+}
+```
+
+After the apply, `kubectl -n flux-system get resourceset external-secrets` is
+Ready and `kubectl get clustersecretstore secret-manager` is `Valid`. An
+`ExternalSecret` of yours then reads a secret through it:
+
+```yaml
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata: { name: db, namespace: shop }
+spec:
+  refreshInterval: 1h
+  secretStoreRef: { kind: ClusterSecretStore, name: secret-manager }
+  target: { name: db }
+  data:
+    - secretKey: password
+      remoteRef: { key: acme-prod/shop/db, property: password }
+# the Deployment reading Secret db carries reloader.stakater.com/auto: "true"
+```
+
 ## What it installs
 
 | | |
@@ -44,30 +85,6 @@ Under `kube.external_secrets` in your tfvars:
 | `values` | `{}` | Any `external-secrets` chart value; yours win over the socle's ([SOCLE-06](../decisions/socle.md#socle-06-the-clients-values-win)). |
 | `values_secret` | `""` | The name of a Secret you create in `external-secrets`, with a `values.yaml` key, merged last. Label it `reconcile.fluxcd.io/watch: Enabled` for a change to apply before the next interval. |
 
-```hcl
-# opentofu/clusters/aws, in your tfvars
-aws = { crossplane = { allowed_services = ["secretsmanager"] } }
-kube = {
-  crossplane       = { enabled = true }
-  external_secrets = { enabled = true } # prefixes = [<cluster name>]
-  reloader         = { enabled = true }
-}
-```
-
-```yaml
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata: { name: db, namespace: shop }
-spec:
-  refreshInterval: 1h
-  secretStoreRef: { kind: ClusterSecretStore, name: secret-manager }
-  target: { name: db }
-  data:
-    - secretKey: password
-      remoteRef: { key: acme-prod/shop/db, property: password }
-# the Deployment reading Secret db carries reloader.stakater.com/auto: "true"
-```
-
 Refused at plan:
 
 - A `prefixes` entry that is not a Secrets Manager name path: letters,
@@ -81,6 +98,30 @@ Refused at plan:
   whose name looks like a credential (`valueFrom` passes;
   `AWS_SECRETSMANAGER_ENDPOINT` is an endpoint and passes).
 - `values_secret` that is not a valid Secret name.
+
+### Every setting
+
+Every attribute, at its default, and how chart values and secrets go in:
+
+```hcl title="terraform.tfvars" kube-full="external_secrets"
+kube = {
+  external_secrets = {
+    enabled  = false         # off by default
+    prefixes = ["acme-prod"] # default: the cluster's name; [] = no role, no store
+
+    # Any value of the external-secrets chart 2.11.0; yours win over the socle's.
+    values = {
+      concurrent = 2
+      log        = { level = "debug" }
+    }
+
+    # A Secret you create in external-secrets, whose values.yaml key holds
+    # chart values that must not reach the OpenTofu state, such as an extraEnv
+    # proxy URL with a password in it.
+    values_secret = "external-secrets-values"
+  }
+}
+```
 
 ## Per cloud
 

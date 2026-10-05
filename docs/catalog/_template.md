@@ -18,6 +18,20 @@ no questions for a reviewer. Files starting with `_` are not published.
 Two sentences: what it is, and when to turn it on. Whether it is on by
 default.
 
+## Getting started
+
+One sentence, then the block a client copies: the module on, and the two or
+three settings they set first. `kube-start` names the catalog.tf key; the
+build refuses an attribute the module does not have.
+
+```hcl title="terraform.tfvars" kube-start="<catalog key>"
+kube = {
+  <catalog key> = {
+    enabled = true
+  }
+}
+```
+
 ## What it installs
 
 | | |
@@ -37,6 +51,22 @@ Under `kube.<module>` in your tfvars:
 | `values_secret` | `{}` | Chart values that are secrets: kept out of the state. |
 
 What is refused at plan, and why.
+
+### Every setting
+
+Every attribute, at its default, and how chart values and secrets go in.
+`kube-full` names the catalog.tf key; the build refuses a block that lists
+more or fewer attributes than catalog.tf. Attributes sit at four spaces.
+
+```hcl title="terraform.tfvars" kube-full="<catalog key>"
+kube = {
+  <catalog key> = {
+    enabled       = false            # what it does
+    values        = { }              # real keys of the chart, at its pinned version
+    values_secret = "<module>-values" # what the Secret holds
+  }
+}
+```
 
 ## Per cloud
 

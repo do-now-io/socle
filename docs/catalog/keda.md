@@ -14,6 +14,30 @@ zero. Turn it on for workers behind a queue. It is **off by default**: it
 does nothing until you write a `ScaledObject`, and it costs three pods and
 an API service.
 
+## Getting started
+
+Turn it on. For queues on aws, also let Crossplane's boundary allow their
+services, and name them in `services` for the operator's own role:
+
+```hcl
+# opentofu/clusters/aws, in your tfvars
+aws = { crossplane = { allowed_services = ["sqs", "cloudwatch"] } }
+```
+
+```hcl title="terraform.tfvars" kube-start="keda"
+kube = {
+  crossplane = { enabled = true }
+  keda = {
+    enabled  = true
+    services = ["sqs", "cloudwatch"]
+  }
+}
+```
+
+Without an aws source, `keda = { enabled = true }` alone. After the apply,
+`kubectl -n flux-system get resourceset keda` is Ready and
+`kubectl get apiservice v1beta1.external.metrics.k8s.io` is `Available`.
+
 ## What it installs
 
 | | |
@@ -52,15 +76,6 @@ Under `kube.keda` in your tfvars:
 | `values` | `{}` | Any `keda` chart value; yours win over the socle's ([SOCLE-06](../decisions/socle.md#socle-06-the-clients-values-win)). |
 | `values_secret` | `""` | The name of a Secret you create in `keda`, with a `values.yaml` key, merged last. Label it `reconcile.fluxcd.io/watch: Enabled` for a change to apply before the next interval. |
 
-```hcl
-# opentofu/clusters/aws, in your tfvars
-aws = { crossplane = { allowed_services = ["sqs", "cloudwatch"] } }
-kube = {
-  crossplane = { enabled = true }
-  keda       = { enabled = true, services = ["sqs", "cloudwatch"] }
-}
-```
-
 Refused at plan:
 
 - A `services` entry outside `sqs`, `cloudwatch`, `kinesis`, `dynamodb`. RDS
@@ -80,6 +95,31 @@ services: the bootstrap module does not see the foundations' variable. A
 service missing there makes the Role fail at IAM, `keda-workload` wait, and
 `socle-root` stay not Ready, with the reason on the Role's `Synced`
 condition.
+
+### Every setting
+
+Every attribute, at its default, and how chart values and secrets go in:
+
+```hcl title="terraform.tfvars" kube-full="keda"
+kube = {
+  keda = {
+    enabled  = false # off by default
+    services = []    # aws: "sqs", "cloudwatch", "kinesis", "dynamodb"; [] = no role
+
+    # Any value of the keda chart 2.21.0; yours win over the socle's.
+    values = {
+      logging = {
+        operator = { level = "debug", format = "json" }
+      }
+    }
+
+    # A Secret you create in keda, whose values.yaml key holds chart values
+    # that must not reach the OpenTofu state, such as an operator.env proxy
+    # URL with a password in it.
+    values_secret = "keda-values"
+  }
+}
+```
 
 ## Per cloud
 

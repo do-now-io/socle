@@ -12,6 +12,26 @@ upgrade may drop the traces it has stored. Turning it on accepts that
 How it fits the rest of the stack:
 [Observability](../architecture/observability.md).
 
+## Getting started
+
+Turn it on, knowing an upgrade may drop the traces stored so far; retention
+and the volume are what you set next.
+
+```hcl title="terraform.tfvars" kube-start="victoria_traces"
+kube = {
+  victoria_traces = {
+    enabled      = true
+    retention    = "3d"
+    storage_size = "20Gi"
+  }
+}
+```
+
+After apply, `kubectl -n victoria-traces get pvc,pods` shows the claim
+`Bound` and the pod `Running`, and Grafana's datasources list
+VictoriaTraces; on aws, a claim left `Pending` needs a default StorageClass
+([Per cloud](#per-cloud)).
+
 ## What it installs
 
 | | |
@@ -68,6 +88,31 @@ for victoria-metrics: an auth flag in `server.extraArgs`, a `server.env`
 entry with a literal value named like a credential, a `Secret` in
 `extraObjects`, a `retention` under a day, a `storage_size` not in `Gi` or
 `Ti`.
+
+### Every setting
+
+Every attribute, at its default, and how chart values and secrets go in:
+
+```hcl title="terraform.tfvars" kube-full="victoria_traces"
+kube = {
+  victoria_traces = {
+    enabled      = false  # off by default; off deletes the claim and its traces
+    retention    = "7d"   # how long traces are kept, at least a day
+    storage_size = "10Gi" # the claim; "" keeps the traces in an emptyDir
+
+    # Any value of the victoria-traces-single chart 0.1.11; yours win over the socle's.
+    values = {
+      server = {
+        resources = { limits = { memory = "1Gi" } }
+      }
+    }
+
+    # A Secret you create in victoria-traces, whose values.yaml key holds chart
+    # values that must not reach the OpenTofu state; merged last.
+    values_secret = "victoria-traces-values"
+  }
+}
+```
 
 ## Per cloud
 

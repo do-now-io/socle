@@ -13,6 +13,25 @@ whichever are on, and ships the workloads dashboard to [grafana](grafana.md).
 On by default. How it fits the rest of the stack:
 [Observability](../architecture/observability.md).
 
+## Getting started
+
+On by default, with nothing to name: what you set first, if anything, is a
+second replica.
+
+```hcl title="terraform.tfvars" kube-start="otel_gateway"
+kube = {
+  otel_gateway = {
+    values = {
+      replicaCount = 2
+    }
+  }
+}
+```
+
+After apply, `kubectl -n otel-gateway get deployment otel-gateway` shows its
+replicas ready, and your applications send OTLP to
+`otel-gateway.otel-gateway.svc:4317` or `:4318`.
+
 ## What it installs
 
 | | |
@@ -78,6 +97,28 @@ authenticator, a literal `Authorization` or API-key header in a
 `config.exporters` entry, an `extraEnvs` entry with a literal value named like
 a credential, and a `Secret` in `extraManifests`. `${env:NAME}`, set from a
 Secret through `extraEnvs` `valueFrom`, is accepted.
+
+### Every setting
+
+Every attribute, at its default, and how chart values and secrets go in:
+
+```hcl title="terraform.tfvars" kube-full="otel_gateway"
+kube = {
+  otel_gateway = {
+    enabled = true # on by default; off removes the release and the dashboard
+
+    # Any value of the opentelemetry-collector chart 0.173.1; yours win over the socle's.
+    values = {
+      replicaCount = 2
+      resources    = { limits = { memory = "2Gi" } }
+    }
+
+    # A Secret you create in otel-gateway, whose values.yaml key holds chart values
+    # that must not reach the OpenTofu state, an exporter's headers say; merged last.
+    values_secret = "otel-gateway-values"
+  }
+}
+```
 
 ## Per cloud
 

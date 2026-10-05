@@ -9,6 +9,24 @@ your applications' OTLP logs are stored, read in [grafana](grafana.md) in
 LogsQL. On by default. How it fits the rest of the stack:
 [Observability](../architecture/observability.md).
 
+## Getting started
+
+On by default: what you set first is how long logs are kept and how big
+their volume is.
+
+```hcl title="terraform.tfvars" kube-start="victoria_logs"
+kube = {
+  victoria_logs = {
+    retention    = "14d"
+    storage_size = "50Gi"
+  }
+}
+```
+
+After apply, `kubectl -n victoria-logs get pvc,pods` shows the claim `Bound`
+and the pod `Running`, and Grafana's Explore lists VictoriaLogs; on aws, a
+claim left `Pending` needs a default StorageClass ([Per cloud](#per-cloud)).
+
 ## What it installs
 
 | | |
@@ -70,6 +88,31 @@ Refused at plan, as for victoria-metrics: an auth flag in
 `server.extraArgs`, a `server.env` entry with a literal value named like a
 credential, a `Secret` in `extraObjects`, a `retention` under a day, a
 `storage_size` not in `Gi` or `Ti`.
+
+### Every setting
+
+Every attribute, at its default, and how chart values and secrets go in:
+
+```hcl title="terraform.tfvars" kube-full="victoria_logs"
+kube = {
+  victoria_logs = {
+    enabled      = true   # on by default; off deletes the claim and its logs
+    retention    = "7d"   # how long logs are kept, at least a day
+    storage_size = "20Gi" # the claim; "" keeps the logs in an emptyDir
+
+    # Any value of the victoria-logs-single chart 0.13.9; yours win over the socle's.
+    values = {
+      server = {
+        resources = { limits = { memory = "1Gi" } }
+      }
+    }
+
+    # A Secret you create in victoria-logs, whose values.yaml key holds chart
+    # values that must not reach the OpenTofu state; merged last.
+    values_secret = "victoria-logs-values"
+  }
+}
+```
 
 ## Per cloud
 

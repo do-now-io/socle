@@ -14,9 +14,11 @@ want needs cloud access (external-dns, external-secrets, keda with
 `services`, velero). How the whole chain works:
 [Module-owned cloud access](../architecture/module-iam.md).
 
+## Getting started
+
 It needs one input that is not a module: the foundations' `aws.crossplane`,
 which gives Crossplane its own identity and the permissions boundary every
-role it creates must carry.
+role it creates must carry. Name there the services your modules use:
 
 ```hcl
 # opentofu/clusters/aws, in your tfvars
@@ -24,10 +26,20 @@ aws = {
   # ...
   crossplane = { allowed_services = ["route53", "secretsmanager"] }
 }
+```
+
+Then turn the module on. The aws root wires `permissions_boundary` for you:
+
+```hcl title="terraform.tfvars" kube-start="crossplane"
 kube = {
-  crossplane = { enabled = true } # permissions_boundary is wired by the root
+  crossplane = {
+    enabled = true
+  }
 }
 ```
+
+After the apply, `kubectl -n flux-system get resourceset crossplane` is Ready
+and, on aws, `kubectl get providers.pkg.crossplane.io` shows the four providers `Healthy`.
 
 ## What it installs
 
@@ -78,6 +90,32 @@ Crossplane off first, wait for their roles to be gone, then set
 leaves the module's managed resources without a provider: their finalizers
 hold the module's namespace.
 :::
+
+### Every setting
+
+Every attribute, at its default, and how chart values and secrets go in:
+
+```hcl title="terraform.tfvars" kube-full="crossplane"
+kube = {
+  crossplane = {
+    enabled = false # off by default; true installs the tooling
+
+    # Any value of the crossplane chart 2.4.2; yours win over the socle's.
+    values = {
+      metrics = { enabled = true } # scrape annotations, read by otel_gateway
+    }
+
+    # A Secret you create in crossplane-system, whose values.yaml key holds
+    # chart values that must not reach the OpenTofu state, such as an
+    # extraEnvVarsCrossplane proxy URL with a password in it.
+    values_secret = "crossplane-values"
+
+    # On aws the root sets it to the foundations' boundary; written here, it
+    # wins over the root's. Leave it out unless you mean to.
+    # permissions_boundary = ""
+  }
+}
+```
 
 ## Per cloud
 

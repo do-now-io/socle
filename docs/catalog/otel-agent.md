@@ -12,6 +12,26 @@ and ships the nodes and pods dashboard to [grafana](grafana.md). On by
 default. How it fits the rest of the stack:
 [Observability](../architecture/observability.md).
 
+## Getting started
+
+On by default, with container logs while victoria-logs is on. What you set
+first is whether it reads logs, and the taints it tolerates, so an agent runs
+on every node:
+
+```hcl title="terraform.tfvars" kube-start="otel_agent"
+kube = {
+  otel_agent = {
+    logs = true
+    values = {
+      tolerations = [{ operator = "Exists" }]
+    }
+  }
+}
+```
+
+After apply, `kubectl -n otel-agent get daemonset otel-agent-agent` shows as
+many pods ready as there are nodes.
+
 ## What it installs
 
 | | |
@@ -96,6 +116,29 @@ Secret, is accepted: nothing secret reaches the state.
 Host metrics (the chart's `hostMetrics` preset) are off: they mount the
 node's root filesystem, which GKE Autopilot refuses. You can turn them on
 through `values` where your cloud allows it.
+
+### Every setting
+
+Every attribute, at its default, and how chart values and secrets go in:
+
+```hcl title="terraform.tfvars" kube-full="otel_agent"
+kube = {
+  otel_agent = {
+    enabled = true # on by default; off removes the release and the dashboard
+    logs    = true # container logs to victoria-logs; false: metrics only, no hostPath, no root
+
+    # Any value of the opentelemetry-collector chart 0.173.1; yours win over the socle's.
+    values = {
+      tolerations = [{ operator = "Exists" }]
+      resources   = { limits = { memory = "1Gi" } }
+    }
+
+    # A Secret you create in otel-agent, whose values.yaml key holds chart values
+    # that must not reach the OpenTofu state, an exporter's headers say; merged last.
+    values_secret = "otel-agent-values"
+  }
+}
+```
 
 ## Per cloud
 

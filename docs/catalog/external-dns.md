@@ -11,6 +11,27 @@ DNS or Scaleway DNS. It is **off by default**, because it needs a zone,
 which has no default. On aws the client root turns it on for you when you
 asked for the Gateways' certificate and gave Crossplane `route53`.
 
+## Getting started
+
+Turn it on with the zones it may write to. On aws, with crossplane on and
+`route53` in `aws.crossplane.allowed_services`, the module brings its own
+role; elsewhere, create its credential Secret ([Per cloud](#per-cloud)).
+
+```hcl title="terraform.tfvars" kube-start="external_dns"
+kube = {
+  crossplane = { enabled = true } # aws: the module's own role
+  external_dns = {
+    enabled        = true
+    domain_filters = ["acme.example"]
+    policy         = "upsert-only"
+  }
+}
+```
+
+After the apply, `kubectl -n flux-system get resourceset external-dns` is
+Ready, and a route on `shop.acme.example` gets an A record and a
+`socle-` TXT record in the zone within seconds.
+
 ## What it installs
 
 | | |
@@ -51,13 +72,6 @@ Under `kube.external_dns` in your tfvars:
 | `values` | `{}` | Any `external-dns` chart value; yours win over the socle's ([SOCLE-06](../decisions/socle.md#socle-06-the-clients-values-win)). A list replaces the socle's: your `env` on aws replaces the `external-dns-aws` entries. |
 | `values_secret` | `""` | The name of a Secret you create in `external-dns`, with a `values.yaml` key, merged last. Label it `reconcile.fluxcd.io/watch: Enabled` for a change to apply before the next interval. |
 
-```hcl
-kube = {
-  crossplane   = { enabled = true }
-  external_dns = { enabled = true, domain_filters = ["acme.example"] }
-}
-```
-
 Refused at plan:
 
 - `enabled = true` with an empty `domain_filters`: a module that publishes
@@ -85,6 +99,35 @@ On aws the client root derives the module for you when
 and `external-dns.kubernetes.io/target`. The older
 `external-dns.alpha.kubernetes.io/` annotations most tutorials show are
 ignored: no record is created from them.
+
+### Every setting
+
+Every attribute, at its default, and how chart values and secrets go in:
+
+```hcl title="terraform.tfvars" kube-full="external_dns"
+kube = {
+  external_dns = {
+    # On aws the root turns the module on, with the certificate's domain as its
+    # filter, once the Gateways have a certificate: write these two only to
+    # change that. Elsewhere, it is off and the filter is required to turn it on.
+    # enabled        = false
+    # domain_filters = []            # the zones it may write to
+    policy         = "upsert-only" # "upsert-only" never deletes; "sync" deletes the records it owns
+    txt_owner_id   = "acme-prod"   # default: the cluster's name
+
+    # Any value of the external-dns chart 1.22.0; yours win over the socle's.
+    values = {
+      interval       = "5m"
+      excludeDomains = ["internal.acme.example"]
+    }
+
+    # A Secret you create in external-dns, whose values.yaml key holds chart
+    # values that must not reach the OpenTofu state, such as
+    # extraArgs.txt-encrypt-aes-key.
+    values_secret = "external-dns-values"
+  }
+}
+```
 
 ## Per cloud
 

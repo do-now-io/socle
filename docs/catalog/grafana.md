@@ -10,6 +10,24 @@ each Victoria backend that is on, and every dashboard a module ships. It is
 **on by default**, on every cloud. How the stack fits together:
 [Observability](../architecture/observability.md).
 
+## Getting started
+
+The module is already on. Give it a host to be served at, on the private
+Gateway:
+
+```hcl title="terraform.tfvars" kube-start="grafana"
+kube = {
+  grafana = {
+    domain  = "grafana.acme.example"
+    gateway = "private"
+  }
+}
+```
+
+After the apply, `kubectl -n flux-system get resourceset grafana` is Ready and
+`kubectl -n grafana get httproute grafana` names your host. Log in as `admin`
+with the chart's random password, as below.
+
 ## What it installs
 
 | | |
@@ -89,6 +107,30 @@ Refused at plan:
   Grafana resolves itself (`$VAR`, `${VAR}`, `$__env{...}`, `$__file{...}`), or
   `values_secret`.
 - `values_secret` that is not a valid Secret name.
+
+### Every setting
+
+Every attribute, at its default, and how chart values and secrets go in:
+
+```hcl title="terraform.tfvars" kube-full="grafana"
+kube = {
+  grafana = {
+    enabled = true      # on by default
+    domain  = ""        # "" = no root_url and no route; a host serves the UI
+    gateway = "private" # the route's shared Gateway: "private", "public" or ""
+
+    # Any value of the grafana chart 13.2.6; yours win over the socle's.
+    values = {
+      persistence = { enabled = true, size = "5Gi" } # keeps dashboards made by hand
+    }
+
+    # A Secret you create in grafana, whose values.yaml key holds chart values
+    # that must not reach the OpenTofu state, such as
+    # grafana.ini."auth.generic_oauth".client_secret.
+    values_secret = "grafana-values"
+  }
+}
+```
 
 ## Per cloud
 

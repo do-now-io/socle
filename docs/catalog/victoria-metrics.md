@@ -9,6 +9,24 @@ VictoriaMetrics single-node, where [otel-agent](otel-agent.md) and
 reads them back, in PromQL. On by default. How it fits the rest of the stack:
 [Observability](../architecture/observability.md).
 
+## Getting started
+
+On by default: what you set first is how long samples are kept and how big
+their volume is.
+
+```hcl title="terraform.tfvars" kube-start="victoria_metrics"
+kube = {
+  victoria_metrics = {
+    retention    = "30d"
+    storage_size = "50Gi"
+  }
+}
+```
+
+After apply, `kubectl -n victoria-metrics get pvc,pods` shows the claim
+`Bound` and the pod `Running`; on aws, a claim left `Pending` needs a default
+StorageClass ([Per cloud](#per-cloud)).
+
 ## What it installs
 
 | | |
@@ -83,6 +101,32 @@ token (`httpAuth.password`, `deleteAuthKey`, `snapshotAuthKey`…); a
 (`VM_httpAuth_password`); a `Secret` in `extraObjects`. Also refused: a
 `retention` under a day, in months or with a fraction, and a `storage_size`
 not in `Gi` or `Ti`.
+
+### Every setting
+
+Every attribute, at its default, and how chart values and secrets go in:
+
+```hcl title="terraform.tfvars" kube-full="victoria_metrics"
+kube = {
+  victoria_metrics = {
+    enabled      = true   # on by default; off deletes the claim and its data
+    retention    = "15d"  # how long samples are kept, at least a day
+    storage_size = "20Gi" # the claim; "" keeps the data in an emptyDir
+
+    # Any value of the victoria-metrics-single chart 0.48.0; yours win over the socle's.
+    values = {
+      server = {
+        extraArgs = { "storage.maxHourlySeries" = "300000" }
+        resources = { limits = { memory = "2Gi" } }
+      }
+    }
+
+    # A Secret you create in victoria-metrics, whose values.yaml key holds chart
+    # values that must not reach the OpenTofu state; merged last.
+    values_secret = "victoria-metrics-values"
+  }
+}
+```
 
 ## Per cloud
 

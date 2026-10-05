@@ -11,6 +11,23 @@ inputs reach the cluster, that a module converges and that turning one off
 removes it. It is **on by default** in every client cluster; turn it off once
 you trust the pipeline.
 
+## Getting started
+
+The module is already on. Change its message to see an input reach the
+cluster:
+
+```hcl title="terraform.tfvars" kube-start="hello"
+kube = {
+  hello = {
+    replicas = 2
+    message  = "hello from acme"
+  }
+}
+```
+
+After the apply, `kubectl -n flux-system get resourceset hello` is Ready and
+podinfo's page reads `hello from acme — <cluster name> on <cloud>`.
+
 ## What it installs
 
 | | |
@@ -40,6 +57,20 @@ To see it:
 
 ```sh
 kubectl -n hello port-forward svc/podinfo 9898:9898   # then http://localhost:9898
+```
+
+### Every setting
+
+Every attribute, at its default:
+
+```hcl title="terraform.tfvars" kube-full="hello"
+kube = {
+  hello = {
+    enabled  = true               # on by default; false once you trust the pipeline
+    replicas = 1                  # podinfo's replica count
+    message  = "hello from socle" # the cluster name and the cloud are appended
+  }
+}
 ```
 
 ## Per cloud

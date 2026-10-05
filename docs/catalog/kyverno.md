@@ -12,6 +12,23 @@ This module is the engine alone, with no policy: the socle's set is
 is **off by default**: an admission webhook on every cluster is something you
 opt into.
 
+## Getting started
+
+Turn the engine on, and [kyverno-policies](kyverno-policies.md) with it for
+the socle's policy set:
+
+```hcl title="terraform.tfvars" kube-start="kyverno"
+kube = {
+  kyverno = {
+    enabled = true
+  }
+  kyverno_policies = { enabled = true } # the socle's policy set
+}
+```
+
+After the apply, `kubectl -n flux-system get resourceset kyverno` is Ready
+and `kubectl -n kyverno get deploy` shows three admission replicas Available.
+
 ## What it installs
 
 | | |
@@ -63,13 +80,6 @@ Under `kube.kyverno` in your tfvars:
 | `values` | `{}` | Any `kyverno` chart value; yours win over the socle's ([SOCLE-06](../decisions/socle.md#socle-06-the-clients-values-win)). Lower `admissionController.replicas` here for a dev cluster. |
 | `values_secret` | `""` | The name of a Secret you create in `kyverno`, with a `values.yaml` key, merged last. OpenTofu never reads it. |
 
-```hcl
-kube = {
-  kyverno          = { enabled = true }
-  kyverno_policies = { enabled = true } # the socle's policy set
-}
-```
-
 A `config.webhooks.namespaceSelector` in `values` replaces the socle's
 whole: keep `kube-system`, `flux-system` and the label expression in it.
 
@@ -82,6 +92,33 @@ Refused at plan:
 - `values_secret` that is not a valid Secret name.
 - `kyverno_policies` on with `kyverno` off: turn `kyverno_policies` off
   first, then `kyverno`.
+
+### Every setting
+
+Every attribute, at its default, and how chart values and secrets go in:
+
+```hcl title="terraform.tfvars" kube-full="kyverno"
+kube = {
+  kyverno = {
+    enabled = false # off by default; false uninstalls the engine and its CRDs
+
+    # Any value of the kyverno chart 3.9.1; yours win over the socle's.
+    values = {
+      crds = {
+        annotations = { "helm.sh/resource-policy" = "keep" } # policies survive an off
+      }
+      features = {
+        backgroundScan = { backgroundScanInterval = "30m" }
+      }
+    }
+
+    # A Secret you create in kyverno, whose values.yaml key holds chart values
+    # that must not reach the OpenTofu state, such as an extraEnvVars proxy
+    # URL with a password in it.
+    values_secret = "kyverno-values"
+  }
+}
+```
 
 ## Per cloud
 

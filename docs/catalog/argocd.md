@@ -9,6 +9,25 @@ ArgoCD is what you deploy your own applications with: Flux keeps the socle
 converged, ArgoCD carries what you build on it. The module is **on by
 default**, on every cloud, non-HA, with no application in it.
 
+## Getting started
+
+The module is already on. Give it a host to be served at, on the private
+Gateway:
+
+```hcl title="terraform.tfvars" kube-start="argocd"
+kube = {
+  argocd = {
+    domain  = "argocd.acme.example"
+    gateway = "private"
+  }
+}
+```
+
+After the apply, `kubectl -n flux-system get resourceset argocd` is Ready and
+`kubectl -n argocd get httproute argocd-server` names your host. Without the
+shared Gateways there is no route: reach the server by port-forward, as
+[Per cloud](#per-cloud) shows.
+
 ## What it installs
 
 | | |
@@ -87,6 +106,35 @@ A named attribute is a convenience, not a lock: `server.replicas` in
 and the namespace are not configurable. The socle ships no Application:
 yours go in through the chart's `extraObjects` in `values`, or through
 ArgoCD itself.
+
+### Every setting
+
+Every attribute, at its default, and how chart values and secrets go in:
+
+```hcl title="terraform.tfvars" kube-full="argocd"
+kube = {
+  argocd = {
+    enabled       = true      # on by default
+    admin_enabled = true      # the local admin account; false once your SSO works
+    domain        = ""        # "" = no URL and no route; a host serves the UI
+    gateway       = "private" # the route's shared Gateway: "private", "public" or ""
+    ha            = false     # true: redis-ha and two replicas (needs 3 nodes)
+
+    # Any value of the argo-cd chart 10.9.2; yours win over the socle's.
+    values = {
+      configs = {
+        cm   = { "timeout.reconciliation" = "300s" }
+        rbac = { "policy.default" = "role:readonly" }
+      }
+    }
+
+    # A Secret you create in argocd, whose values.yaml key holds chart values
+    # that must not reach the OpenTofu state, such as a repository's
+    # githubAppPrivateKey.
+    values_secret = "argocd-values"
+  }
+}
+```
 
 ## Per cloud
 
