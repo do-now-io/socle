@@ -653,7 +653,7 @@ spec:
             kind: HelmRelease
             namespace: kyverno-policies
             name: kyverno-policies
-    # The order of valuesFrom, proven whole (docs/flux-catalog.md §6), on the
+    # The order of valuesFrom, proven whole (docs/architecture/flux-catalog.md), on the
     # severity annotation the socle sets to medium: high in values, low in the
     # Secret; the live policy carries the Secret's; both cleared, the socle's.
     - name: kube.kyverno_policies.values_secret is merged last, over values and the socle

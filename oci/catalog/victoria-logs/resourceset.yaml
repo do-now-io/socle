@@ -1,7 +1,8 @@
 # The victoria_logs module: VictoriaLogs single-node, the monitoring stack's
 # logs storage — container logs from otel_agent, Kubernetes events and the
 # applications' OTLP logs from otel_gateway, LogsQL out to Grafana.
-# Design: docs/monitoring.md; this module: docs/catalog/victoria-logs.md.
+# The stack: docs/architecture/observability.md; this module:
+# docs/catalog/victoria-logs.md.
 #
 # resourcesTemplate rather than resources: the persistence block and the
 # Secret in valuesFrom only exist under a condition, and the operator's block
@@ -10,7 +11,7 @@
 #
 # Values: no spec.values on the HelmRelease. The socle's defaults are a
 # ConfigMap listed first in valuesFrom, the client's second, his Secret last —
-# later wins, so the client overrides any socle default (docs/flux-catalog.md §6).
+# later wins, so the client overrides any socle default (docs/architecture/flux-catalog.md).
 #
 # The pipelines that write here and the datasource that reads it live in the
 # modules that run them (otel_agent, otel_gateway, grafana), each under a test

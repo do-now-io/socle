@@ -1,5 +1,5 @@
 # The workloads dashboard, shipped by the otel_gateway module because it reads
-# that module's metrics (docs/monitoring.md §5). Written on the names
+# that module's metrics (docs/decisions/socle.md, SOCLE-03). Written on the names
 # VictoriaMetrics stores k8s_cluster and the scraped endpoints under
 # -opentelemetry.usePrometheusNaming; the e2e parses this JSON and asserts that
 # every metric an expression names has series in VictoriaMetrics. Edit it in

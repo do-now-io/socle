@@ -1,4 +1,4 @@
-# The gateway_api module's proof (docs/catalog/cilium.md §4). Selected by
+# The gateway_api module's proof (docs/catalog/gateway-api.md). Selected by
 # label:
 #   health   the standard CRDs established from upstream through Flux —
 #            nothing vendored — and the ResourceSet Ready

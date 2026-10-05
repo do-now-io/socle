@@ -1,11 +1,11 @@
 # The external-dns module: one Deployment that reads Services, Ingresses and
 # Gateway API HTTPRoutes and publishes their names into the cloud's DNS zone.
-# docs/catalog/external-dns.md holds the design; the rules of docs/flux-catalog.md
-# §6 apply: inputsFrom the one provider, the reconcile toggle on EACH resource,
+# docs/catalog/external-dns.md is the module's page; the rules of
+# docs/reference/catalog-module-standard.md apply: inputsFrom the one provider, the reconcile toggle on EACH resource,
 # values tested never presence.
 #
 # Values, in the order helm-controller merges them, later winning
-# (docs/flux-catalog.md §6): external-dns-socle-values, the socle's defaults
+# (docs/decisions/socle.md#socle-06-the-clients-values-win): external-dns-socle-values, the socle's defaults
 # below; external-dns-client-values, kube.external_dns.values; then the
 # client's Secret when they name one. No inline `values:` on the HelmRelease —
 # helm-controller merges it last, so it would beat the client on every key.
@@ -19,7 +19,7 @@
 # (docs/catalog/external-dns.md):
 # - this ResourceSet: the Namespace and, on AWS with Crossplane on, the
 #   module's own IAM Role and the Pod Identity association binding it to
-#   external-dns/external-dns (docs/catalog/crossplane.md §3);
+#   external-dns/external-dns (docs/architecture/module-iam.md);
 # - external-dns-workload, a child ResourceSet holding the chart, which
 #   dependsOn the Role and the association being Ready. EKS Pod Identity
 #   injects the credentials at pod admission: a pod admitted before its
@@ -44,7 +44,7 @@
 #   every cloud: the subject the module's own cloud identity is bound to.
 #
 # Cloud access: on AWS the module declares its own role through Crossplane,
-# the foundations never do (docs/flux-catalog.md §6). With Crossplane off,
+# the foundations never do (docs/decisions/socle.md, SOCLE-04). With Crossplane off,
 # and on the other clouds until their Crossplane providers land, each cloud
 # block below reads a credential the client brings.
 # - the Gateway API source is added only when the gateway_api module is on.
@@ -84,7 +84,7 @@ spec:
         pod-security.kubernetes.io/enforce: restricted
     << if and (eq inputs.cloud "aws") inputs.modules.crossplane.enabled >>
     ---
-    # The module's own AWS access, docs/catalog/crossplane.md §3. Under
+    # The module's own AWS access, docs/architecture/module-iam.md. Under
     # /socle/<cluster>/ and carrying Crossplane's boundary when the root wired
     # one: Crossplane's own policy refuses any other role. Inline policy only.
     #
@@ -93,7 +93,8 @@ spec:
     # domain_filters entry or under one (route53:
     # ChangeResourceRecordSetsNormalizedRecordNames). A zone id cannot be
     # derived from a name, and the names are what domain_filters already says;
-    # the argument is in docs/catalog/external-dns.md. The reads have no
+    # the argument is in docs/decisions/external-dns.md
+    # (EXTERNAL-DNS-01). The reads have no
     # condition key and stay on every zone.
     apiVersion: iam.aws.m.upbound.io/v1beta1
     kind: Role

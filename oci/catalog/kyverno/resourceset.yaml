@@ -12,7 +12,7 @@
 #
 # Values: no spec.values on the HelmRelease. The socle's defaults are a
 # ConfigMap listed first in valuesFrom, the client's second, his Secret last —
-# later wins, so the client overrides any socle default (docs/flux-catalog.md §6).
+# later wins, so the client overrides any socle default (docs/decisions/socle.md#socle-06-the-clients-values-win).
 #
 # Every other rule is the hello module's: inputsFrom the one provider, the
 # reconcile toggle on each resource, values tested never presence.

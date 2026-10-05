@@ -1,7 +1,8 @@
 # The otel_gateway module: the OpenTelemetry Collector as a Deployment, one
 # replica, for what lives in the cluster — Kubernetes object metrics, the
 # Prometheus endpoints of annotated pods, and the applications' own OTLP.
-# Design: docs/monitoring.md; this module: docs/catalog/otel-gateway.md.
+# The stack: docs/architecture/observability.md; this module:
+# docs/catalog/otel-gateway.md.
 #
 # resourcesTemplate rather than resources: the exporter depends on whether the
 # victoria_metrics module is on, and the Secret in valuesFrom only exists when
@@ -10,10 +11,10 @@
 #
 # Values: no spec.values on the HelmRelease. The socle's defaults are a
 # ConfigMap listed first in valuesFrom, the client's second, his Secret last —
-# later wins, so the client overrides any socle default (docs/flux-catalog.md §6).
+# later wins, so the client overrides any socle default (docs/architecture/flux-catalog.md).
 #
 # The workloads dashboard ships here, not in Grafana: the module whose metrics
-# a dashboard reads carries it (docs/monitoring.md §5), applied from the socle
+# a dashboard reads carries it (docs/decisions/socle.md, SOCLE-03), applied from the socle
 # artifact by a Flux Kustomization as otel_agent's is.
 #
 # Every other rule is the hello module's: inputsFrom the one provider, the
@@ -127,9 +128,9 @@ spec:
                   # Every running pod annotated prometheus.io/scrape: "true",
                   # on the port and path its annotations name: how Cilium,
                   # Flux and the socle's own modules expose their metrics when
-                  # no ServiceMonitor exists (docs/monitoring.md §2). The
-                  # dollar signs are doubled for the collector's own
-                  # environment expansion.
+                  # no ServiceMonitor exists (docs/decisions/otel-gateway.md,
+                  # OTEL-GATEWAY-01). The dollar signs are doubled for the
+                  # collector's own environment expansion.
                   - job_name: kubernetes-pods
                     scrape_interval: 30s
                     kubernetes_sd_configs:

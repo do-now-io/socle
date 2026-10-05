@@ -406,7 +406,7 @@ spec:
                 value: (join('/', [$values.cluster, 'e2e-app']))
             content: |
               aws secretsmanager delete-secret --secret-id "$KEY" --force-delete-without-recovery > /dev/null 2>&1 || true
-    # The rest of valuesFrom's order (docs/flux-catalog.md §6): 96Mi in
+    # The rest of valuesFrom's order (docs/decisions/socle.md#socle-06-the-clients-values-win): 96Mi in
     # values beat the socle's 64Mi above; 112Mi in the Secret the client
     # names in values_secret beat values; both cleared, the socle's 64Mi.
     - name: kube.external_secrets.values_secret is merged last, over values and the socle
@@ -508,7 +508,7 @@ spec:
       try:
         # The release must be idle before the module goes: helm-controller
         # honours a deletion only once the running action returns, and the
-        # values step above has just driven an upgrade (docs/flux-catalog.md §8).
+        # values step above has just driven an upgrade (docs/architecture/flux-catalog.md).
         - assert:
             resource:
               apiVersion: helm.toolkit.fluxcd.io/v2
@@ -651,10 +651,10 @@ spec:
             namespace: flux-system
             selector: app=helm-controller
             tail: 60
-    # Second half: the module's own AWS access (docs/catalog/crossplane.md
-    # §3), with Crossplane on and the default prefix, the cluster's name.
+    # Second half: the module's own AWS access
+    # (docs/architecture/module-iam.md), with Crossplane on and the default prefix, the cluster's name.
     - name: with Crossplane on, the module declares its Role and its association
-      # 99 s cold (docs/catalog/crossplane.md §7); ~5 min when the providers
+      # 99 s cold (docs/catalog/crossplane.md); ~5 min when the providers
       # re-adopt CRDs a previous install left behind.
       timeouts:
         assert: 8m
@@ -673,7 +673,7 @@ spec:
                       enabled: true
                       # The boundary the root wires from the foundations: the
                       # Role must carry it. floci ignores it at IAM; the object
-                      # is what is asserted (docs/catalog/crossplane.md §7).
+                      # is what is asserted (docs/catalog/crossplane.md).
                       permissions_boundary: arn:aws:iam::000000000000:policy/socle-e2e-catalog-crossplane-boundary
                     external_secrets:
                       enabled: true

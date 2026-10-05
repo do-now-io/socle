@@ -4,7 +4,8 @@
 # objects, plus three of the socle's own: CPU and memory requests required,
 # no `latest` tag, and the client's registries allow-list when he names one.
 # Off by default, and refused at plan without kyverno on.
-# Design and measurements: docs/catalog/kyverno-policies.md.
+# The module: docs/catalog/kyverno-policies.md; its decisions:
+# docs/decisions/kyverno-policies.md.
 #
 # Scope: the client's applications. Every namespace the socle renders is out
 # of every policy — the operator labels each with the namespace of the
@@ -27,7 +28,7 @@
 #
 # Values: no spec.values on the HelmRelease. The socle's defaults are a
 # ConfigMap listed first in valuesFrom, the client's second, his Secret last —
-# later wins (docs/flux-catalog.md §6). The custom policies are Helm templates
+# later wins (docs/architecture/flux-catalog.md). The custom policies are Helm templates
 # inside that document: the chart passes customPolicies through tpl, so they
 # read the same failurePolicy, the same per-policy action and the same
 # exclusions as the chart's own.

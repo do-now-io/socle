@@ -21,7 +21,7 @@
 #            workload is withheld; off deletes the role.
 # Not provable on floci: the association reaching EKS, the operator getting
 # the role's credentials, IAM enforcing the policy and the boundary — the
-# sandbox's (docs/catalog/keda.md §6).
+# sandbox's (docs/catalog/keda.md).
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -195,7 +195,7 @@ spec:
         - podLogs:
             namespace: keda
             tail: 40
-    # The order of valuesFrom, proven whole (docs/flux-catalog.md §6): the
+    # The order of valuesFrom, proven whole (docs/decisions/socle.md#socle-06-the-clients-values-win): the
     # socle's document, then kube.keda.values, then the Secret the client
     # names in values_secret, merged last; both cleared, the socle's 128Mi.
     - name: kube.keda.values_secret is merged last, over values and the socle
@@ -549,7 +549,7 @@ spec:
             namespace: flux-system
             selector: app.kubernetes.io/name=flux-operator
             tail: 40
-    # Second half: the operator's own AWS access (docs/catalog/keda.md §2),
+    # Second half: the operator's own AWS access (docs/decisions/keda.md),
     # one service named. In the order their CRDs appear: the release, the
     # providers Healthy, then the module's objects.
     - name: with Crossplane on and services = ["sqs"], the module declares its Role and its association
