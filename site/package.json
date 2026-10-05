@@ -1,0 +1,24 @@
+{
+  "name": "socle-site",
+  "private": true,
+  "type": "module",
+  "description": "The socle documentation site, built from ../docs.",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@astrojs/markdown-remark": "7.3.1",
+    "@astrojs/starlight": "0.42.5",
+    "astro": "7.3.5",
+    "remark-gfm": "4.0.1",
+    "remark-parse": "11.0.0",
+    "starlight-links-validator": "0.26.0",
+    "unified": "11.0.5",
+    "unist-util-visit": "5.1.0"
+  }
+}
