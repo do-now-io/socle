@@ -1,4 +1,4 @@
-# Identities — docs/gcp/managed-scope.md.
+# Identities — docs/decisions/gcp.md, GCP-06 and GCP-11.
 #
 # Workload Identity Federation itself has nothing to configure: Autopilot
 # pre-configures it and it cannot be disabled. The pool is exposed as an

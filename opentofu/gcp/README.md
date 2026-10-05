@@ -1,8 +1,15 @@
 # Socle foundations — Google Cloud
 
-One flat root module: network, GKE Autopilot cluster, identities. It
-provisions an empty-shell cluster and the identities the Flux-pulled socle
-needs, then steps away.
+One flat root module: a VPC (or yours), a GKE Autopilot cluster with private
+nodes and a DNS-based control plane endpoint, Cloud NAT, and the project
+bindings that go with them. It provisions an empty cluster, then steps away:
+the catalog arrives through the [bootstrap](../bootstrap/README.md) and Flux.
+
+What it decides for you, what it refuses, and why:
+[GCP foundations](../../docs/clouds/gcp/foundations.md). What the project
+needs before an apply: [GCP prerequisites](../../docs/clouds/gcp/prerequisites.md).
+
+## Usage
 
 ```hcl
 module "socle" {
@@ -24,76 +31,28 @@ module "socle" {
 }
 ```
 
-A deployable version of that is in [`examples/minimal`](examples/minimal),
-which also lists the roles the apply needs and where remote state belongs.
+A deployable version is [`examples/minimal`](examples/minimal/README.md); the
+full root, with the bootstrap, is in the
+[GCP quickstart](../../docs/getting-started/gcp.md).
 
-> **OpenTofu does not verify OCI signatures.** It will pull an unsigned or
-> tampered artifact without complaint — Flux does, this does not. Run
+> **OpenTofu does not verify OCI signatures.** It pulls an unsigned or
+> tampered artifact without complaint — Flux does verify, this does not. Run
 > `cosign verify` in CI before `tofu init`, or enforce it through registry
-> policy. The command, and the identity to pin:
-> [distribution](../../docs/distribution.md#who-verifies-and-who-does-not).
+> policy: [distribution](../../docs/architecture/distribution.md).
 
-## What is decided for you
+After the apply, one step is manual: linking the billing account to the
+BigQuery dataset `billing_export_dataset_id` creates. Google exposes no API
+for it ([GCP limits](../../docs/clouds/gcp/limits.md#what-no-apply-can-finish)).
 
-Every default traces back to a research document. The short version:
-
-| Decision | Position | Traces to |
-| --- | --- | --- |
-| Autopilot, no cluster mode option | enforced | [cluster mode](../../docs/gcp/cluster-mode.md) |
-| Regular release channel; Extended rejected | default | [managed scope](../../docs/gcp/managed-scope.md) |
-| Maintenance window required, no default | required | [managed scope](../../docs/gcp/managed-scope.md) |
-| Only free metric components enabled | default | [managed scope](../../docs/gcp/managed-scope.md) |
-| Backup for GKE agent off, Velero preferred | default | [managed scope](../../docs/gcp/managed-scope.md) |
-| Cost allocation on from day one | default | [cloud observability](../../docs/gcp/cloud-observability.md) |
-| Private nodes on, flipping Autopilot's default | default | [network & security](../../docs/gcp/network-security.md) |
-| DNS-based control plane endpoint, IP endpoints off | default | [network & security](../../docs/gcp/network-security.md) |
-| No Services secondary range — GKE manages it | enforced | [network & security](../../docs/gcp/network-security.md) |
-
-## What is deliberately absent
-
-Not oversights. An option in the interface is an option that is supported and
-tested, so these are refusals:
-
-- **`EXTENDED` as a release channel** — Google forbids Autopilot clusters in it.
-- **Any Config Connector toggle** — the add-on is Standard-only and Google
-  discourages it in production; Crossplane is the choice.
-- **Any Workload Identity toggle** — Autopilot enforces it.
-- **`master_authorized_networks` and `master_ipv4_cidr_block`** — they govern
-  the IP endpoints this module disables.
-- **A CNI or datapath variable** — Autopilot enforces Dataplane V2.
-- **Auto-Monitoring and `gke_auto_upgrade_config`** — silent recurring cost.
-- **Auto IPAM** — still Preview; a module default has to be GA.
-- **Gateway, NetworkPolicy and alerting objects** — catalog concerns, so that
-  four clouds share one definition. The module stops at the proxy-only subnet
-  a Gateway needs.
-- **Any credential as an input** — the module authenticates through the
-  provider's ambient credentials, and issues no key.
-
-## One step no apply can finish
-
-Linking a billing account to the BigQuery dataset for the detailed cost export
-is a Cloud Console action: Google exposes no API for it, so there is no
-Terraform resource and no `gcloud` command. `billing_export_dataset_id` makes
-the module create the dataset; a human has to point the billing account at it.
-Nothing breaks without that step — the cost data simply never arrives.
-
-## Tests
+## Testing
 
 ```bash
-tofu test          # 35 runs: every validation, and the defaults
+tofu test          # every validation, and the defaults
 ```
 
-Integration: CI plans [`tests/emulator`](tests/emulator) against the floci-gcp
-emulator. That proves the module plans coherently against a live API, and does
-not prove it converges — two reasons, both outside this module:
-
-- The emulator implements no Compute Engine API, so the VPC, subnetworks,
-  router and NAT have nowhere to be created.
-- The google provider segfaults reading back the emulator's cluster: it
-  dereferences the cluster's legacy ABAC field without a nil check, and the
-  emulator omits that field.
-
-The workflow prints that caveat on every run.
+CI also plans [`tests/emulator`](tests/emulator/main.tf) against the
+floci-gcp emulator. What that proves and what it does not is in
+[CONTRIBUTING.md](../../CONTRIBUTING.md#what-each-check-proves).
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements

@@ -1,5 +1,5 @@
 # Upgrade notifications and the cost attribution dataset —
-# docs/gcp/managed-scope.md and docs/gcp/cloud-observability.md.
+# docs/decisions/gcp.md, GCP-02, GCP-11 and GCP-12.
 #
 # Deliberately absent: alert policies, dashboards, uptime checks and metrics
 # scopes. Alerting and dashboards are catalog objects so that four clouds
