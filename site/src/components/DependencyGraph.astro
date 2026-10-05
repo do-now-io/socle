@@ -1,0 +1,471 @@
+---
+// How the catalog's modules depend on each other, drawn from the repository
+// at build time (src/catalog.mjs): `requires` from each module page's
+// frontmatter, `after` from its ResourceSet's spec.dependsOn, `uses` from
+// the other modules its templates read. Selecting a module says, in a
+// sentence, what turning it on does and does not bring. Filterable by cloud:
+// a module not offered there, or a requirement that only holds elsewhere,
+// is left out.
+import { modules } from '../catalog.mjs';
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const CLOUDS = ['aws', 'gcp', 'azure', 'scaleway'] as const;
+type Kind = 'requires' | 'after' | 'uses';
+
+const byPage = new Map(modules.map((m) => [m.page, m]));
+const offered = (page: string, cloud: string) => {
+  const clouds = byPage.get(page)?.clouds;
+  return clouds === null || clouds === undefined || clouds.includes(cloud);
+};
+
+// One edge per pair, with its kind on each cloud ('' where it does not hold).
+const edges: { from: string; to: string; kinds: Record<string, Kind | ''> }[] = [];
+for (const m of modules) {
+  const targets = new Set([...m.requires.map((r) => r.module.replace(/_/g, '-')), ...m.after, ...m.uses]);
+  for (const to of targets) {
+    if (!byPage.has(to)) continue;
+    const kinds: Record<string, Kind | ''> = {};
+    for (const cloud of CLOUDS) {
+      const required = m.requires.some((r) => r.module.replace(/_/g, '-') === to && (r.clouds === null || r.clouds.includes(cloud)));
+      const kind: Kind = required ? 'requires' : m.after.includes(to) ? 'after' : 'uses';
+      kinds[cloud] = offered(m.page, cloud) && offered(to, cloud) ? kind : '';
+    }
+    const rank = { requires: 3, after: 2, uses: 1, '': 0 };
+    kinds.all = Object.values(kinds).reduce((a, b) => (rank[b] > rank[a] ? b : a), '' as Kind | '');
+    edges.push({ from: m.page, to, kinds });
+  }
+}
+
+// Two columns: on the left the modules that lean on others, on the right
+// the modules leaned on; arrows go left to right. The ones with no link at
+// all stand apart, below. Orders minimise crossings: each column sorted by
+// the mean position of what it links to.
+const dependents = modules.filter((m) => edges.some((e) => e.from === m.page)).map((m) => m.page);
+const providers = modules.filter((m) => edges.some((e) => e.to === m.page)).map((m) => m.page);
+const standalone = modules.filter((m) => !dependents.includes(m.page) && !providers.includes(m.page)).map((m) => m.page);
+const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
+const left = [...dependents];
+const right = [...providers];
+for (let pass = 0; pass < 3; pass++) {
+  left.sort((a, b) => mean(edges.filter((e) => e.from === a).map((e) => right.indexOf(e.to))) - mean(edges.filter((e) => e.from === b).map((e) => right.indexOf(e.to))));
+  right.sort((a, b) => mean(edges.filter((e) => e.to === a).map((e) => left.indexOf(e.from))) - mean(edges.filter((e) => e.to === b).map((e) => left.indexOf(e.from))));
+}
+
+const W = 720;
+const NODE = { w: 180, h: 34 };
+const STEP = 46;
+const rows = Math.max(left.length, right.length);
+const H = rows * STEP;
+const column = (list: string[], cx: number) =>
+  list.forEach((p, i) => pos.set(p, { x: cx, y: (H - list.length * STEP) / 2 + i * STEP + (STEP - NODE.h) / 2 }));
+const pos = new Map<string, { x: number; y: number }>();
+column(left, 20 + NODE.w / 2);
+column(right, W - 20 - NODE.w / 2);
+const PLINTH = H + 14;
+const HEIGHT = PLINTH + 40;
+
+// Edges leave a node spread along its right side and arrive spread along
+// the target's left side, so parallel lines stay apart.
+const spread = (n: number, i: number) => (n === 1 ? 0 : -NODE.h * 0.32 + (i * NODE.h * 0.64) / (n - 1));
+const paths = edges.map((e) => {
+  const out = edges.filter((o) => o.from === e.from).sort((a, b) => pos.get(a.to)!.y - pos.get(b.to)!.y);
+  const into = edges.filter((o) => o.to === e.to).sort((a, b) => pos.get(a.from)!.y - pos.get(b.from)!.y);
+  const a = pos.get(e.from)!;
+  const b = pos.get(e.to)!;
+  const x1 = a.x + NODE.w / 2;
+  const y1 = a.y + NODE.h / 2 + spread(out.length, out.indexOf(e));
+  const x2 = b.x - NODE.w / 2 - 6;
+  const y2 = b.y + NODE.h / 2 + spread(into.length, into.indexOf(e));
+  const mid = (x1 + x2) / 2;
+  const scoped = CLOUDS.filter((c) => e.kinds[c] === 'requires');
+  return {
+    ...e,
+    d: `M${x1},${y1} C${mid},${y1} ${mid},${y2} ${x2},${y2}`,
+    label: scoped.length > 0 && scoped.length < CLOUDS.length ? scoped.join(', ') : '',
+    lx: mid,
+    ly: (y1 + y2) / 2 - 4,
+  };
+});
+
+const data = {
+  modules: modules.map((m) => ({ page: m.page, clouds: m.clouds })),
+  edges: edges.map((e) => ({
+    from: e.from,
+    to: e.to,
+    kinds: e.kinds,
+    why: byPage.get(e.from)!.requires.find((r) => r.module.replace(/_/g, '-') === e.to)?.why ?? '',
+  })),
+  base,
+};
+---
+
+<figure class="not-content dep-graph" data-graph={JSON.stringify(data)}>
+  <div class="dg-filters" role="group" aria-label="Show one cloud" hidden>
+    <button type="button" aria-pressed="true" data-cloud="all">Every cloud</button>
+    {
+      CLOUDS.map((c) => (
+        <button type="button" aria-pressed="false" data-cloud={c}>
+          {c}
+        </button>
+      ))
+    }
+  </div>
+
+  <div class="dg-scroll">
+    <svg viewBox={`0 0 ${W} ${HEIGHT}`} role="img" aria-labelledby="dg-title dg-desc">
+      <title id="dg-title">How the catalog's modules depend on each other</title>
+      <desc id="dg-desc">
+        Modules on the left need, wait for or plug into the modules on the right. Every module stands on the socle's
+        base: Cilium, CoreDNS and the Flux Operator.
+      </desc>
+      <defs>
+        {
+          (['requires', 'after', 'uses'] as const).map((k) => (
+            <marker id={`dg-arrow-${k}`} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0,0 L10,5 L0,10 z" class={`dg-head ${k}`} />
+            </marker>
+          ))
+        }
+      </defs>
+
+      <g class="dg-edges">
+        {
+          paths.map((p) => (
+            <g
+              class="dg-edge"
+              data-from={p.from}
+              data-to={p.to}
+              data-all={p.kinds.all}
+              data-aws={p.kinds.aws}
+              data-gcp={p.kinds.gcp}
+              data-azure={p.kinds.azure}
+              data-scaleway={p.kinds.scaleway}
+            >
+              <path d={p.d} class={`dg-line ${p.kinds.all}`} marker-end={`url(#dg-arrow-${p.kinds.all})`} />
+              {p.label && (
+                <text x={p.lx} y={p.ly} class="dg-tag" text-anchor="middle">
+                  {p.label}
+                </text>
+              )}
+            </g>
+          ))
+        }
+      </g>
+
+      <g class="dg-nodes">
+        {
+          [...pos.entries()].map(([page, p]) => (
+            <g class="dg-node" data-page={page} tabindex="0" role="button" aria-label={page}>
+              <rect x={p.x - NODE.w / 2} y={p.y} width={NODE.w} height={NODE.h} rx="3" />
+              <text x={p.x} y={p.y + NODE.h / 2 + 4.5} text-anchor="middle">
+                {page}
+              </text>
+            </g>
+          ))
+        }
+      </g>
+
+      <g class="dg-plinth" aria-hidden="true">
+        <rect x="20" y={PLINTH} width={W - 40} height="28" rx="2" />
+        <text x={W / 2} y={PLINTH + 18} text-anchor="middle">the socle: Cilium, CoreDNS, the Flux Operator, under every module</text>
+      </g>
+    </svg>
+  </div>
+
+  <p class="dg-alone">
+    On their own, needing nothing and needed by nothing:{' '}
+    {
+      standalone.map((p, i) => (
+        <>
+          {i > 0 && ', '}
+          <a href={`${base}/catalog/${p}/`}>{p}</a>
+        </>
+      ))
+    }.
+  </p>
+
+  <figcaption>
+    <ul class="dg-legend">
+      <li><svg viewBox="0 0 44 10" aria-hidden="true"><line x1="0" y1="5" x2="44" y2="5" class="dg-line requires" /></svg><span><b>requires</b>: does not work without it; <code>tofu plan</code> refuses it alone</span></li>
+      <li><svg viewBox="0 0 44 10" aria-hidden="true"><line x1="0" y1="5" x2="44" y2="5" class="dg-line after" /></svg><span><b>after</b>: waits for it to be ready when it is on</span></li>
+      <li><svg viewBox="0 0 44 10" aria-hidden="true"><line x1="0" y1="5" x2="44" y2="5" class="dg-line uses" /></svg><span><b>uses</b>: plugs into it when it is on, runs without it</span></li>
+    </ul>
+    <p class="dg-say" aria-live="polite">
+      Turning a module on never turns another on. Select a module to see what it needs.
+    </p>
+  </figcaption>
+</figure>
+
+<script>
+  type Kind = 'requires' | 'after' | 'uses' | '';
+  interface Graph {
+    modules: { page: string; clouds: string[] | null }[];
+    edges: { from: string; to: string; kinds: Record<string, Kind>; why: string }[];
+    base: string;
+  }
+
+  for (const figure of document.querySelectorAll<HTMLElement>('.dep-graph')) {
+    const graph: Graph = JSON.parse(figure.dataset.graph ?? '{}');
+    const say = figure.querySelector<HTMLElement>('.dg-say')!;
+    const filters = figure.querySelector<HTMLElement>('.dg-filters')!;
+    const nodes = figure.querySelectorAll<SVGGElement>('.dg-node');
+    const edgeEls = figure.querySelectorAll<SVGGElement>('.dg-edge');
+    const intro = say.textContent ?? '';
+    let cloud = 'all';
+    let selected: string | null = null;
+
+    const offered = (page: string) => {
+      if (cloud === 'all') return true;
+      const clouds = graph.modules.find((m) => m.page === page)?.clouds;
+      return !clouds || clouds.includes(cloud);
+    };
+    const kindOf = (e: Graph['edges'][number]) => e.kinds[cloud] ?? '';
+    const list = (xs: string[]) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
+
+    function sentence(page: string): string {
+      const live = graph.edges.filter((e) => kindOf(e) !== '');
+      const out = (k: Kind) => live.filter((e) => e.from === page && kindOf(e) === k).map((e) => e.to);
+      const into = (k: Kind) => live.filter((e) => e.to === page && kindOf(e) === k).map((e) => e.from);
+      const parts = [`Turning ${page} on deploys ${page}, and nothing else.`];
+      const needs = out('requires');
+      if (needs.length) {
+        const scoped = graph.edges
+          .filter((e) => e.from === page && needs.includes(e.to) && cloud === 'all')
+          .map((e) => Object.entries(e.kinds).filter(([c, k]) => c !== 'all' && k === 'requires').map(([c]) => c))
+          .flat();
+        const only = cloud === 'all' && scoped.length > 0 && scoped.length < 4 ? ` on ${[...new Set(scoped)].join(', ')}` : '';
+        const why = graph.edges
+          .filter((e) => e.from === page && needs.includes(e.to) && e.why)
+          .map((e) => e.why)
+          .join('; ');
+        parts.push(`It needs ${list(needs)}${only}${why ? ` (${why})` : ''}: turn ${needs.length > 1 ? 'them' : 'it'} on too, or tofu plan refuses it.`);
+      }
+      const waits = out('after');
+      if (waits.length) parts.push(`It waits for ${list(waits)} when ${waits.length > 1 ? 'they are' : 'it is'} on.`);
+      const plugs = out('uses');
+      if (plugs.length) parts.push(`It plugs into ${list(plugs)} when ${plugs.length > 1 ? 'they are' : 'it is'} on, and runs without ${plugs.length > 1 ? 'them' : 'it'}.`);
+      const neededBy = into('requires');
+      if (neededBy.length) parts.push(`${list(neededBy)} ${neededBy.length > 1 ? 'need' : 'needs'} it.`);
+      const usedBy = [...into('after'), ...into('uses')];
+      if (usedBy.length) parts.push(`${list([...new Set(usedBy)])} ${usedBy.length > 1 ? 'use' : 'uses'} it when it is on.`);
+      if (!offered(page)) return `${page} is not offered on ${cloud}.`;
+      return parts.join(' ');
+    }
+
+    function render() {
+      for (const n of nodes) {
+        const page = n.dataset.page!;
+        n.classList.toggle('off', !offered(page));
+        n.classList.toggle('selected', page === selected);
+        const linked = selected !== null && graph.edges.some((e) => kindOf(e) !== '' && ((e.from === selected && e.to === page) || (e.to === selected && e.from === page)));
+        n.classList.toggle('dim', selected !== null && page !== selected && !linked);
+      }
+      for (const el of edgeEls) {
+        const kind = (el.dataset[cloud] ?? '') as Kind;
+        el.classList.toggle('hidden', kind === '');
+        const line = el.querySelector('path')!;
+        // classList, not the class attribute: Astro's scoping class must stay.
+        for (const k of ['requires', 'after', 'uses']) line.classList.toggle(k, k === kind);
+        if (kind) line.setAttribute('marker-end', `url(#dg-arrow-${kind})`);
+        el.classList.toggle('dim', selected !== null && el.dataset.from !== selected && el.dataset.to !== selected);
+      }
+      say.innerHTML = '';
+      if (selected === null) {
+        say.textContent = intro;
+      } else {
+        say.append(sentence(selected) + ' ');
+        const link = document.createElement('a');
+        link.href = `${graph.base}/catalog/${selected}/`;
+        link.textContent = `The ${selected} page.`;
+        say.append(link);
+      }
+    }
+
+    for (const n of nodes) {
+      const choose = () => {
+        selected = selected === n.dataset.page ? null : n.dataset.page!;
+        render();
+      };
+      n.addEventListener('click', choose);
+      n.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          choose();
+        }
+      });
+    }
+    filters.hidden = false;
+    filters.addEventListener('click', (event) => {
+      const button = (event.target as HTMLElement).closest('button');
+      if (!button) return;
+      cloud = button.dataset.cloud ?? 'all';
+      for (const b of filters.querySelectorAll('button')) b.setAttribute('aria-pressed', String(b === button));
+      render();
+    });
+  }
+</script>
+
+<style>
+  .dep-graph {
+    margin: 0;
+    display: grid;
+    gap: 1rem;
+  }
+  .dg-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+  .dg-filters button {
+    padding: 0.45rem 0.85rem;
+    border: 1px solid var(--hairline);
+    border-radius: 2px;
+    background: var(--stone-raised);
+    color: var(--basalt);
+    font: 600 0.875rem/1 var(--font-body);
+    cursor: pointer;
+  }
+  .dg-filters button[aria-pressed='true'] {
+    background: var(--pine);
+    border-color: var(--pine);
+    color: #f5fff7;
+  }
+  .dg-scroll {
+    overflow-x: auto;
+    padding: 0.75rem;
+    background: var(--stone-raised);
+    border: 1px solid var(--hairline);
+    border-radius: 3px;
+  }
+  svg {
+    display: block;
+    width: 100%;
+    min-width: 560px;
+    height: auto;
+  }
+  .dg-node {
+    cursor: pointer;
+    outline: none;
+  }
+  .dg-node rect {
+    fill: var(--stone);
+    stroke: var(--basalt);
+    stroke-width: 1.25;
+  }
+  .dg-node text {
+    fill: var(--basalt);
+    font: 600 14px var(--font-mono);
+  }
+  .dg-node:hover rect,
+  .dg-node:focus-visible rect {
+    stroke: var(--accent);
+    stroke-width: 2.5;
+  }
+  .dg-node.selected rect {
+    fill: var(--pine);
+    stroke: var(--pine);
+  }
+  .dg-node.selected text {
+    fill: #f5fff7;
+  }
+  .dg-node.off {
+    display: none;
+  }
+  .dim {
+    opacity: 0.18;
+  }
+  .hidden {
+    display: none;
+  }
+  .dg-line {
+    fill: none;
+  }
+  .dg-line.requires {
+    stroke: var(--accent);
+    stroke-width: 2.5;
+  }
+  .dg-line.after {
+    stroke: var(--basalt-muted);
+    stroke-width: 1.5;
+    stroke-dasharray: 7 4;
+  }
+  .dg-line.uses {
+    stroke: var(--basalt-muted);
+    stroke-width: 1.5;
+    stroke-dasharray: 1.5 4;
+    stroke-linecap: round;
+  }
+  .dg-head.requires {
+    fill: var(--accent);
+  }
+  .dg-head.after,
+  .dg-head.uses {
+    fill: var(--basalt-muted);
+  }
+  .dg-tag {
+    font: 600 11px var(--font-mono);
+    fill: var(--accent);
+    paint-order: stroke;
+    stroke: var(--stone-raised);
+    stroke-width: 4px;
+  }
+  .dg-plinth rect {
+    fill: var(--pine);
+  }
+  .dg-plinth text {
+    fill: #f5fff7;
+    font: 500 13px var(--font-mono);
+  }
+  .dg-alone {
+    margin: 0;
+    font-size: 0.875rem;
+    color: var(--basalt-muted);
+  }
+  .dg-alone a {
+    color: var(--accent);
+  }
+  .dg-legend {
+    list-style: none;
+    margin: 0 0 0.75rem;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.5rem;
+    font-size: 0.8125rem;
+    color: var(--basalt-muted);
+  }
+  .dg-legend li {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .dg-legend svg {
+    width: 44px;
+    min-width: 0;
+    height: 10px;
+  }
+  .dg-legend b {
+    color: var(--basalt);
+  }
+  .dg-say {
+    margin: 0;
+    padding: 0.85rem 1rem;
+    min-height: 3.2rem;
+    background: var(--accent-soft);
+    border-left: 3px solid var(--accent);
+    border-radius: 2px;
+    font-size: 0.9375rem;
+    color: var(--basalt);
+  }
+  /* The link is added by the script, so it carries no scoping class. */
+  .dg-say :global(a) {
+    color: var(--accent);
+    font-weight: 600;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .dg-node,
+    .dg-edge {
+      transition: opacity 0.15s;
+    }
+  }
+</style>

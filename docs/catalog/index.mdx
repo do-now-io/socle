@@ -7,11 +7,13 @@ sidebar:
 ---
 
 import CatalogBricks from '@site/components/CatalogBricks.astro';
+import DependencyGraph from '@site/components/DependencyGraph.astro';
 
 The catalog is what Flux installs on a socle cluster, one module at a time,
 from your `kube` block. Some are on by default; the others wait for you.
 
 <CatalogBricks compact />
+
 
 - **The foot of each brick** is the clouds the module is offered on;
   elsewhere `tofu plan` refuses it. CI proves every module on AWS only.
@@ -19,6 +21,13 @@ from your `kube` block. Some are on by default; the others wait for you.
   [how they fit](../architecture/observability.md).
 - **Cilium, CoreDNS and the EKS add-ons** are not modules: they run
   [before Flux](../architecture/cilium-before-flux.md).
+
+## How modules depend on each other
+
+Turning a module on never turns another on. Some need another one on, some
+only wait for it, some plug into it when it is there. Select a module:
+
+<DependencyGraph />
 
 ## How kube turns them on
 
