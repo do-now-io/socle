@@ -11,7 +11,7 @@ needs neither skips step 2.
 
 ## 1. Read the module's page
 
-Each module has a page in the [catalog](../catalog/index.md): what it
+Each module has a page in the [catalog](../catalog/index.mdx): what it
 installs, its attributes and their defaults, the clouds it is offered on,
 what it requires, and what it may do in your cloud account. For KEDA, that
 is [keda](../catalog/keda.md): a non-empty `services` list needs the

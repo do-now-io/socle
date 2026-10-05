@@ -26,10 +26,15 @@ function frontmatter(page) {
     const raw = new RegExp(`^${name}: *(.*)$`, 'm').exec(head)?.[1]?.trim() ?? '';
     return raw.replace(/^(['"])(.*)\1$/, '$2').replace(/''/g, "'");
   };
-  return { description: field('description'), category: field('category') };
+  // requires: [{ module, clouds? }], as written in the page's frontmatter.
+  const requires = [...head.matchAll(/^ {2}- module: *([a-z0-9_-]+)\n(?: {4}clouds: *\[([^\]]*)\]\n)?/gm)].map((r) => ({
+    module: r[1],
+    clouds: r[2] ? r[2].split(',').map((c) => c.trim()) : null,
+  }));
+  return { description: field('description'), category: field('category'), requires };
 }
 
-/** @type {{ name: string, page: string, enabled: boolean, clouds: string[] | null, description: string, category: string }[]} */
+/** @type {{ name: string, page: string, enabled: boolean, clouds: string[] | null, description: string, category: string, requires: { module: string, clouds: string[] | null }[] }[]} */
 export const modules = [...body.matchAll(/^ {4}([a-z][a-z0-9_]*) *= *\{\n {6}enabled *= *(true|false)/gm)].map((m) => {
   const page = m[1].replace(/_/g, '-');
   return { name: m[1], page, enabled: m[2] === 'true', clouds: restricted[m[1]] ?? null, ...frontmatter(page) };

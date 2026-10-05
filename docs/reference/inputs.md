@@ -86,7 +86,7 @@ repeated below. `gateway_api` and `hello` have neither.
 | `velero` | `node_agent` | `eks_addons.efs_csi` | the privileged node-agent DaemonSet, which backs EFS volumes up by file system |
 
 What each module installs, and what it refuses in `values`, is on its
-[catalog page](../catalog/index.md).
+[catalog page](../catalog/index.mdx).
 
 ## Cilium, CoreDNS and the EKS add-ons
 

@@ -57,6 +57,12 @@ export default defineConfig({
   // It sits over the bottom of every page in `npm run dev`.
   devToolbar: { enabled: false },
   vite: {
+    // `@site/…` lets docs/*.mdx import the site's components: the pages are
+    // read through a symlink, so a relative import would not resolve.
+    // preserveSymlinks: an .mdx page is a module, and Vite would otherwise
+    // name it by its real path (docs/…), which the link check cannot map to
+    // a route; .md pages already keep the symlink's path.
+    resolve: { alias: { '@site': fileURLToPath(new URL('./src', import.meta.url)) }, preserveSymlinks: true },
     define: {
       'import.meta.env.SOCLE_CHANNEL': JSON.stringify(channel),
       'import.meta.env.SOCLE_RELEASED': JSON.stringify(String(released)),

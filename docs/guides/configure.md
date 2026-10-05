@@ -69,7 +69,7 @@ kube = {
 - **`kube`** lists only what differs from the catalog's defaults. A module
   absent from it is at its defaults, on or off as the catalog says. Names are
   `snake_case`. The defaults are in [Inputs](../reference/inputs.md#the-catalog-schema);
-  what each module does is on its [catalog page](../catalog/index.md).
+  what each module does is on its [catalog page](../catalog/index.mdx).
 
 On AWS, set `storage_size = ""` on the Victoria backends until your cluster
 has a default StorageClass: EKS marks none, and their claims would stay
