@@ -4,7 +4,7 @@ what it installs.
 
 | File | Source |
 | --- | --- |
-| argo, grafana, opentelemetry, victoriametrics, kubernetes, gcp (googlecloud), scaleway | [simple-icons](https://simpleicons.org) 16.34.0, CC0 |
+| argo, grafana, opentelemetry, victoriametrics, kubernetes, opentofu, flux, gcp (googlecloud), scaleway | [simple-icons](https://simpleicons.org) 16.34.0, CC0 |
 | aws (amazonaws), azure (microsoftazure) | simple-icons 9.21.0, CC0 (removed from later releases) |
 | crossplane, keda, kyverno | [cncf/artwork](https://github.com/cncf/artwork), `icon/black` |
 
