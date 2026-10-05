@@ -4,7 +4,7 @@
 // the documentation, which Starlight renders.
 import '../styles/tokens.css';
 import Wordmark from '../components/Wordmark.astro';
-import { bannerHtml, released } from '../channel';
+import { bannerHtml } from '../channel';
 import { modules } from '../catalog.mjs';
 import argo from '../logos/argo.svg?raw';
 import aws from '../logos/aws.svg?raw';
@@ -130,9 +130,6 @@ const inline = (text: string) => text.replace(/`([^`]+)`/g, '<code>$1</code>');
           <a class="btn primary" href={to('getting-started/concepts/')}>Read the docs</a>
           <a class="btn ghost" href={repository}>View on GitHub</a>
         </div>
-        <p class="status">
-          {released ? `Latest release: ${socleVersion}.` : 'Nothing is released yet. Every push to main publishes a signed alpha.'}
-        </p>
       </div>
       <div class="base">
         <ul class="standing" aria-label="Modules in the catalog">
@@ -318,7 +315,6 @@ const inline = (text: string) => text.replace(/`([^`]+)`/g, '<code>$1</code>');
     color: var(--ink);
     display: flex;
     flex-direction: column;
-    min-height: min(92vh, 52rem);
   }
   .top {
     display: flex;
@@ -352,12 +348,12 @@ const inline = (text: string) => text.replace(/`([^`]+)`/g, '<code>$1</code>');
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 1.5rem;
+    gap: 1.1rem;
     text-align: center;
-    padding: 3rem 16px 4.5rem;
+    padding: 1.25rem 16px 2.5rem;
   }
   .mark {
-    margin: 0 0 1rem;
+    margin: 0 0 0.35rem;
     font-weight: normal;
     color: var(--ink);
   }
@@ -368,6 +364,23 @@ const inline = (text: string) => text.replace(/`([^`]+)`/g, '<code>$1</code>');
     font-stretch: 112%;
     letter-spacing: -0.02em;
     text-wrap: balance;
+  }
+  /* Short screens (a laptop at 720 px): the hero tightens so the plinth,
+     with what stands on it and what it stands on, is in the first view. */
+  @media (max-height: 760px) and (min-width: 40rem) {
+    .top {
+      padding-block: 0.75rem;
+    }
+    .stage {
+      gap: 0.8rem;
+      padding-block: 0.25rem 1.75rem;
+    }
+    .mark :global(.word) {
+      font-size: 6.25rem;
+    }
+    .baseline {
+      font-size: 2.6rem;
+    }
   }
   .lede {
     margin: 0;
@@ -410,11 +423,6 @@ const inline = (text: string) => text.replace(/`([^`]+)`/g, '<code>$1</code>');
   }
   .hero :focus-visible {
     outline-color: var(--lime);
-  }
-  .status {
-    margin: 0.5rem 0 0;
-    font: 400 0.8125rem var(--font-mono);
-    color: var(--ink-muted);
   }
   /* The base of the hero, drawn as what it is: the catalog's modules stand
      on the socle, and the socle stands on the four clouds — the plinth, one
