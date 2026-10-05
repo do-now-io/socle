@@ -4,9 +4,9 @@
 # fork-friendly. A green plan proves the module resolves its providers,
 # data sources and inputs, and lists what it would create.
 #
-# These legs plan. Convergence on AWS is proven in publish-artifact.yaml's
-# e2e-aws-root and e2e-aws-catalog jobs, which apply on floci's real k3s
-# against the artifact the same commit published. floci applies the real
+# These legs plan. Convergence on AWS is proven by e2e.yaml, called by
+# publish-artifact.yaml: its root and per-module jobs apply on floci's real
+# k3s against the artifact the same commit published. floci applies the real
 # root once but cannot re-apply it (it does not read back several
 # attributes), which is why the mutation tests use a bare fixture root.
 #

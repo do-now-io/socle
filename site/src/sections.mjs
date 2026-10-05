@@ -25,20 +25,14 @@ const sidebar = [
 
 // The landing page is not one of them: it is site/src/pages/index.astro.
 const pages = ['contributing.md'];
-const directories = ['getting-started', 'clouds', 'guides', 'architecture', 'decisions', 'reference'];
-
-// The documentation as it stood before the site (#71). It stays readable on
-// GitHub and out of the site until the migration (M2) moves it into the tree
-// above; this list then goes. docs/catalog/<module>.md are legacy until they
-// carry the frontmatter of the module page template.
-const legacy = [/^(aws|gcp|azure|scaleway|standards)\//, /^(distribution|flux-catalog|monitoring)\.md$/, /^catalog\/(?!index\.md$)[^/]+\.md$/];
+const directories = ['getting-started', 'clouds', 'catalog', 'guides', 'architecture', 'decisions', 'reference'];
 
 export const sections = {
   sidebar,
   // Glob patterns, relative to docs/, for Astro's glob() loader. A leading
   // `_` keeps a file out, as in Starlight's own loader.
-  patterns: [...pages, 'catalog/index.md', ...directories.map((d) => `${d}/**/[^_]*.{md,mdx}`)],
-  covers: (file) =>
-    pages.includes(file) || file === 'catalog/index.md' || directories.some((d) => file.startsWith(`${d}/`)),
-  isLegacy: (file) => legacy.some((re) => re.test(file)),
+  patterns: [...pages, ...directories.map((d) => `${d}/**/[^_]*.{md,mdx}`)],
+  // A file whose name starts with `_` (a template) is not published.
+  covers: (file) => pages.includes(file) || directories.some((d) => file.startsWith(`${d}/`) && !/(^|\/)_[^/]*$/.test(file)),
+  isTemplate: (file) => /(^|\/)_[^/]*$/.test(file),
 };

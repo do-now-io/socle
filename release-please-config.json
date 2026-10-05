@@ -23,7 +23,13 @@
     { "type": "generic", "path": "opentofu/clusters/aws/prod.tfvars.example" },
     { "type": "generic", "path": "oci/.ci/inputs-sample.yaml" },
     { "type": "generic", "path": "README.md" },
-    { "type": "generic", "path": "site/src/pages/index.astro" }
+    { "type": "generic", "path": "site/src/pages/index.astro" },
+    { "type": "generic", "path": "docs/getting-started/aws.md" },
+    { "type": "generic", "path": "docs/getting-started/gcp.md" },
+    { "type": "generic", "path": "docs/getting-started/azure.md" },
+    { "type": "generic", "path": "docs/getting-started/scaleway.md" },
+    { "type": "generic", "path": "docs/guides/configure.md" },
+    { "type": "generic", "path": "docs/guides/upgrade.md" }
   ],
   "packages": {
     ".": {}

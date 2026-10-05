@@ -38,7 +38,7 @@ const released = process.env.SOCLE_RELEASED === 'true';
 const markdown = readdirSync(docsDir, { recursive: true })
   .filter((f) => /\.mdx?$/.test(f))
   .map((f) => f.split(path.sep).join('/'));
-const strays = markdown.filter((f) => !sections.covers(f) && !sections.isLegacy(f));
+const strays = markdown.filter((f) => !sections.covers(f) && !sections.isTemplate(f));
 if (strays.length > 0) {
   throw new Error(
     `docs/: ${strays.length} page(s) outside the site's sections (src/sections.mjs), so missing from its navigation:\n` +
