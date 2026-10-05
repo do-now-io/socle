@@ -4,8 +4,8 @@
 # The only line an upgrade touches.
 socle_version = "0.1.0" # x-release-please-version
 
-# While the registry is private, name the pull secret created outside OpenTofu
-# (see README, "A private registry"):
+# Only when Flux pulls the artifact from a private mirror: the pull secret
+# created outside OpenTofu (docs/guides/private-registry.md).
 # artifact_pull_secret = "ghcr-auth"
 
 aws = {
@@ -73,10 +73,10 @@ kube = {
     values_secret = "argocd-values"
   }
   # Metrics storage, on by default: 15 days on a 20Gi claim of the cluster's
-  # default StorageClass. EKS has none until the EBS CSI driver is installed
-  # (docs/catalog/victoria-metrics.md), so the claim would stay Pending: until
-  # then, an empty storage_size keeps the data in an emptyDir, lost when the
-  # pod moves.
+  # default StorageClass. The bootstrap installs the EBS CSI driver but marks
+  # no StorageClass default (docs/clouds/aws/limits.md), so the claim would
+  # stay Pending: an empty storage_size keeps the data in an emptyDir, lost
+  # when the pod moves.
   victoria_metrics = {
     storage_size = ""
     # retention  = "30d"

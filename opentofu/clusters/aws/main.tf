@@ -8,7 +8,7 @@
 #   source = "oci://ghcr.io/do-now-io/socle/opentofu-modules//opentofu/bootstrap?tag=${var.socle_version}"
 #
 # (the modules package, not the socle artifact: one OCI tag cannot carry both
-# shapes — PR #15)
+# shapes — docs/architecture/distribution.md)
 #
 # Two cases need more than one apply, both documented in README.md: replacing
 # the cluster, and destroying it when the runner cannot reach the API.

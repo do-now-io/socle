@@ -1,6 +1,11 @@
 # Socle on AWS — one apply
 
-The cluster, then Flux and the catalog on it, from one root and one tfvars.
+The client root for AWS: the foundations ([`opentofu/aws`](../../aws)), then
+the bootstrap module ([`opentofu/bootstrap`](../../bootstrap)) — Cilium,
+CoreDNS, the EKS add-ons, Flux — from one tfvars and one `tofu apply`. In
+the repository both module sources are relative, and this is the root CI
+applies. A first cluster, step by step:
+[AWS quickstart](../../../docs/getting-started/aws.md).
 
 ```sh
 cp prod.tfvars.example prod.tfvars   # edit
@@ -8,43 +13,29 @@ tofu init
 tofu apply -var-file=prod.tfvars
 ```
 
-Upgrading the socle is one line in the tfvars, `socle_version`, then
-`tofu init && tofu apply`. In a client's copy the version is also in both
-`source` attributes, pointed at the modules package rather than the socle
-artifact — one OCI tag cannot carry both shapes (PR #15):
+In a client's copy both sources point at the published modules package, the
+version taken from the tfvars, which OpenTofu resolves at `tofu init`
+(`tofu init -var-file=prod.tfvars`):
 
 ```hcl
 source = "oci://ghcr.io/do-now-io/socle/opentofu-modules//opentofu/aws?tag=${var.socle_version}"
 source = "oci://ghcr.io/do-now-io/socle/opentofu-modules//opentofu/bootstrap?tag=${var.socle_version}"
 ```
 
-which OpenTofu ≥ 1.8 resolves at init.
+Upgrading is then one line, `socle_version`
+([upgrade](../../../docs/guides/upgrade.md)). Prerequisites:
+[AWS prerequisites](../../../docs/clouds/aws/prerequisites.md).
 
-## What must exist first
-
-The [foundations prerequisites](../../../docs/aws/prerequisites.md), plus the
-`aws` CLI on the machine or runner that applies: the helm provider obtains its
-token through `aws eks get-token` at call time, from the same credentials the
-aws provider uses. Nothing is stored.
-
-## The nodes it starts with
+## In what order
 
 The foundations create one node group, the bootstrap group: two 4 vCPU
-nodes on Spot, drawn from six Graviton families so they are not reclaimed
-together, untainted, about $84 a month in eu-west-3, $223 on demand. It carries the socle — Cilium's operator, CoreDNS,
-Flux, later Karpenter — and is not sized for your workloads, which
-Karpenter's nodes will carry. `aws.bootstrap_node_instance_types`,
-`aws.bootstrap_node_capacity_type` and `aws.bootstrap_node_count` change it.
-A reclaimed node is replaced by EKS; the other carries the socle meanwhile.
-
-Cilium is installed beside the group, not after it: its nodes are Ready only
-once Cilium runs on them. Everything else waits for the group, and a
-`bootstrap_node_count` of zero is refused at plan.
-
-The EKS-managed add-ons follow the network in the same apply: the Pod
-Identity Agent before Flux — every AWS identity in the catalog needs it —
-then the EBS CSI driver, and EFS CSI if `eks_addons.efs_csi` is set. No
-`aws eks create-addon` by hand.
+Graviton nodes on Spot, untainted, sized for the socle, not for workloads
+(`aws.bootstrap_node_*` change it). Cilium is installed beside the group, not
+after it: its nodes are Ready only once Cilium runs on them. CoreDNS, the
+EKS add-ons, Flux and the catalog wait for the group, and a
+`bootstrap_node_count` of zero is refused at plan. The Pod Identity Agent
+comes before Flux, the snapshot controller and the storage drivers after
+CoreDNS.
 
 ## Values the root derives for you
 
@@ -53,28 +44,18 @@ then the EBS CSI driver, and EFS CSI if `eks_addons.efs_csi` is set. No
 - `kube.external_dns`: on, filtered to `aws.gateway_certificate.domain`,
   when that certificate is requested and Crossplane can give external-dns
   its role — `kube.crossplane.enabled`, `aws.crossplane` set, `route53` in
-  its `allowed_services`. Every route on the Gateways is `<name>.<domain>`,
-  so that domain is the zone it writes to.
+  its `allowed_services`.
 
 What you write under `kube` always wins: `external_dns = { enabled = false }`
 turns it off, `domain_filters` replaces the derived one.
 
-## A private registry
+## A mirror
 
-While `ghcr.io/do-now-io/socle/flux-modules` is private, Flux needs a pull secret. Create it
-once, outside OpenTofu, then name it in the tfvars:
-
-```sh
-kubectl -n flux-system create secret docker-registry ghcr-auth \
-  --docker-server=ghcr.io --docker-username=<github user> --docker-password=<token with read:packages>
-```
-
-```hcl
-artifact_pull_secret = "ghcr-auth"
-```
-
-The credential never enters OpenTofu or its state. A public registry needs
-none of this.
+`ghcr.io/do-now-io/socle/flux-modules`, the artifact Flux pulls, is public:
+no pull secret. A mirror (`artifact_url`) that needs credentials takes a
+`dockerconfigjson` Secret created in `flux-system` outside OpenTofu, named in
+`artifact_pull_secret`:
+[private registry](../../../docs/guides/private-registry.md).
 
 ## Reading the result
 
@@ -88,15 +69,14 @@ reports whether they converged.
 
 ## When one apply is not enough
 
-- **Replacing the cluster.** A ForceNew change (the foundations README lists
-  them) makes the endpoint unknown at plan, and the helm provider cannot
-  refresh its releases: `tofu apply -var-file=prod.tfvars -target=module.foundations`,
+- **Replacing the cluster.** A change that replaces the EKS cluster makes
+  the endpoint unknown at plan, and the helm provider cannot refresh its
+  releases: `tofu apply -var-file=prod.tfvars -target=module.foundations`,
   then the full apply.
 - **Destroying with the API unreachable.** Releases are deleted before the
-  cluster, and all but Cilium before the bootstrap nodes, which is the right
-  order, but it needs the API: if the runner is no
-  longer in `cluster_endpoint_public_access_cidrs`, `tofu state rm module.socle`
-  first.
+  cluster, and all but Cilium before the bootstrap nodes, which needs the
+  API: if the runner is no longer in
+  `cluster_endpoint_public_access_cidrs`, `tofu state rm module.socle` first.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
