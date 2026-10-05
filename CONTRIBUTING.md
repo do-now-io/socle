@@ -136,6 +136,12 @@ the folder says which:
   into its address on GitHub, at the version being read.
 - The landing page is not in `docs/`: it is `site/src/pages/index.astro`,
   and its module list is read from `catalog.tf` at build time.
+- A socle version in an example (`socle_version = "…"`) is the last release,
+  never a version picked by hand. End its line with
+  `# x-release-please-version` and list the file under `extra-files` in
+  `release-please-config.json`: release-please then rewrites it with every
+  other stamp. `check-version.sh` fails on an annotated line that drifts from
+  `VERSION`, or whose file release-please does not list.
 - The navigation follows the folders. A page's place within its folder is
   `sidebar.order` in its frontmatter.
 - To preview the site:

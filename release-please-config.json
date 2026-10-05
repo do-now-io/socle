@@ -21,7 +21,9 @@
     { "type": "generic", "path": "opentofu/aws/tests/defaults.tftest.hcl" },
     { "type": "generic", "path": "opentofu/azure/tests/defaults.tftest.hcl" },
     { "type": "generic", "path": "opentofu/clusters/aws/prod.tfvars.example" },
-    { "type": "generic", "path": "oci/.ci/inputs-sample.yaml" }
+    { "type": "generic", "path": "oci/.ci/inputs-sample.yaml" },
+    { "type": "generic", "path": "README.md" },
+    { "type": "generic", "path": "site/src/pages/index.astro" }
   ],
   "packages": {
     ".": {}

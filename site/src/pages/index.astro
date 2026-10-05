@@ -4,12 +4,15 @@
 // the documentation, which Starlight renders.
 import '../styles/tokens.css';
 import Wordmark from '../components/Wordmark.astro';
-import { bannerHtml } from '../channel';
+import { bannerHtml, released } from '../channel';
 import { modules } from '../catalog.mjs';
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 const to = (path: string) => `${base}/${path}`;
 const repository = 'https://github.com/do-now-io/socle';
+// The last release, as every other stamp in the repository: release-please
+// rewrites this line in its release PR, check-version.sh holds it to VERSION.
+const socleVersion = '0.1.0'; // x-release-please-version
 const banner = bannerHtml();
 const onByDefault = modules.filter((m) => m.enabled).length;
 
@@ -31,7 +34,7 @@ const reasons = [
 // The README's example, trimmed. HCL braces would be Astro expressions in
 // the template, so it is a string.
 const tfvars = `<span class="c"># clusters/prod.tfvars</span>
-socle_version = <span class="s">"0.1.0"</span>   <span class="c"># the only line an upgrade touches</span>
+socle_version = <span class="s">"${socleVersion}"</span>   <span class="c"># the only line an upgrade touches</span>
 
 aws = {
   region             = <span class="s">"eu-west-3"</span>
@@ -96,7 +99,9 @@ const inline = (text: string) => text.replace(/`([^`]+)`/g, '<code>$1</code>');
           <a class="btn primary" href={to('getting-started/concepts/')}>Read the docs</a>
           <a class="btn ghost" href={repository}>View on GitHub</a>
         </div>
-        <p class="status">Pre-0.1.0. Every push to main publishes a signed alpha; nothing is released yet.</p>
+        <p class="status">
+          {released ? `Latest release: ${socleVersion}.` : 'Nothing is released yet. Every push to main publishes a signed alpha.'}
+        </p>
       </div>
       <div class="plinth" aria-hidden="true"></div>
     </header>

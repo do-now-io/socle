@@ -76,7 +76,7 @@ from the catalog defaults:
 
 ```hcl
 # clusters/prod.tfvars
-socle_version = "0.1.0"            # the only line an upgrade touches
+socle_version = "0.1.0"            # the only line an upgrade touches. x-release-please-version
 
 aws = {
   region             = "eu-west-3"
