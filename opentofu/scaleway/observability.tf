@@ -1,4 +1,4 @@
-# Observability — docs/scaleway/cloud-observability.md.
+# Observability — docs/decisions/scaleway.md, SCALEWAY-11 to SCALEWAY-13.
 #
 # Deliberately absent: the alert manager, its contacts, preconfigured alerts,
 # data exports and dashboards. Alerting is one Alertmanager for four clouds,
@@ -11,7 +11,7 @@
 #
 # Writing is what costs money on Cockpit — ~2.5x GKE's rate per sample — so
 # this token is deliberately unable to do it. Workload metrics stay in the
-# socle's own Prometheus.
+# socle's in-cluster stack (docs/decisions/socle.md, SOCLE-03).
 resource "scaleway_cockpit_token" "observability" {
   count = var.cockpit_token_enabled ? 1 : 0
 

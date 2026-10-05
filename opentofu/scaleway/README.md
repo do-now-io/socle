@@ -26,103 +26,35 @@ module "socle" {
 }
 ```
 
-A deployable version of that is in [`examples/minimal`](examples/minimal),
-which also lists the permissions the apply needs and where remote state
-belongs. What has to exist on the Scaleway account before any of it runs is in
-[prerequisites](../../docs/scaleway/prerequisites.md).
+A deployable version is in [`examples/minimal`](examples/minimal). The whole
+path, foundations then bootstrap, is the
+[Scaleway quickstart](../../docs/getting-started/scaleway.md); what must exist
+on the account first is in
+[prerequisites](../../docs/clouds/scaleway/prerequisites.md).
+
+What every default decides and why, and what is left out on purpose:
+[foundations](../../docs/clouds/scaleway/foundations.md). What no apply can
+finish, and what Scaleway cannot do:
+[limits](../../docs/clouds/scaleway/limits.md).
 
 > **OpenTofu does not verify OCI signatures.** It will pull an unsigned or
 > tampered artifact without complaint — Flux does, this does not. Run
 > `cosign verify` in CI before `tofu init`, or enforce it through registry
-> policy. The command, and the identity to pin:
-> [distribution](../../docs/distribution.md#who-verifies-and-who-does-not).
+> policy: [distribution](../../docs/architecture/distribution.md).
 
-## What is decided for you
+## Testing
 
-Every default traces back to a research document. The short version:
+Plan-only. Scaleway has no emulator, so nothing in CI applies this module:
 
-| Decision | Position | Traces to |
-| --- | --- | --- |
-| Kapsule, Cilium, no CNI option | enforced | [capabilities](../../docs/scaleway/kapsule-capabilities.md) |
-| Dedicated control plane in production, mutualized elsewhere | derived from `environment` | [capabilities](../../docs/scaleway/kapsule-capabilities.md) |
-| Full isolation — no node carries a public address | enforced | [capabilities](../../docs/scaleway/kapsule-capabilities.md) |
-| One Public Gateway per zone the pools span | enforced | [capabilities](../../docs/scaleway/kapsule-capabilities.md) |
-| Allowed-IP list required, `0.0.0.0/0` refused | required | [capabilities](../../docs/scaleway/kapsule-capabilities.md) |
-| Kubernetes version explicit, no floating tag | required | [capabilities](../../docs/scaleway/kapsule-capabilities.md) |
-| Maintenance window required, no default | required | [capabilities](../../docs/scaleway/kapsule-capabilities.md) |
-| `expander = least_waste`, not Scaleway's `random` | default | [capabilities](../../docs/scaleway/kapsule-capabilities.md) |
-| COMPUTE3-X nodes across two zones of fr-par | default | [capabilities](../../docs/scaleway/kapsule-capabilities.md) |
-| A security group per cluster, not the shared default | enforced | [capabilities](../../docs/scaleway/kapsule-capabilities.md) |
-| One Project per environment | required | [managed scope](../../docs/scaleway/managed-scope.md) |
-| Crossplane key bound to a source address | default | [managed scope](../../docs/scaleway/managed-scope.md) |
-| Query-only Cockpit token; nothing pushed to Cockpit | default | [cloud observability](../../docs/scaleway/cloud-observability.md) |
+- `tofu test` (`tests/`, in `pr-static.yaml`) plans the module, asserting the
+  recommended defaults and tripping every validation block.
+- `tofu plan` of `examples/minimal` (in `integration.yaml`) plans it the way a
+  consumer calls it.
 
-## Two exceptions this module has to declare
-
-**It issues a credential.** Every other foundations module refuses to, and the
-conformance checklist says modules authenticate through ambient credentials or
-workload identity federation. Scaleway has no workload identity federation at
-all, so an in-cluster Crossplane provider can only hold a long-lived API key.
-The module creates it, marks it sensitive, scopes its policy to one Project,
-binds it to the gateways' egress addresses with an IAM condition, and lets a
-consumer set an expiry. That is the whole mitigation available. See
-[`iam.tf`](iam.tf).
-
-**There is no TFLint ruleset for Scaleway.** `terraform-linters` publishes none
-and neither does anyone else, so `.tflint.hcl` carries the recommended
-`terraform` preset alone. The module leans on `tofu test` instead — 37 cases,
-one per validation block plus the recommended-defaults assertions.
-
-## What is deliberately absent
-
-Not oversights. An option in the interface is an option that is supported and
-tested, so these are refusals:
-
-- **Kosmos** — a different CNI, no Private Network, and no migration path in
-  either direction.
-- **A CNI variable** — Kapsule supports `cilium` and `calico`; `none` is not
-  supported, so a self-managed Cilium is impossible and Calico is worse on
-  every count.
-- **Controlled isolation** — it would have dev and staging exercising a
-  different egress path from production.
-- **`price` as an autoscaler expander** — upstream implements it for GCE and
-  AWS only, so on Scaleway it is a silent no-op.
-- **BASIC3-X and the development ranges as node types** — shared vCPU and a
-  99% SLO.
-- **`feature_gates`, `admission_plugins`, `apiserver_cert_sans`,
-  `open_id_connect_config`** — Kapsule exposes them and the socle needs none.
-- **Cockpit alerting, contacts, dashboards and data exports** — catalog
-  concerns, so four clouds share one definition.
-- **Load balancers, DNS records and certificates** — the cloud controller
-  manager, External-DNS and cert-manager own those, in-cluster.
-
-## What no apply can finish
-
-- **Quota.** The reference estate wants four `COMPUTE3-X8C-16G` nodes in
-  production; the shape it replaces is capped at two by default and the quota
-  table has no figure for the Zen 5 generation at all. Raising a quota is a
-  support ticket, before the first apply.
-- **Identity validation.** Without it most useful instance types have no quota
-  whatsoever.
-
-## Integration testing
-
-This module's leg is **plan-only**. Scaleway publishes no emulator, and there
-is no third-party one — recorded in the conformance checklist as an exception,
-not hidden.
-
-Two offline checks stand in for an apply, and neither is one:
-
-- **`tofu test`**, in `pr-static.yaml`, plans the module itself — 37 runs, 5
-  asserting the recommended defaults and 32 tripping the 32 validation blocks
-  one by one.
-- **`tofu plan` on `examples/minimal`**, in `integration.yaml`, plans the
-  module the way a consumer calls it, so the example's own wiring and outputs
-  are exercised too.
-
-Both use fixture credentials over empty state, so no API call leaves the
-runner and forks can run them. **Convergence is not proven by either.** That
-needs a real Project, a quota raise and an apply.
+Both run with fixture credentials over empty state; no API call leaves the
+runner. Neither proves convergence: that needs a real Project, a quota raise
+and an apply. There is no TFLint ruleset for Scaleway, so `.tflint.hcl`
+carries the `terraform` preset alone.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
@@ -173,7 +105,7 @@ No modules.
 | <a name="input_availability_zones"></a> [availability\_zones](#input\_availability\_zones) | Zones the node pools span, one pool per zone. Two is the default because the current instance generation exists in only two zones of fr-par and nl-ams; only pl-waw offers three. | `list(string)` | <pre>[<br/>  "fr-par-1",<br/>  "fr-par-2"<br/>]</pre> | no |
 | <a name="input_cockpit_token_enabled"></a> [cockpit\_token\_enabled](#input\_cockpit\_token\_enabled) | Create a query-only Cockpit token so the central observability cluster can federate Scaleway's own metrics and logs. Reading is what the supervision plane does; pushing into Cockpit is billed per sample and is refused. | `bool` | `true` | no |
 | <a name="input_control_plane_type"></a> [control\_plane\_type](#input\_control\_plane\_type) | Control plane offer. Null derives it from environment — dedicated 4 in production for the SLA and the audit log, mutualized elsewhere. Kosmos offers are absent by decision. | `string` | `null` | no |
-| <a name="input_create_vpc"></a> [create\_vpc](#input\_create\_vpc) | Create the VPC instead of attaching to an existing one. Routing is VPC-wide, so one VPC per environment is the layout the research recommends. | `bool` | `true` | no |
+| <a name="input_create_vpc"></a> [create\_vpc](#input\_create\_vpc) | Create the VPC instead of attaching to an existing one. Routing is VPC-wide: by default each cluster gets its own VPC; pass an existing one to share it. | `bool` | `true` | no |
 | <a name="input_crossplane_allowed_cidrs"></a> [crossplane\_allowed\_cidrs](#input\_crossplane\_allowed\_cidrs) | Source addresses the Crossplane key may be used from, as an IAM policy condition. Empty derives it from the Public Gateways' egress addresses, which is the only stable source a fully isolated node presents. | `list(string)` | `[]` | no |
 | <a name="input_crossplane_key_expires_at"></a> [crossplane\_key\_expires\_at](#input\_crossplane\_key\_expires\_at) | RFC 3339 expiry for the Crossplane API key. Null means no expiry. Scaleway has no workload identity federation, so this key is the credential — an expiry is what forces the rotation the factory owns. | `string` | `null` | no |
 | <a name="input_delete_additional_resources"></a> [delete\_additional\_resources](#input\_delete\_additional\_resources) | On cluster deletion, also delete the Load Balancers and Block volumes Kubernetes created. False keeps client data when a cluster is torn down, at the price of orphaned billable resources someone has to clean up. | `bool` | `false` | no |

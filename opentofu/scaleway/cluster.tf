@@ -1,4 +1,4 @@
-# The Kapsule cluster and its pools — docs/scaleway/kapsule-capabilities.md.
+# Kapsule cluster and pools — docs/decisions/scaleway.md, SCALEWAY-01 to -05.
 
 resource "scaleway_k8s_cluster" "socle" {
   name        = var.cluster_name

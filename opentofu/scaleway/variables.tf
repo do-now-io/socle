@@ -1,6 +1,6 @@
 # Every variable is typed, every constrained value is enforced by a validation
-# block rather than by documentation, and every default is the position the
-# research documents recommend. Options we would not recommend are absent.
+# block, and every default is the position docs/decisions/scaleway.md takes.
+# Options we would not recommend are absent.
 
 # ---------------------------------------------------------------------------
 # Identity of the deployment
@@ -69,11 +69,11 @@ variable "additional_tags" {
 }
 
 # ---------------------------------------------------------------------------
-# Network — docs/scaleway/kapsule-capabilities.md
+# Network — docs/decisions/scaleway.md, SCALEWAY-06
 # ---------------------------------------------------------------------------
 
 variable "create_vpc" {
-  description = "Create the VPC instead of attaching to an existing one. Routing is VPC-wide, so one VPC per environment is the layout the research recommends."
+  description = "Create the VPC instead of attaching to an existing one. Routing is VPC-wide: by default each cluster gets its own VPC; pass an existing one to share it."
   type        = bool
   default     = true
 }
@@ -137,7 +137,7 @@ variable "public_gateway_type" {
 # production, which is the one thing the socle exists to prevent.
 
 # ---------------------------------------------------------------------------
-# Control plane access — docs/scaleway/kapsule-capabilities.md
+# Control plane access — docs/decisions/scaleway.md, SCALEWAY-06
 # ---------------------------------------------------------------------------
 
 variable "cluster_endpoint_public_access_cidrs" {
@@ -161,7 +161,7 @@ variable "cluster_endpoint_public_access_cidrs" {
 }
 
 # ---------------------------------------------------------------------------
-# Cluster — docs/scaleway/kapsule-capabilities.md
+# Cluster — docs/decisions/scaleway.md, SCALEWAY-01, -02, -04, -05
 # ---------------------------------------------------------------------------
 
 variable "kubernetes_version" {
@@ -243,7 +243,7 @@ variable "scale_down_utilization_threshold" {
 }
 
 # ---------------------------------------------------------------------------
-# Node pools — docs/scaleway/kapsule-capabilities.md
+# Node pools — docs/decisions/scaleway.md, SCALEWAY-04
 # ---------------------------------------------------------------------------
 
 variable "node_type" {
@@ -310,7 +310,7 @@ variable "root_volume_size_in_gb" {
 }
 
 # ---------------------------------------------------------------------------
-# Identities — docs/scaleway/managed-scope.md
+# Identities — docs/decisions/scaleway.md, SCALEWAY-08
 # ---------------------------------------------------------------------------
 
 variable "crossplane_permission_sets" {
@@ -351,7 +351,7 @@ variable "crossplane_allowed_cidrs" {
 }
 
 # ---------------------------------------------------------------------------
-# Observability — docs/scaleway/cloud-observability.md
+# Observability — docs/decisions/scaleway.md, SCALEWAY-12
 # ---------------------------------------------------------------------------
 
 variable "cockpit_token_enabled" {
