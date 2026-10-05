@@ -3,7 +3,7 @@
 # the only thing that differs between EKS, GKE, AKS and Kapsule.
 #
 # Every variable is typed, every constraint is a validation block with a test
-# that trips it, and every default is the position docs/flux-catalog.md argues.
+# that trips it, and every default is the position docs/decisions/socle.md argues.
 
 # ---------------------------------------------------------------------------
 # Identity of the deployment
@@ -62,7 +62,7 @@ variable "region" {
 }
 
 # ---------------------------------------------------------------------------
-# The catalog — docs/flux-catalog.md §2 and §3
+# The catalog — docs/reference/inputs.md and docs/architecture/flux-catalog.md
 # ---------------------------------------------------------------------------
 
 # nullable = false on every defaulted variable: a root that groups its
@@ -78,7 +78,7 @@ variable "kube" {
     are snake_case. Typed `any` on purpose: a map(any) refuses two modules with
     different attributes, and an object type silently drops a misspelt
     attribute — the validations below are what makes a typo an error at plan.
-    The schema is catalog.tf; the README lists it module by module.
+    The schema is catalog.tf; docs/reference/inputs.md lists it module by module.
   EOT
   type        = any
   default     = {}
@@ -1033,7 +1033,7 @@ variable "kube" {
 }
 
 # ---------------------------------------------------------------------------
-# Cilium — cilium.tf and docs/catalog/cilium.md
+# Cilium — cilium.tf and docs/architecture/cilium-before-flux.md
 # ---------------------------------------------------------------------------
 
 variable "cilium" {
@@ -1253,7 +1253,7 @@ variable "schedulable_nodes" {
 }
 
 # ---------------------------------------------------------------------------
-# What the cluster pulls — docs/flux-catalog.md §3 and §7
+# What the cluster pulls — docs/architecture/distribution.md
 # ---------------------------------------------------------------------------
 
 variable "socle_version" {
