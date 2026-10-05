@@ -18,7 +18,8 @@ const sidebar = [
   { label: 'Catalog', items: [{ autogenerate: { directory: 'catalog' } }] },
   { label: 'Guides', items: [{ autogenerate: { directory: 'guides' } }] },
   { label: 'Architecture', items: [{ autogenerate: { directory: 'architecture' } }] },
-  { label: 'Decisions', items: [{ autogenerate: { directory: 'decisions' } }] },
+  // 22 files: folded until opened, so the navigation stays readable.
+  { label: 'Decisions', collapsed: true, items: [{ autogenerate: { directory: 'decisions' } }] },
   { label: 'Reference', items: [{ autogenerate: { directory: 'reference' } }] },
   { label: 'Contributing', slug: 'contributing' },
 ];

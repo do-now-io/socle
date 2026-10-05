@@ -6,13 +6,12 @@ requires: []
 ---
 
 ArgoCD is what you deploy your own applications with: Flux keeps the socle
-converged, ArgoCD carries what you build on it. The module is **on by
-default**, on every cloud, non-HA, with no application in it.
+converged, ArgoCD carries what you build on it. **On by default**, on every
+cloud, with no application in it.
 
 ## Getting started
 
-The module is already on. Give it a host to be served at, on the private
-Gateway:
+It is already on. Give it a host, on the private Gateway:
 
 ```hcl title="terraform.tfvars" kube-start="argocd"
 kube = {
@@ -23,93 +22,21 @@ kube = {
 }
 ```
 
-After the apply, `kubectl -n flux-system get resourceset argocd` is Ready and
-`kubectl -n argocd get httproute argocd-server` names your host. Without the
-shared Gateways there is no route: reach the server by port-forward, as
-[Per cloud](#per-cloud) shows.
+Then `kubectl -n argocd get httproute argocd-server` shows your host.
 
-## What it installs
+## Settings
 
-| | |
-| --- | --- |
-| Chart | `argo-cd` `10.9.2` (ArgoCD v3.5.3) from `oci://ghcr.io/argoproj/argo-helm/argo-cd` |
-| Namespace | `argocd` |
-| Objects | `Namespace/argocd`, `OCIRepository/argo-cd-chart`, `ConfigMap/argocd-socle-values`, `ConfigMap/argocd-client-values`, `HelmRelease/argocd`; with a `domain`, a `gateway` and the shared Gateways, the child `ResourceSet/argocd-route` holding `HTTPRoute/argocd-server` |
-
-The socle's values, in `argocd-socle-values`:
-
-| Value | Setting |
-| --- | --- |
-| `controller.replicas` | 1, with `ha` too: more controllers shard clusters, they do not add availability |
-| `server`, `repoServer`, `applicationSet` `.replicas` | 1; 2 with `ha` |
-| `redis-ha.enabled` | `true` only with `ha` |
-| Requests | controller 250m / 256Mi, repoServer 100m / 128Mi, server 50m / 64Mi, applicationSet 50m / 64Mi, redis 50m / 32Mi; with `ha`, redis-ha 100m / 128Mi and haproxy 50m / 64Mi. No limits |
-| `server.service.type` | `ClusterIP` |
-| `configs.params."server.insecure"` | `true`: TLS ends at the Gateway or its load balancer, the server speaks plain HTTP in the cluster |
-| `configs.cm."admin.enabled"` | `admin_enabled` |
-| `global.domain` | `domain`, when set. The chart derives `configs.cm.url` from it |
-| `configs.cm.url`, `statusbadge.url` | `""` when `domain` is empty, instead of the chart's `https://argocd.example.com` |
-| `dex.enabled`, `notifications.enabled` | `false` |
-
-The HelmRelease has a 10-minute timeout and retries a failed install or
-upgrade three times.
-
-## What you can set
-
-Under `kube.argocd` in your tfvars:
-
-| Attribute | Default | What it does |
+| Attribute | Default | |
 | --- | --- | --- |
-| `enabled` | `true` | Turns the module on. `false` removes the release and its namespace; the CRDs stay ([CRDs when a module is off](../architecture/flux-catalog.md#crds-when-a-module-is-off)). |
-| `admin_enabled` | `true` | `false` removes the local `admin` account. The module configures no SSO, so set it only once yours works through `values`. |
-| `domain` | `""` | The host ArgoCD is served at, such as `argocd.acme.example`. Feeds `global.domain` and the route's hostname. Empty means no URL and no route. |
-| `gateway` | `"private"` | The shared Gateway the route attaches to: `private`, `public`, or `""` for no route. |
-| `ha` | `false` | The chart's HA layout without autoscaling: the `redis-ha` subchart and two replicas of server, repo-server and applicationset. `redis-ha` places its three Redis pods on three different nodes: on a cluster with fewer nodes they stay Pending. |
-| `values` | `{}` | Any `argo-cd` chart value; yours win over the socle's ([SOCLE-06](../decisions/socle.md#socle-06-the-clients-values-win)). |
-| `values_secret` | `""` | The name of a Secret you create in `argocd`, with a `values.yaml` key, merged last. OpenTofu never reads it. |
-
-Refused at plan:
-
-- `domain` that is not empty or a lowercase FQDN: no scheme, no port, no path.
-- `gateway` other than `private`, `public` or `""`.
-- In `values`: `configs.secret`, `configs.credentialTemplates`,
-  `configs.clusterCredentials`, and a `password`, `sshPrivateKey`,
-  `githubAppPrivateKey`, `bearerToken`, `tlsClientCertData` or
-  `tlsClientCertKey` under `configs.repositories`. `values` lands in the
-  OpenTofu state and in a ConfigMap; those go in `values_secret`. An
-  ArgoCD `repo-creds` Secret you create yourself, labelled
-  `argocd.argoproj.io/secret-type: repo-creds`, works too.
-- `values_secret` that is not a valid Secret name.
-
-A typical block:
-
-```hcl
-kube = {
-  argocd = {
-    domain = "argocd.acme.example"
-    values = {
-      configs = {
-        cm   = { "accounts.alice" = "apiKey, login" }
-        rbac = { "policy.csv" = "g, platform-admins, role:admin" }
-        repositories = {
-          acme = { url = "https://github.com/acme", type = "git", githubAppID = "12345", githubAppInstallationID = "67890" }
-        }
-      }
-    }
-    values_secret = "argocd-values" # holds configs.repositories.acme.githubAppPrivateKey
-  }
-}
-```
-
-A named attribute is a convenience, not a lock: `server.replicas` in
-`values` wins over `ha`, `configs.cm.url` over `domain`. The chart version
-and the namespace are not configurable. The socle ships no Application:
-yours go in through the chart's `extraObjects` in `values`, or through
-ArgoCD itself.
+| `enabled` | `true` | Turns the module on or off. |
+| `domain` | `""` | The host ArgoCD is served at. Empty: no URL, no route. |
+| `gateway` | `"private"` | The shared Gateway the route uses: `private`, `public` or `""`. |
+| `admin_enabled` | `true` | `false` removes the local `admin` account, once your SSO works. |
+| `ha` | `false` | Two replicas of each server and `redis-ha`. Needs three nodes. |
+| `values` | `{}` | Any [`argo-cd` chart](https://artifacthub.io/packages/helm/argo/argo-cd) value; yours win. |
+| `values_secret` | `""` | A Secret in `argocd` with a `values.yaml` key, for what must stay out of the OpenTofu state. |
 
 ### Every setting
-
-Every attribute, at its default, and how chart values and secrets go in:
 
 ```hcl title="terraform.tfvars" kube-full="argocd"
 kube = {
@@ -136,39 +63,41 @@ kube = {
 }
 ```
 
-## Per cloud
+## Good to know
 
-The same template on aws, gcp, azure and scaleway, with no overlay patch.
-The route exists where the shared Gateways do, aws and azure
-([gateway-api](gateway-api.md)); on aws only once the foundations issued the
-Gateways' certificate. Elsewhere, reach the server with
-`kubectl -n argocd port-forward svc/argocd-server 8080:80`.
+- **No route without the shared Gateways.** They exist on aws (once the
+  Gateways' certificate is issued) and azure. Elsewhere:
+  `kubectl -n argocd port-forward svc/argocd-server 8080:80`.
+- **Repository credentials go in `values_secret`**, or in a `repo-creds`
+  Secret of your own. `tofu plan` refuses them in `values`, which lands in
+  the state.
+- **Your `values` win over the attributes**: `server.replicas` over `ha`,
+  `configs.cm.url` over `domain`.
+- **The socle ships no Application.** Add yours through ArgoCD, or the
+  chart's `extraObjects`.
+- **Upgrades**: the chart moves with `socle_version`. A chart major may
+  rename keys you set in `values`.
 
-## Cloud access
+<details>
+<summary>Under the hood</summary>
 
-None.
+**Installed**: chart `argo-cd` 10.9.2 (ArgoCD v3.5.3) from
+`oci://ghcr.io/argoproj/argo-helm/argo-cd`, in the `argocd` namespace. With a
+`domain`, a `gateway` and the shared Gateways, a child `ResourceSet/argocd-route`
+holds `HTTPRoute/argocd-server`, which waits for its Gateway to be `Accepted`
+([ARGOCD-02](../decisions/argocd.md#argocd-02-the-socle-owns-the-httproute-not-the-chart)).
 
-## Ordering
+**What the socle sets**: one replica of each component (two with `ha`; the
+controller stays at one), requests with no limits, `server.insecure` (TLS
+ends at the Gateway), `dex` and `notifications` off, `admin.enabled` and
+`global.domain` from the attributes. Your `values` are merged over these
+([SOCLE-06](../decisions/socle.md#socle-06-the-clients-values-win)).
 
-No requirement. The route waits for its Gateway: `argocd-route` `dependsOn`
-the Gateway named by `gateway` being `Accepted`, so the release never waits
-for the Gateway API CRDs and a missing Gateway leaves only the route
-pending ([ARGOCD-02](../decisions/argocd.md#argocd-02-the-socle-owns-the-httproute-not-the-chart)).
-The route sends `domain` on the `https` listener to `argocd-server:80`. The
-`argocd` CLI logs in with `--grpc-web` over that route.
+**Cloud access**: none.
 
-## Upgrade notes
+**Measured** on floci k3s, 2026-09-24: Ready 42 s after the wait started
+(53 s on the full aws root); turned off, removed in 8 s.
 
-The chart pin moves with `socle_version`, and the release notes name the
-new version. Your `values` are written in the chart's vocabulary: a chart
-major may rename keys, and adapting them is yours, as with any chart you
-install yourself. `crds.keep` stays at the chart's `true`.
+**Decisions**: [argocd decisions](../decisions/argocd.md).
 
-## Measured
-
-| Date | Where | What |
-| --- | --- | --- |
-| 2026-09-24 | floci k3s v1.34.1, GitHub `ubuntu-latest` runner (7 GB) | `resourceset/argocd` Ready and `argocd-server` Available 42 s after the wait started on a bare root, 53 s on the full aws root; `enabled = false` garbage-collected the release in 8 s; back on, Ready 18 s later with the images already on the node. No eviction, no Pending pod |
-| 2026-09-24 | `helm template` of chart 10.9.2 | A client `server.resources.requests.memory: 96Mi` gives `argocd-server` `cpu: 50m, memory: 96Mi`: the client's key wins, the socle's sibling key stays |
-
-Its decisions: [argocd decisions](../decisions/argocd.md).
+</details>
