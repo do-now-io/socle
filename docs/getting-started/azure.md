@@ -5,39 +5,32 @@ sidebar:
   order: 3
 ---
 
-Two modules in one root of your own: [`opentofu/azure`](../../opentofu/azure/README.md)
-builds the cluster, then the [bootstrap](../../opentofu/bootstrap/README.md)
-installs Cilium, Flux and the catalog on it. The repository has no
-`opentofu/clusters/azure` root as it has for AWS, so this page applies the two
-in two steps.
+Two modules in one root of your own, applied in two steps:
+[`opentofu/azure`](../../opentofu/azure/README.md) builds the cluster, then the
+[bootstrap](../../opentofu/bootstrap/README.md) installs Cilium, Flux and the
+catalog.
 
 :::caution
-No Azure apply has run in the socle's CI or on a real subscription. Both
-modules are planned with mocked providers only; what is unproven is listed in
-[limits](../clouds/azure/limits.md).
+No Azure apply has run, in CI or on a real subscription: both modules are
+planned with mocked providers only ([limits](../clouds/azure/limits.md)).
 :::
 
 ## Before you start
 
-The full list, with commands, is in
-[prerequisites](../clouds/azure/prerequisites.md). In short:
+From [prerequisites](../clouds/azure/prerequisites.md):
 
-- **Resource providers registered**: `Microsoft.ContainerService`,
-  `Microsoft.Network`, `Microsoft.Compute`, `Microsoft.ManagedIdentity`, and,
-  while the module still creates Container Insights and Managed Prometheus,
-  `Microsoft.OperationalInsights` and `Microsoft.Monitor`.
-- **Contributor and User Access Administrator** for the principal that applies,
-  on the subscription (the module creates the resource group below). Contributor
-  alone cannot grant the cluster's identity Network Contributor on its subnet.
-- **A state storage account** and container, versioned, and an `azurerm`
-  backend ([prerequisites](../clouds/azure/prerequisites.md#state)).
-- **Quota** in the region for 2 × Standard_D2s_v5 in zones 1, 2 and 3, and for
-  the VM families NAP will pick. A region or VM size without three zones fails
-  with `AvailabilityZoneNotSupported`; set `zones` to what it has.
-- **A runner that reaches the VNet** for step 2: the cluster is private, with
-  no public FQDN. A VM in the VNet, or a network peered or connected to it,
-  that resolves the cluster's private DNS zone.
-- OpenTofu 1.10 or later, the Azure CLI logged in, `kubectl`.
+- the resource providers registered: `Microsoft.ContainerService`,
+  `Microsoft.Network`, `Microsoft.Compute`, `Microsoft.ManagedIdentity`,
+  `Microsoft.OperationalInsights`, `Microsoft.Monitor`;
+- **Contributor and User Access Administrator** on the subscription for the
+  principal that applies (the module creates the resource group);
+- a versioned state storage account and container
+  ([prerequisites](../clouds/azure/prerequisites.md#state));
+- vCPU quota for 2 × Standard_D2s_v5 in zones 1, 2 and 3, and the families
+  NAP picks; a region without three zones needs `zones` set;
+- for step 2, a runner that reaches the private VNet and resolves its
+  private DNS zone;
+- OpenTofu 1.10 or later, the Azure CLI, `kubectl`.
 
 ```sh
 az login
@@ -97,10 +90,8 @@ output "resource_group_name" { value = module.foundations.resource_group_name }
 output "cluster_endpoint" { value = module.foundations.cluster_endpoint }
 ```
 
-`cluster_name` must also suit the bootstrap: 1 to 40 lowercase letters, digits
-and dashes, starting with a letter. The foundations alone accept more.
-
-And `dev.tfvars`:
+`cluster_name` must suit the bootstrap too: 1 to 40 lowercase letters, digits
+and dashes, starting with a letter. `dev.tfvars`:
 
 ```hcl
 # The only line an upgrade touches.
@@ -131,31 +122,29 @@ kube = {}
 ```
 
 The [minimal example](../../opentofu/azure/examples/minimal/README.md) is the
-same foundations call, in the repository, with a relative source.
+same foundations call, with a relative source.
 
 ## Apply
 
-**Step 1, the cluster.** From anywhere: this apply only calls Azure's API.
+**Step 1, the cluster**, from anywhere:
 
 ```sh
 tofu init
 tofu apply -var-file=dev.tfvars
 ```
 
-The cluster comes up with its two `system` nodes `NotReady`: it has no CNI
-until step 2.
+The two `system` nodes stay `NotReady`: no CNI until step 2.
 
-**Step 2, Cilium, Flux and the catalog.** From the runner that reaches the
-VNet. The module's `helm_kubernetes` output needs Entra ID authentication,
-which the cluster does not have ([limits](../clouds/azure/limits.md#what-no-apply-can-finish)),
-so Helm reads the local admin kubeconfig instead:
+**Step 2, Cilium, Flux and the catalog**, from the runner that reaches the
+VNet. Helm reads the admin kubeconfig
+([why](../clouds/azure/limits.md#what-no-apply-can-finish)):
 
 ```sh
 az aks get-credentials --resource-group acme-dev --name acme-dev --admin --file kubeconfig
 ```
 
-The file holds a client certificate for the cluster's admin: keep it out of
-version control. Add to `main.tf`:
+Keep that file out of version control: it holds the admin's client
+certificate. Add to `main.tf`:
 
 ```hcl
 provider "helm" {
@@ -203,12 +192,10 @@ tofu init
 tofu apply -var-file=dev.tfvars
 ```
 
-Cilium installs first, on the `system` nodes, and makes them `Ready`. The Flux
-Operator does not tolerate the `system` pool's `CriticalAddonsOnly` taint: it
-stays `Pending` until Node Auto-Provisioning brings a node for it, within the
-bootstrap's `helm_timeout_seconds` (600). While the artifact's registry is
-private, create the pull secret in `flux-system` first and set
-`artifact_pull_secret` ([private registry](../guides/private-registry.md)).
+While the registry is private, create the pull secret in `flux-system` first
+and set `artifact_pull_secret` ([private registry](../guides/private-registry.md)).
+The Flux Operator stays `Pending` until NAP brings a node it can run on,
+within `helm_timeout_seconds` (600).
 
 ## Check it converged
 
@@ -220,18 +207,17 @@ kubectl -n flux-system get ocirepository socle       # the pulled digest, and So
 kubectl -n flux-system get resourceset               # socle-root and one per module, Ready
 ```
 
-A green apply proves the releases were deposited, not that the catalog
-converged: `socle-root` Ready is the signal.
+`socle-root` Ready means the catalog converged; a green apply alone does
+not.
 
 ## Next steps
 
-- [Configure](../guides/configure.md) the catalog through `kube`, and
-  [enable a module](../guides/enable-a-module.md). On Azure, `velero` and
-  `kube.keda.services` are refused, and external-dns needs the
+- [Configure](../guides/configure.md) the catalog and
+  [enable a module](../guides/enable-a-module.md). On Azure `velero` and
+  `kube.keda.services` are refused; external-dns needs the
   `external-dns-azure` Secret ([external-dns](../catalog/external-dns.md)).
-- [Upgrade](../guides/upgrade.md): one `socle_version` bump moves both modules
-  and the artifact. Keep `kubernetes_version` at the cluster's minor once AKS
-  has moved it ([limits](../clouds/azure/limits.md#what-no-apply-can-finish)).
-- Read what the foundations decide for you, in
-  [foundations](../clouds/azure/foundations.md) and the
+- [Upgrade](../guides/upgrade.md) with `socle_version`; keep
+  `kubernetes_version` at the cluster's minor once AKS has moved it
+  ([limits](../clouds/azure/limits.md#what-no-apply-can-finish)).
+- [Foundations](../clouds/azure/foundations.md) and
   [Azure decisions](../decisions/azure.md).

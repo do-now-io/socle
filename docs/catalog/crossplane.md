@@ -5,30 +5,16 @@ category: platform
 requires: []
 ---
 
-Crossplane is how a catalog module that needs a cloud service declares its
-own role, beside its workload, instead of the foundations growing one IAM
-block per module. This module is only the tooling: Crossplane, the AWS
-providers and their `ClusterProviderConfig`. It names no module and grants
-nothing by itself. It is **off by default**; turn it on when a module you
-want needs cloud access (external-dns, external-secrets, keda with
-`services`, velero). How the whole chain works:
-[Module-owned cloud access](../architecture/module-iam.md).
+Crossplane is the tooling a module that needs a cloud service uses to declare
+its own role, beside its workload. It grants nothing by itself. **Off by
+default**; turn it on when a module you want needs cloud access (external-dns,
+external-secrets, keda with `services`, velero). Providers exist on aws only.
 
 ## Getting started
 
-It needs one input that is not a module: the foundations' `aws.crossplane`,
-which gives Crossplane its own identity and the permissions boundary every
-role it creates must carry. Name there the services your modules use:
-
-```hcl
-# opentofu/clusters/aws, in your tfvars
-aws = {
-  # ...
-  crossplane = { allowed_services = ["route53", "secretsmanager"] }
-}
-```
-
-Then turn the module on. The aws root wires `permissions_boundary` for you:
+Set the foundations' `aws.crossplane` with the services your modules use
+(`crossplane = { allowed_services = ["route53", "secretsmanager"] }`), then
+turn the module on; the aws root wires `permissions_boundary` for you:
 
 ```hcl title="terraform.tfvars" kube-start="crossplane"
 kube = {
@@ -38,62 +24,18 @@ kube = {
 }
 ```
 
-After the apply, `kubectl -n flux-system get resourceset crossplane` is Ready
-and, on aws, `kubectl get providers.pkg.crossplane.io` shows the four providers `Healthy`.
+Then `kubectl get providers.pkg.crossplane.io` shows the four providers `Healthy`.
 
-## What it installs
+## Settings
 
-| | |
-| --- | --- |
-| Chart | `crossplane` `2.4.2` from `https://charts.crossplane.io/stable` (a `HelmRepository`: upstream publishes no OCI chart) |
-| Namespace | `crossplane-system` |
-| Objects | Three steps, each applied and health-checked before the next: `core` — `Namespace`, `HelmRepository/crossplane-stable`, `ConfigMap/crossplane-socle-values`, `ConfigMap/crossplane-client-values`, `HelmRelease/crossplane`; `providers` (aws) — `DeploymentRuntimeConfig/provider-aws` and the `Provider`s `crossplane-contrib-provider-family-aws`, `provider-aws-iam`, `provider-aws-eks`, `provider-aws-s3`, all `v2.8.1` from `xpkg.crossplane.io`; `config` (aws) — the child `ResourceSet/crossplane-provider-config`, which waits for the four providers to be `Healthy` and holds `ClusterProviderConfig/default` on EKS Pod Identity |
-
-Every AWS provider pod runs as the ServiceAccount
-`crossplane-system/provider-aws`, a fixed name, so the foundations can write
-its Pod Identity association before the cluster has a node. No key exists
-anywhere.
-
-Requests, no limits: core 50m / 128Mi, RBAC manager 10m / 32Mi, each
-provider 50m / 320Mi. On aws that is 1440Mi requested in all.
-
-## What you can set
-
-Under `kube.crossplane` in your tfvars:
-
-| Attribute | Default | What it does |
+| Attribute | Default | |
 | --- | --- | --- |
-| `enabled` | `false` | Turns the module on. |
-| `permissions_boundary` | `""` | The IAM policy every module role must carry. The aws root fills it from the foundations' `crossplane_permissions_boundary_arn` when `aws.crossplane` is set; a value you write wins. Empty means roles are created without one, which Crossplane's own identity refuses. |
-| `values` | `{}` | Any `crossplane` chart value; yours win over the socle's ([SOCLE-06](../decisions/socle.md#socle-06-the-clients-values-win)). |
-| `values_secret` | `""` | The name of a Secret you create in `crossplane-system`, with a `values.yaml` key, merged last. OpenTofu never reads it. |
-
-Refused at plan:
-
-- `permissions_boundary` that is not empty or an IAM policy ARN.
-- In `values`: a `Secret` among `extraObjects`, and an entry of
-  `extraEnvVarsCrossplane`, `extraEnvVarsCrossplaneInit` or
-  `extraEnvVarsRBACManager` named like a password, token, secret, credential
-  or key.
-- `values_secret` that is not a valid Secret name.
-
-The aws root warns, without failing, when `kube.crossplane.enabled` is set
-without `aws.crossplane`: Crossplane then installs and converges, and every
-role a module declares fails at the AWS API.
-
-:::caution[Turning it off does not delete what it provisioned]
-The namespace and the release go. The CRDs, the `crossplane-no-usages`
-webhook configuration and every module role still declared stay, orphaned in
-your account with nothing left to delete them. Turn the modules that use
-Crossplane off first, wait for their roles to be gone, then set
-`enabled = false`. Turning a module and Crossplane off in the same apply
-leaves the module's managed resources without a provider: their finalizers
-hold the module's namespace.
-:::
+| `enabled` | `false` | Turns the module on or off. |
+| `permissions_boundary` | `""` | The IAM policy every module role carries. The aws root fills it from the foundations; a value you write wins. |
+| `values` | `{}` | Any [`crossplane` chart](https://artifacthub.io/packages/helm/crossplane/crossplane) value; yours win. |
+| `values_secret` | `""` | A Secret in `crossplane-system` with a `values.yaml` key, for what must stay out of the OpenTofu state. |
 
 ### Every setting
-
-Every attribute, at its default, and how chart values and secrets go in:
 
 ```hcl title="terraform.tfvars" kube-full="crossplane"
 kube = {
@@ -117,51 +59,50 @@ kube = {
 }
 ```
 
-## Per cloud
+## Good to know
 
-Offered by all four overlays, but only aws has providers. On gcp, azure and
-scaleway, `enabled = true` installs the core alone: the `providers` and
-`config` steps render nothing, and no module declares a role there. Modules
-on those clouds take a credential you bring; each module page says how.
+- **It needs `aws.crossplane` in the foundations.** Without it the aws root
+  warns: Crossplane converges, and every role a module declares fails at the
+  AWS API.
+- **On gcp, azure and scaleway it installs the core alone.** No module
+  declares a role there; each takes a credential you bring.
+- **Turning it off deletes nothing it provisioned.** The CRDs, the webhook
+  configuration and every module role stay, orphaned. Turn the modules that
+  use it off first, wait for their roles to go, then turn Crossplane off.
+- **`tofu plan` refuses secrets in `values`**: a `Secret` in `extraObjects`,
+  or an `extraEnvVars*` entry named like a password, token or key. Use
+  `values_secret`.
+- **Upgrades**: the chart moves with `socle_version`, and its CRDs with it
+  (Crossplane applies them at start). The four providers move together, on
+  one tag.
 
-## Cloud access
+<details>
+<summary>Under the hood</summary>
 
-Crossplane's own identity is the one the foundations create when
-`aws.crossplane` is set: an IAM role bound to
-`crossplane-system/provider-aws`, allowed to create roles only under
-`/socle/<cluster>/` and only carrying the boundary
-([AWS-18](../decisions/aws.md#aws-18-crossplanes-identity-and-its-permissions-boundary-in-the-foundations)).
-The boundary allows the
-services in `allowed_services` and always denies `iam`, `sts`,
-`organizations`, `account`, `sso` and `identitystore`
-([CROSSPLANE-01](../decisions/crossplane.md#crossplane-01-the-boundary-is-an-allowlist-of-services)).
-For buckets a module owns, it may create and configure buckets named
-`<cluster>-*`, and never delete one or read their objects. The full grant,
-and what IAM cannot bound, are in
-[Module-owned cloud access](../architecture/module-iam.md).
+**Installed**: chart `crossplane` 2.4.2 from `https://charts.crossplane.io/stable`,
+in `crossplane-system`. On aws, the providers `provider-family-aws`,
+`provider-aws-iam`, `provider-aws-eks` and `provider-aws-s3` (v2.8.1), then
+`ClusterProviderConfig/default` on EKS Pod Identity, once they are `Healthy`.
 
-## Ordering
+**What the socle sets**: requests with no limits (about 1440Mi in all on aws),
+and every provider pod on the fixed ServiceAccount
+`crossplane-system/provider-aws`, so the foundations can bind it before the
+cluster has a node. Your `values` are merged over these
+([SOCLE-06](../decisions/socle.md#socle-06-the-clients-values-win)).
 
-No requirement. Every module that declares a role `dependsOn` the
-`crossplane` ResourceSet, which exists on every cloud and is Ready trivially
-when the module is off, so their roles are applied only once the providers'
-CRDs exist ([SOCLE-04](../decisions/socle.md#socle-04-each-module-owns-its-cloud-access-the-foundations-never-change)).
+**Cloud access**: the foundations' role for `crossplane-system/provider-aws`
+creates roles only under `/socle/<cluster>/` and only with the boundary, which
+allows `allowed_services` and always denies `iam`, `sts` and the account
+services ([CROSSPLANE-01](../decisions/crossplane.md#crossplane-01-the-boundary-is-an-allowlist-of-services)).
+The whole chain: [Module-owned cloud access](../architecture/module-iam.md).
 
-## Upgrade notes
+**Ordering**: every module that declares a role waits for the `crossplane`
+ResourceSet, Ready trivially when the module is off
+([SOCLE-04](../decisions/socle.md#socle-04-each-module-owns-its-cloud-access-the-foundations-never-change)).
 
-The chart ships no `crds/` folder: Crossplane's init container applies its
-core CRDs at every start, so a chart upgrade is a CRD upgrade, outside
-Helm's CRD policy. The four providers move together, pinned to one tag. A
-module back on after an off takes longer than a cold install: the providers
-re-adopt the CRDs they left behind.
+**Measured** on floci 2.1.0, GitHub runner, 2026-09-30: on, providers and
+ProviderConfig converged, a module role in IAM, and off again in under 4 min.
 
-## Measured
+**Decisions**: [crossplane decisions](../decisions/crossplane.md).
 
-| Date | Where | What |
-| --- | --- | --- |
-| 2026-09-24 | local k3s, through Flux, aws providers | `crossplane` ResourceSet Ready 99 s after it was applied, cold; a module-shaped Role in floci's IAM 3–6 s later. Off: namespace gone in 18 s, 21 Crossplane CRDs, 71 provider CRDs and the `crossplane-no-usages` webhook configuration left behind. Back on: about 5 min, the providers 3.5 min to `Healthy` against 89 s cold |
-| 2026-09-24 | local k3s, idle, three aws providers (before `provider-aws-s3`) | core 109–138Mi, RBAC manager 17–21Mi, `provider-family-aws` 306–401Mi, `provider-aws-iam` 323–441Mi, `provider-aws-eks` 327–374Mi: about 1.1 GB |
-| 2026-09-24 | floci, GitHub `ubuntu-latest` runner | Ready 58 s after the apply returned; right after install, core 148Mi and each provider 550–662Mi, about 2 GB |
-| 2026-09-30 | floci 2.1.0, GitHub `ubuntu-latest` runner | On, core, providers and ProviderConfig converged, a module-shaped Role in IAM, and off again: under 4 min cold |
-
-Its decisions: [crossplane decisions](../decisions/crossplane.md).
+</details>

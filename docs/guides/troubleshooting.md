@@ -15,14 +15,14 @@ kubectl -n flux-system describe resourceset <module>                # why one is
 kubectl -n <namespace> get helmrelease                              # the module's chart
 ```
 
-**A green `tofu apply` is not convergence.** Helm's `wait` does not wait for
-a custom resource to be Ready: the apply proves the objects were deposited.
-The signal is `socle-root` Ready, which it is only when every module is.
+**A green `tofu apply` is not convergence**: it proves the objects were
+deposited. `socle-root` is Ready only when every module is.
 
-## The plan refuses kube
+## Symptoms
 
-`kube` is validated against the catalog at plan, and the message lists what
-is allowed:
+### The plan refuses kube
+
+**What you see:**
 
 ```text
 kube = { external_dsn = { enabled = true } }
@@ -38,51 +38,54 @@ kube = { velero = { enabled = true } }        # on gcp
 → kube: a module is not offered on gcp. Cloud-bound modules: {"gateway_api":["aws","azure","scaleway"],"velero":["aws"]}
 ```
 
-Each module adds its own rules, with a message that says what to do:
-`external_dns` enabled without `domain_filters`, `kyverno_policies` without
-`kyverno`, `keda.services` or `velero` without `crossplane`, a secret-bearing
-chart path in `values`. The rules are the validations of `kube` in
-[`variables.tf`](../../opentofu/bootstrap/variables.tf); the schema is in
-[Inputs](../reference/inputs.md).
+**Why:** `kube` is validated against the catalog at plan. Modules add their
+own rules: `external_dns` without `domain_filters`, `kyverno_policies`
+without `kyverno`, `keda.services` or `velero` without `crossplane`, a
+secret-bearing path in `values`.
 
-## The plan warns that Crossplane has no identity
+**Fix:** use what the message allows; the schema is in
+[Inputs](../reference/inputs.md), the rules in
+[`variables.tf`](../../opentofu/bootstrap/variables.tf).
 
-```text
-kube.crossplane.enabled is set without aws.crossplane: the AWS provider runs with no identity, and every CloudAccess will fail.
-```
+### The plan warns that Crossplane has no identity
 
-A `check`, not an error: Crossplane installs and converges, but every role a
-module declares fails at the AWS API. Set
-`aws.crossplane = { allowed_services = [ … ] }`, naming the services your
-modules use, or keep Crossplane off.
+**What you see:** `kube.crossplane.enabled is set without aws.crossplane: the AWS provider runs with no identity, and every CloudAccess will fail.`
 
-## The plan says the cluster has no schedulable node
+**Why:** Crossplane converges, but every module role then fails at the AWS
+API.
 
-```text
-The cluster has no schedulable node (schedulable_nodes = 0), so CoreDNS and the Flux operator cannot start.
-```
+**Fix:** `aws.crossplane = { allowed_services = [ … ] }` with the services
+your modules use, or keep Crossplane off.
 
-On aws the foundations' `bootstrap_node_count` sets it; it must be at least
-1. Without nodes Helm would wait `helm_timeout_seconds` for pods that never
-schedule, and the EKS add-ons would report `DEGRADED`.
+### The plan says the cluster has no schedulable node
 
-## Calls to AWS hang without an error
+**What you see:** `The cluster has no schedulable node (schedulable_nodes = 0), so CoreDNS and the Flux operator cannot start.`
 
-A pod using Pod Identity (Crossplane's AWS providers first) waits on
-`169.254.170.23` and logs nothing. The Pod Identity Agent is missing:
-`eks_addons.pod_identity_agent` is `false`, or the add-on did not install.
-Check `aws eks describe-addon --cluster-name <cluster> --addon-name
-eks-pod-identity-agent`. A pod admitted before its association existed never
-gets credentials either: delete it so it is recreated.
+**Why:** the foundations' `bootstrap_node_count` is 0 (on aws).
 
-## A Crossplane provider stays Healthy=False while its pods are Ready
+**Fix:** set `bootstrap_node_count` to at least 1.
 
-The AWS `Provider`s report `Healthy=False`, `Deployment does not have minimum
-availability`, while their pods are Running and Ready: the package manager's
-view of the Deployment is stale. The `crossplane-provider-config`
-`ResourceSet` waits on that condition, so every module with cloud access
-waits with it. Seen once in five e2e runs; it clears when Crossplane
-re-evaluates the revision. To read it:
+### Calls to AWS hang without an error
+
+**What you see:** a pod using Pod Identity (Crossplane's AWS providers first)
+waits on `169.254.170.23` and logs nothing.
+
+**Why:** the Pod Identity Agent is missing, or the pod was admitted before
+its association existed.
+
+**Fix:** set `eks_addons.pod_identity_agent = true` and check
+`aws eks describe-addon --cluster-name <cluster> --addon-name eks-pod-identity-agent`;
+delete a pod admitted too early so it is recreated.
+
+### A Crossplane provider stays Healthy=False while its pods are Ready
+
+**What you see:** `Healthy=False`, `Deployment does not have minimum
+availability`, on running pods; every module with cloud access waits.
+
+**Why:** the package manager's view of the Deployment is stale (once in five
+e2e runs).
+
+**Fix:** it clears when Crossplane re-evaluates the revision. To read it:
 
 ```sh
 kubectl get providers.pkg.crossplane.io
@@ -90,45 +93,48 @@ kubectl get providerrevisions.pkg.crossplane.io
 kubectl -n crossplane-system logs deploy/crossplane
 ```
 
-## Turning a module off takes five minutes
+### Turning a module off takes five minutes
 
-A values change drives a Helm upgrade with `--wait`, and helm-controller
-honours a deletion only once the running action returns. Turned off during
-that upgrade, the module waits for the upgrade's five-minute timeout, and
-helm-controller's log shows `running 'upgrade' action with timeout of 5m0s`
-then `uninstalled Helm release for deleted resource`. Wait for the release to
-be idle (`Ready` and `Released` true, no `Reconciling`) before turning a
-module off.
+**What you see:** helm-controller logs `running 'upgrade' action with timeout
+of 5m0s`, then `uninstalled Helm release for deleted resource`.
 
-## The OCIRepository refuses the signature
+**Why:** the module was turned off during the Helm upgrade a values change
+drives; the deletion waits for it.
 
-`SourceVerified` false: the artifact's signature does not match
-`cosign_identity`.
+**Fix:** before turning a module off, wait for its release to be idle:
+`Ready` and `Released` true, no `Reconciling`.
 
-- A branch build pinned without its identity: set `cosign_identity` to that
-  branch ([Upgrade the socle](upgrade.md#test-a-build-before-it-is-released)).
-- A hand-written identity: both fields are regexes, anchored, every dot
-  escaped. In HCL each backslash is doubled: `"^https://github\\.com/…$"`.
-- A mirror that re-signed the artifact: copy the original signature with the
-  artifact instead.
+### The OCIRepository refuses the signature
 
-The subject includes the workflow file's name, `publish-artifact.yaml`, and
-its ref.
+**What you see:** `SourceVerified` false.
 
-## MANIFEST_UNKNOWN on the OCIRepository
+**Why:** the signature does not match `cosign_identity`, whose subject is
+`publish-artifact.yaml` on its ref.
 
-The tag no longer exists in the registry. Branch tags are deleted when their
-branch is deleted and after seven days, alphas after thirty
-([Artifacts](../reference/artifacts.md#tags)). A cluster pinned to one stops
-pulling. Move `socle_version` to a release, or to a newer build. Two branch
-names with the same slug (`feat-x`, `feat/x`) share their tags: deleting one
-deletes the other's.
+**Fix:**
 
-## When one apply is not enough
+- a branch build: set `cosign_identity` to that branch
+  ([Upgrade the socle](upgrade.md#test-a-build-before-it-is-released));
+- a hand-written identity: anchored regexes, every dot escaped, each
+  backslash doubled in HCL: `"^https://github\\.com/…$"`;
+- a re-signed mirror: copy the original signature with the artifact.
 
-- **Replacing the cluster.** A ForceNew change of the foundations makes the
-  endpoint unknown at plan, and the helm provider cannot refresh its
-  releases. Apply with `-target=module.foundations` first, then a full apply.
-- **Destroying with the API unreachable.** The releases are deleted before
-  the cluster, which needs the API. If the runner cannot reach it, run
-  `tofu state rm module.socle` first ([Uninstall](uninstall.md#everything)).
+### MANIFEST_UNKNOWN on the OCIRepository
+
+**What you see:** `MANIFEST_UNKNOWN`; the cluster stops pulling.
+
+**Why:** the tag was deleted: branch tags with their branch and after seven
+days, alphas after thirty
+([Artifacts](../reference/artifacts.md#tags)). `feat-x` and `feat/x` share
+their tags.
+
+**Fix:** move `socle_version` to a release, or to a newer build.
+
+### When one apply is not enough
+
+- **Replacing the cluster.** A ForceNew foundations change leaves the helm
+  provider unable to refresh. Fix: `tofu apply -target=module.foundations`,
+  then a full apply.
+- **Destroying with the API unreachable.** The releases need the API to go.
+  Fix: `tofu state rm module.socle` first
+  ([Uninstall](uninstall.md#everything)).

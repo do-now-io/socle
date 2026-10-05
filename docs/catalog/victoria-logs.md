@@ -4,15 +4,14 @@ description: "Logs storage: VictoriaLogs single-node, 7 days on a volume, LogsQL
 category: observability
 ---
 
-VictoriaLogs single-node, where your containers' logs, Kubernetes events and
-your applications' OTLP logs are stored, read in [grafana](grafana.md) in
-LogsQL. On by default. How it fits the rest of the stack:
+VictoriaLogs single-node stores your containers' logs, Kubernetes events and
+your applications' OTLP logs, read in [grafana](grafana.md) in LogsQL.
+**On by default**, on every cloud. How it fits the rest of the stack:
 [Observability](../architecture/observability.md).
 
 ## Getting started
 
-On by default: what you set first is how long logs are kept and how big
-their volume is.
+It is already on. Set how long logs are kept and how big their volume is:
 
 ```hcl title="terraform.tfvars" kube-start="victoria_logs"
 kube = {
@@ -23,75 +22,20 @@ kube = {
 }
 ```
 
-After apply, `kubectl -n victoria-logs get pvc,pods` shows the claim `Bound`
-and the pod `Running`, and Grafana's Explore lists VictoriaLogs; on aws, a
-claim left `Pending` needs a default StorageClass ([Per cloud](#per-cloud)).
+Then `kubectl -n victoria-logs get pvc,pods` shows the claim `Bound` and the
+pod `Running`.
 
-## What it installs
+## Settings
 
-| | |
-| --- | --- |
-| Chart | `victoria-logs-single` `0.13.9` (VictoriaLogs v1.52.0) from `oci://ghcr.io/victoriametrics/helm-charts` |
-| Namespace | `victoria-logs` |
-| Objects | the namespace, the chart source, the socle's and your values ConfigMaps, one `HelmRelease`: a Deployment with strategy `Recreate`, a standalone `PersistentVolumeClaim`, a headless Service |
-
-**Address:** `victoria-logs.victoria-logs.svc:9428`, in-cluster only: no
-route, no authentication. OTLP comes in at `/insert/opentelemetry/v1/logs`.
-
-The socle's values: `server.mode: deployment`, as
-[victoria-metrics](victoria-metrics.md#what-it-installs) and for its reason;
-`retentionPeriod` from `retention` (the chart's own default is a month);
-persistence from `storage_size`, on the cluster's default StorageClass; the
-`prometheus.io/*` annotations on port 9428; requests 50m CPU and 128Mi
-memory; `fullnameOverride: victoria-logs`. The chart's Vector subchart stays
-off.
-
-**What turning it on adds to the other modules**, each under a test on
-`victoria_logs.enabled`, and removed in the same reconciliation when you turn
-it off:
-
-| Module | What it gains |
-| --- | --- |
-| [otel-agent](otel-agent.md) | every container's log from `/var/log/pods`, while `kube.otel_agent.logs` is `true`: a read-only `hostPath`, and the agent running as root with every capability dropped ([OTEL-AGENT-03](../decisions/otel-agent.md#otel-agent-03-root-to-read-container-logs-with-nothing-else)) |
-| [otel-gateway](otel-gateway.md) | Kubernetes events, and a logs pipeline for your OTLP logs on `:4317` and `:4318` |
-| [grafana](grafana.md) | a read-only `VictoriaLogs` datasource, uid `victoria-logs`, and its plugin `victoriametrics-logs-datasource` 0.32.0, downloaded from grafana.com when Grafana starts |
-
-**Reading logs.** In Grafana, Explore, then VictoriaLogs. The OpenTelemetry
-resource attributes are fields: `k8s.namespace.name:=argocd`,
-`k8s.pod.name:~"flux"`. A container's line has `_msg`, `_time`, `_stream`
-and the `k8s.*` fields of its pod and container. Kubernetes events are
-`k8s.resource.name:=events`; they are stored as their whole watch object, so
-their message is `object.note` and they have **no `_msg`**: a phrase search
-does not find them, and Grafana shows "missing _msg field".
-
-## What you can set
-
-Under `kube.victoria_logs` in your tfvars:
-
-| Attribute | Default | What it does |
+| Attribute | Default | |
 | --- | --- | --- |
-| `enabled` | `true` | Turns the module on. Off removes the release and the namespace, **the claim and its logs included**, and the logs path from both collectors and Grafana. |
-| `retention` | `"7d"` | How long logs are kept: a whole number of hours, days, weeks or years, at least a day. |
-| `storage_size` | `"20Gi"` | The claim's size, in `Gi` or `Ti`. `""` renders no claim: the logs live in an `emptyDir` and go when the pod moves. |
-| `values` | `{}` | Any `victoria-logs-single` chart value; yours win over the socle's. |
-| `values_secret` | `""` | A Secret you create in `victoria-logs` with a `values.yaml` key, merged last. |
-
-`kube.otel_agent.logs = false` keeps container logs out while events and
-OTLP logs still arrive.
-
-Changing `storage_size` follows the rules of
-[victoria-metrics](victoria-metrics.md#what-you-can-set): growing where the
-class allows it, never shrinking, `""` replaces the volume. Write numeric
-flags in `values` as strings.
-
-Refused at plan, as for victoria-metrics: an auth flag in
-`server.extraArgs`, a `server.env` entry with a literal value named like a
-credential, a `Secret` in `extraObjects`, a `retention` under a day, a
-`storage_size` not in `Gi` or `Ti`.
+| `enabled` | `true` | Turns the module on or off. Off deletes the claim and its logs. |
+| `retention` | `"7d"` | How long logs are kept, in hours, days, weeks or years; at least a day. |
+| `storage_size` | `"20Gi"` | The claim's size, in `Gi` or `Ti`. `""`: an `emptyDir`, lost when the pod moves. |
+| `values` | `{}` | Any [`victoria-logs-single` chart](https://artifacthub.io/packages/helm/victoriametrics/victoria-logs-single) value; yours win. |
+| `values_secret` | `""` | A Secret in `victoria-logs` with a `values.yaml` key, for what must stay out of the OpenTofu state. |
 
 ### Every setting
-
-Every attribute, at its default, and how chart values and secrets go in:
 
 ```hcl title="terraform.tfvars" kube-full="victoria_logs"
 kube = {
@@ -114,38 +58,41 @@ kube = {
 }
 ```
 
-## Per cloud
+## Good to know
 
-The template is the same everywhere.
+- **On aws, set a default StorageClass or `storage_size = ""`**: EKS has
+  none, and the claim stays `Pending`. See
+  [victoria-metrics](victoria-metrics.md#good-to-know).
+- **Turning it on feeds it**: [otel-agent](otel-agent.md) ships container
+  logs (unless `kube.otel_agent.logs = false`), [otel-gateway](otel-gateway.md)
+  events and your OTLP logs, and Grafana gets a VictoriaLogs datasource.
+- **Kubernetes events have no `_msg`**: their message is `object.note`, so a
+  phrase search misses them; find them with `k8s.resource.name:=events`.
+- **`storage_size` grows, never shrinks**, and only where the StorageClass
+  allows expansion; to or from `""` replaces the volume.
+- **`tofu plan` refuses** credentials in `values` (auth flags, literal
+  credential env values, a `Secret` in `extraObjects`), a `retention` under a
+  day and a `storage_size` not in `Gi` or `Ti`.
+- **Grafana downloads the logs plugin from grafana.com** when it starts: with
+  no egress there, it has no logs datasource.
 
-| Cloud | What to know |
-| --- | --- |
-| aws | No default StorageClass: the claim stays `Pending` until you set `storage_size = ""` or create a default class, as for [victoria-metrics](victoria-metrics.md#per-cloud). |
-| azure | Container logs need otel-agent's read-only `hostPath`, which the Baseline Pod Security Standard forbids. If you apply AKS Deployment Safeguards, set `kube.otel_agent.logs = false`: events and OTLP logs still arrive. |
-| gcp, scaleway | Nothing. |
+<details>
+<summary>Under the hood</summary>
 
-Grafana downloads the logs plugin from grafana.com when it starts: a cluster
-with no egress to grafana.com gets Grafana without its logs datasource.
+**Installed**: chart `victoria-logs-single` 0.13.9 (VictoriaLogs v1.52.0)
+from `oci://ghcr.io/victoriametrics/helm-charts`, in the `victoria-logs`
+namespace: a Deployment with strategy `Recreate` and a standalone claim.
+In-cluster only, no authentication, at `victoria-logs.victoria-logs.svc:9428`.
 
-## Cloud access
+**What the socle sets**: `server.mode: deployment`, `retentionPeriod` and
+persistence from the attributes, requests 50m CPU and 128Mi, and
+`fullnameOverride: victoria-logs`, which the collectors and Grafana rely on.
 
-None: the logs are on the claim.
+**Cloud access**: none; the logs are on the claim.
 
-## Ordering
+**Measured** on floci k3s, 2026-09-30: a container's line found 6 s after
+its pod was created; VictoriaLogs at 2m CPU and 32–47Mi.
 
-None. The collectors export here only while the module is on, and retry
-while it starts.
+**Decisions**: [victoria-logs decisions](../decisions/victoria-logs.md).
 
-## Upgrade notes
-
-- With strategy `Recreate`, an upgrade stops the pod before the new one
-  starts: logs sent in between are retried by the collectors, within their
-  queue.
-
-## Measured
-
-| Date | Where | What |
-| --- | --- | --- |
-| 2026-09-30 | floci, k3s, one node | VictoriaLogs at 2m CPU and 32–47Mi; a container's line found 6 s after its pod was created; Kubernetes events and an OTLP log posted from podinfo stored; Grafana's datasource health OK, plugin signature valid |
-
-Its decisions: [victoria-logs decisions](../decisions/victoria-logs.md).
+</details>

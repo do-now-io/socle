@@ -5,36 +5,35 @@ sidebar:
   order: 1
 ---
 
-What must exist before `tofu apply` runs the [foundations](foundations.md).
-The module creates none of it.
+Tick these before `tofu apply` runs the [foundations](foundations.md). The
+module creates none of it.
 
 ## Account
 
-- An Azure subscription. It may hold several clusters (dev, staging, prod, or
-  several clients' environments): the module assumes no exclusive ownership.
-- These resource providers registered. A subscription that never used one
-  fails the apply with `MissingSubscriptionRegistration`:
+- [ ] An Azure subscription; it may hold several clusters.
+- [ ] The resource providers registered, or the apply fails with
+  `MissingSubscriptionRegistration`:
 
-  ```sh
-  az provider register --namespace Microsoft.ContainerService
-  az provider register --namespace Microsoft.Network
-  az provider register --namespace Microsoft.Compute
-  az provider register --namespace Microsoft.ManagedIdentity
-  # Only while the module still creates Container Insights and Managed Prometheus:
-  az provider register --namespace Microsoft.OperationalInsights
-  az provider register --namespace Microsoft.Monitor
-  ```
-
-  `Microsoft.OperationalInsights` and `Microsoft.Monitor` serve the Log
-  Analytics workspace, the Azure Monitor workspace and the data collection
-  rule of [AZURE-05](../../decisions/azure.md#azure-05-managed-prometheus-and-container-insights),
-  which is superseded but still in the code.
+```sh
+az provider register --namespace Microsoft.ContainerService
+az provider register --namespace Microsoft.Network
+az provider register --namespace Microsoft.Compute
+az provider register --namespace Microsoft.ManagedIdentity
+# Only while the module still creates Container Insights and Managed Prometheus (AZURE-05):
+az provider register --namespace Microsoft.OperationalInsights
+az provider register --namespace Microsoft.Monitor
+```
 
 ## Permissions for the apply
 
-The module takes no credential as input. `azurerm` reads the ambient chain:
-`az login` on a workstation, Workload Identity Federation (OIDC) in CI, with
-no client secret either way:
+- [ ] **Contributor** for the principal that applies, on the target resource
+  group, or on the subscription with `create_resource_group = true`.
+- [ ] **User Access Administrator**, or any role with
+  `Microsoft.Authorization/roleAssignments/write`, on the same scope: AKS
+  grants the cluster's identity Network Contributor on the node subnet, which
+  Contributor cannot.
+- [ ] Credentials from the ambient chain, no client secret: `az login`
+  locally, OIDC in CI:
 
 ```sh
 export ARM_USE_OIDC=true
@@ -43,18 +42,7 @@ export ARM_TENANT_ID=<tenant-id>
 export ARM_SUBSCRIPTION_ID=<subscription-id>
 ```
 
-The principal needs two roles, on the target resource group, or on the
-subscription when the module creates the group (`create_resource_group = true`):
-
-| Role | Why |
-| --- | --- |
-| Contributor | The resource group, VNet, subnet, NAT gateway, public IP, AKS cluster, Log Analytics workspace, Azure Monitor workspace and data collection rule |
-| User Access Administrator, or any role with `Microsoft.Authorization/roleAssignments/write` | The cluster's system-assigned identity needs Network Contributor on the node subnet, whether the module creates it or attaches to yours. Contributor cannot write a role assignment |
-
-The module declares no role assignment itself. The requirement is AKS's,
-for a cluster on a VNet that AKS does not create.
-
-To scope both roles to an existing resource group:
+Both roles, scoped to an existing resource group:
 
 ```sh
 SUBSCRIPTION_ID=<subscription-id>
@@ -66,8 +54,7 @@ az role assignment create --assignee "$APP_ID" --role "User Access Administrator
   --scope "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$TARGET_RG"
 ```
 
-For CI, an app registration with a federated credential trusting one
-repository and branch, and no secret:
+For CI, an app registration trusting one repository and branch:
 
 ```sh
 APP_ID=$(az ad app create --display-name socle-tofu --query appId -o tsv)
@@ -84,38 +71,23 @@ az ad app federated-credential create --id "$APP_ID" --parameters '{
 
 The cluster is private, with no public FQDN
 ([AZURE-12](../../decisions/azure.md#azure-12-a-private-cluster-with-no-public-fqdn)).
-The foundations apply only calls Azure's API and runs from anywhere. The
-bootstrap apply talks to the Kubernetes API through Helm, so its runner needs:
+The foundations apply runs from anywhere; the bootstrap's runner needs:
 
-- a route to the API server's private endpoint: a runner in the VNet, or a
-  network connected to it by peering, VPN or ExpressRoute;
-- resolution of the cluster's private DNS zone (`privatelink.<region>.azmk8s.io`),
-  which is linked to the cluster's VNet only;
-- a kubeconfig. The module's `helm_kubernetes` output does not log in yet (see
-  [limits](limits.md#what-no-apply-can-finish)); the
-  [quickstart](../../getting-started/azure.md#apply) uses
-  `az aks get-credentials --admin`.
+- [ ] a route to the API server's private endpoint: in the VNet, or peered,
+  VPN or ExpressRoute;
+- [ ] resolution of the private DNS zone (`privatelink.<region>.azmk8s.io`),
+  linked to the cluster's VNet only;
+- [ ] a kubeconfig from `az aks get-credentials --admin`: the module's
+  `helm_kubernetes` output does not log in yet
+  ([limits](limits.md#what-no-apply-can-finish),
+  [quickstart](../../getting-started/azure.md#apply)).
 
 ## State
 
-A storage account and a blob container in your subscription. The `azurerm`
-backend locks through blob leases: no lock resource. The module ships no
-backend block; declare it in your root:
-
-```hcl
-terraform {
-  backend "azurerm" {
-    resource_group_name  = "socle-tfstate-rg"
-    storage_account_name = "socletfstate<suffix>"
-    container_name       = "tfstate"
-    key                  = "socle/azure/<cluster-name>.tfstate"
-  }
-}
-```
-
-State holds every attribute of every resource, the cluster's CA included.
-Turn versioning and soft delete on before the first write, and keep one key
-per cluster:
+- [ ] A storage account and blob container, versioning and soft delete on,
+  one key per cluster. Blob leases lock.
+- [ ] A data-plane role on the account, such as Storage Blob Data
+  Contributor, for the principal that writes state (`--auth-mode login`).
 
 ```sh
 LOCATION=francecentral
@@ -129,26 +101,34 @@ az storage account blob-service-properties update --account-name "$STATE_ACCOUNT
   --enable-versioning true --enable-delete-retention true --delete-retention-days 30
 ```
 
-`--auth-mode login` needs a data-plane role on the account, such as Storage
-Blob Data Contributor, for the principal that writes state.
+```hcl
+terraform {
+  backend "azurerm" {
+    resource_group_name  = "socle-tfstate-rg"
+    storage_account_name = "socletfstate<suffix>"
+    container_name       = "tfstate"
+    key                  = "socle/azure/<cluster-name>.tfstate"
+  }
+}
+```
+
+State holds every attribute of every resource, the cluster's CA included.
 
 ## Tooling
 
-- OpenTofu 1.10 or later, the floor in [`versions.tf`](../../../opentofu/azure/versions.tf).
-- Azure CLI, logged in (`az login`), for the commands on this page and for
-  `az aks get-credentials`.
-- `kubectl`, to check convergence.
-- `cosign`, to verify the module package before `tofu init`: OpenTofu does
-  not verify OCI signatures ([distribution](../../architecture/distribution.md)).
+- [ ] OpenTofu 1.10 or later ([`versions.tf`](../../../opentofu/azure/versions.tf)).
+- [ ] The Azure CLI, logged in (`az login`).
+- [ ] `kubectl`.
+- [ ] `cosign`, to verify the modules package: OpenTofu does not verify OCI
+  signatures ([distribution](../../architecture/distribution.md)).
 
 ## Quotas
 
-- Regional vCPU quota per VM family: the `system` pool
-  (`system_node_pool_vm_size`, 2 × Standard_D2s_v5 by default) and every
-  family NAP provisions. Check with
+- [ ] Regional vCPUs per VM family, for the `system` pool (2 ×
+  Standard_D2s_v5) and every family NAP picks:
   `az vm list-usage --location <region> -o table`.
-- Zones: the `system` pool spreads over `zones` (`["1", "2", "3"]`). A
-  subscription, region and VM size without all three fails with
-  `AvailabilityZoneNotSupported`; pass the zones it has, or `[]`.
-- Network: one Standard public IP and one NAT gateway per cluster, plus the
-  public IPs of the load balancers the shared Gateways create.
+- [ ] Zones 1, 2 and 3 for the `system` VM size, or the apply fails with
+  `AvailabilityZoneNotSupported`; set `zones` to what the region has, or
+  `[]`.
+- [ ] One Standard public IP and one NAT gateway per cluster, plus the shared
+  Gateways' load balancer IPs.

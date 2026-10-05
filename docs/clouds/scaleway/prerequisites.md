@@ -5,9 +5,10 @@ sidebar:
   order: 1
 ---
 
-What must exist before `tofu apply` can run [`opentofu/scaleway`](../../../opentofu/scaleway/README.md). The module creates none of it. Scaleway has no API-enablement step: every product is reachable once the Organization exists and its identity is validated. What blocks a first apply here is quota.
-
-The commands assume the `scw` CLI is initialised (`scw init`) and these variables are set:
+Tick these before `tofu apply` runs
+[`opentofu/scaleway`](../../../opentofu/scaleway/README.md). The module
+creates none of it. Scaleway has no API-enablement step; what blocks a first
+apply is [quota](#quotas). The commands assume `scw init` and:
 
 ```sh
 ORG_ID=33333333-3333-3333-3333-333333333333
@@ -19,10 +20,14 @@ RUNNER_CIDR=203.0.113.10/32   # the CI runner's egress address
 
 ## Account
 
-- A Scaleway Organization with a validated payment method.
-- **A validated identity.** Without it most production instance types have no quota at all, and the apply fails while building a pool.
-- **One Project per environment.** `project_id` is required because the Project is the only boundary Scaleway offers for both IAM and cost ([SCALEWAY-08](../../decisions/scaleway.md#scaleway-08-one-project-per-environment-one-scoped-crossplane-key)). Never reuse a Project that has held a cluster until its state is archived.
-- A billing alert on the Organization. Nodes are billed whether or not anything schedules on them, and the cluster-autoscaler never consolidates, so an oversized `pool_min_size` is otherwise silent.
+- [ ] An Organization with a validated payment method.
+- [ ] **A validated identity**: without it most production instance types
+  have no quota, and the apply fails while building a pool.
+- [ ] **One Project per environment**, never one that held a cluster whose
+  state is not archived
+  ([SCALEWAY-08](../../decisions/scaleway.md#scaleway-08-one-project-per-environment-one-scoped-crossplane-key)).
+- [ ] A billing alert on the Organization: the autoscaler never
+  consolidates, so an oversized `pool_min_size` is silent.
 
 ```sh
 scw account project create name="$PROJECT_NAME" organization-id="$ORG_ID"
@@ -31,21 +36,19 @@ PROJECT_ID=$(scw account project list name="$PROJECT_NAME" -o json | jq -r '.[0]
 
 ## Permissions for the apply
 
-Give the apply its own IAM application and key, never a person's. Its policy carries:
+- [ ] An IAM application of its own, never a person's, with this policy:
 
 | Permission set | Scope | For |
 | --- | --- | --- |
-| `KubernetesFullAccess` | Project | the cluster, its pools and its ACL; also what lets the bootstrap act on the cluster |
+| `KubernetesFullAccess` | Project | the cluster, pools, ACL; also the bootstrap's access |
 | `VPCFullAccess` | Project | the VPC |
-| `PrivateNetworksFullAccess` | Project | the cluster's Private Network |
-| `VPCGatewayFullAccess` | Project | the Public Gateways and their flexible IPs |
-| `IPAMFullAccess` | Project | the gateways' private address reservations |
-| `InstancesFullAccess` | Project | the placement groups and the security groups |
-| `ObservabilityFullAccess` | Project | the query-only Cockpit token |
-| `IAMManager` | Organization | the Crossplane application, its policy and its key |
-| `ObjectStorageFullAccess` | Project | creating the state bucket, once; not needed by the apply afterwards |
-
-`IAMManager` is Organization-scoped by nature: it is the broadest grant here and the one that cannot be confined to the Project. Give it to this application only, and bind the application's key to the runner's egress with a policy condition. Never `AllProductsFullAccess`: the module refuses it for the Crossplane identity, and the same reasoning holds for the runner.
+| `PrivateNetworksFullAccess` | Project | the Private Network |
+| `VPCGatewayFullAccess` | Project | the Public Gateways and their IPs |
+| `IPAMFullAccess` | Project | the gateways' private addresses |
+| `InstancesFullAccess` | Project | placement and security groups |
+| `ObservabilityFullAccess` | Project | the Cockpit token |
+| `IAMManager` | Organization | the Crossplane application, policy and key |
+| `ObjectStorageFullAccess` | Project | creating the state bucket, once |
 
 ```sh
 APP_ID=$(scw iam application create name=socle-tofu -o json | jq -r '.id')
@@ -67,7 +70,7 @@ scw iam policy create \
   rules.1.permission-set-names.0=IAMManager
 ```
 
-Its key, with an expiry so rotation is forced. The date command differs between GNU and BSD:
+- [ ] Its API key, with an expiry (the `date` line covers GNU and BSD):
 
 ```sh
 EXPIRES=$(date -u -d '+1 year' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v+1y +%Y-%m-%dT%H:%M:%SZ)
@@ -79,7 +82,8 @@ scw iam api-key create \
   default-project-id="$PROJECT_ID"
 ```
 
-Export it for the provider. There is no federated alternative: Scaleway has no OIDC trust for CI, so the runner holds a long-lived key. The bootstrap's Helm provider reads the same `SCW_SECRET_KEY` as its bearer token.
+- [ ] The key exported for the provider; the bootstrap's Helm provider reads
+  the same `SCW_SECRET_KEY`:
 
 ```sh
 export SCW_ACCESS_KEY=SCWXXXXXXXXXXXXXXXXX
@@ -88,24 +92,33 @@ export SCW_DEFAULT_ORGANIZATION_ID="$ORG_ID"
 export SCW_DEFAULT_PROJECT_ID="$PROJECT_ID"
 ```
 
-One key per pipeline, so revoking one stops nothing else. Never commit one.
+<details>
+<summary>Under the hood</summary>
+
+- `IAMManager` cannot be confined to a Project: it is the broadest grant
+  here. Give it to this application only, with the key bound to the runner's
+  egress.
+- Never `AllProductsFullAccess`: the module refuses it for Crossplane, and
+  the same holds for the runner.
+- Scaleway has no OIDC trust for CI: the runner holds a long-lived key. One
+  per pipeline; never commit one.
+
+</details>
 
 ## State
 
-An Object Storage bucket, created before the first `tofu init`, in the cluster's region, never shared with application data. State holds every attribute of every resource, and on this cloud that includes the Crossplane secret key: losing the bucket leaves a cluster nobody can manage.
-
-- Versioning on before the first write.
-- Server-side encryption with Key Manager (SSE-KMS).
-- A bucket policy restricting access to the runner's egress addresses.
-- A lifecycle rule that never touches a live object: expire only non-current versions, and only old ones.
-- No Object Lock on this bucket: WORM would make a legitimate state rewrite impossible.
+- [ ] An Object Storage bucket in the cluster's region: versioned, private,
+  never shared with application data, no Object Lock.
+- [ ] SSE-KMS encryption and a bucket policy restricting access to the
+  runner's egress.
+- [ ] A lifecycle rule on non-current versions only.
 
 ```sh
 scw object bucket create "$STATE_BUCKET" region="$REGION"
 scw object bucket update "$STATE_BUCKET" enable-versioning=true acl=private region="$REGION"
 ```
 
-`scw` does not expose lifecycle rules or bucket policies; the `aws` CLI does, pointed at Scaleway:
+`scw` has no lifecycle rules; the `aws` CLI, pointed at Scaleway, does:
 
 ```sh
 aws configure set aws_access_key_id "$SCW_ACCESS_KEY" --profile scw
@@ -128,7 +141,8 @@ aws --profile scw --endpoint-url "https://s3.$REGION.scw.cloud" s3api put-bucket
   --bucket "$STATE_BUCKET" --lifecycle-configuration file://lifecycle.json
 ```
 
-The module ships no backend block. Declare it in your root, one key per environment:
+One key per environment; `use_lockfile` locks through S3 conditional writes,
+which Scaleway implements:
 
 ```hcl
 terraform {
@@ -145,31 +159,36 @@ terraform {
 }
 ```
 
-Nothing else is needed for locking: Scaleway Object Storage implements S3 conditional writes (`If-Match`, `If-None-Match`), which is what `use_lockfile` uses.
+State holds the Crossplane secret key: losing the bucket leaves a cluster
+nobody can manage.
 
 ## Tooling
 
-- OpenTofu 1.10 or later (`required_version = ">= 1.10"`, needed for OCI module sources).
-- The `scaleway/scaleway` provider, `>= 2.82, < 3.0`, which `tofu init` fetches.
-- The `scw` CLI, initialised.
-- The `aws` CLI, for the bucket settings `scw` does not expose.
-- `jq`, for the commands above.
-- `sh` on the machine that runs the bootstrap: the `helm_kubernetes` output's exec credential is a `sh -c printf`.
+- [ ] OpenTofu 1.10 or later (OCI module sources).
+- [ ] The `scaleway/scaleway` provider `>= 2.82, < 3.0`, fetched by `tofu init`.
+- [ ] The `scw` CLI, initialised.
+- [ ] The `aws` CLI, for the bucket lifecycle.
+- [ ] `jq`.
+- [ ] `sh` where the bootstrap runs: the `helm_kubernetes` exec credential is
+  a `sh -c printf`.
 
 ## Quotas
 
-Scaleway quotas are per instance type and sit below what the module's defaults need. As read on 2026-09-14, for an Organization with a validated identity:
+Read on 2026-09-14, for an Organization with a validated identity:
 
-| Quota | Default | The module's defaults need |
+| Quota | Default | The defaults need |
 | --- | --- | --- |
-| `COMPUTE3-X8C-16G` | not published | 4 per cluster at `pool_min_size`, up to 10 at `pool_max_size` |
+| `COMPUTE3-X8C-16G` | not published | 4 per cluster, up to 10 |
 | `POP2-HC-8C-16G` | 2 | 0, unless `node_type` is POP2 |
 | Kapsule clusters | 40 | 1 per environment |
-| Kapsule with a dedicated control plane 4 or 8 | 4 | 1 per production cluster |
+| Dedicated control plane 4 or 8 | 4 | 1 per production cluster |
 | Public Gateways per Organization | 50 | 2 per cluster |
 | Private Networks per Public Gateway | 10 | 1 |
 | Load Balancers | 50 | 1 per Service of type `LoadBalancer` |
 
-- The quota table gives no figure for the Zen 5 generation (`COMPUTE3`, `STANDARD3`, `BASIC3`). Read the real number in the console before the first apply.
-- A raise is a support ticket: no API, no OpenTofu resource. Open it days ahead, at <https://console.scaleway.com/support/tickets/create>, for `pool_max_size` times the number of zones of `node_type`, times the clusters, plus one dedicated control plane per production cluster.
-- Scaleway exposes no quota metric, so there is nothing to watch: the control is this checklist, and the symptom is a failed apply.
+- [ ] The real `COMPUTE3` figure read in the console: the quota table gives
+  none for Zen 5.
+- [ ] A raise ticket opened days ahead, at
+  <https://console.scaleway.com/support/tickets/create>: `pool_max_size` ×
+  zones × clusters, plus one dedicated control plane per production cluster.
+  No API, and no quota metric to watch.

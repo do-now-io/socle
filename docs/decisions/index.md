@@ -6,22 +6,17 @@ sidebar:
   order: 0
 ---
 
-Every choice the socle makes on purpose is written down once, with what
-forced it, what it costs, and whether the code follows it. The other pages
-explain how things work and link here for the why.
+Every deliberate choice of the socle is written down once: what forced it,
+what it costs, whether the code follows it. Other pages link here for the why.
 
 ## What a decision file is
 
 One file per group: the socle itself, each cloud, each catalog module. Each
 decision is a `##` section numbered within its file, `<GROUP>-NN`
 (`SOCLE-04`, `AWS-01`, `ARGOCD-02`), never renumbered and never reused. A
-section gives:
-
-- its **status**, its **date**, and the code that implements it;
-- the **context**: the constraint, the options weighed, the facts;
-- the **decision**, in one or two sentences;
-- the **consequences**, good and bad, including what it costs;
-- the **sources**.
+section gives its **status**, **date** and implementing code, then the
+**decision**, its **context**, its **consequences** (cost included) and its
+**sources**.
 
 ## The files
 

@@ -5,10 +5,8 @@ sidebar:
   order: 3
 ---
 
-What one socle version runs and requires. Every pin moves with a socle
-release: an upgrade of `socle_version` is what changes them on a cluster
-([Upgrade the socle](../guides/upgrade.md)). One table per release; no
-version has been released yet.
+What one socle version pins and requires; they move with `socle_version`
+([Upgrade the socle](../guides/upgrade.md)). No version is released yet.
 
 ## main (unreleased)
 
@@ -24,8 +22,7 @@ version has been released yet.
 | `scaleway/scaleway` | `>= 2.82, < 3.0` | `opentofu/scaleway` |
 | `aws` CLI | on the runner that applies an AWS root | the helm provider's exec (`aws eks get-token`) |
 
-The roots commit their `.terraform.lock.hcl`; the exact provider builds are
-there.
+Exact provider builds: each root's `.terraform.lock.hcl`.
 
 ### Clouds and Kubernetes
 
@@ -36,9 +33,7 @@ there.
 | Azure · AKS | none yet | `kubernetes_version`, required, `1.x`; the `stable` auto-upgrade channel within the maintenance window |
 | Scaleway · Kapsule | none yet | `kubernetes_version`, required, a minor or a patch; auto-upgrade moves patches only |
 
-The version policy is
-[SOCLE-05](../decisions/socle.md#socle-05-the-kubernetes-version-moves-by-rings-n-1-then-n),
-proposed.
+Policy (proposed): [SOCLE-05](../decisions/socle.md#socle-05-the-kubernetes-version-moves-by-rings-n-1-then-n).
 
 ### Flux and what precedes it
 
@@ -56,7 +51,7 @@ proposed.
 
 ### Catalog charts
 
-From each module's `oci/catalog/<module>/resourceset.yaml`.
+From each `oci/catalog/<module>/resourceset.yaml`. Offered is not proven: CI applies on AWS only.
 
 | Module | Chart | Version | App version | Clouds |
 | --- | --- | --- | --- | --- |
@@ -78,10 +73,6 @@ From each module's `oci/catalog/<module>/resourceset.yaml`.
 | `reloader` | `reloader`, `oci://ghcr.io/stakater/charts` | `2.2.18` | v1.4.22 | all |
 | `velero` | `velero`, `https://vmware-tanzu.github.io/helm-charts` | `12.2.0` | 1.18.2; `velero-plugin-for-aws` v1.14.4 | aws |
 
-"Clouds" is what each `oci/clusters/<cloud>/kustomization.yaml` deploys,
-which `catalog_clouds` in `catalog.tf` mirrors. A module offered on a cloud
-is not proven there: CI applies on AWS only.
-
 ### Where it was tested
 
 | | |
@@ -91,7 +82,5 @@ is not proven there: CI applies on AWS only.
 | What floci does not run | Cilium (every e2e root sets `cilium.enabled = false`), the EKS add-ons, Pod Identity, IAM enforcement, more than one node |
 | Integration plans | floci `1.5.34` (AWS), floci-gcp `0.8.0`, floci-az `0.10.0` (red, not blocking); Scaleway plans its minimal example offline |
 
-`renovate.json` declares no custom manager for the chart versions inside the
-`ResourceSet` templates, the locals of `cilium.tf` and `eks_addons.tf`, or
-`operator_version`: Renovate's built-in managers do not read those places,
-so they move by hand, in a reviewed change.
+Chart versions in the templates, `cilium.tf`, `eks_addons.tf` and
+`operator_version` move by hand: Renovate does not read them.

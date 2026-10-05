@@ -4,18 +4,15 @@ description: "Traces storage, off by default until VictoriaTraces is GA: single-
 category: observability
 ---
 
-VictoriaTraces single-node, where your applications' traces are stored,
-read in [grafana](grafana.md) through the Jaeger API. **Off by default:**
-VictoriaTraces is not yet GA and its storage format is not committed, so an
-upgrade may drop the traces it has stored. Turning it on accepts that
+VictoriaTraces single-node stores your applications' traces, read in
+[grafana](grafana.md) through the Jaeger API. **Off by default**, on every
+cloud: VictoriaTraces is not yet GA, and an upgrade may drop the traces it
+holds
 ([VICTORIA-TRACES-01](../decisions/victoria-traces.md#victoria-traces-01-off-by-default-until-victoriatraces-is-ga)).
-How it fits the rest of the stack:
-[Observability](../architecture/observability.md).
 
 ## Getting started
 
-Turn it on, knowing an upgrade may drop the traces stored so far; retention
-and the volume are what you set next.
+Turn it on, knowing an upgrade may drop the traces stored so far:
 
 ```hcl title="terraform.tfvars" kube-start="victoria_traces"
 kube = {
@@ -27,71 +24,20 @@ kube = {
 }
 ```
 
-After apply, `kubectl -n victoria-traces get pvc,pods` shows the claim
-`Bound` and the pod `Running`, and Grafana's datasources list
-VictoriaTraces; on aws, a claim left `Pending` needs a default StorageClass
-([Per cloud](#per-cloud)).
+Then `kubectl -n victoria-traces get pvc,pods` shows the claim `Bound` and
+the pod `Running`.
 
-## What it installs
+## Settings
 
-| | |
-| --- | --- |
-| Chart | `victoria-traces-single` `0.1.11` (VictoriaTraces v0.11.0) from `oci://ghcr.io/victoriametrics/helm-charts` |
-| Namespace | `victoria-traces` |
-| Objects | the namespace, the chart source, the socle's and your values ConfigMaps, one `HelmRelease`: a Deployment with strategy `Recreate`, a standalone `PersistentVolumeClaim`, a headless Service |
-
-**Address:** `victoria-traces.victoria-traces.svc:10428`, in-cluster only.
-OTLP over HTTP comes in at `/insert/opentelemetry/v1/traces`, protobuf only,
-which is what otel-gateway sends. Your applications send their traces to
-[otel-gateway](otel-gateway.md) (`otel-gateway.otel-gateway.svc:4317` or
-`:4318`), never here.
-
-The socle's values: `server.mode: deployment`, as
-[victoria-metrics](victoria-metrics.md#what-it-installs) and for its reason;
-`retentionPeriod` from `retention` (the chart's own default is a month);
-persistence from `storage_size`, on the cluster's default StorageClass; the
-`prometheus.io/*` annotations on port 10428; requests 50m CPU and 128Mi
-memory; `fullnameOverride: victoria-traces`.
-
-**What turning it on adds to the other modules**, removed in the same
-reconciliation when you turn it off:
-
-| Module | What it gains |
-| --- | --- |
-| [otel-gateway](otel-gateway.md) | a traces pipeline: your OTLP traces, enriched with the sender's workload by `k8s_attributes` |
-| [grafana](grafana.md) | a read-only `VictoriaTraces` datasource, uid `victoria-traces`, of the built-in Jaeger type, at `…:10428/select/jaeger` |
-
-Every span your applications send is kept: there is no sampling. A
-probability or tail sampling processor goes in `kube.otel_gateway.values`.
-
-## What you can set
-
-Under `kube.victoria_traces` in your tfvars:
-
-| Attribute | Default | What it does |
+| Attribute | Default | |
 | --- | --- | --- |
-| `enabled` | `false` | Turns the module on, and the gateway's traces pipeline and Grafana's datasource with it. Off removes all three, **the stored traces included**. |
-| `retention` | `"7d"` | How long traces are kept: a whole number of hours, days, weeks or years, at least a day. |
-| `storage_size` | `"10Gi"` | The claim's size, in `Gi` or `Ti`. `""` renders no claim: the traces live in an `emptyDir` and go when the pod moves. |
-| `values` | `{}` | Any `victoria-traces-single` chart value; yours win over the socle's. |
-| `values_secret` | `""` | A Secret you create in `victoria-traces` with a `values.yaml` key, merged last. |
-
-```hcl
-kube = {
-  victoria_traces = { enabled = true }
-}
-```
-
-Changing `storage_size` follows the rules of
-[victoria-metrics](victoria-metrics.md#what-you-can-set). Refused at plan, as
-for victoria-metrics: an auth flag in `server.extraArgs`, a `server.env`
-entry with a literal value named like a credential, a `Secret` in
-`extraObjects`, a `retention` under a day, a `storage_size` not in `Gi` or
-`Ti`.
+| `enabled` | `false` | Turns the module, the gateway's traces pipeline and Grafana's datasource on or off. Off deletes the stored traces. |
+| `retention` | `"7d"` | How long traces are kept, in hours, days, weeks or years; at least a day. |
+| `storage_size` | `"10Gi"` | The claim's size, in `Gi` or `Ti`. `""`: an `emptyDir`, lost when the pod moves. |
+| `values` | `{}` | Any [`victoria-traces-single` chart](https://github.com/VictoriaMetrics/helm-charts/tree/master/charts/victoria-traces-single) value; yours win. |
+| `values_secret` | `""` | A Secret in `victoria-traces` with a `values.yaml` key, for what must stay out of the OpenTofu state. |
 
 ### Every setting
-
-Every attribute, at its default, and how chart values and secrets go in:
 
 ```hcl title="terraform.tfvars" kube-full="victoria_traces"
 kube = {
@@ -114,33 +60,40 @@ kube = {
 }
 ```
 
-## Per cloud
+## Good to know
 
-The template is the same everywhere. On aws there is no default
-StorageClass: the claim stays `Pending` until you set `storage_size = ""` or
-create a default class, as for
-[victoria-metrics](victoria-metrics.md#per-cloud).
+- **Send traces to [otel-gateway](otel-gateway.md)**,
+  `otel-gateway.otel-gateway.svc:4317` or `:4318`, never here.
+- **Every span is kept**: there is no sampling. A sampling processor goes in
+  `kube.otel_gateway.values`.
+- **On aws, set a default StorageClass or `storage_size = ""`**: EKS has
+  none, and the claim stays `Pending`. See
+  [victoria-metrics](victoria-metrics.md#good-to-know).
+- **`tofu plan` refuses** what it refuses for victoria-metrics: credentials
+  in `values`, a `retention` under a day, a `storage_size` not in `Gi` or
+  `Ti`. `storage_size` grows where the class allows it, never shrinks.
+- **Upgrades**: until VictoriaTraces is GA, a chart upgrade may change the
+  storage format and drop the stored traces.
 
-## Cloud access
+<details>
+<summary>Under the hood</summary>
 
-None: the traces are on the claim.
+**Installed**: chart `victoria-traces-single` 0.1.11 (VictoriaTraces
+v0.11.0) from `oci://ghcr.io/victoriametrics/helm-charts`, in the
+`victoria-traces` namespace: a Deployment with strategy `Recreate` and a
+standalone claim, in-cluster only at
+`victoria-traces.victoria-traces.svc:10428`.
 
-## Ordering
+**What the socle sets**: `server.mode: deployment`, `retentionPeriod` and
+persistence from the attributes, requests 50m CPU and 128Mi, and
+`fullnameOverride: victoria-traces`. Turned on, it adds a traces pipeline to
+otel-gateway and a Jaeger datasource to Grafana.
 
-None. The gateway exports here only while the module is on, and retries while
-it starts.
+**Cloud access**: none; the traces are on the claim.
 
-## Upgrade notes
+**Measured** on floci k3s, 2026-09-30: Ready in 26 s; a span posted to the
+gateway found by its trace id 24 s later.
 
-- Until VictoriaTraces is GA, an upgrade of its chart may change the storage
-  format and drop the traces stored so far.
-- With strategy `Recreate`, an upgrade stops the pod before the new one
-  starts.
+**Decisions**: [victoria-traces decisions](../decisions/victoria-traces.md).
 
-## Measured
-
-| Date | Where | What |
-| --- | --- | --- |
-| 2026-09-30 | floci, k3s, one node | turned on, Ready on a `Bound` claim in 26 s; one span posted from podinfo to the gateway found by its trace id through `/select/jaeger/api/traces/<id>` 24 s later; VictoriaTraces at 2m CPU and 10Mi |
-
-Its decisions: [victoria-traces decisions](../decisions/victoria-traces.md).
+</details>

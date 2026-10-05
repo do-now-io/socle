@@ -5,15 +5,15 @@ sidebar:
   order: 4
 ---
 
-Two modules in one root of your own: [`opentofu/scaleway`](../../opentofu/scaleway/README.md) builds the cluster, then the [bootstrap](../../opentofu/bootstrap/README.md) installs Flux and the catalog on it. The repository has no `opentofu/clusters/scaleway` root as it has for AWS, and no Scaleway apply has run in the socle's CI, so this page applies the two in two steps.
+Two modules in one root of your own, applied in two steps: [`opentofu/scaleway`](../../opentofu/scaleway/README.md) builds the cluster, then the [bootstrap](../../opentofu/bootstrap/README.md) installs Flux and the catalog. No Scaleway apply has run in the socle's CI.
 
 ## Before you start
 
-The full list, with commands, is in [prerequisites](../clouds/scaleway/prerequisites.md). In short:
+From [prerequisites](../clouds/scaleway/prerequisites.md):
 
-- **Identity validated and the quota ticket answered.** The defaults need 4 `COMPUTE3-X8C-16G` nodes per cluster, up to 10, and a dedicated control plane for `prod`. Without the quota the apply fails while building a pool.
-- **A Project for this environment**, and its ID.
-- **An IAM application for the apply**, with its key exported. Its policy carries, on the Project, `KubernetesFullAccess`, `VPCFullAccess`, `PrivateNetworksFullAccess`, `VPCGatewayFullAccess`, `IPAMFullAccess`, `InstancesFullAccess` and `ObservabilityFullAccess`; and on the Organization, `IAMManager`, which cannot be narrowed to a Project.
+- **identity validated and the quota ticket answered**: 4 `COMPUTE3-X8C-16G` nodes per cluster, up to 10, and a dedicated control plane for `prod`;
+- a Project for this environment, and its ID;
+- an IAM application for the apply, with `KubernetesFullAccess`, `VPCFullAccess`, `PrivateNetworksFullAccess`, `VPCGatewayFullAccess`, `IPAMFullAccess`, `InstancesFullAccess` and `ObservabilityFullAccess` on the Project, `IAMManager` on the Organization, and its key exported:
 
   ```sh
   export SCW_ACCESS_KEY=SCWXXXXXXXXXXXXXXXXX
@@ -22,7 +22,7 @@ The full list, with commands, is in [prerequisites](../clouds/scaleway/prerequis
   export SCW_DEFAULT_PROJECT_ID=...
   ```
 
-- **A state bucket** in Object Storage, versioned, and an `s3` backend with `use_lockfile = true` ([prerequisites](../clouds/scaleway/prerequisites.md#state)).
+- a versioned Object Storage state bucket ([prerequisites](../clouds/scaleway/prerequisites.md#state));
 - OpenTofu 1.10 or later, and `kubectl`.
 
 ## Write your tfvars
@@ -100,7 +100,7 @@ cluster_endpoint_public_access_cidrs = ["203.0.113.0/24"]
 kube = {}
 ```
 
-The [minimal example](../../opentofu/scaleway/examples/minimal/README.md) is the same foundations call, in the repository, with a relative source; CI plans it.
+The [minimal example](../../opentofu/scaleway/examples/minimal/README.md) is the same foundations call, with a relative source; CI plans it.
 
 ## Apply
 
@@ -111,9 +111,7 @@ tofu init
 tofu apply -var-file=prod.tfvars
 ```
 
-Two outputs are null on this cloud and no other: `oidc_issuer_url` and `workload_identity_pool`. Kapsule has no OIDC issuer and Scaleway no workload identity federation; they are returned so that the four foundations modules share one output surface. In their place the module returns `crossplane_access_key` and the sensitive `crossplane_secret_key`.
-
-The catalog has no Scaleway Crossplane provider yet, so nothing in the cluster uses that key. Leave it in state, do not copy it into a Secret, and keep `crossplane_permission_sets` to what you will need once the provider exists ([SCALEWAY-14](../decisions/scaleway.md#scaleway-14-crossplane-through-scaleways-own-provider-pinned-with-a-regenerable-fork)). The expiry forces a rotation; changing `crossplane_key_expires_at` replaces the key.
+The outputs include `crossplane_access_key` and the sensitive `crossplane_secret_key`. Nothing in the cluster uses them yet ([SCALEWAY-14](../decisions/scaleway.md#scaleway-14-crossplane-through-scaleways-own-provider-pinned-with-a-regenerable-fork)): leave the key in state, never copy it into a Secret. `oidc_issuer_url` and `workload_identity_pool` are null on Scaleway.
 
 **Step 2, Flux and the catalog.** Add to `main.tf`:
 
@@ -151,9 +149,9 @@ module "socle" {
 }
 ```
 
-On Scaleway the bootstrap installs no Cilium and no CoreDNS (Kapsule operates both), and refuses the `cilium` variable. The key in `SCW_SECRET_KEY` is the apply's own: its `KubernetesFullAccess` is what the Helm provider acts with. While the artifact's registry is private, create the pull secret in `flux-system` first and set `artifact_pull_secret` ([private registry](../guides/private-registry.md)).
+No Cilium and no CoreDNS here: Kapsule operates both, and the bootstrap refuses `cilium`. While the registry is private, create the pull secret in `flux-system` first and set `artifact_pull_secret` ([private registry](../guides/private-registry.md)).
 
-To turn External-DNS on, create its credential first. The template reads a Secret named `external-dns-scaleway` in the `external-dns` namespace, with a key that may write the zone:
+For External-DNS, first create its Secret with a key that may write the zone:
 
 ```sh
 kubectl create namespace external-dns
@@ -189,11 +187,10 @@ kubectl -n flux-system get ocirepository socle     # the pulled digest, SourceVe
 kubectl -n flux-system get resourceset             # socle-root and one per module, Ready
 ```
 
-A green apply proves the objects were deposited; `socle-root` Ready is the convergence signal. Expect no Gateway: nothing implements Gateway API on Scaleway yet, so `gateway_api` installs its CRDs only ([limits](../clouds/scaleway/limits.md#what-the-socle-does-not-offer-here-yet)).
+`socle-root` Ready means the catalog converged. Expect no Gateway: nothing implements Gateway API on Scaleway yet ([limits](../clouds/scaleway/limits.md#what-the-socle-does-not-offer-here-yet)).
 
 ## Next steps
 
 - [Configure](../guides/configure.md) the catalog through `kube`, and [enable a module](../guides/enable-a-module.md).
 - [Upgrade](../guides/upgrade.md): `socle_version` moves the modules and the artifact; `kubernetes_version` moves the cluster, environment by environment.
-- Read what this cloud cannot do: [limits](../clouds/scaleway/limits.md).
-- [Troubleshooting](../guides/troubleshooting.md) and [uninstall](../guides/uninstall.md).
+- [Limits](../clouds/scaleway/limits.md), [troubleshooting](../guides/troubleshooting.md), [uninstall](../guides/uninstall.md).

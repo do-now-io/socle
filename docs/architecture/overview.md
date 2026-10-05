@@ -6,35 +6,9 @@ sidebar:
 ---
 
 The socle turns one tfvars file into a managed Kubernetes cluster running a
-chosen set of platform modules, and keeps it converged. Two tools share the
-work, in one apply: OpenTofu creates the cluster and hands it its inputs, and
-Flux, through the Flux Operator, pulls a signed artifact and renders the
-catalog from those inputs. After the apply, OpenTofu steps away until the
-next change of the tfvars.
-
-## The positions
-
-| Question | Position |
-| --- | --- |
-| Where the client's configuration lives | In the client's Git, as OpenTofu: one root per cloud, one tfvars per cluster |
-| What Flux syncs from | The socle's OCI artifact only, never a client repository |
-| Who templates | The Flux Operator, through the `ResourceSet`s shipped in the artifact |
-| What OpenTofu ships into the cluster | Inputs only: one `ResourceSetInputProvider`, one root `ResourceSet`, and before them what Flux needs to run |
-| How OpenTofu ships them | `helm_release`, as an applier, never as a templater |
-| Number of applies | One: foundations and bootstrap in the same root |
-| The client's surface | `socle_version`, `<cloud> = {…}`, `kube = {…}` (and on aws/azure `cilium`, on aws `coredns` and `eks_addons`) |
-| Validation of `kube` | `any` plus `validation` blocks against the catalog schema, at plan |
-| Version pin | `socle_version` drives both module sources and the artifact tag |
-| Signature | cosign keyless, verified by Flux on every reconciliation; cannot be turned off |
-
-## The layers
-
-| Layer | What it is | Code | Owned by |
-| --- | --- | --- | --- |
-| Foundations | One OpenTofu module per cloud: network, managed cluster, the nodes the socle starts on, identities | [`opentofu/aws`](../../opentofu/aws/), `gcp`, `azure`, `scaleway` | OpenTofu |
-| Bootstrap | Cilium and CoreDNS where the cloud provides none, the EKS add-ons on aws, the Flux Operator and instance, and the envelope carrying the inputs | [`opentofu/bootstrap`](../../opentofu/bootstrap/) | OpenTofu, same apply |
-| Root | The one apply: calls the two modules above, configures the providers | [`opentofu/clusters/aws`](../../opentofu/clusters/aws/) (AWS only so far) | the client, a copy he never edits |
-| Catalog | One `ResourceSet` per module, one overlay per cloud | [`oci/`](../../oci/) | Flux, from the signed artifact |
+chosen set of platform modules, and keeps it converged. In one apply,
+OpenTofu creates the cluster and hands it its inputs; Flux, through the Flux
+Operator, then pulls a signed artifact and renders the catalog from them.
 
 ```text
 tfvars ──▶ tofu apply ──▶ foundations: network, cluster, nodes, identities
@@ -45,17 +19,39 @@ ghcr.io/do-now-io/socle/flux-modules ──verified pull──▶ Flux ──▶
                                                                  └▶ one ResourceSet per module
 ```
 
-What the bootstrap deposits, and how the operator renders it, is in
-[The Flux catalog](flux-catalog.md). Why Cilium comes first is in
-[Cilium before Flux](cilium-before-flux.md). How a module gets cloud access
-without changing the foundations is in [Module IAM](module-iam.md). How the
-two artifacts are published, signed and released is in
-[Distribution](distribution.md).
+## The layers
+
+| Layer | What it is | Code | Owned by |
+| --- | --- | --- | --- |
+| Foundations | One module per cloud: network, cluster, the nodes the socle starts on, identities | [`opentofu/aws`](../../opentofu/aws/), `gcp`, `azure`, `scaleway` | OpenTofu |
+| Bootstrap | Cilium and CoreDNS where the cloud has none, the EKS add-ons, the Flux Operator and instance, the envelope of inputs | [`opentofu/bootstrap`](../../opentofu/bootstrap/) | OpenTofu, same apply |
+| Root | The one apply: calls both, configures the providers | [`opentofu/clusters/aws`](../../opentofu/clusters/aws/) (AWS only so far) | you, a copy never edited |
+| Catalog | One `ResourceSet` per module, one overlay per cloud | [`oci/`](../../oci/) | Flux, from the signed artifact |
+
+## The positions
+
+- **Your configuration lives in your Git, as OpenTofu**: `socle_version`,
+  `<cloud> = {…}`, `kube = {…}` (and `cilium`, `coredns`, `eks_addons` where
+  they apply). Flux never syncs from your repository.
+- **OpenTofu ships inputs only**, through `helm_release` as an applier; the
+  Flux Operator templates
+  ([The Flux catalog](flux-catalog.md)).
+- **One apply**, foundations and bootstrap in the same root. Two cases need
+  more: [When one apply is not enough](../guides/troubleshooting.md#when-one-apply-is-not-enough).
+- **`socle_version` pins both** the module sources and the artifact tag
+  ([Distribution](distribution.md)).
+- **The signature is always checked** by Flux, on every reconciliation.
+- **A module carries its own cloud access**, never the foundations
+  ([Module IAM](module-iam.md)).
+
+After the apply, the cluster pulls the artifact every minute, verifies it,
+and each `ResourceSet` renders its module, or nothing when it is off. A change
+of `kube` is re-rendered within seconds of its apply.
 
 ## How the root reaches the cluster
 
-Each foundations module outputs `helm_kubernetes`, so the root's provider
-block is one line, identical on every cloud:
+Each foundations module outputs `helm_kubernetes`, so the root's provider is
+one line on every cloud:
 
 ```hcl
 provider "helm" {
@@ -63,47 +59,28 @@ provider "helm" {
 }
 ```
 
+It holds no token: an exec plugin gets a short-lived one from the runner's
+ambient credentials
+([SOCLE-13](../decisions/socle.md#socle-13-helm_kubernetes-is-an-exec-no-credential-in-the-state)).
+
+<details>
+<summary>Under the hood</summary>
+
 The object is `{ host, cluster_ca_certificate, exec = { api_version,
-command, args } }`. It holds no token and no kubeconfig: the exec plugin gets
-a short-lived token at call time from the runner's ambient credentials, the
-same ones the cloud provider uses.
+command, args } }`.
 
 | Cloud | Exec | State |
 | --- | --- | --- |
 | AWS | `aws eks get-token --cluster-name …` | works; the root applies with it on floci |
 | GCP | `gke-gcloud-auth-plugin`, host is the DNS endpoint | output exists; no GCP root yet |
-| Azure | `kubelogin get-token --login azurecli --server-id 6dae42f8-4368-4678-94ff-3960e28e3630` | authenticates only a cluster with Entra ID authentication, which `opentofu/azure` does not configure yet |
+| Azure | `kubelogin get-token --login azurecli --server-id 6dae42f8-4368-4678-94ff-3960e28e3630` | needs Entra ID authentication, which `opentofu/azure` does not configure yet |
 | Scaleway | `sh -c` emitting an `ExecCredential` from `SCW_SECRET_KEY` | output exists; no Scaleway root yet |
 
-The decision is
-[SOCLE-13](../decisions/socle.md#socle-13-helm_kubernetes-is-an-exec-no-credential-in-the-state).
-On aws the root's own `aws` provider serves both modules; elsewhere the
-bootstrap's `aws` provider has no resource and is never configured.
+No `kubernetes` provider exists in the chain
+([SOCLE-10](../decisions/socle.md#socle-10-no-kubernetes-provider)). On aws
+the bootstrap does not `depends_on` the whole foundations module: Cilium
+follows the cluster alone (the nodes become Ready only once it runs), and
+everything else follows the node group through `schedulable_nodes`
+([Cilium before Flux](cilium-before-flux.md)).
 
-## One root, one apply
-
-The foundations and the bootstrap are called from one root, so a client
-applies once: the plan passes with the cluster unknown, and a second plan is
-empty. Each module still has its own providers. On aws the root does not make
-the bootstrap `depends_on` the whole foundations module: that would hold
-Cilium until the bootstrap nodes are Ready, and they become Ready only once
-Cilium runs on them. Cilium follows the cluster alone; everything else
-follows the node group through `schedulable_nodes`, which is also why it is
-uninstalled before the nodes on a destroy.
-
-Two cases need more than one apply, replacing the cluster and destroying it
-with the API unreachable: see
-[Troubleshooting](../guides/troubleshooting.md#when-one-apply-is-not-enough).
-No `kubernetes` provider exists anywhere in the chain
-([SOCLE-10](../decisions/socle.md#socle-10-no-kubernetes-provider)).
-
-## After the apply
-
-The cluster pulls `ghcr.io/do-now-io/socle/flux-modules:<socle_version>`
-every minute, verifies its signature, and applies `clusters/<cloud>` from it:
-the list of catalog `ResourceSet`s that cloud offers. Each `ResourceSet`
-reads the inputs and renders its module, or nothing when the module is off.
-A change of `kube` is a `tofu apply` that upgrades the envelope's inputs; the
-operator re-renders within seconds. A change of `socle_version` moves the
-module sources and the artifact tag together
-([Upgrade the socle](../guides/upgrade.md)).
+</details>

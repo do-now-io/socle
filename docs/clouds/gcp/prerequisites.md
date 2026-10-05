@@ -5,9 +5,8 @@ sidebar:
   order: 1
 ---
 
-What must exist before `tofu apply` can run the GCP foundations. The module
-creates none of it. Each item can be done in the Cloud Console or with the
-commands below; set these once:
+Tick these before `tofu apply` runs the GCP foundations. The module creates
+none of it. The commands use these variables:
 
 ```sh
 PROJECT_ID=my-project-dev
@@ -19,38 +18,19 @@ PRINCIPAL=user:you@example.com   # or serviceAccount:…, principalSet://… for
 
 ## Account
 
-- **One project per environment.** Workload Identity Federation builds a
-  workload's principal from the project, the namespace and the service
-  account name, so two clusters in one project share principals
+- [ ] **One project per environment**, its ID matching
+  `^[a-z][a-z0-9-]{4,28}[a-z0-9]$`
   ([GCP-06](../../decisions/gcp.md#gcp-06-workload-identity-federation-a-google-service-account-per-kubernetes-service-account)).
-  A separate project also bounds the blast radius of an IAM mistake.
-- The project ID matches `^[a-z][a-z0-9-]{4,28}[a-z0-9]$`.
-- A billing account linked to the project, and a budget with alert
-  thresholds on it: Autopilot bills Pod requests, and a runaway workload is
-  otherwise silent.
-- Under an organisation or folder, whose org policies permit private GKE
-  nodes, Cloud NAT and external NAT addresses.
-- Never delete a project that held a cluster before its state is archived:
-  a deleted project ID cannot be reused.
+- [ ] A billing account linked, and a budget with alert thresholds.
+- [ ] Org policies that permit private GKE nodes, Cloud NAT and external NAT
+  addresses.
+- [ ] The APIs enabled: `cloudresourcemanager`, `serviceusage`, `compute`,
+  `container`, `pubsub` (upgrade notifications, on by default), `bigquery`
+  (only with `billing_export_dataset_id`).
 
 ```sh
 gcloud projects create "$PROJECT_ID"                  # when it does not exist
 gcloud billing projects link "$PROJECT_ID" --billing-account="$BILLING_ACCOUNT"
-gcloud billing projects describe "$PROJECT_ID"        # billingEnabled: true
-```
-
-The APIs the module calls:
-
-| API | Needed for |
-| --- | --- |
-| `cloudresourcemanager.googleapis.com` | project IAM bindings |
-| `serviceusage.googleapis.com` | enabling the others |
-| `compute.googleapis.com` | VPC, subnetworks, router, Cloud NAT |
-| `container.googleapis.com` | the Autopilot cluster |
-| `pubsub.googleapis.com` | the upgrade notification topic (on by default) |
-| `bigquery.googleapis.com` | only when `billing_export_dataset_id` is set |
-
-```sh
 gcloud services enable \
   cloudresourcemanager.googleapis.com serviceusage.googleapis.com \
   compute.googleapis.com container.googleapis.com \
@@ -58,36 +38,33 @@ gcloud services enable \
   --project="$PROJECT_ID"
 ```
 
-Drop `pubsub` when `enable_upgrade_notifications = false` and `bigquery`
-when no dataset is requested. Never disable an API a resource still depends
-on: the next plan cannot read it.
+<details>
+<summary>Under the hood</summary>
+
+- Workload Identity builds a principal from project, namespace and service
+  account: two clusters in one project share principals.
+- Autopilot bills Pod requests; without a budget a runaway workload is
+  silent.
+- A deleted project ID cannot be reused: archive the state first.
+- Never disable an API a resource still depends on: the next plan cannot
+  read it.
+
+</details>
 
 ## Permissions for the apply
 
-Two sets. The first prepares the project, once, and is held by whoever does
-that; the second is what the principal running `tofu apply` needs on every
-run.
-
-Preparing the project:
+- [ ] To prepare the project, once: `roles/serviceusage.serviceUsageAdmin`
+  (APIs) and `roles/storage.admin` (state bucket).
+- [ ] On the principal that applies, on the project:
 
 | Role | For |
 | --- | --- |
-| `roles/serviceusage.serviceUsageAdmin` | enabling the APIs above |
-| `roles/storage.admin` | creating the state bucket |
-
-Running the apply, granted on the project except where stated:
-
-| Role | For |
-| --- | --- |
-| `roles/container.admin` | the cluster, and the Helm releases the bootstrap installs in it |
-| `roles/compute.networkAdmin` | VPC, subnetworks, router and NAT |
+| `roles/container.admin` | the cluster, and the Helm releases in it |
+| `roles/compute.networkAdmin` | VPC, subnetworks, router, NAT |
 | `roles/resourcemanager.projectIamAdmin` | the `observability_reader_members` bindings |
 | `roles/pubsub.admin` | the upgrade notification topic |
-| `roles/bigquery.admin` | only when `billing_export_dataset_id` is set |
-| `roles/storage.objectAdmin` | reading and writing state — on the state bucket, not the project |
-
-The same table is in the
-[minimal example](../../../opentofu/gcp/examples/minimal/README.md).
+| `roles/bigquery.admin` | only with `billing_export_dataset_id` |
+| `roles/storage.objectAdmin` | state, **on the state bucket**, not the project |
 
 ```sh
 for ROLE in \
@@ -102,20 +79,8 @@ do
 done
 ```
 
-- Use a dedicated service account for OpenTofu, impersonated by humans and
-  federated from CI, bound at project level, never at organisation level.
-- Never `roles/owner` or `roles/editor`: both grant service account key
-  creation and IAM changes far beyond what the module needs.
-- No service account key, ever. The module accepts no credential as input.
-  Enforce it with the `constraints/iam.disableServiceAccountKeyCreation` org
-  policy.
-
-Credentials come from the environment: Workload Identity Federation in CI, a
-user login locally. The google provider reads Application Default
-Credentials; `gke-gcloud-auth-plugin`, which the Helm releases authenticate
-through, reads the active `gcloud` account. Locally, log in to both and set
-the quota project, or API calls bill and rate-limit against whatever project
-the login defaulted to:
+- [ ] Logged in locally, for both the provider (ADC) and
+  `gke-gcloud-auth-plugin` (the active `gcloud` account):
 
 ```sh
 gcloud auth login
@@ -124,22 +89,25 @@ gcloud auth application-default set-quota-project "$PROJECT_ID"
 gcloud config set project "$PROJECT_ID"
 ```
 
+<details>
+<summary>Under the hood</summary>
+
+- A dedicated service account for OpenTofu, impersonated by humans and
+  federated from CI, bound at project level.
+- Never `roles/owner` or `roles/editor`; never a service account key
+  (enforce `constraints/iam.disableServiceAccountKeyCreation`).
+- Without the quota project, API calls bill and rate-limit against whatever
+  project the login defaulted to.
+- The same table is in the
+  [minimal example](../../../opentofu/gcp/examples/minimal/README.md).
+
+</details>
+
 ## State
 
-A GCS bucket for remote state, created before the first `tofu init`. The
-module ships no backend block; state lives in your project. State holds
-every attribute of every resource, and losing it leaves a cluster that
-exists but can no longer be managed.
-
-- Versioning on before the first write; soft delete raised from the 7-day
-  default.
-- Uniform bucket-level access, public access prevention enforced.
-- A lifecycle rule that deletes only noncurrent versions. A rule without
-  `isLive: false` eventually deletes the current state.
-- Object access granted on the bucket: anyone who can read it reads every
-  value the state holds.
-- Same region as the cluster, one prefix per environment, never shared with
-  application data. The GCS backend locks natively.
+- [ ] A GCS bucket in the cluster's region: uniform access, public access
+  prevention, versioning, soft delete raised to 30 days, a lifecycle rule on
+  noncurrent versions only. The GCS backend locks natively.
 
 ```sh
 gcloud storage buckets create "gs://$STATE_BUCKET" \
@@ -164,7 +132,7 @@ gcloud storage buckets add-iam-policy-binding "gs://$STATE_BUCKET" \
   --member="$PRINCIPAL" --role=roles/storage.objectAdmin
 ```
 
-In the root configuration:
+One prefix per environment:
 
 ```hcl
 terraform {
@@ -175,30 +143,37 @@ terraform {
 }
 ```
 
+<details>
+<summary>Under the hood</summary>
+
+- State holds every attribute of every resource; anyone who reads the bucket
+  reads it all. Losing it leaves a cluster nobody can manage.
+- A lifecycle rule without `isLive: false` eventually deletes the current
+  state.
+- Never share the bucket with application data.
+
+</details>
+
 ## Tooling
 
-- OpenTofu 1.10 or later.
-- The `gcloud` CLI, authenticated as above.
-- `gke-gcloud-auth-plugin`: the foundations' `helm_kubernetes` output runs
-  it to get a short-lived token, so the bootstrap cannot reach the cluster
-  without it. `gcloud components install gke-gcloud-auth-plugin`, or your
-  package manager's `google-cloud-cli-gke-gcloud-auth-plugin`.
-- `kubectl`, to read the result.
-- `cosign`, to verify the modules package before `tofu init`: OpenTofu does
-  not verify OCI signatures ([distribution](../../architecture/distribution.md)).
-- While the socle registry is private, a registry login for OpenTofu and a
-  pull secret for Flux ([private registry](../../guides/private-registry.md)).
+- [ ] OpenTofu 1.10 or later.
+- [ ] `gcloud`, authenticated as above.
+- [ ] `gke-gcloud-auth-plugin` (`gcloud components install
+  gke-gcloud-auth-plugin`, or the package
+  `google-cloud-cli-gke-gcloud-auth-plugin`): the bootstrap cannot reach the
+  cluster without it.
+- [ ] `kubectl`.
+- [ ] `cosign`, to verify the modules package: OpenTofu does not verify OCI
+  signatures ([distribution](../../architecture/distribution.md)).
+- [ ] While the registry is private, a registry login and a Flux pull secret
+  ([private registry](../../guides/private-registry.md)).
 
 ## Quotas
 
-Autopilot nodes are Compute Engine VMs in your project and draw on its
-regional quotas. Check before the first apply, and before growing a cluster:
-
-- CPUs, and persistent disk SSD, in the region.
-- In-use external IP addresses in the region: Cloud NAT allocates its
-  addresses automatically.
-- One proxy-only subnetwork per region and VPC: a second cluster in the same
-  region and VPC sets `create_proxy_only_subnet = false`.
+- [ ] Regional CPUs and persistent disk SSD: Autopilot nodes draw on them.
+- [ ] In-use external IP addresses: Cloud NAT allocates its own.
+- [ ] One proxy-only subnetwork per region and VPC: a second cluster there
+  sets `create_proxy_only_subnet = false`.
 
 ```sh
 gcloud compute regions describe "$REGION" --project="$PROJECT_ID" \

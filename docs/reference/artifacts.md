@@ -5,8 +5,7 @@ sidebar:
   order: 2
 ---
 
-Why there are two and how a release is cut is in
-[Distribution](../architecture/distribution.md).
+Why two, and how a release is cut: [Distribution](../architecture/distribution.md).
 
 ## The packages
 
@@ -15,12 +14,9 @@ Why there are two and how a release is cut is in
 | `ghcr.io/do-now-io/socle/flux-modules` | Flux artifact (`tar+gzip`) | `oci/`, without any `tests/` folder | public |
 | `ghcr.io/do-now-io/socle/opentofu-modules` | `application/vnd.opentofu.modulepkg`, one `archive/zip` layer | `git archive` of the whole commit | private until v1 |
 
-Both carry the annotations `org.opencontainers.image.source`
-(`https://github.com/do-now-io/socle`) and `org.opencontainers.image.revision`
-(`<branch>@sha1:<commit>`), which is how a release finds the alpha built from
-its commit.
-
-How each is consumed:
+Annotations on both: `org.opencontainers.image.source`
+(`https://github.com/do-now-io/socle`), `org.opencontainers.image.revision`
+(`<branch>@sha1:<commit>`).
 
 ```hcl
 # a client's root: the modules package, by tag
@@ -32,7 +28,8 @@ artifact_url = "oci://ghcr.io/do-now-io/socle/flux-modules"
 
 ## Tags
 
-The same tag names both packages.
+One tag names both packages; `socle_version` takes any of them, never
+`latest` or `main`.
 
 | Tag | Published by | Example | Deleted |
 | --- | --- | --- | --- |
@@ -40,20 +37,14 @@ The same tag names both packages.
 | `X.Y.Z-alpha.N` | every push to `main` | `0.1.0-alpha.3` | after 30 days, unless the same version also carries a release tag |
 | `0.0.0-<branch-slug>.<short-sha>` | every push to any other branch | `0.0.0-docs-71-m2-migration.285a8d5` | when the branch is deleted, on manual dispatch with the branch name, and after 7 days |
 
-The slug is the branch name lowercased, every run of characters outside
-`a-z0-9` turned into one dash, with no leading or trailing dash. Two branch
-names with the same slug (`feat-x` and `feat/x`) share their tags, and
-deleting one branch deletes the other's.
-
-Deletion is [`cleanup-artifacts.yaml`](../../.github/workflows/cleanup-artifacts.yaml):
-on a branch's deletion, on `workflow_dispatch`, and nightly at 03:17 UTC for
-the age rules, on both packages. A version is deleted only when every one of
-its tags matches a rule, so a promoted alpha, which also carries its release
-tag, is kept. A cluster pinned to a deleted tag can no longer pull it
-([Troubleshooting](../guides/troubleshooting.md#manifest_unknown-on-the-ocirepository)).
-
-`socle_version` accepts the three forms: a SemVer tag, with an optional
-pre-release. `latest`, `main` and any moving head are refused at plan.
+- **Slug**: the branch name lowercased, each run outside `a-z0-9` one dash,
+  no leading or trailing dash. `feat-x` and `feat/x` share their tags:
+  deleting one branch deletes the other's.
+- **Deletion**: [`cleanup-artifacts.yaml`](../../.github/workflows/cleanup-artifacts.yaml),
+  nightly at 03:17 UTC for the age rules. A version goes only when every tag
+  matches a rule, so a promoted alpha stays. A cluster pinned to a deleted
+  tag stops pulling
+  ([Troubleshooting](../guides/troubleshooting.md#manifest_unknown-on-the-ocirepository)).
 
 ## What the Flux artifact contains
 
@@ -73,15 +64,12 @@ oci/
     └── <module>/resourceset.yaml
 ```
 
-The cluster applies `./clusters/<cloud>`. In the repository, beside each
-module, `oci/catalog/<module>/tests/e2e/` holds its Chainsaw suite,
-`oci/tests/e2e/` the socle's own suites (`root`, `disabled`, `destroyed`),
-and `oci/.ci/` the fixtures CI renders the catalog with; none of them is
-pushed.
+The cluster applies `./clusters/<cloud>`. Not pushed: `oci/catalog/<module>/tests/`,
+`oci/tests/` and `oci/.ci/`.
 
 ## Signatures
 
-Both packages are signed keyless with cosign, through GitHub's OIDC token.
+Keyless cosign, through GitHub's OIDC token.
 
 | Built from | Certificate identity |
 | --- | --- |
@@ -90,15 +78,13 @@ Both packages are signed keyless with cosign, through GitHub's OIDC token.
 
 Issuer: `https://token.actions.githubusercontent.com`.
 
-A release tag points at the alpha's digest, so it carries main's signature.
-Flux checks the Flux artifact on every reconciliation against
-`cosign_identity`, two anchored regexes whose default is the `main` identity
-above.
+A release carries its alpha's `main` signature. Flux checks it on every
+reconciliation against `cosign_identity`, two anchored regexes, `main` by
+default.
 
 ### Verify a signature
 
-OpenTofu does not verify OCI signatures. Run this in CI before `tofu init`,
-for the version the tfvars pins:
+OpenTofu does not verify signatures: run this in CI before `tofu init`.
 
 ```sh
 cosign verify ghcr.io/do-now-io/socle/opentofu-modules:<version> \
@@ -106,7 +92,6 @@ cosign verify ghcr.io/do-now-io/socle/opentofu-modules:<version> \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-The same command with `flux-modules` checks the Flux artifact. While
-`opentofu-modules` is private, `cosign` needs registry credentials
-(`cosign login ghcr.io`, or a docker login, with a token that has
+Swap in `flux-modules` for the Flux artifact. While `opentofu-modules` is
+private, log in first (`cosign login ghcr.io` or `docker login`, a token with
 `read:packages`).

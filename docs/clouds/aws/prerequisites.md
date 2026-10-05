@@ -5,62 +5,75 @@ sidebar:
   order: 1
 ---
 
-What must exist before `tofu apply` runs
+Tick these before `tofu apply` runs
 [`opentofu/clusters/aws`](../../../opentofu/clusters/aws). The socle creates
 none of it.
 
 ## Account
 
-- An AWS account and a region. The region is the root's `aws.region`; the
-  foundations module reads it from the provider.
-- The account may hold several clusters. Every name the module creates
-  carries `cluster_name`, and IAM names are unique per account, so two
-  clusters in one account need two names, even in different regions.
-- If the account has never run EKS, EC2 Spot or Auto Scaling, the first
-  apply creates their service-linked roles; the principal needs
-  `iam:CreateServiceLinkedRole` for that.
-- With `gateway_certificate`: a **public** Route 53 hosted zone in the same
-  account, named after the domain or a parent of it. ACM validates the
-  certificate through it.
-- GuardDuty, if wanted, is turned on by the account owner. The socle creates
-  no detector ([AWS-14](../../decisions/aws.md#aws-14-guardduty-is-the-account-owners)).
+- [ ] An AWS account and a region (the root's `aws.region`).
+- [ ] A `cluster_name` unique in the account: IAM names are per account, even
+  across regions.
+- [ ] `iam:CreateServiceLinkedRole`, if the account has never run EKS, EC2
+  Spot or Auto Scaling.
+- [ ] With `gateway_certificate`: a **public** Route 53 hosted zone in the same
+  account, for the domain or a parent of it.
+- [ ] GuardDuty, if wanted, turned on by the account owner
+  ([AWS-14](../../decisions/aws.md#aws-14-guardduty-is-the-account-owners)).
 
 ## Permissions for the apply
 
-The principal that applies creates the resources below. Scope its policy to
-these services rather than attaching `AdministratorAccess`.
+- [ ] A principal with a policy scoped to the services below, not
+  `AdministratorAccess`. Credentials come from the ambient chain: a profile
+  locally, an OIDC role in CI; no IAM access key.
+- [ ] The same principal creates the cluster: it becomes its first admin.
+  Another principal later needs its own EKS access entry.
+- [ ] The runner's public IP in `cluster_endpoint_public_access_cidrs`: Helm
+  talks to the public endpoint during the apply.
 
-| Service | What the apply creates |
+| Service | What the apply needs |
 | --- | --- |
-| EC2 | VPC, subnets, route tables, internet gateway, Elastic IPs, NAT Gateways, VPC endpoints, the endpoints' security group, flow logs, the bootstrap nodes' launch template |
-| EKS | the cluster, the bootstrap node group, the add-ons (`CreateAddon`, `DescribeAddon`, `UpdateAddon`, `DeleteAddon`), Pod Identity associations, tags |
-| IAM | roles, inline role policies, managed policy attachments; `iam:CreatePolicy` for the Crossplane permissions boundary; `iam:PassRole` for the cluster role (to EKS), the node role (to EKS), the flow logs role (to VPC flow logs), and the Crossplane and CSI drivers' roles (to `pods.eks.amazonaws.com`) |
-| KMS | two keys (Secrets, logs) with rotation and a key policy; `kms:DescribeKey` on the logs key, without which `CreateLogGroup` with a `kmsKeyId` fails with `AccessDeniedException` |
-| CloudWatch Logs | the control-plane and flow-log groups, their retention and their KMS key |
-| ACM, Route 53 | with `gateway_certificate` only: the certificate (`RequestCertificate`, `DescribeCertificate`, `ListTagsForCertificate`), the zone lookup (`ListHostedZones`, `GetHostedZone`) and the validation records (`ChangeResourceRecordSets`, `GetChange`, `ListResourceRecordSets`) |
-| STS | `GetCallerIdentity`, the providers' own check and the account ID the module reads |
+| EC2 | VPC, subnets, routes, internet gateway, Elastic IPs, NAT Gateways, VPC endpoints and their security group, flow logs, the launch template |
+| EKS | cluster, node group, add-ons (`CreateAddon`, `DescribeAddon`, `UpdateAddon`, `DeleteAddon`), Pod Identity associations, tags |
+| IAM | roles, inline policies, attachments; `iam:CreatePolicy` for the Crossplane boundary; `iam:PassRole` (see below) |
+| KMS | two keys with rotation and key policy; `kms:DescribeKey` on the logs key |
+| CloudWatch Logs | the control-plane and flow-log groups, retention, KMS key |
+| ACM, Route 53 | with `gateway_certificate` only (see below) |
+| STS | `GetCallerIdentity` |
 
-Two more conditions, both about reaching the cluster in the same apply:
+<details>
+<summary>Under the hood</summary>
 
-- **The principal is the cluster's first admin.** The cluster is created with
-  `bootstrap_cluster_creator_admin_permissions = true`, so the principal that
-  creates it gets cluster-admin through an EKS access entry. A later apply by
-  another principal needs its own access entry.
-- **The runner's public IP is in `cluster_endpoint_public_access_cidrs`.**
-  The helm provider talks to the API server's public endpoint during the
-  apply.
+- `iam:PassRole`: the cluster and node roles to EKS, the flow logs role to
+  VPC flow logs, the Crossplane and CSI drivers' roles to
+  `pods.eks.amazonaws.com`.
+- Without `kms:DescribeKey` on the logs key, `CreateLogGroup` with a
+  `kmsKeyId` fails with `AccessDeniedException`.
+- ACM: `RequestCertificate`, `DescribeCertificate`, `ListTagsForCertificate`.
+  Route 53: `ListHostedZones`, `GetHostedZone`, `ChangeResourceRecordSets`,
+  `GetChange`, `ListResourceRecordSets`.
+- The first admin comes from
+  `bootstrap_cluster_creator_admin_permissions = true`, through an EKS access
+  entry.
 
-Credentials come from the provider's ambient chain: a profile or
-environment variables on a workstation, a role assumed through OIDC
-federation in CI. The module takes no credential as input and needs no IAM
-access key.
+</details>
 
 ## State
 
-An S3 bucket in the client's account, created before the first `tofu init`,
-with versioning on, Block Public Access on and default encryption. OpenTofu
-locks state in S3 with conditional writes (`use_lockfile = true`); no
-DynamoDB table is needed. One key per cluster:
+- [ ] An S3 bucket, versioned, Block Public Access on, encrypted (SSE-S3 is
+  the default), apart from application data. No DynamoDB table:
+  `use_lockfile = true` locks.
+
+```sh
+aws s3api create-bucket --bucket acme-tofu-state --region eu-west-3 \
+  --create-bucket-configuration LocationConstraint=eu-west-3
+aws s3api put-bucket-versioning --bucket acme-tofu-state \
+  --versioning-configuration Status=Enabled
+aws s3api put-public-access-block --bucket acme-tofu-state \
+  --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+```
+
+One key per cluster; expire only noncurrent versions:
 
 ```hcl
 terraform {
@@ -73,38 +86,21 @@ terraform {
 }
 ```
 
-The state holds every attribute of every resource. Keep the bucket apart
-from application data, and expire only noncurrent versions.
-
-```sh
-aws s3api create-bucket --bucket acme-tofu-state --region eu-west-3 \
-  --create-bucket-configuration LocationConstraint=eu-west-3
-aws s3api put-bucket-versioning --bucket acme-tofu-state \
-  --versioning-configuration Status=Enabled
-aws s3api put-public-access-block --bucket acme-tofu-state \
-  --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
-```
-
-New S3 buckets are encrypted with SSE-S3 by default.
-
 ## Tooling
 
-- OpenTofu 1.10 or later: the modules are pulled as OCI artifacts
-  (`oci://`), which needs 1.10.
-- The AWS CLI on the machine that applies: the helm provider gets its token
-  from `aws eks get-token`, with the same credentials as the aws provider.
-- `kubectl`, to read the result.
-- While `ghcr.io/do-now-io/socle/opentofu-modules` is private, `tofu init`
-  needs a GHCR login with `read:packages` (for example `docker login
-  ghcr.io`, whose credentials OpenTofu reads). The Flux package the cluster
-  pulls is public ([distribution](../../architecture/distribution.md)).
-- `cosign`, to verify the modules package before `tofu init`: OpenTofu does
-  not verify OCI signatures.
+- [ ] OpenTofu 1.10 or later (OCI module sources).
+- [ ] The AWS CLI: the helm provider gets its token from `aws eks get-token`.
+- [ ] `kubectl`.
+- [ ] A GHCR login with `read:packages` (`docker login ghcr.io`) while
+  `ghcr.io/do-now-io/socle/opentofu-modules` is private. The Flux package is
+  public ([distribution](../../architecture/distribution.md)).
+- [ ] `cosign`, to verify the modules package: OpenTofu does not verify OCI
+  signatures.
 
 ## Quotas
 
-Per cluster, with the defaults: one VPC, one Elastic IP and one NAT Gateway
-per AZ, five interface endpoints, two EC2 instances on Spot. Elastic IPs are
-the first default quota to run out: 5 per region, so a third cluster on two
-AZs, or a second on three, needs an increase. VPCs are 5 per region by
-default.
+- [ ] Elastic IPs: one per AZ per cluster, against a default of 5 per region.
+  A third cluster on two AZs, or a second on three, needs an increase.
+- [ ] VPCs: one per cluster, 5 per region by default.
+- [ ] Also per cluster: one NAT Gateway per AZ, five interface endpoints, two
+  Spot instances.

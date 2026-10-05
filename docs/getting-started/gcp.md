@@ -5,37 +5,26 @@ sidebar:
   order: 2
 ---
 
-At the end of this page you have a GKE Autopilot cluster in your project,
-Flux running on it, and the socle's catalog reconciled from the signed
-artifact — in one `tofu apply`.
+One `tofu apply` of a root you write: a GKE Autopilot cluster in your
+project, Flux on it, and the catalog reconciled from the signed artifact.
 
 ## Before you start
 
-- A project for this environment, billed, with its APIs enabled, a state
-  bucket, and the roles below on the principal that runs the apply. The
-  commands are in [GCP prerequisites](../clouds/gcp/prerequisites.md).
+From [GCP prerequisites](../clouds/gcp/prerequisites.md):
 
-  | Role | For |
-  | --- | --- |
-  | `roles/container.admin` | the cluster, and the Helm releases in it |
-  | `roles/compute.networkAdmin` | VPC, subnetworks, router and NAT |
-  | `roles/resourcemanager.projectIamAdmin` | project role bindings |
-  | `roles/pubsub.admin` | the upgrade notification topic |
-  | `roles/bigquery.admin` | the billing export dataset |
-  | `roles/storage.objectAdmin` | state, on the state bucket |
-
-- OpenTofu 1.10 or later, `gcloud`, `gke-gcloud-auth-plugin` and `kubectl`.
-- While the socle registry is private, a registry login for `tofu init` and
-  a pull secret for Flux: [private registry](../guides/private-registry.md).
+- a billed project for this environment, its APIs enabled, a state bucket;
+- on the principal that applies: `roles/container.admin`,
+  `roles/compute.networkAdmin`, `roles/resourcemanager.projectIamAdmin`,
+  `roles/pubsub.admin`, `roles/bigquery.admin`, and
+  `roles/storage.objectAdmin` on the state bucket;
+- OpenTofu 1.10 or later, `gcloud`, `gke-gcloud-auth-plugin`, `kubectl`;
+- while the registry is private, a registry login and a Flux pull secret
+  ([private registry](../guides/private-registry.md)).
 
 ## Write your tfvars
 
-There is no ready-made GCP root in the repository (the AWS one is
-[`opentofu/clusters/aws`](../../opentofu/clusters/aws/README.md)), so the
-root is yours: two module calls, the foundations then the bootstrap, in one
-directory.
-
-`main.tf`:
+There is no GCP root in the repository: yours calls the foundations, then
+the bootstrap. `main.tf`:
 
 ```hcl
 terraform {
@@ -119,12 +108,8 @@ module "socle" {
 }
 ```
 
-The bootstrap pulls the artifact of its own version, so the one
-`socle_version` moves both modules and the catalog. No `cilium`,
-`cluster_network` or `schedulable_nodes`: GKE runs Dataplane V2, and
-Autopilot provisions nodes as Pods ask for them.
-
-`terraform.tfvars`:
+No `cilium`, `cluster_network` or `schedulable_nodes`: GKE runs Dataplane V2
+and Autopilot provisions nodes. `terraform.tfvars`:
 
 ```hcl
 socle_version = "0.0.0" # x-release-please-version
@@ -147,8 +132,8 @@ maintenance_window = {
 kube = {}
 ```
 
-Every foundations input is listed in [GCP foundations](../clouds/gcp/foundations.md#reference),
-and what `kube` accepts in [configure](../guides/configure.md).
+Every input: [GCP foundations](../clouds/gcp/foundations.md#reference) and
+[Configure](../guides/configure.md).
 
 ## Apply
 
@@ -161,14 +146,9 @@ tofu init
 tofu apply
 ```
 
-The apply creates the network and the cluster, then installs the Flux
-Operator, a Flux instance and the socle's inputs through Helm, on the
-cluster's DNS endpoint.
-
-Then the one step no apply finishes: in the Cloud Console, under
-**Billing › Billing export › BigQuery export**, set the detailed usage cost
-export to the project and the `billing_export` dataset. Without it the cost
-data never arrives; nothing else depends on it.
+Then, in the Cloud Console, **Billing › Billing export › BigQuery export**:
+set the detailed usage cost export to the project and the `billing_export`
+dataset. No apply can do it; without it, no cost data arrives.
 
 ## Check it converged
 
@@ -180,16 +160,12 @@ kubectl -n flux-system get ocirepository socle   # pulled digest, SourceVerified
 kubectl -n flux-system get resourceset           # socle-root and one per module, Ready
 ```
 
-A green apply proves the objects were deposited; the `socle-root`
-ResourceSet reports whether the catalog converged.
-[Troubleshooting](../guides/troubleshooting.md) covers what to read when it
-does not.
+`socle-root` Ready means the catalog converged; if not, see
+[Troubleshooting](../guides/troubleshooting.md).
 
 ## Next steps
 
 - [Enable a module](../guides/enable-a-module.md) through `kube`.
 - [Upgrade](../guides/upgrade.md) by moving `socle_version`.
-- Read what Autopilot forbids and what is not offered on GCP yet:
-  [GCP limits](../clouds/gcp/limits.md).
-- For staging and prod, repeat in their own projects, with a Wednesday and a
-  Saturday window.
+- What Autopilot forbids and what GCP lacks: [GCP limits](../clouds/gcp/limits.md).
+- Staging and prod: their own projects, Wednesday and Saturday windows.

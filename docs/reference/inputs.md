@@ -5,19 +5,17 @@ sidebar:
   order: 0
 ---
 
-What a client writes in his tfvars, beyond `socle_version` and the cloud
-object (`aws = {…}`, documented with each cloud's foundations). How to write
-it is in [Configure a cluster](../guides/configure.md).
+What a tfvars holds beyond `socle_version` and the cloud object. How to write
+it: [Configure a cluster](../guides/configure.md).
 
 ## kube
 
-`kube` is `{ <module> = { <attribute> = <value> } }`, typed `any`, default
-`{}`. Only what differs from a default needs writing; a module absent from
-`kube` is at its defaults, on or off as the catalog says.
+`{ <module> = { <attribute> = <value> } }`, typed `any`, default `{}`; only
+what differs from a default.
 
 | Rule | |
 | --- | --- |
-| Names | `snake_case`, as HCL writes them without quotes. The artifact reads `inputs.modules.external_dns` as-is; the module's folder, `ResourceSet` and namespace are the same name in `kebab-case` (`external-dns`) |
+| Names | `snake_case`; the folder, `ResourceSet` and namespace use `kebab-case` (`external-dns`) |
 | Unknown module | refused at plan: `kube: unknown module(s) <name>. Catalog: <every module>.` |
 | Unknown attribute | refused at plan, with the allowed attributes of every module |
 | Wrong type | refused at plan: each value must have the kind (string, number, bool, list, object) of its default |
@@ -25,18 +23,14 @@ it is in [Configure a cluster](../guides/configure.md).
 | Secrets in `values` | refused at plan, per module: the chart's secret-bearing paths. Put them in the Secret named by `values_secret` |
 | `values` and a named attribute on the same key | `values` wins |
 
-The schema is [`catalog.tf`](../../opentofu/bootstrap/catalog.tf): each
-entry's defaults are its attributes. The per-attribute rules are the
-validations of `kube` in
-[`variables.tf`](../../opentofu/bootstrap/variables.tf).
+Sources: [`catalog.tf`](../../opentofu/bootstrap/catalog.tf) (the schema),
+[`variables.tf`](../../opentofu/bootstrap/variables.tf) (the rules).
 
 ### The catalog schema
 
-Every module with a chart also takes `values` (`{}`, any chart value, merged
-over the socle's defaults, the client's winning) and `values_secret` (`""`,
-the name of a Secret the client creates in the module's namespace with a
-`values.yaml` key, merged last, never read by OpenTofu). They are not
-repeated below. `gateway_api` and `hello` have neither.
+Every module but `gateway_api` and `hello` also takes `values` (`{}`, any
+chart value, yours winning) and `values_secret` (`""`, a Secret in the
+module's namespace with a `values.yaml` key, merged last); not repeated below.
 
 | Module | Attribute | Default | Meaning |
 | --- | --- | --- | --- |
@@ -85,14 +79,11 @@ repeated below. `gateway_api` and `hello` have neither.
 | `velero` | `policies` | seven pairs | `[{ frequency, retention, schedule }]`, one `Schedule` each: hourly 24h and 48h, daily 7d and 30d, weekly 30d and 90d, monthly 90d |
 | `velero` | `node_agent` | `eks_addons.efs_csi` | the privileged node-agent DaemonSet, which backs EFS volumes up by file system |
 
-What each module installs, and what it refuses in `values`, is on its
-[catalog page](../catalog/index.mdx).
+What each module installs and refuses in `values`: its [catalog page](../catalog/index.mdx).
 
 ## Cilium, CoreDNS and the EKS add-ons
 
-Three objects of the bootstrap module and of the aws root, each `any`,
-validated like `kube`: an unknown attribute or a wrong type is refused at
-plan. Every key is optional.
+Three objects, each `any`, validated like `kube`; every key optional.
 
 | Variable | Attribute | Default | Where | Meaning |
 | --- | --- | --- | --- | --- |
@@ -106,30 +97,23 @@ plan. Every key is optional.
 | `eks_addons` | `efs_csi` | `false` | aws | the EFS CSI driver, with its own role |
 | `eks_addons` | `snapshot_controller` | `true` | aws | the CSI snapshot controller and its CRDs |
 
-`cilium` with any key is refused on gcp and scaleway; `coredns` wherever the
-socle installs no CoreDNS; `eks_addons` on every cloud but aws; `ebs_csi` or
-`efs_csi` with `pod_identity_agent = false`.
+| Refused | When |
+| --- | --- |
+| `cilium` | on gcp and scaleway |
+| `coredns` | where the socle installs no CoreDNS |
+| `eks_addons` | on every cloud but aws |
+| `ebs_csi`, `efs_csi` | with `pod_identity_agent = false` |
+| in `cilium.values` (chart 1.20.2) | `tls.ca.key`, `hubble.tls.server.key`, `hubble.relay.tls.client.key`, `hubble.relay.tls.server.key`, `hubble.ui.tls.client.key`, `hubble.metrics.tls.server.key`, `clustermesh.config.clusters[*].tls.key` |
 
-Refused in `cilium.values`, measured against the 1.20.2 chart: `tls.ca.key`,
-`hubble.tls.server.key`, `hubble.relay.tls.client.key`,
-`hubble.relay.tls.server.key`, `hubble.ui.tls.client.key`,
-`hubble.metrics.tls.server.key` and `clustermesh.config.clusters[*].tls.key`.
-Certificates alone are accepted.
-
-**Not attributes:** chart versions, IPAM and routing mode, kube-proxy
-replacement, the operator's replica count, resources, the GatewayClass name.
-Each is dictated by the foundations' network or has no socle use yet; all but
-the chart versions are reachable through `values`.
-
-`cluster_network` (`api_endpoint`, `service_cidr` on aws, `pod_cidr` on
-azure) is what Cilium needs to know about the cluster. The root passes it
-from the foundations' outputs; a client never writes it.
+- **Not attributes**: chart versions, IPAM and routing mode, kube-proxy
+  replacement, operator replicas, resources, the GatewayClass name; all but
+  the chart versions are reachable through `values`.
+- **`cluster_network`** (`api_endpoint`, `service_cidr` on aws, `pod_cidr` on
+  azure) comes from the foundations' outputs; you never write it.
 
 ## The bootstrap module's variables
 
-Generated by terraform-docs from
-[`opentofu/bootstrap`](../../opentofu/bootstrap/README.md). A client's root
-passes most of them through; the aws root's own variables are in
-[OpenTofu modules](opentofu-modules.md#clustersaws).
+Generated from [`opentofu/bootstrap`](../../opentofu/bootstrap/README.md);
+the aws root's own variables: [OpenTofu modules](opentofu-modules.md#clustersaws).
 
 ::include{file="opentofu/bootstrap/README.md" section="tf-docs"}
