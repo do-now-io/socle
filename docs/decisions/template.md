@@ -5,6 +5,7 @@ status: proposed
 date: 2026-01-01
 cloud: all
 sidebar:
+  label: Record template
   order: 1
 ---
 

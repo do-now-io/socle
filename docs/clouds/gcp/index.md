@@ -2,6 +2,7 @@
 title: GCP · GKE
 description: What the socle builds on GCP, and the decisions behind it.
 sidebar:
+  label: Overview
   order: 0
 ---
 

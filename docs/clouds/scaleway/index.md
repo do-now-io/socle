@@ -2,6 +2,7 @@
 title: Scaleway · Kapsule
 description: What the socle builds on Scaleway, and the decisions behind it.
 sidebar:
+  label: Overview
   order: 0
 ---
 

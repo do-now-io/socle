@@ -2,6 +2,7 @@
 title: AWS · EKS
 description: What the socle builds on AWS, and the decisions behind it.
 sidebar:
+  label: Overview
   order: 0
 ---
 

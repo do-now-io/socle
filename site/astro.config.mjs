@@ -54,6 +54,8 @@ export default defineConfig({
   site: 'https://do-now-io.github.io',
   base,
   trailingSlash: 'always',
+  // It sits over the bottom of every page in `npm run dev`.
+  devToolbar: { enabled: false },
   vite: {
     define: {
       'import.meta.env.SOCLE_CHANNEL': JSON.stringify(channel),

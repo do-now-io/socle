@@ -2,6 +2,7 @@
 title: Decisions
 description: Every decision the socle made, numbered, with its status.
 sidebar:
+  label: Overview
   order: 0
 ---
 

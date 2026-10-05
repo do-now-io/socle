@@ -13,7 +13,7 @@ const sidebar = [
   { label: 'Getting started', items: [{ autogenerate: { directory: 'getting-started' } }] },
   {
     label: 'Clouds',
-    items: clouds.map(([cloud, label]) => ({ label, items: [{ autogenerate: { directory: `clouds/${cloud}` } }] })),
+    items: clouds.map(([cloud, label]) => ({ label, collapsed: true, items: [{ autogenerate: { directory: `clouds/${cloud}` } }] })),
   },
   { label: 'Catalog', items: [{ autogenerate: { directory: 'catalog' } }] },
   { label: 'Guides', items: [{ autogenerate: { directory: 'guides' } }] },

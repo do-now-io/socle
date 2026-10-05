@@ -25,13 +25,13 @@ The type is not decoration: it is what names the next version (see
 ```
 opentofu/
 ├── aws/  gcp/  azure/  scaleway/   # foundations, one module per cloud
-├── bootstrap/                      # Cilium, Flux Operator, inputs, catalog schema (catalog.tf)
+├── bootstrap/                      # Cilium, Flux Operator, inputs, catalog.tf
 └── clusters/aws/                   # the root a client copies: one apply
 oci/
 ├── catalog/<module>/               # one ResourceSet + its Chainsaw suite
 └── clusters/<cloud>/               # which modules each cloud offers
 docs/                               # the documentation, rendered by site/
-site/                               # the documentation site's generator (Astro + Starlight)
+site/                               # the site's generator: Astro + Starlight
 .github/
 ├── workflows/                      # the checks below
 ├── scripts/                        # what the workflows run; runnable locally

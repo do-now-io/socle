@@ -1,6 +1,8 @@
 ---
 title: Catalog
 description: The catalog modules, the clouds they run on, and how they depend on each other.
+sidebar:
+  label: Overview
 ---
 
 :::note[Stub]

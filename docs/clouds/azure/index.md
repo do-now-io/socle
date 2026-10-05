@@ -2,6 +2,7 @@
 title: Azure · AKS
 description: What the socle builds on Azure, and the decisions behind it.
 sidebar:
+  label: Overview
   order: 0
 ---
 
