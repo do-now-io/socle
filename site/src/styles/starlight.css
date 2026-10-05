@@ -1,4 +1,5 @@
-/* The socle tokens, mapped onto Starlight's custom properties. Starlight
+/* The socle tokens, mapped onto Starlight's custom properties. The accent is
+   the socle green (tokens.css), dark #3fae73 / light #0b6b3a. Starlight
    names its scale from the dark theme: --sl-color-white is the text,
    --sl-color-black the ground, in both themes. */
 @import './tokens.css';
@@ -6,9 +7,13 @@
 :root {
   --sl-font: var(--font-body);
   --sl-font-mono: var(--font-mono);
-  --sl-color-accent-low: #1e2448;
-  --sl-color-accent: #5c6fe0;
-  --sl-color-accent-high: #c7ceff;
+  --sl-color-accent-low: #143322;
+  --sl-color-accent: #3fae73;
+  --sl-color-accent-high: #b9f0cf;
+  /* Note asides are Starlight's blue: the accent instead, one green only. */
+  --sl-color-blue-low: #143322;
+  --sl-color-blue: #3fae73;
+  --sl-color-blue-high: #b9f0cf;
   --sl-color-white: #e6e8e3;
   --sl-color-gray-1: #d5d9d3;
   --sl-color-gray-2: #b4bab5;
@@ -20,9 +25,12 @@
 }
 
 :root[data-theme='light'] {
-  --sl-color-accent-low: #e1e5f8;
-  --sl-color-accent: #2c3fb8;
-  --sl-color-accent-high: #1e2b85;
+  --sl-color-accent-low: #e6f5c9;
+  --sl-color-accent: #0b6b3a;
+  --sl-color-accent-high: #004f28;
+  --sl-color-blue-low: #e6f5c9;
+  --sl-color-blue: #0b6b3a;
+  --sl-color-blue-high: #004f28;
   --sl-color-white: #1b2026;
   --sl-color-gray-1: #22272c;
   --sl-color-gray-2: #353c43;
@@ -58,5 +66,5 @@ h1#_top {
   font-size: var(--sl-text-sm);
 }
 .sl-banner a {
-  color: var(--ultramarine);
+  color: var(--accent);
 }

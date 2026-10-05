@@ -212,11 +212,11 @@ const inline = (text: string) => text.replace(/`([^`]+)`/g, '<code>$1</code>');
     -webkit-font-smoothing: antialiased;
   }
   a {
-    color: var(--ultramarine);
+    color: var(--accent);
     text-underline-offset: 3px;
   }
   :focus-visible {
-    outline: 2px solid var(--ultramarine);
+    outline: 2px solid var(--accent);
     outline-offset: 3px;
   }
   code {
@@ -252,16 +252,13 @@ const inline = (text: string) => text.replace(/`([^`]+)`/g, '<code>$1</code>');
 
   /* ---- hero: always basalt, the wordmark standing on its plinth ---- */
   .hero {
-    --ink: #e6e8e3;
-    --ink-muted: #a2a9af;
-    background: var(--basalt-deep);
+    --ink: #f5fff7;
+    --ink-muted: #a9c2b2;
+    background: var(--pine);
     color: var(--ink);
     display: flex;
     flex-direction: column;
     min-height: min(92vh, 52rem);
-  }
-  :root:not([data-theme='light']) .hero {
-    background: #1b2026;
   }
   .top {
     display: flex;
@@ -337,22 +334,22 @@ const inline = (text: string) => text.replace(/`([^`]+)`/g, '<code>$1</code>');
     text-decoration: none;
   }
   .btn.primary {
-    background: var(--ultramarine-on-dark);
-    color: #14181d;
+    background: var(--lime);
+    color: #062a19;
     padding-inline: 2.75rem;
   }
   .btn.primary:hover {
-    background: #c7ceff;
+    background: var(--lime-hover);
   }
   .btn.ghost {
     color: var(--ink);
-    box-shadow: inset 0 0 0 1.5px #535b63;
+    box-shadow: inset 0 0 0 1.5px #4d6b59;
   }
   .btn.ghost:hover {
     box-shadow: inset 0 0 0 1.5px var(--ink);
   }
   .hero :focus-visible {
-    outline-color: var(--ultramarine-on-dark);
+    outline-color: var(--lime);
   }
   .status {
     margin: 0.5rem 0 0;
@@ -438,15 +435,16 @@ const inline = (text: string) => text.replace(/`([^`]+)`/g, '<code>$1</code>');
   }
   .strata .s3 {
     margin-inline: 14%;
-    background: var(--ultramarine-soft);
+    background: var(--accent-soft);
   }
   .strata .s2 {
     margin-inline: 7%;
     background: var(--stone-sunk);
   }
+  /* The foundations are the hero's own ground: the layer everything stands on. */
   .strata .s1 {
-    background: var(--basalt);
-    color: var(--stone);
+    background: var(--pine);
+    color: #f5fff7;
   }
 
   .code {
@@ -463,10 +461,10 @@ const inline = (text: string) => text.replace(/`([^`]+)`/g, '<code>$1</code>');
     font-style: italic;
   }
   .code .s {
-    color: var(--lichen);
+    color: var(--ochre);
   }
   .code .k {
-    color: var(--ultramarine);
+    color: var(--accent);
   }
   .reasons {
     list-style: none;
@@ -513,7 +511,7 @@ const inline = (text: string) => text.replace(/`([^`]+)`/g, '<code>$1</code>');
     text-decoration: none;
   }
   .clouds a:hover {
-    border-bottom-color: var(--ultramarine);
+    border-bottom-color: var(--accent);
   }
   .clouds .cloud {
     font-size: 0.875rem;
@@ -558,8 +556,8 @@ const inline = (text: string) => text.replace(/`([^`]+)`/g, '<code>$1</code>');
   }
   .modules li.on::before,
   .dot.on {
-    background: var(--lichen);
-    border-color: var(--lichen);
+    background: var(--accent);
+    border-color: var(--accent);
   }
   .legend {
     grid-column: -2 / -1;
