@@ -5,7 +5,7 @@
 # which provisions every other node. It is not the cluster's capacity: it
 # does not autoscale, and Karpenter scales nothing here. A cluster with no
 # node is not a cluster, whatever runs on top, so this is not a change the
-# catalog asked for. docs/catalog/cilium.md §2.
+# catalog asked for. docs/decisions/aws.md, AWS-17.
 #
 # Its nodes boot with no CNI and stay NotReady until Cilium's agent runs, and
 # a managed node group is ACTIVE only once its nodes are Ready. So the

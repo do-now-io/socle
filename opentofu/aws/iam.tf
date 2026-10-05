@@ -1,4 +1,5 @@
-# Identities — docs/aws/eks-managed-scope.md (Pod Identity, not IRSA).
+# Identities — docs/decisions/aws.md, AWS-03 (Pod Identity, not IRSA) and
+# AWS-18 (Crossplane's identity and its permissions boundary).
 
 # The cluster's own service role — not a research decision, a structural
 # requirement of EKS itself: the control plane assumes this role to manage
@@ -24,16 +25,12 @@ resource "aws_iam_role_policy_attachment" "cluster" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
 }
 
-# No identity for the in-cluster Crossplane provider, and none for anything
-# else the layer above installs. Such a role is only half an identity: the
-# other half is a Pod Identity association naming a Kubernetes service account
-# that does not exist until the plugins are deployed. That association is built
-# where its service account is, in a second step, and the role goes with it.
-#
-# What remains are the three roles this module's own resources cannot do
-# without: the cluster's service role, which EKS itself assumes, the
-# bootstrap nodes' role in nodes.tf, and the flow logs' delivery role in
-# network.tf.
+# Four roles live in this module: the cluster's service role above, which
+# EKS itself assumes; the bootstrap nodes' role in nodes.tf; the flow logs'
+# delivery role in network.tf; and, when var.crossplane is set, Crossplane's
+# role below, the one workload identity written here. Every other workload
+# identity is declared by the catalog module that needs it, or, for the CSI
+# drivers, beside their add-on in opentofu/bootstrap/eks_addons.tf.
 
 # What Cilium's operator calls in ENI mode. It runs hostNetwork, so the
 # identity it runs under is its node's: the bootstrap nodes' role carries this
@@ -66,12 +63,8 @@ data "aws_iam_policy_document" "cilium_operator" {
   }
 }
 
-# What remains here, besides the Crossplane identity below, are the two roles
-# this module's own resources cannot do without: the cluster's service role,
-# which EKS itself assumes, and the flow logs' delivery role in network.tf.
-# Every other workload identity is declared by the catalog module that needs
-# it, as a CloudAccess claim the crossplane module turns into a role —
-# docs/catalog/crossplane.md.
+# A catalog module declares its identity as a CloudAccess claim the
+# crossplane module turns into a role — docs/catalog/crossplane.md.
 
 # --- crossplane — docs/catalog/crossplane.md ----------------------------------
 #
@@ -83,7 +76,7 @@ data "aws_iam_policy_document" "cilium_operator" {
 # and its Pod Identity association are written here, and only when asked.
 # Credentials reach the pods through the Pod Identity Agent add-on, which the
 # bootstrap module installs with the other managed add-ons, before Flux
-# (opentofu/bootstrap/eks_addons.tf, docs/aws/eks-managed-scope.md §1).
+# (opentofu/bootstrap/eks_addons.tf, docs/decisions/aws.md, AWS-02).
 #
 # An identity that can create IAM roles is the most powerful thing in the
 # cluster. What bounds it, statement by statement below:

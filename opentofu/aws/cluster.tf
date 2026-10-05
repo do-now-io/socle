@@ -1,9 +1,8 @@
-# The cluster — docs/aws/eks-cluster-mode.md (EKS Standard, no Auto Mode)
-# and docs/aws/eks-managed-scope.md (add-ons, version policy, Upgrade
-# Insights). A control plane and the bootstrap node group beside it
-# (nodes.tf), nothing more: Karpenter, Cilium, CSI drivers and the load
-# balancer controller are factory components delivered through the socle
-# OCI artifact, not provisioned by this module.
+# The cluster — docs/decisions/aws.md: AWS-01 (EKS Standard, no Auto Mode),
+# AWS-02 (add-ons), AWS-04 (Upgrade Insights), AWS-15 (no extended support).
+# A control plane and the bootstrap node group beside it (nodes.tf), nothing
+# more: Cilium, CoreDNS and the EKS add-ons come from the bootstrap module,
+# the rest of the socle from the OCI artifact.
 #
 # Standard mode is the absence of a choice, not a variable: this resource
 # has no compute_config/storage_config blocks (those are what Auto Mode
@@ -93,7 +92,7 @@ resource "aws_kms_key" "secrets" {
 # is required with no default and a validation block rejects 0.0.0.0/0, which
 # is the part that actually matters.
 #
-# Both are argued in docs/aws/eks-network-security.md.
+# Both are argued in docs/decisions/aws.md, AWS-11.
 # AVD-AWS-0039 (secrets encryption) fires only when this module is scanned
 # through a root that passes secrets_encryption_enabled as an explicit null
 # (opentofu/clusters/aws groups its inputs in an object, so an omitted key
@@ -118,7 +117,7 @@ resource "aws_eks_cluster" "socle" {
   # right after it — not as a managed add-on: with no CNI the add-on's pods
   # never schedule, it sits DEGRADED, and the provider waits for ACTIVE until
   # it times out, here, before the module that installs the CNI ever runs.
-  # docs/catalog/cilium.md.
+  # docs/architecture/cilium-before-flux.md.
   bootstrap_self_managed_addons = false
 
   # Shipped to the log group below, which is created first so that its
@@ -200,5 +199,5 @@ resource "aws_eks_cluster" "socle" {
 # exists, at versions it pins (opentofu/bootstrap/eks_addons.tf), with the
 # drivers' roles beside them. CoreDNS is the exception: it
 # is needed before Flux and cannot be an add-on before a CNI exists, so the
-# bootstrap module installs it by Helm, after Cilium (docs/catalog/cilium.md).
+# bootstrap module installs it by Helm, after Cilium (docs/architecture/cilium-before-flux.md).
 # What stays here is what the add-ons bind to: the roles in iam.tf.

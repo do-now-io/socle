@@ -6,8 +6,9 @@
 # observability stack, application infrastructure — arrives through the
 # socle OCI artifact and Crossplane.
 #
-# Every default here traces back to a research document under docs/aws/.
-# Resources live in network.tf, cluster.tf, nodes.tf and iam.tf.
+# Every default here traces back to a decision in docs/decisions/aws.md.
+# Resources live in network.tf, cluster.tf, nodes.tf, iam.tf and
+# certificate.tf.
 
 # The region comes from the provider, never from a variable of our own. A
 # variable would be a second source of truth the module cannot enforce

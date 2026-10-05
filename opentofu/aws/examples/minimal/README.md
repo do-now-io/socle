@@ -1,27 +1,38 @@
 # Minimal socle foundations — AWS
 
-The smallest deployable example of the [`opentofu/aws`](../../) module:
-region, name, owner, environment, and the handful of variables the module
-deliberately leaves with no default.
+The smallest call of the [`opentofu/aws`](../../) module: a region, a name,
+an owner, an environment, and the variables the module leaves without a
+default. It shows the module's interface; it is not a cluster on its own.
+
+**This example does not converge alone.** The bootstrap node group's nodes
+boot with no CNI and the group turns `ACTIVE` only once Cilium runs on them,
+so an apply of this example fails on the node group. A
+cluster is [`opentofu/clusters/aws`](../../../clusters/aws), which applies
+the foundations with the bootstrap module that installs Cilium beside the
+group; start from the [AWS quickstart](../../../../docs/getting-started/aws.md).
 
 ## Roles the apply needs
 
-At minimum, a principal able to create VPCs, subnets, NAT gateways, VPC
-endpoints, flow logs, an EKS cluster, KMS keys and CloudWatch log groups,
-and IAM roles/policy attachments for the cluster and for flow log delivery.
+The full list is on
+[Prerequisites](../../../../docs/clouds/aws/prerequisites.md#permissions-for-the-apply).
+For this example alone: EC2 (VPC, subnets, route tables, internet and NAT
+gateways, Elastic IPs, VPC endpoints and their security group, flow logs,
+the launch template), EKS (cluster, node group), IAM (the cluster, node and
+flow-log roles, their inline policies and attachments, `iam:PassRole` on
+each), KMS (two keys), and CloudWatch Logs (two log groups).
 
 ## Remote state
 
-Not configured here on purpose — state belongs in the consumer's own
-account. Declare a backend in a root configuration that wraps this
-example, for instance:
+Not configured here: state belongs in the consumer's own account. Declare a
+backend in the root that wraps this example, for instance:
 
 ```hcl
 terraform {
   backend "s3" {
-    bucket = "my-account-tofu-state"
-    key    = "socle/aws/minimal"
-    region = "eu-west-3"
+    bucket       = "my-account-tofu-state"
+    key          = "socle/aws/minimal.tfstate"
+    region       = "eu-west-3"
+    use_lockfile = true
   }
 }
 ```

@@ -1,4 +1,5 @@
-# Network — docs/aws/eks-network-security.md.
+# Network — docs/decisions/aws.md, AWS-12 (reference network) and AWS-16
+# (flow logs).
 #
 # One VPC, at least one public and one private subnet per AZ — never a
 # flat, all-public layout, even for a client whose workloads all end up in
@@ -23,10 +24,9 @@ resource "aws_vpc" "socle" {
   tags = merge(local.tags, { Name = var.cluster_name })
 }
 
-# Tagged for the AWS Load Balancer Controller and Karpenter's own subnet
-# auto-discovery — a network-level artifact this module has to lay down
-# now, even though the controllers themselves are factory components
-# installed later through the socle OCI artifact, not by this module.
+# Tagged for subnet auto-discovery: EKS's in-tree service controller places
+# the Gateways' NLBs by these tags, and Karpenter will find its subnets the
+# same way — a network-level artifact this module has to lay down now.
 # "owned" rather than "shared": this VPC belongs to one cluster only.
 
 resource "aws_subnet" "private" {
