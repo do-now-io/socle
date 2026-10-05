@@ -6,7 +6,7 @@
 # that — Cilium, the catalog, the observability stack, application
 # infrastructure — arrives through the socle OCI artifact and Crossplane.
 #
-# Every default here traces back to a research document under docs/azure/.
+# Every decided default traces back to a section of docs/decisions/azure.md.
 # Resources live in network.tf and cluster.tf.
 
 locals {
