@@ -60,7 +60,8 @@ the repository: `check-version.sh`, `check-catalog-clouds.sh`.
 | --- | --- | --- |
 | `pr-static.yaml` | every PR, every push to `main` | YAML and workflows lint clean; `VERSION` is stamped everywhere; `catalog.tf` and the cloud overlays agree and every module ships its e2e suite; every OpenTofu module formats, validates, passes `tofu test` and TFLint, and its terraform-docs block is current; the catalog renders and kubeconforms strictly; Trivy finds no HIGH/CRITICAL misconfiguration and no secret |
 | `integration.yaml` | every PR, every push to `main` | every OpenTofu root plans against a cloud emulator ([floci](https://floci.io)) for AWS, GCP and Azure; Scaleway, which has no emulator, plans its minimal example |
-| `docs.yaml` | every PR, every push to `main`, after every release | the documentation site builds in strict mode: no broken internal link or anchor, no page outside the navigation, no include that does not resolve. On `main` it also deploys the site |
+| `docs.yaml` | every PR, forks included | the documentation site builds in strict mode: no broken internal link or anchor, no page outside the navigation, no include that does not resolve |
+| `pages.yaml` | every push to `main`, every PR event, after every run of `publish-artifact.yaml` on `main` | the site is deployed: the last release at the root, `main` under `/dev/`, and a preview of each open PR from a branch of this repository under `/pr/<N>/`, linked from a comment on the PR |
 | `publish-artifact.yaml` | every push | `oci/` is pushed to GHCR and signed; on `main`, the artifact converges on floci's k3s through `e2e.yaml` (one job per module and cloud, each ending in `tofu destroy`), then release-please refreshes its PR |
 | `cleanup-artifacts.yaml` | branch deletion, nightly | pre-release tags are deleted: a branch's when it goes or after 7 days, alphas after 30. Release tags are never touched |
 | `renovate.yaml` | hourly, Dependency Dashboard edits | dependency updates, opened only once their box is ticked on the dashboard |
@@ -75,8 +76,10 @@ step.
 
 The documentation lives in `docs/` and is published at
 <https://do-now-io.github.io/socle/>: the last release at the root, `main`
-under [`/dev/`](https://do-now-io.github.io/socle/dev/). The site itself is in
-`site/`; it reads `docs/` and holds no content of its own.
+under [`/dev/`](https://do-now-io.github.io/socle/dev/), and every open pull
+request from a branch of this repository under `/pr/<N>/`, linked from a
+comment on the PR. The site itself is in `site/`; it reads `docs/` and holds
+no content of its own.
 
 ### The structure
 

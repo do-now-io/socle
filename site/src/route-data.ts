@@ -8,13 +8,18 @@ import { defineRouteMiddleware } from '@astrojs/starlight/route-data';
 
 const channel = import.meta.env.SOCLE_CHANNEL ?? 'dev';
 const released = import.meta.env.SOCLE_RELEASED === 'true';
+const pr = import.meta.env.SOCLE_PR;
 
 export const onRequest = defineRouteMiddleware((context) => {
   const route = context.locals.starlightRoute;
   if (route.editUrl) route.editUrl = new URL(route.editUrl.href.replace('/site/src/content/docs/', '/docs/'));
   const { entry } = route;
   if (entry.data.banner) return;
-  if (channel === 'dev') {
+  if (channel === 'pr') {
+    entry.data.banner = {
+      content: `Preview of <a href="https://github.com/do-now-io/socle/pull/${pr}">pull request #${pr}</a>: not merged, not released. <a href="/socle/dev/">Read main</a>.`,
+    };
+  } else if (channel === 'dev') {
     entry.data.banner = {
       content: released
         ? 'You are reading <strong>dev</strong>: the documentation of <code>main</code>, not yet released. <a href="/socle/">Read the last release</a>.'

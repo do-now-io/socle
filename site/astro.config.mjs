@@ -1,8 +1,11 @@
 // The socle documentation site. The content is ../docs; this folder holds
-// only the generator. Built twice into one GitHub Pages artifact (docs.yaml):
+// only the generator. Built several times into one GitHub Pages artifact
+// (.github/scripts/build-pages.sh):
 //   SOCLE_CHANNEL=latest  the last release, at the root (/socle/)
 //   SOCLE_CHANNEL=dev     main, under /socle/dev/, with an "unreleased" banner
-// Any other value (a pull request, a local build) is built like dev.
+//   SOCLE_CHANNEL=pr      pull request SOCLE_PR, under /socle/pr/<N>/, as a
+//                         preview
+// Unset (a local build), it is built like dev.
 
 import { readdirSync } from 'node:fs';
 import path from 'node:path';
@@ -19,7 +22,9 @@ const docsDir = path.join(repoRoot, 'docs');
 const repository = 'https://github.com/do-now-io/socle';
 
 const channel = process.env.SOCLE_CHANNEL ?? 'dev';
-const base = channel === 'latest' ? '/socle' : '/socle/dev';
+const pr = process.env.SOCLE_PR ?? '';
+if (channel === 'pr' && !/^[0-9]+$/.test(pr)) throw new Error('SOCLE_CHANNEL=pr needs SOCLE_PR, the pull request number');
+const base = { latest: '/socle', pr: `/socle/pr/${pr}` }[channel] ?? '/socle/dev';
 // The ref the content was checked out at: links to files outside docs/ point
 // at that exact tree on GitHub, so a released page links to released code.
 const ref = process.env.SOCLE_REF ?? 'main';
@@ -53,6 +58,7 @@ export default defineConfig({
     define: {
       'import.meta.env.SOCLE_CHANNEL': JSON.stringify(channel),
       'import.meta.env.SOCLE_RELEASED': JSON.stringify(String(released)),
+      'import.meta.env.SOCLE_PR': JSON.stringify(pr),
     },
   },
   // unified, not Astro 7's default Sätteri: Starlight's asides and

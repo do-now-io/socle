@@ -1,0 +1,144 @@
+---
+# The documentation site on GitHub Pages, one artifact holding all of it:
+#   https://do-now-io.github.io/socle/          latest: the last release
+#   https://do-now-io.github.io/socle/dev/      dev: main, bannered as unreleased
+#   https://do-now-io.github.io/socle/pr/<N>/   a preview per open pull request
+# A Pages deployment replaces the whole site, so every run rebuilds every
+# part (.github/scripts/build-pages.sh) and runs are queued, never parallel.
+#
+#   push to main          dev changed.
+#   Docs completed        a PR was opened, pushed to or closed: its preview
+#                         appears, changes or goes.
+#   Publish artifact      the release is tagged inside that workflow with the
+#   completed on main     GITHUB_TOKEN, so no release or tag event ever
+#                         reaches this one: latest may have changed.
+#
+# Previews are for PRs from branches of this repository only. A fork's HTML
+# would be served from do-now-io.github.io, the documentation's own origin;
+# a fork's PR still gets the strict build (docs.yaml). Whoever can push a
+# branch here can already change this workflow, so building their branch
+# grants nothing new. The build job holds no token: listing the PRs is a
+# step of its own, and only the deploy and comment jobs can write.
+#
+# Needs Settings → Pages → Source: GitHub Actions.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_run:
+    workflows: [Docs, Publish artifact]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+# `shell: bash` runs every step with -o pipefail: a failure on the left of a
+# pipe (`| tee`, `| python3`) fails the step instead of vanishing behind the
+# right-hand command's exit code. The unspecified default, `bash -e`, does not.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: Build latest, dev and the previews
+    # Publish artifact runs on every branch; only main's can bring a release.
+    # A fork's PR has no preview, so its Docs runs change nothing here.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.name == 'Docs' &&
+       github.event.workflow_run.head_repository.full_name == github.repository) ||
+      (github.event.workflow_run.name == 'Publish artifact' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      previews: ${{ steps.build.outputs.previews }}
+    steps:
+      # main, whatever the trigger: dev is main, and the PR heads are fetched
+      # below. Tags: latest is built from the last release's tree.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - name: List the open PRs from this repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh pr list --repo "$REPO" --state open --limit 100 \
+            --json number,headRefOid,isCrossRepository \
+            --jq '.[] | select(.isCrossRepository | not) | "\(.number) \(.headRefOid)"' > "$RUNNER_TEMP/prs.txt"
+          # The repository is public: its PR refs fetch without credentials.
+          while read -r number _; do
+            git fetch --quiet --no-tags origin "refs/pull/${number}/head"
+          done < "$RUNNER_TEMP/prs.txt"
+      - name: Build
+        id: build
+        run: |
+          .github/scripts/build-pages.sh "$RUNNER_TEMP/site/_site" "$RUNNER_TEMP/prs.txt"
+          previews="$(jq -Rnc '[inputs | split(" ") | {number: .[0], sha: .[1]}]' < "$RUNNER_TEMP/site/previews.txt")"
+          echo "previews=${previews}" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: ${{ runner.temp }}/site/_site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+        id: deploy
+
+  # One comment per previewed PR, created once and then edited in place: the
+  # link never changes, the commit it shows does.
+  comment:
+    name: Link each preview from its PR
+    needs: [build, deploy]
+    if: needs.build.outputs.previews != '[]'
+    runs-on: ubuntu-24.04
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Create or update the preview comments
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PREVIEWS: ${{ needs.build.outputs.previews }}
+        run: |
+          marker='<!-- socle-docs-preview -->'
+          jq -r '.[] | "\(.number) \(.sha)"' <<< "$PREVIEWS" | while read -r number sha; do
+            body="${marker}
+          📖 **Docs preview:** https://do-now-io.github.io/socle/pr/${number}/
+          Built from ${sha:0:7}. It follows every push and goes when the PR closes."
+            id="$(gh api "repos/${REPO}/issues/${number}/comments" --paginate \
+              --jq ".[] | select(.body | startswith(\"${marker}\")) | .id" | sed -n 1p)"
+            if [ -n "$id" ]; then
+              gh api -X PATCH "repos/${REPO}/issues/comments/${id}" -f body="$body" > /dev/null
+            else
+              gh api -X POST "repos/${REPO}/issues/${number}/comments" -f body="$body" > /dev/null
+            fi
+            echo "- PR #${number}: preview linked" >> "$GITHUB_STEP_SUMMARY"
+          done
