@@ -182,15 +182,16 @@ variable "secrets_encryption_kms_key_arn" {
 
 variable "cluster_log_types" {
   description = <<-EOT
-    Control plane log types shipped to CloudWatch Logs. All five by default:
-    the audit and authenticator streams are the only record of who did what
-    to the API server, which ISO 27001 A.8.15 and SOC 2 CC7 both expect, and
-    the same argument that puts a private subnet tier in every VPC applies
-    here. Trim the list to cut ingestion cost; an empty list turns control
-    plane logging off entirely.
+    Control plane log types shipped to CloudWatch Logs. None by default:
+    ingestion is billed by the gigabyte, and the audit stream records every
+    request to the API server — one controller writing in a loop made it
+    about $40 a day on an idle cluster (#80). A client whose audit expects
+    the API server's record of who did what (ISO 27001 A.8.15, SOC 2 CC7)
+    turns on at least audit and authenticator; the log group, its retention
+    and its key exist either way, so the first line is already covered.
   EOT
   type        = list(string)
-  default     = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+  default     = []
   nullable    = false
 
   validation {
