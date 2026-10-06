@@ -167,8 +167,28 @@ spec:
         # ServiceAccount name for every AWS provider pod, so the foundations
         # can write its Pod Identity association before the cluster has a
         # node: Crossplane otherwise names it after the ProviderRevision, a
-        # hash. Requests from what was measured on k3s:
-        # 306Mi to 441Mi per provider once its CRDs are loaded.
+        # hash.
+        #
+        # The module creates that ServiceAccount, and the runtime config only
+        # points the pods at it (deploymentTemplate's serviceAccountName).
+        # Named through serviceAccountTemplate instead, Crossplane creates it
+        # and makes each ProviderRevision its controller owner in turn: every
+        # provider sharing the name takes it back from the last, the write
+        # wakes the others, and every reconcile succeeds, so nothing backs
+        # off — ~25 writes a second, forever, each one a billed line of the
+        # EKS audit log (#80, crossplane/crossplane#7769). Pointed at, it is
+        # used and never owned. Crossplane's RBAC manager binds the providers'
+        # permissions to whatever ServiceAccount their Deployment runs as.
+        apiVersion: v1
+        kind: ServiceAccount
+        metadata:
+          name: provider-aws
+          namespace: crossplane-system
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
+        ---
+        # Requests from what was measured on k3s: 306Mi to 441Mi per provider
+        # once its CRDs are loaded.
         apiVersion: pkg.crossplane.io/v1beta1
         kind: DeploymentRuntimeConfig
         metadata:
@@ -176,14 +196,12 @@ spec:
           annotations:
             fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
         spec:
-          serviceAccountTemplate:
-            metadata:
-              name: provider-aws
           deploymentTemplate:
             spec:
               selector: {}
               template:
                 spec:
+                  serviceAccountName: provider-aws
                   containers:
                     - name: package-runtime
                       resources:

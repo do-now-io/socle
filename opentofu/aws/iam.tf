@@ -78,8 +78,8 @@ data "aws_iam_policy_document" "cilium_operator" {
 # The one workload identity the socle cannot make for itself: Crossplane
 # creates every other one, and something has to create Crossplane's. Both
 # halves are known before the cluster has a node — the socle artifact runs
-# every AWS provider pod as crossplane-system/provider-aws (a fixed
-# serviceAccountTemplate name in its DeploymentRuntimeConfig) — so the role
+# every AWS provider pod as crossplane-system/provider-aws (a ServiceAccount
+# the crossplane module creates, never one Crossplane owns: #80) — so the role
 # and its Pod Identity association are written here, and only when asked.
 # Credentials reach the pods through the Pod Identity Agent add-on, which the
 # bootstrap module installs with the other managed add-ons, before Flux

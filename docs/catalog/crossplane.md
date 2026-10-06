@@ -55,11 +55,22 @@ Why each link sits where it does:
 - **Link 1 is the only one OpenTofu can own**: it is the only one that cannot
   be created from inside the cluster without already having an identity. Both
   halves are known before the cluster has a node — the module runs every AWS
-  provider pod as `crossplane-system/provider-aws`, a fixed
-  `serviceAccountTemplate` name in its `DeploymentRuntimeConfig` (Crossplane
-  otherwise names the ServiceAccount after a revision hash) — so the
-  association is written in the same apply, and the provider pods get their
-  credentials the moment they start.
+  provider pod as `crossplane-system/provider-aws` (Crossplane otherwise
+  names the ServiceAccount after a revision hash) — so the association is
+  written in the same apply, and the provider pods get their credentials the
+  moment they start. The module creates that ServiceAccount itself and the
+  `DeploymentRuntimeConfig` only points the pods at it, through
+  `deploymentTemplate`'s `serviceAccountName`. Named through
+  `serviceAccountTemplate` instead, Crossplane creates it and makes each
+  ProviderRevision its controller owner in turn: the providers take it back
+  from one another about 25 times a second, forever, every reconcile a
+  success, every write a billed line of the EKS audit log (#80,
+  [crossplane/crossplane#7769](https://github.com/crossplane/crossplane/issues/7769)).
+  A cluster that ran the catalog before #80 still carries those owners on
+  the ServiceAccount, and the garbage collector would delete it, and every
+  provider's AWS access with it, once the last of those revisions goes.
+  Once the new catalog is applied, strip them once:
+  `kubectl -n crossplane-system patch serviceaccount provider-aws --type json -p '[{"op":"remove","path":"/metadata/ownerReferences"}]'`.
 - **Links 5 → 6 → 7 are one `ResourceSet` with `spec.steps`** (flux-operator
   v0.60.0: each step applied and health-checked before the next). Step 6
   needs the core's CRDs, which the core applies itself at start; step 7 needs
@@ -426,7 +437,7 @@ field.
    they provision nothing that needs a pod to run.
 4. **This reverses a documented position**: `opentofu/aws/iam.tf` said no
    Crossplane identity would be built there, because its ServiceAccount did
-   not exist yet. The fixed `serviceAccountTemplate` name removes that reason;
+   not exist yet. The fixed ServiceAccount name removes that reason;
    the comment is rewritten, `docs/aws/eks-managed-scope.md` is not touched.
 5. **Cost**: ~1.1 GB idle (~2 GB just after install, measured in CI) on every cluster that enables it. `provider-aws-eks`
    exists only for the associations; recommended to keep it — the alternative,

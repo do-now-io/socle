@@ -266,6 +266,48 @@ spec:
         - podLogs:
             namespace: crossplane-system
             tail: 40
+    # Every AWS provider runs as the one ServiceAccount the module creates and
+    # Crossplane only points at: owned by no revision, so none of them takes
+    # it back from another. Once they shared it through serviceAccountTemplate
+    # and fought over its owner ~25 times a second, every reconcile a success,
+    # every write a billed line of the EKS audit log (#80). Healthy providers
+    # and a converged module said nothing of it; a resourceVersion that does
+    # not move does — at that rate, 30 s is thousands of writes.
+    - name: the providers' ServiceAccount has no owner and stays still
+      try:
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ServiceAccount
+              metadata:
+                name: provider-aws
+                namespace: crossplane-system
+                (ownerReferences == null): true
+        - script:
+            content: kubectl get serviceaccount provider-aws -n crossplane-system -o jsonpath='{.metadata.resourceVersion}'
+            outputs:
+              - name: resourceVersion
+                value: ($stdout)
+        - sleep:
+            duration: 30s
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ServiceAccount
+              metadata:
+                name: provider-aws
+                namespace: crossplane-system
+                resourceVersion: ($resourceVersion)
+      catch:
+        - get:
+            apiVersion: v1
+            kind: ServiceAccount
+            namespace: crossplane-system
+            name: provider-aws
+            format: yaml
+        - describe:
+            apiVersion: pkg.crossplane.io/v1
+            kind: ProviderRevision
     # The seam: floci's own ClusterProviderConfig. Deleted with this step
     # the day floci serves Pod Identity.
     # skipDelete: the last step removes these two itself, before Crossplane
