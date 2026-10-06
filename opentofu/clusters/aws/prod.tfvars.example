@@ -26,6 +26,10 @@ aws = {
   # bootstrap_node_capacity_type  = "ON_DEMAND"
   # bootstrap_node_instance_types = ["t4g.xlarge", "m7g.xlarge", "m6g.xlarge", "c7g.xlarge", "c6g.xlarge", "r6g.xlarge"]
   # bootstrap_node_count          = 2
+  # Control plane logs are off by default: CloudWatch bills them by the
+  # gigabyte. Turn on the API server's record of who did what when your
+  # audit (ISO 27001, SOC 2) asks for it.
+  # cluster_log_types = ["audit", "authenticator"]
   # Crossplane's own AWS identity, the one the socle cannot create for itself.
   # allowed_services is the ceiling of every role a catalog module gets:
   # add a service when you enable a module that uses it (route53 for
