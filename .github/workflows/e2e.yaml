@@ -144,12 +144,23 @@ jobs:
           TAG: ${{ inputs.tag }}
           CLOUD: ${{ matrix.cloud }}
           CLUSTER: socle-e2e
+        # The generic suite first, alone: socle-root Ready means every module
+        # is Ready. Not beside the modules' tests: a test that ends while an
+        # aggregated API (metrics.k8s.io, KEDA's external metrics) is still
+        # starting cannot delete its namespace — the API server will not
+        # finish deleting one while an API it serves fails discovery
+        # (NamespaceDeletionDiscoveryFailure), and Chainsaw's cleanup times
+        # out (measured on floci; docs/catalog/metrics-server.md).
         run: |
           mkdir -p "$RUNNER_TEMP/reports"
-          chainsaw test oci/tests/e2e oci/catalog/*/tests/e2e \
-            --selector "phase in (root, health), cloud in ($CLOUD, any), platform in (floci, any)" \
+          chainsaw test oci/tests/e2e \
+            --selector "phase=root, cloud in ($CLOUD, any), platform in (floci, any)" \
             --set "tag=$TAG" --set "cloud=$CLOUD" --set "cluster=$CLUSTER" --set "floci_ip=$FLOCI_IP" \
             --report-format JUNIT-STEP --report-name root --report-path "$RUNNER_TEMP/reports"
+          chainsaw test oci/catalog/*/tests/e2e \
+            --selector "phase=health, cloud in ($CLOUD, any), platform in (floci, any)" \
+            --set "tag=$TAG" --set "cloud=$CLOUD" --set "cluster=$CLUSTER" --set "floci_ip=$FLOCI_IP" \
+            --report-format JUNIT-STEP --report-name health --report-path "$RUNNER_TEMP/reports"
       - name: Uninstall the socle, and nothing is left
         if: always()
         uses: ./.github/actions/e2e-cluster
@@ -260,13 +271,19 @@ jobs:
       # Two runs, not one: Chainsaw orders tests arbitrarily, and the
       # module's `module` phase mutates what `health` asserts. Values are the
       # module's tests/e2e/values.yaml when it ships one.
+      # The generic suite first, alone, as in the root job and for the same
+      # reason: no module test ends while an aggregated API is starting.
       - name: The socle converges, and the module is healthy
         run: |
           mkdir -p "$RUNNER_TEMP/reports"
           values=()
           if [ -f "$TESTS/values.yaml" ]; then values=(--values "$TESTS/values.yaml"); fi
-          chainsaw test oci/tests/e2e "$TESTS" "${values[@]}" \
-            --selector "phase in (root, health), cloud in ($CLOUD, any), platform in (floci, any)" \
+          chainsaw test oci/tests/e2e "${values[@]}" \
+            --selector "phase=root, cloud in ($CLOUD, any), platform in (floci, any)" \
+            --set "tag=$TAG" --set "cloud=$CLOUD" --set "cluster=$CLUSTER" --set "floci_ip=$FLOCI_IP" \
+            --report-format JUNIT-STEP --report-name root --report-path "$RUNNER_TEMP/reports"
+          chainsaw test "$TESTS" "${values[@]}" \
+            --selector "phase=health, cloud in ($CLOUD, any), platform in (floci, any)" \
             --set "tag=$TAG" --set "cloud=$CLOUD" --set "cluster=$CLUSTER" --set "floci_ip=$FLOCI_IP" \
             --report-format JUNIT-STEP --report-name health --report-path "$RUNNER_TEMP/reports"
       - name: The module proves itself
@@ -310,7 +327,11 @@ jobs:
           # destroy that races the re-enable orphans what that reconcile
           # applied (measured, run 36850894039: the operator uninstalls from
           # the last completed inventory — empty — and lets the finalizer go).
-          suite "root, health" "$GITHUB_WORKSPACE/oci/tests/e2e" "$GITHUB_WORKSPACE/$TESTS"
+          # The module's health first, then the generic suite: with the module
+          # back, an aggregated API it serves is starting again, and no test
+          # may end before it answers (the health step above says why).
+          suite health "$GITHUB_WORKSPACE/$TESTS"
+          suite root "$GITHUB_WORKSPACE/oci/tests/e2e"
           tofu plan -input=false -detailed-exitcode -var "socle_version=$TAG" -var "cosign_identity=$COSIGN" \
             -var 'kube={}' > /dev/null
           echo "| second \`tofu plan\` | empty (exit 0) |" >> "$GITHUB_STEP_SUMMARY"

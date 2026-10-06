@@ -136,12 +136,23 @@ say which types it serves.
   floci).
 - **Discovery stays quiet.** `kubectl api-resources` exits 0 with nothing on
   stderr while the `APIService` is unavailable (measured on floci).
-- **A namespace deletion waits.** The namespace controller must list every
-  namespaced type before it removes a namespace, `PodMetrics` included, so a
-  module disabled during the window stays `Terminating` and finishes on its
-  own once the API answers. Nothing is lost; the client sees a delay. *Not
-  measured: the quiet discovery above suggests the delay may not happen at
-  all on a recent API server.*
+- **A namespace deletion waits, for as long as the window lasts.** The
+  namespace controller must list every namespaced type before it removes a
+  namespace, `PodMetrics` included, and it does not settle for a partial list
+  the way `kubectl` does. Measured on floci, metrics-server scaled to 0: an
+  empty namespace stayed `Terminating` for five minutes, its condition
+  `NamespaceDeletionDiscoveryFailure` — *Discovery failed for some groups, 1
+  failing: … metrics.k8s.io/v1beta1: stale GroupVersion discovery* — every
+  other condition clear (content deleted, no finalizer left). Back to one
+  replica, it was gone once the `APIService` was `Available` again. Nothing is
+  lost; every namespace deletion in the cluster is held until the API
+  answers. A client who deletes namespaces often (preview environments, a
+  test runner's) wants `ha`, which keeps one replica answering through a node
+  loss or a drain. The e2e met it first: a module's test that ended while the
+  socle's metrics-server was still starting could not delete its namespace
+  within Chainsaw's cleanup timeout, so the workflow now runs the generic
+  suite — `socle-root` `Ready`, every module with it — before any module's
+  test.
 - **The first apply.** Nothing in the socle trips on it: on floci the
   module's `ResourceSet` and `socle-root` were `Ready` 35 s after the apply,
   the `APIService` `Available` one second later.
