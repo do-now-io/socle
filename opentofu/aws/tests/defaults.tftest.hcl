@@ -124,8 +124,9 @@ run "defaults_are_the_recommended_position" {
   }
 
   assert {
-    condition     = length(aws_eks_cluster.socle.enabled_cluster_log_types) == 5
-    error_message = "All five control plane log types must be on by default — audit and authenticator are the only record of who did what."
+    # An empty set plans as null.
+    condition     = try(length(aws_eks_cluster.socle.enabled_cluster_log_types), 0) == 0
+    error_message = "Control plane logging must be off by default — opt-in for a client whose audit needs it (#80): the audit stream is billed by the gigabyte."
   }
 
   assert {
@@ -300,6 +301,18 @@ run "on_demand_is_one_variable_away" {
   assert {
     condition     = aws_eks_node_group.bootstrap.capacity_type == "ON_DEMAND" && aws_eks_node_group.bootstrap.instance_types[0] == "t4g.xlarge"
     error_message = "on demand, EKS takes the list's first type: t4g.xlarge, the cheapest of the six."
+  }
+}
+
+run "the_audit_trail_is_one_variable_away" {
+  command = plan
+  variables {
+    cluster_log_types = ["audit", "authenticator"]
+  }
+
+  assert {
+    condition     = toset(aws_eks_cluster.socle.enabled_cluster_log_types) == toset(["audit", "authenticator"]) && aws_cloudwatch_log_group.cluster.retention_in_days == 90
+    error_message = "a client whose audit needs the API server's record turns on audit and authenticator, into the log group the module already created with its retention."
   }
 }
 
