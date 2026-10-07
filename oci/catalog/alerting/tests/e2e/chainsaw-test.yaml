@@ -4,7 +4,8 @@
 #            no namespace, no Alertmanager datasource in Grafana.
 #   module   on, with a receiver and the watchdog both pointed at podinfo's
 #            /echo (the hello module): vmalert and Alertmanager Available,
-#            the module's rules loaded by the sidecar, the Watchdog firing
+#            its rules and those of otel_gateway, otel_agent and
+#            victoria_metrics loaded by the sidecar and healthy, the Watchdog firing
 #            and delivered through the webhook with no failure, Grafana's
 #            Alertmanager datasource; a ConfigMap labelled vmalert_rules in a
 #            client namespace — broken on purpose — never read, vmalert's
@@ -174,16 +175,21 @@ spec:
         - podLogs:
             namespace: alerting
             tail: 40
-    # The module's rules reach vmalert through the sidecar, the Watchdog
-    # fires, and Alertmanager delivers it through the webhook — the path a
-    # dead man's switch hears.
-    - name: the module's rules are loaded, the Watchdog fires and is delivered
+    # The module's rules reach vmalert through the sidecar, and so do those
+    # of the other modules on by default, from their own namespaces; every
+    # rule evaluates without error. The Watchdog fires, and Alertmanager
+    # delivers it through the webhook — the path a dead man's switch hears.
+    - name: every module's rules are loaded and healthy, the Watchdog fires and is delivered
       try:
         - script:
             content: |
               . ./alerting.sh
               eventually 120 has_group socle-alerting
+              eventually 120 has_group socle-kubernetes
+              eventually 120 has_group socle-nodes
+              eventually 120 has_group socle-victoria-metrics
               echo "rule groups: $(rule_groups | tr '\n' ' ')"
+              eventually 120 rules_healthy
               eventually 120 firing Watchdog
               eventually 180 delivered
       catch:

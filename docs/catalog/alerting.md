@@ -106,22 +106,34 @@ read kube-state-metrics and node-exporter, so each is rewritten, not copied.
 | A rule file did not load | `vmalert_config_last_reload_successful` | `alerting` |
 | A rule fails at evaluation, without a break for 10 minutes | `vmalert_alerting_rules_errors_total` (labels `alertname`, `group`, `file`) | `alerting` |
 | Notifications failing, without a break for 10 minutes | `alertmanager_notifications_failed_total` | `alerting` |
-| Pod crash-looping | `k8s_container_restarts` | `otel_gateway` (`k8s_cluster`) |
-| Pod pending too long | `k8s_pod_phase` (1 = pending) | `otel_gateway` |
-| Node not ready | `k8s_node_condition_ready` | `otel_gateway` |
-| Deployment missing replicas | `k8s_deployment_desired`, `k8s_deployment_available` | `otel_gateway` |
-| Node filesystem nearly full | `k8s_node_filesystem_usage_bytes`, `k8s_node_filesystem_capacity_bytes` | `otel_agent` (`kubeletstats`) |
-| VictoriaMetrics down, disk nearly full, series dropped by its guard | its own scraped metrics (`vm_hourly_series_limit_rows_dropped_total`) | `victoria_metrics` |
+| `PodCrashLooping`: 3 restarts or more in 20 minutes, for 5 | `k8s_container_restarts`, `container_id` aggregated away | `otel_gateway` (`k8s_cluster`) |
+| `PodPending`: for 15 minutes | `k8s_pod_phase` (1 = Pending) | `otel_gateway` |
+| `NodeNotReady`: for 5 minutes, **critical** | `k8s_node_condition_ready` (1 ready, 0 not, -1 unknown) | `otel_gateway` |
+| `DeploymentReplicasMissing`: for 15 minutes | `k8s_deployment_available` < `k8s_deployment_desired` | `otel_gateway` |
+| `NodeFilesystemAlmostFull`: under 10 % free, for 10 minutes | `k8s_node_filesystem_available_bytes` / `_capacity_bytes` | `otel_agent` (`kubeletstats`) |
+| `VictoriaMetricsDiskAlmostFull`: its data over 80 % of its disk, for 10 minutes | `vm_data_size_bytes`, `vm_free_disk_space_bytes` | `victoria_metrics` |
+| `VictoriaMetricsSeriesLimitNear`: the guard past 90 %, for 10 minutes | `vm_hourly_series_limit_current_series` / `_max_series` | `victoria_metrics` |
+| `VictoriaMetricsSeriesDropped`: any, no wait, **critical** | `vm_hourly_series_limit_rows_dropped_total` | `victoria_metrics` |
+
+Two severities: `critical` for a node lost or data lost, `warning` for the
+rest, so a client can route the first to their on-call (`route.routes`
+matching `severity="critical"`). The waits are longer than a rollout's
+transient states, and the crash-loop window longer than the kubelet's
+5-minute back-off, so a pod crash-looping for long still counts 3 restarts.
+
+**No "VictoriaMetrics down" rule.** vmalert asks VictoriaMetrics every
+question: with it down, every rule fails to evaluate, the health rules
+included, and nothing fires. The Watchdog stops instead, and the dead man's
+switch outside the cluster raises the alarm.
 
 Each module's rules are a ConfigMap under `oci/catalog/<module>/rules/`,
 applied by a Kustomization under that module's toggle. With `alerting` off they
 are inert, as a dashboard is with `grafana` off.
 
-**Shipped in two steps.** The module's PR ships the `alerting` rows above —
-the watchdog and the alerting path's own health. The other modules' rows
-(`otel_gateway`, `otel_agent`, `victoria_metrics`) follow in a PR of their
-own, each module gaining a `rules/` folder and its Kustomization; the
-sidecar already reads their namespaces.
+**Grafana lists them.** With `alerting` on, the `victoria_metrics` module
+gives VictoriaMetrics `-vmalert.proxyURL`: Grafana asks its VictoriaMetrics
+datasource for rules, VictoriaMetrics forwards to vmalert, and the socle's
+rules show in Alerting → Alert rules instead of "No rules found".
 
 Not in the baseline yet, each for a reason the collectors give:
 
@@ -323,17 +335,32 @@ request it receives:
 | A rule made in Grafana's UI | `Firing` in Grafana, never in the socle's Alertmanager. With `handleGrafanaManagedAlerts`: Alerting → Settings still shows *Not receiving Grafana managed alerts*, Grafana's log *Sending alerts to local notifier*. With `alertmanagersChoice: all` posted to the admin API: on `/team`. The pod recreated by a socle upgrade: the rule gone |
 | `kubectl top`, the socle's rules | vmalert 3m / 31Mi, the sidecar 1m / 72Mi, Alertmanager 2m / 30Mi: the requests above |
 
-Found on the way, fixed in the same PR: **VictoriaMetrics dropped fresh data**
-12 minutes after it started — its series guard counted one series many
-times. The crash-looping pod's metrics never reached the storage until
-`sortLabels` was set ([victoria-metrics.md](victoria-metrics.md)). For the
-rules PR: `k8s_container_restarts` carries `container_id`, which changes at
-every restart, so a crash-loop rule aggregates it away; and the kubelet's
-back-off reaches 5 minutes, so a 5-minute window stops seeing a pod that has
-crash-looped for long.
+Found on the way: **VictoriaMetrics dropped fresh data** 12 minutes after it
+started — its series guard counted one series many times. The crash-looping
+pod's metrics never reached the storage until `sortLabels` was set
+([victoria-metrics.md](victoria-metrics.md)). And `k8s_container_restarts`
+carries `container_id`, which changes at every restart: a first crash-loop
+rule fired twice for one pod, with counts that were not its restarts.
+
+**The other modules' rules, provoked** (same cluster, the rule files applied
+by hand into their modules' namespaces, three faults started at once):
+
+| Fault | Alert on `/team` |
+| --- | --- |
+| A pod exiting every 5 seconds | `PodCrashLooping` after **8 min**, once for the pod, "restarted 6 times in the last 20 minutes"; `DeploymentReplicasMissing` for its Deployment after **17 min** — never Ready, so never available |
+| A pod whose `nodeSelector` no node matches | `PodPending` after **17 min** |
+| A Deployment whose image does not exist (`ImagePullBackOff`) | `PodPending` and `DeploymentReplicasMissing` after **17 min** |
+
+So one crash-looping pod raises two alerts; an inhibition in Alertmanager
+could fold them, not done. Not provoked: `NodeNotReady` (floci has one node),
+`NodeFilesystemAlmostFull` and `VictoriaMetricsDiskAlmostFull` (a disk of
+hundreds of gigabytes), `VictoriaMetricsSeriesLimitNear` and
+`VictoriaMetricsSeriesDropped` (their metrics were read during the guard's
+incident above, not with the rules loaded). Every rule loads in
+`vmalert -dryRun` and, in the e2e, evaluates without error.
 
 Not measured: a missing `watchdog-url` key in `receivers_secret`, and the
-rules of a module turned off (the other modules' rules come in their own PR).
+rules of a module turned off.
 
 ## Left out of v1
 
