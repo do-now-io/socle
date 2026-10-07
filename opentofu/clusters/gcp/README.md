@@ -101,6 +101,14 @@ reports whether they converged.
   at plan, and the helm provider cannot refresh its releases:
   `tofu apply -var-file=prod.tfvars -target=module.foundations`, then the
   full apply.
+- **Changing `gcp.gateway_certificate.domains`.** A certificate's domains
+  cannot change in place, so the apply creates two new certificates before
+  deleting the old ones. They are created, not issued: the public Gateway's
+  map moves to its new certificate at once, and TLS fails there until Google
+  has issued it — minutes, once the authorization records resolve. The
+  internal Gateway moves only when Flux reconciles the new certificate's
+  name, after the apply has tried to delete the old one: expect an "in use"
+  error, wait for the Gateway to name the new certificate, and apply again.
 - **Destroying.** The cluster carries deletion protection: set
   `gcp.deletion_protection = false` and apply before `tofu destroy`. Releases
   are deleted before the cluster, which needs the API: if the runner can no

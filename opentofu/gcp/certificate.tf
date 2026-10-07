@@ -108,9 +108,14 @@ resource "google_certificate_manager_certificate" "gateway" {
     dns_authorizations = [for a in google_certificate_manager_dns_authorization.gateway : a.id]
   }
 
-  # A replacement is issued before the old one is released: the certificate map
-  # references it, and Certificate Manager refuses to delete a certificate
-  # still in use.
+  # A replacement is created before the old one is released: the certificate
+  # map references it, and Certificate Manager refuses to delete a
+  # certificate still in use. Created is not issued: the map entries move to
+  # the new certificate in the same apply, while it is still PROVISIONING,
+  # and TLS on the public Gateway fails until Google has issued it (minutes,
+  # once the authorization records resolve). A domain-list change is a short
+  # outage on the public Gateway — schedule it (clusters/gcp/README.md, When
+  # one apply is not enough).
   lifecycle {
     create_before_destroy = true
   }
@@ -155,9 +160,15 @@ resource "google_certificate_manager_certificate" "gateway_regional" {
     dns_authorizations = [for a in google_certificate_manager_dns_authorization.gateway_regional : a.id]
   }
 
-  # A replacement is issued before the old one is released: the internal Gateway's listener
-  # references it, and Certificate Manager refuses to delete a certificate
-  # still in use.
+  # A replacement is created before the old one is released: the internal
+  # Gateway's listener references it, and Certificate Manager refuses to
+  # delete a certificate still in use. Two consequences, as on the public
+  # Gateway's: the new certificate is PROVISIONING when the listener moves to
+  # it, so TLS fails until Google issues it; and the listener moves only when
+  # Flux reconciles the new name, after this apply has tried to delete the
+  # old certificate — expect an "in use" error, and apply again once the
+  # Gateway names the new one (clusters/gcp/README.md, When one apply is not
+  # enough).
   lifecycle {
     create_before_destroy = true
   }
