@@ -152,6 +152,21 @@ installs himself, live in his namespaces and are judged like his
 applications. He exempts them through `values` (`vpolExclude`, keeping the
 names above).
 
+## GCP: GKE Autopilot refuses privileged pods first
+
+On Autopilot, GKE's own admission (Warden) refuses a privileged pod before
+Kyverno sees it. Measured on the sandbox: `admission webhook
+"warden-validating.common-webhooks.networking.gke.io" denied the request ...
+[denied by autogke-disallow-privilege] container pause is privileged; not
+allowed in Autopilot`. The privileged policies, `disallow-privileged-containers`
+among them, so only ever report pods Autopilot already blocks. They stay in
+the set, the same on every cloud.
+
+The e2e on GKE (`kyverno-policies-module-gke`) runs the floci test's steps on
+a violation Autopilot admits: a pod mounting the node's `/var/log` read-only,
+the one `hostPath` Autopilot allows, which `disallow-host-path` reports in
+Audit and refuses once enforced.
+
 ## What the client may set — `kube.kyverno_policies`
 
 | Attribute | Default | Type | Meaning |
