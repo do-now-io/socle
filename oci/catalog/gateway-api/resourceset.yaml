@@ -34,6 +34,19 @@
 # a separate route table, so `http` on 80 redirects everything to https. Unlike the CRDs, the Gateways are the socle's
 # own: disabling the module or kube.gateway_api.gateways deletes them, and
 # their load balancers with them.
+#
+# On gcp the module installs nothing: GKE owns Gateway API — its controller,
+# and the standard-channel CRDs it installs and upgrades with the cluster
+# (the foundations' gateway_api_config) — and serves only its own classes,
+# so there is no Cilium step either. What remains are the two Gateways, on
+# GKE's classes: `public` on inputs.gateway.className
+# (gke-l7-global-external-managed, a global external Application Load
+# Balancer), `private` on gke-l7-rilb (a regional internal one, which needs
+# the proxy-only subnetwork the foundations create). TLS terminates at the
+# Google load balancer with the foundations' Certificate Manager
+# certificates, so no key exists in the cluster, and a route attaches to
+# the listener it names: `http` on 80 redirects to https, as on azure. They
+# wait for GKE's two classes to be Accepted instead of the Cilium step.
 apiVersion: fluxcd.controlplane.io/v1
 kind: ResourceSet
 metadata:
@@ -46,6 +59,7 @@ spec:
       name: socle
   wait: true
   resourcesTemplate: |
+    << if ne inputs.cloud "gcp" >>
     apiVersion: source.toolkit.fluxcd.io/v1
     kind: GitRepository
     metadata:
@@ -81,6 +95,7 @@ spec:
       deletionPolicy: Orphan
       wait: true
       timeout: 5m
+    << end >>
     << if inputs.cilium.gatewayApi >>
     ---
     apiVersion: kustomize.toolkit.fluxcd.io/v1
@@ -113,11 +128,24 @@ spec:
         fluxcd.controlplane.io/reconcile: << if inputs.modules.gateway_api.enabled >>enabled<< else >>disabled<< end >>
     spec:
       dependsOn:
+        << if eq inputs.cloud "gcp" >>
+        # GKE's classes, which exist once its Gateway API controller runs;
+        # Accepted, because a Gateway on a class GKE has not accepted would
+        # never be programmed.
+        << range $class := list inputs.gateway.className "gke-l7-rilb" >>
+        - apiVersion: gateway.networking.k8s.io/v1
+          kind: GatewayClass
+          name: << $class >>
+          ready: true
+          readyExpr: status.conditions.exists(c, c.type == 'Accepted' && c.status == 'True')
+        << end >>
+        << else >>
         - apiVersion: kustomize.toolkit.fluxcd.io/v1
           kind: Kustomization
           name: gateway-api-cilium
           namespace: flux-system
           ready: true
+        << end >>
       wait: true
       resources:
         - apiVersion: v1
@@ -130,7 +158,18 @@ spec:
           metadata:
             name: << $gw >>
             namespace: << inputs.gateway.namespace >>
+            << if and (eq inputs.cloud "gcp") (eq $gw "public") >>
+            # The global load balancer takes its certificates from a
+            # Certificate Manager map, named by this annotation.
+            annotations:
+              networking.gke.io/certmap: << inputs.gateway.certificateMap | quote >>
+            << end >>
           spec:
+            << if eq inputs.cloud "gcp" >>
+            # `private` is a regional internal load balancer: GKE has no
+            # internal variant of the global class.
+            gatewayClassName: << if eq $gw "public" >><< inputs.gateway.className >><< else >>gke-l7-rilb<< end >>
+            << else >>
             gatewayClassName: << inputs.gateway.className >>
             # Carried by Cilium onto the LoadBalancer Service it creates for
             # the Gateway, where the cloud's own service controller reads it.
@@ -149,6 +188,7 @@ spec:
                 service.beta.kubernetes.io/azure-load-balancer-internal: "true"
                 << end >>
                 socle.do-now.io/gateway: << $gw >>
+            << end >>
             listeners:
               << if ne inputs.cloud "aws" >>
               # Only the redirect below attaches here.
@@ -164,6 +204,19 @@ spec:
                 << if eq inputs.cloud "aws" >>
                 # TLS is the NLB's; Envoy receives plain HTTP on 443.
                 protocol: HTTP
+                << else if and (eq inputs.cloud "gcp") (eq $gw "public") >>
+                # TLS is the load balancer's, from the certmap annotation: no
+                # tls block, Google's documented shape.
+                protocol: HTTPS
+                << else if eq inputs.cloud "gcp" >>
+                # A regional Gateway takes no certificate map: its regional
+                # Certificate Manager certificate is named in a listener
+                # option, not an annotation.
+                protocol: HTTPS
+                tls:
+                  mode: Terminate
+                  options:
+                    networking.gke.io/cert-manager-certs: << inputs.gateway.regionalCertificate | quote >>
                 << else >>
                 protocol: HTTPS
                 tls:
