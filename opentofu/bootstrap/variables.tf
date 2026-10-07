@@ -768,7 +768,7 @@ variable "kube" {
   # no list is the next rule's to refuse.
   validation {
     condition     = !can(keys(var.kube)) || !contains(keys(local.keda_services), var.cloud) || alltrue([for x in try(tolist(var.kube.keda.services), []) : contains(lookup(local.keda_services, var.cloud, []), x)])
-    error_message = "kube.keda.services: unknown service on ${var.cloud}. KEDA's own role can read ${join(", ", lookup(local.keda_services, var.cloud, []))} — the ${var.cloud} scalers the module scopes. On aws RDS metrics go through cloudwatch; a cron, Prometheus, Kafka, RabbitMQ or Redis trigger needs no entry."
+    error_message = var.cloud == "gcp" ? "kube.keda.services: unknown service on gcp. KEDA's own identity can read ${join(", ", local.keda_services.gcp)} — the GCP scalers the module scopes. A cron, Prometheus, Kafka, RabbitMQ or Redis trigger needs no entry." : "kube.keda.services: unknown service. KEDA's own role can read ${join(", ", local.keda_services.aws)} — the AWS scalers the module scopes. RDS metrics go through cloudwatch; a cron, Prometheus, Kafka, RabbitMQ or Redis trigger needs no entry."
   }
 
   # A named service is a role, and only Crossplane creates one: without it the
@@ -777,7 +777,7 @@ variable "kube" {
   # to an identity made outside the socle.
   validation {
     condition     = !can(keys(var.kube)) || length(try(tolist(var.kube.keda.services), [])) == 0 || try(var.kube.crossplane.enabled, false)
-    error_message = "kube.keda.services names a service, so KEDA needs its own cloud role, which only Crossplane creates: set kube.crossplane.enabled = true (and in the foundations aws.crossplane.allowed_services naming the same services, or on gcp crossplane.allowed_roles with roles/monitoring.viewer), or leave services empty and bind keda/keda-operator to an identity you made yourself."
+    error_message = var.cloud == "gcp" ? "kube.keda.services names a service, so KEDA needs its own cloud binding, which only Crossplane creates: set kube.crossplane.enabled = true (and roles/monitoring.viewer in the foundations' crossplane.allowed_roles), or leave services empty and bind keda/keda-operator to an identity you made yourself." : "kube.keda.services names a service, so KEDA needs its own cloud role, which only Crossplane creates: set kube.crossplane.enabled = true (and aws.crossplane.allowed_services in the foundations, naming the same services), or leave services empty and bind keda/keda-operator to an identity you made yourself."
   }
 
   # The role is declared on the clouds where the crossplane module has a
@@ -1345,9 +1345,10 @@ variable "gateway_regional_certificate" {
   description = <<-EOT
     On gcp, the regional Certificate Manager certificate the private shared
     Gateway's internal load balancer terminates TLS with — the foundations'
-    gateway_regional_certificate output, never the client's. Unknown at plan
-    on the apply that creates it, which is why nothing validates it here.
-    Ignored elsewhere.
+    gateway_regional_certificate output, never the client's. Null or empty
+    on gcp means no shared Gateway either: a private listener without it
+    would never be programmed. Unknown at plan on the apply that creates it,
+    which is why nothing validates it here. Ignored elsewhere.
   EOT
   type        = string
   default     = null

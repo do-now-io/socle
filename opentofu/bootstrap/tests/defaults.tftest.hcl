@@ -1251,6 +1251,21 @@ run "no_shared_gateway_on_gcp_without_a_certificate_map" {
   }
 }
 
+run "no_shared_gateway_on_gcp_without_the_regional_certificate" {
+  command = plan
+  variables {
+    cloud                   = "gcp"
+    cluster_network         = null
+    project                 = { id = "sandbox-2bace", number = "123456789012" }
+    gateway_certificate_map = "socle-test-gateway"
+  }
+
+  assert {
+    condition     = output.inputs.gateway.shared == false && output.inputs.gateway.certificateMap == "socle-test-gateway" && output.inputs.gateway.regionalCertificate == ""
+    error_message = "the private Gateway's listener needs the regional certificate: with the map alone no shared Gateway may be created."
+  }
+}
+
 run "gcp_has_snapshots" {
   command = plan
   variables {

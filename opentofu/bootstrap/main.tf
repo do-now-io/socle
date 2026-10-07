@@ -51,13 +51,16 @@ locals {
   # docs/catalog/gateway-api.md. Where the client kept them and a class
   # serves them — the socle's Cilium's `cilium`, or on gcp GKE's — and,
   # where TLS terminates at the load balancer (aws, gcp), a certificate
-  # exists: the socle never serves a route in clear text.
+  # exists: the socle never serves a route in clear text. On gcp both: the
+  # public Gateway's global load balancer takes the map, the private one's
+  # regional load balancer the regional certificate, and a Gateway whose
+  # listener has no certificate would never be programmed.
   shared_gateways = (
     local.modules.gateway_api.enabled
     && local.modules.gateway_api.gateways
     && (
       var.cloud == "gcp"
-      ? local.gateway_certificate_map != ""
+      ? local.gateway_certificate_map != "" && local.gateway_regional_certificate != ""
       : local.gateway_class_name == "cilium" && (var.cloud != "aws" || local.gateway_certificate_arn != "")
     )
   )
@@ -105,6 +108,13 @@ locals {
       gatewayApi = local.cilium_installed && local.cilium.gateway_api
       hubble     = local.cilium_installed && local.cilium.hubble
     }
+    # What the cluster offers for volumes: `snapshots` — the CSI snapshot
+    # controller and its CRDs are there, so a template may render a
+    # VolumeSnapshotClass. On aws from the add-on this module installed; on
+    # gcp always, GKE manages the PD CSI driver and the snapshot CRDs.
+    storage = {
+      snapshots = var.cloud == "gcp" ? true : local.eks_addon_installed.snapshot_controller
+    }
     # The one GatewayClass a template targets for an internet-facing Gateway
     # or HTTPRoute parent, whatever the cloud: Cilium's where the socle runs
     # it, GKE's global external managed load balancer on gcp. Empty where
@@ -118,13 +128,6 @@ locals {
     # `certificateMap` — on gcp, the Certificate Manager map of the public
     # Gateway, and `regionalCertificate` the certificate of the private
     # one; empty elsewhere.
-    # What the cluster offers for volumes: `snapshots` — the CSI snapshot
-    # controller and its CRDs are there, so a template may render a
-    # VolumeSnapshotClass. On aws from the add-on this module installed; on
-    # gcp always, GKE manages the PD CSI driver and the snapshot CRDs.
-    storage = {
-      snapshots = var.cloud == "gcp" ? true : local.eks_addon_installed.snapshot_controller
-    }
     gateway = {
       className           = local.gateway_class_name
       shared              = local.shared_gateways

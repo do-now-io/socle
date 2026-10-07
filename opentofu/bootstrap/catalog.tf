@@ -48,11 +48,11 @@ locals {
     # gateways: the two shared Gateways every module and the client route
     # through, `public` (internet-facing) and `private` (internal), in
     # gateway-system — HTTPS on 443 (on azure also HTTP on 80, redirecting;
-    # not on aws yet, docs/catalog/gateway-api.md). Created where
-    # the socle's Cilium serves Gateway API (aws, azure) and on gcp, on aws
-    # and gcp only once the foundations issued their certificate: TLS
-    # terminates at the load balancer (docs/catalog/gateway-api.md). false
-    # keeps the CRDs and the class, and no Gateway.
+    # not on aws yet, docs/catalog/gateway-api.md). Created where a class
+    # serves them — the socle's Cilium (aws, azure) or GKE's (gcp) — and, on
+    # aws and gcp, only once the foundations issued their certificate(s):
+    # TLS terminates at the load balancer (docs/catalog/gateway-api.md).
+    # false keeps the CRDs and the class, and no Gateway.
     gateway_api = {
       enabled  = true
       gateways = true
