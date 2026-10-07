@@ -20,12 +20,13 @@
 # in kube.external_secrets.prefixes (default: the cluster name), never `*`,
 # no write, no ListSecrets — bound by Pod Identity to the controller's
 # ServiceAccount, and one ClusterSecretStore named secret-manager on it. On
-# GCP, the same with Crossplane on and a prefix: roles/secretmanager.
-# secretAccessor (versions.access, no list, no write) granted to the
-# controller's own Workload Identity principal, one project-level binding per
-# prefix under an IAM condition on the secret's name — no Google service
-# account — and the same store on Secret Manager. Anywhere else the operator is installed alone
-# and the client brings his stores.
+# GCP, the same with Crossplane on and a prefix:
+# roles/secretmanager.secretAccessor (versions.access, no list, no write)
+# granted to the controller's own Workload Identity principal, one
+# project-level binding per prefix under an IAM condition on the secret's
+# name, <prefix>_<name> — no Google service account — and the same store on
+# Secret Manager. Anywhere else the operator is installed alone and the
+# client brings his stores.
 #
 # Three layers, so that each object is applied once what it needs exists:
 # - this ResourceSet: the Namespace and, on AWS, the Role and the Pod
@@ -77,18 +78,16 @@ spec:
       ready: true
   wait: true
   resourcesTemplate: |
-    << $aws := and (eq inputs.cloud "aws") inputs.modules.crossplane.enabled inputs.modules.external_secrets.prefixes ->>
-    << $gcp := and (eq inputs.cloud "gcp") inputs.modules.crossplane.enabled inputs.modules.external_secrets.prefixes ->>
-    << $access := or $aws $gcp ->>
-    # One binding per prefix, named after it. A prefix may hold "_" and
-    # capitals, which an object name may not: those, a trailing "-" and a
-    # long prefix get a short hash of the prefix, so that two prefixes never
-    # share a name. The default, the cluster's name, is a valid name as it
-    # stands.
+    << $access := and (eq inputs.cloud "aws") inputs.modules.crossplane.enabled inputs.modules.external_secrets.prefixes ->>
+    << $gcpAccess := and (eq inputs.cloud "gcp") inputs.modules.crossplane.enabled inputs.modules.external_secrets.prefixes ->>
+    # One binding per prefix, named after it. A prefix may hold capitals,
+    # which an object name may not: those, a trailing "-" and a long prefix
+    # get a short hash of the prefix, so that two prefixes never share a
+    # name. The default, the cluster's name, is a valid name as it stands.
     << $members := list ->>
-    << if $gcp ->>
+    << if $gcpAccess ->>
     << range $p := inputs.modules.external_secrets.prefixes ->>
-    << $n := $p | lower | replace "_" "-" ->>
+    << $n := $p | lower ->>
     << if or (ne $n $p) (hasSuffix "-" $p) (gt (len $p) 40) ->>
     << $n = printf "%s-%s" ($n | trunc 37) ($p | sha1sum | trunc 8) ->>
     << end ->>
@@ -106,7 +105,7 @@ spec:
         # seccomp (the chart's own security contexts): restricted holds, and
         # pins it.
         pod-security.kubernetes.io/enforce: restricted
-    << if $aws >>
+    << if $access >>
     ---
     # The module's own AWS access, docs/catalog/crossplane.md §3. Under
     # /socle/<cluster>/ and carrying Crossplane's boundary when the root wired
@@ -172,12 +171,7 @@ spec:
         roleArnRef:
           name: external-secrets
     << end >>
-    << if $gcp >>
-    << $principal := printf "%s/projects/%s/locations/global/workloadIdentityPools/%s.svc.id.goog/subject/ns/%s/sa/%s"
-      "principal://iam.googleapis.com" inputs.cluster.projectNumber inputs.cluster.projectId
-      "external-secrets" "external-secrets" ->>
-    << range $m := $members >>
-    ---
+    << if $gcpAccess >>
     # The module's own GCP access, docs/catalog/crossplane.md §2: a binding
     # of the controller's own principal, Workload Identity on
     # external-secrets/external-secrets, no Google service account.
@@ -195,12 +189,19 @@ spec:
     # resource.name, which Secret Manager presents as
     # projects/<number>/secrets/<name>[/versions/<version>] — the project's
     # number, not its id — so that the condition holds for a secret and every
-    # version of it. ListSecrets is not there, and with it dataFrom.find, as
-    # on AWS.
+    # version of it. The prefix ends with "_", the separator, as AWS's ends
+    # with "/": prefixes hold no "_" (OpenTofu refuses one), so prod_ never
+    # matches prod-eu_'s secrets. ListSecrets is not there, and with it
+    # dataFrom.find, as on AWS.
     #
     # One binding per prefix rather than one condition ORing them: a
     # binding's condition cannot change in place, so adding a prefix would
     # otherwise remove and re-create the module's whole access.
+    << $principal := printf "%s/projects/%s/locations/global/workloadIdentityPools/%s.svc.id.goog/subject/ns/%s/sa/%s"
+      "principal://iam.googleapis.com" inputs.cluster.projectNumber inputs.cluster.projectId
+      "external-secrets" "external-secrets" ->>
+    << range $m := $members >>
+    ---
     apiVersion: cloudplatform.gcp.m.upbound.io/v1beta1
     kind: ProjectIAMMember
     metadata:
@@ -217,7 +218,7 @@ spec:
           # Titles need not be unique; the cluster's name tells two clusters'
           # bindings apart in the project's policy.
           title: << printf "socle-%s-%s" inputs.cluster.name $m.prefix | trunc 100 | quote >>
-          expression: << printf "resource.name.startsWith('projects/%s/secrets/%s')" inputs.cluster.projectNumber $m.prefix | quote >>
+          expression: << printf "resource.name.startsWith('projects/%s/secrets/%s_')" inputs.cluster.projectNumber $m.prefix | quote >>
     << end >>
     << end >>
     ---
@@ -233,7 +234,7 @@ spec:
       annotations:
         fluxcd.controlplane.io/reconcile: << if inputs.modules.external_secrets.enabled >>enabled<< else >>disabled<< end >>
     spec:
-      << if $aws >>
+      << if $access >>
       dependsOn:
         - apiVersion: iam.aws.m.upbound.io/v1beta1
           kind: Role
@@ -247,7 +248,7 @@ spec:
           namespace: external-secrets
           ready: true
           readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
-      << else if $gcp >>
+      << else if $gcpAccess >>
       dependsOn:
         << range $m := $members >>
         - apiVersion: cloudplatform.gcp.m.upbound.io/v1beta1
@@ -372,7 +373,7 @@ spec:
           upgrade:
             remediation:
               retries: 3
-    << if $access >>
+    << if or $access $gcpAccess >>
     ---
     # The socle's one store, on the module's own access: no auth block, so
     # the controller's default credential chain — the Pod Identity
@@ -403,7 +404,7 @@ spec:
           name: secret-manager
         spec:
           provider:
-            << if $aws >>
+            << if $access >>
             aws:
               service: SecretsManager
               region: << inputs.cluster.region >>

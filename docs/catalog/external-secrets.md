@@ -12,7 +12,7 @@ read it.
 | What | The official chart, `oci://ghcr.io/external-secrets/charts/external-secrets:2.11.0` (ESO v2.11.0), one `HelmRelease` in namespace `external-secrets` |
 | Default | **Off** |
 | Cloud access, aws | With `crossplane` on and a prefix: the module's own **read-only** IAM role, `GetSecretValue` and `DescribeSecret` on `secret:<prefix>/*` in the cluster's region, Pod Identity on `external-secrets/external-secrets` |
-| Cloud access, gcp | With `crossplane` on and a prefix: `roles/secretmanager.secretAccessor` (**read-only**: `versions.access`, plus `projects.get`/`list`, which the condition voids) for the principal of `external-secrets/external-secrets`, one project-level binding per prefix under the condition `resource.name.startsWith('projects/<number>/secrets/<prefix>')`; no Google service account |
+| Cloud access, gcp | With `crossplane` on and a prefix: `roles/secretmanager.secretAccessor` (**read-only**: `versions.access`, plus `projects.get`/`list`, which the condition voids) for the principal of `external-secrets/external-secrets`, one project-level binding per prefix under the condition `resource.name.startsWith('projects/<number>/secrets/<prefix>_')` — secrets named `<prefix>_<name>`; no Google service account |
 | Store | One `ClusterSecretStore`, `secret-manager`, on that access, aws and gcp. Per-namespace `SecretStore`s and other backends are the client's |
 | Prefixes | `[<cluster name>]` by default, a list; `[]` means no access and no store |
 | Other clouds, or Crossplane off | The operator alone; the client brings his stores |
@@ -44,7 +44,7 @@ When enabled, three layers, each applied once what it needs exists:
 3. **`external-secrets-store`**, a child ResourceSet `dependsOn` the
    `HelmRelease` being Ready, holding the `ClusterSecretStore`: its CRD is one
    the chart installs, and ESO's validating webhook must answer for it to
-   apply. Only where the role exists.
+   apply. Only where the access exists, aws or gcp.
 
 The socle's values: `fullnameOverride: external-secrets`; the CRDs installed
 and annotated `helm.sh/resource-policy: keep`; the ServiceAccount
@@ -84,11 +84,11 @@ spec:
     member: principal://iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/acme-prod-4821.svc.id.goog/subject/ns/external-secrets/sa/external-secrets
     condition:
       title: socle-<cluster>-acme-prod
-      expression: resource.name.startsWith('projects/123456789012/secrets/acme-prod')
+      expression: resource.name.startsWith('projects/123456789012/secrets/acme-prod_')
 ```
 
-A binding is named `external-secrets-<prefix>`; a prefix with `_`, capitals,
-a trailing `-` or over 40 characters is lowered, `_` turned to `-`, and
+A binding is named `external-secrets-<prefix>`; a prefix with capitals, a
+trailing `-` or over 40 characters is lowered, cut to 37 characters and
 suffixed with eight characters of its SHA-1, so that two prefixes never
 share a name. The store is `provider.gcpsm.projectID: <project id>`, no
 `auth` block, no `location`.
@@ -110,13 +110,13 @@ kube = {
 gcp  = { crossplane = { allowed_roles = ["roles/secretmanager.secretAccessor"] } }
 kube = {
   crossplane       = { enabled = true }
-  external_secrets = { enabled = true }   # secrets named acme-prod…, the cluster's name
+  external_secrets = { enabled = true }   # secrets named acme-prod_…, the cluster's name
   reloader         = { enabled = true }
 }
 ```
 
-On gcp, `remoteRef.key` is the secret's name, `acme-prod-shop-db` say: Secret
-Manager names have no `/`, so the prefix is the start of the name.
+On gcp, `remoteRef.key` is the secret's name, `acme-prod_shop-db` say:
+Secret Manager names have no `/`, so `_` separates the prefix from the rest.
 
 ```yaml
 apiVersion: external-secrets.io/v1
@@ -163,9 +163,16 @@ isolation turns off the socle's store (`prefixes = []`) and gives each team a
 
 **Prefixes, several.** A list, because a platform's shared secrets
 (`shared/platform/*`) rarely live under one cluster's name. The default is
-the cluster name, so two clusters in one account never read each other's
-secrets unless the client says so. Each entry is validated at plan as a
-Secrets Manager name path with no wildcard and no leading or trailing `/`.
+the cluster name, so two clusters in one AWS account never read each
+other's secrets unless the client says so. Each entry is validated at plan
+as a Secrets Manager name path with no wildcard and no leading or trailing
+`/`. On gcp a prefix is `[A-Za-z0-9-]` — no `_`, which is the separator: the
+module reads `<prefix>_*`, as AWS reads `<prefix>/*`, so `prod_` never
+matches `prod-eu_db`. Two clusters in one GCP project, however, share the
+controller's principal (the pool is the project's, the subject
+`ns/external-secrets/sa/external-secrets` the same): each reads what either
+cluster's bindings allow. One socle cluster per GCP project is the supported
+topology.
 
 **On gcp, a condition on the project, one binding per prefix.** A
 `SecretIAMMember` binds one secret, never a prefix, so the role is granted on
@@ -183,13 +190,11 @@ turns Ready, and the operator is withheld — visibly, never a silent grant.
 Only global secrets: the condition names no `locations/`, and the store sets
 no `location`.
 
-**On gcp, a prefix is the start of a name, with no separator.** Secret
-Manager names are `[A-Za-z0-9_-]`, without the `/` that ends an AWS prefix,
-so the prefix `acme-prod` also reads `acme-prod2-db` and `acme-production-…`.
-Two clusters of one project whose names extend one another — `prod` and
-`prod-eu` — therefore share the default: `prod` reads `prod-eu`'s secrets.
-Name such clusters apart, or end each prefix with a character the cluster
-names never hold: `prefixes = ["prod_"]` reads only `prod_…`.
+**On gcp, `_` ends the prefix.** Secret Manager names are `[A-Za-z0-9_-]`,
+without the `/` that ends an AWS prefix: a bare `startsWith` on `acme-prod`
+would also read `acme-prod2-db` and `acme-production-…`. So the condition
+names `<prefix>_`, prefixes refuse `_` at plan, and a secret the module may
+read is named `<prefix>_<name>` — `acme-prod_shop-db`.
 
 **Read-only, two calls.** `GetSecretValue` and `DescribeSecret` are what a
 `remoteRef` needs. `ListSecrets` and `BatchGetSecretValue` take no resource
@@ -197,7 +202,8 @@ scope — granting them lists every secret name of the account — so they are
 left out, and with them `dataFrom.find`. On gcp the same holds:
 `secretAccessor` is `versions.access`, and `resourcemanager.projects.get`
 and `list`, which the condition voids (a project's name never starts with a
-secret's path) — no `secrets.list`, no `secrets.get`, so neither `dataFrom.find` nor `metadataPolicy: Fetch`, nor
+secret's path) — no `secrets.list`, no `secrets.get`, so neither
+`dataFrom.find` nor `metadataPolicy: Fetch`, nor
 `secretVersionSelectionPolicy: LatestOrFetch` (it lists versions). No `kms:Decrypt`: a secret encrypted
 with the account's `aws/secretsmanager` key needs none; one on a customer key
 needs that key's policy to name the role, which is the key owner's decision.
@@ -250,10 +256,10 @@ turns it off:
 
 - the `ProjectIAMMember` `external-secrets-<cluster>` Ready and Synced, its
   role `secretAccessor`, its member the controller's principal, its
-  condition on `projects/<number>/secrets/<cluster>`;
+  condition on `projects/<number>/secrets/<cluster>_`;
 - the workload Ready, the controller running as `external-secrets`, the
   socle's store Ready on `gcpsm` with no `auth` block;
-- an `ExternalSecret` on `<cluster>-e2e-app` (seeded by hand, value `first`)
+- an `ExternalSecret` on `<cluster>_e2e-app` (seeded by hand, value `first`)
   turned into a `Secret` holding `first` — the store turns Ready without
   calling GCP, so this read is the proof of the principal;
 - an `ExternalSecret` on `e2e-outside-<cluster>` (seeded too) refused with
