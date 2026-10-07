@@ -1561,7 +1561,14 @@ spec:
                   publicAccessPrevention: enforced
                   versioning:
                     enabled: true
-                  (length(lifecycleRule[?action.type == 'Delete' && condition.daysSinceNoncurrentTime == `30`] || `[]`) > `0`): true
+                  # Matched as a tree, not compared in a filter: atProvider
+                  # carries the integer 30, which a JMESPath `30` literal
+                  # (a float) never equals; the tree compares numbers by
+                  # value. The one rule the module writes.
+                  (lifecycleRule[?action.type == 'Delete'] || `[]`):
+                    - condition:
+                        daysSinceNoncurrentTime: 30
+                        withState: ARCHIVED
                 (conditions[?type == 'Ready'] || `[]`):
                   - status: 'True'
                 (conditions[?type == 'Synced'] || `[]`):
