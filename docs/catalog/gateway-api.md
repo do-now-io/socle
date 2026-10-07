@@ -132,8 +132,10 @@ shows, beyond it:
   Certificate Manager certificate;
 - `private` answers from inside the VPC only, with the regional certificate;
 - the backends are healthy: GKE health-checks each Service on `/` unless a
-  `HealthCheckPolicy` says otherwise, so a backend that does not answer 200
-  there — Grafana redirects `/` to `/login` — is unhealthy behind GKE.
+  `HealthCheckPolicy` says otherwise, and accepts only a 200. A module whose
+  backend redirects `/` carries its own policy on gcp, beside its route —
+  grafana, on `/api/health`; argocd-server answers `/` with a 200 and needs
+  none ([argocd.md](argocd.md)).
 
 ## Follow-ups
 

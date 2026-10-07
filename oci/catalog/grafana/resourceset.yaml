@@ -293,4 +293,28 @@ spec:
               - backendRefs:
                   - name: grafana
                     port: 80
+        << if eq inputs.cloud "gcp" >>
+        # GKE's load balancer health-checks every backend itself, on `/` by
+        # default and accepting only a 200, where Grafana answers 302 to
+        # /login: without this policy the backend is unhealthy and the route
+        # answers 502. /api/health is Grafana's unauthenticated 200, on the
+        # pod's port (USE_SERVING_PORT: the NEG endpoint's, 3000).
+        # https://cloud.google.com/kubernetes-engine/docs/how-to/configure-gateway-resources#configure_health_check
+        - apiVersion: networking.gke.io/v1
+          kind: HealthCheckPolicy
+          metadata:
+            name: grafana
+            namespace: grafana
+          spec:
+            default:
+              config:
+                type: HTTP
+                httpHealthCheck:
+                  portSpecification: USE_SERVING_PORT
+                  requestPath: /api/health
+            targetRef:
+              group: ""
+              kind: Service
+              name: grafana
+        << end >>
     << end >>

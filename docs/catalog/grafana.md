@@ -20,7 +20,7 @@ and Grafana shows it on their two dashboards.
 | RBAC | **A ClusterRole of the socle's, ConfigMaps only.** The chart's own reads every Secret of the cluster (below) |
 | Identity | Local `admin`, the chart's **random password** in `Secret/grafana`; no SSO |
 | Persistence | None: everything shown is provisioned |
-| Exposure | `ClusterIP`, `grafana.grafana.svc:80`. The HTTPRoute is the Gateway API follow-up, as argocd's |
+| Exposure | `ClusterIP`, `grafana.grafana.svc:80`, and an `HTTPRoute` on the shared Gateway `gateway` names, as argocd's. On gcp also a `HealthCheckPolicy` on the Service: GKE's load balancer checks `/` and accepts only a 200, where Grafana redirects to `/login`, so it checks `/api/health` on the pod's port instead ([GKE](https://cloud.google.com/kubernetes-engine/docs/how-to/configure-gateway-resources#configure_health_check)) |
 | Client surface | `domain`, plus `values` and `values_secret` as every module |
 
 ## What is installed

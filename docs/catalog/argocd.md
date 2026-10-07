@@ -260,6 +260,15 @@ install stalls the release. The route attaches to the `https` listener and
 sends `domain` to `argocd-server:80`. `server.insecure: true` is what makes
 that port answer in plain HTTP.
 
+On gcp, GKE's load balancer health-checks the backend itself: `GET /` on the
+pod's port, healthy on a 200 only. No `HealthCheckPolicy` is needed for
+argocd-server. In insecure mode there is no redirect to https, and `/`
+without an HTML `Accept` header is served by the UI's file server, which
+answers `index.html` with a 200 (`newStaticAssetsHandler`, argo-cd v3.5.3
+`server/server.go`; the UI is embedded from `dist/app`, `index.html` at its
+root). The sandbox has to confirm it: the backend healthy in the load
+balancer.
+
 Not done yet: a `GRPCRoute` for the `argocd` CLI. `argocd login --grpc-web`
 works over the HTTPRoute.
 
