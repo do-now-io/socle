@@ -134,14 +134,21 @@ spec:
                     - kube-system
                     - flux-system
                     <<- if eq inputs.cloud "gcp" >>
-                    # GKE's own namespaces, which it runs and a client
-                    # cannot deploy to: GKE rewrites a mutating webhook that
-                    # reaches them, and Kyverno would rewrite it back on every
-                    # reconcile. Leases in kube-node-lease are the nodes'
-                    # heartbeat, which GKE asks no webhook to intercept.
+                    # GKE's own namespaces, which GKE runs: it rewrites a
+                    # mutating webhook that reaches them, and Kyverno would
+                    # rewrite it back on every reconcile. Leases in
+                    # kube-node-lease are the nodes' heartbeat, which GKE asks
+                    # no webhook to intercept. A selector matches no prefix,
+                    # so each is named: those of a 1.35 Autopilot cluster
+                    # (measured 2026-10-07), and gke-managed-cim and
+                    # gmp-system, which GKE documents.
                     - kube-node-lease
                     - gke-managed-system
                     - gke-managed-cim
+                    - gke-managed-filestorecsi
+                    - gke-managed-networking-dra-driver
+                    - gke-managed-parallelstorecsi
+                    - gke-managed-volumepopulator
                     - gke-gmp-system
                     - gmp-system
                     - gmp-public

@@ -111,6 +111,8 @@ spec:
           <<- end >>
           excludeNamespaces: [kube-system, flux-system, kyverno
             <<- if eq inputs.cloud "gcp" >>, kube-node-lease, gke-managed-system, gke-managed-cim
+            <<- ", gke-managed-filestorecsi, gke-managed-networking-dra-driver" >>
+            <<- ", gke-managed-parallelstorecsi, gke-managed-volumepopulator" >>
             <<- ", gke-gmp-system, gmp-system, gmp-public" >>
             <<- end >>]
         customPolicies:
