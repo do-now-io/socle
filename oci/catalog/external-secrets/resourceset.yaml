@@ -182,8 +182,11 @@ spec:
     # Read-only and scoped by name, as on AWS: secretAccessor is
     # versions.access — the value, never the metadata, never a write — on
     # the secrets whose name starts with the prefix. Its other two
-    # permissions, resourcemanager.projects.get and list, act on the project,
-    # whose name never starts with a secret's path: the condition voids them.
+    # permissions (gcloud iam roles describe, 2026-10-07) reach no secret:
+    # resourcemanager.projects.get acts on the project, whose name never
+    # starts with a secret's path, so the condition voids it; and
+    # resourcemanager.projects.list is checked on the project's parent, which
+    # a binding on the project never reaches.
     # A secret's binding cannot name a prefix (a SecretIAMMember is one
     # secret), so the role is bound on the project under an IAM condition on
     # resource.name, which Secret Manager presents as
