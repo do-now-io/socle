@@ -261,7 +261,7 @@ not accept a kubeconfig string anyway.
 | Cloud | `exec` | Note |
 | --- | --- | --- |
 | AWS | `aws eks get-token --cluster-name …` | measured on floci |
-| GCP | `gke-gcloud-auth-plugin` | host is the DNS endpoint |
+| GCP | `gke-gcloud-auth-plugin` | host is the DNS endpoint, verified by the system trust store: no `cluster_ca_certificate` |
 | Azure | `kubelogin get-token --login azurecli --server-id 6dae42f8-4368-4678-94ff-3960e28e3630` | *to verify* — only authenticates a cluster with Entra ID auth enabled (`azure_active_directory_role_based_access_control`), which `opentofu/azure` does not configure yet; enabling it is a pending decision for `docs/azure` — until then this is the shape a root will consume, not a working login |
 | Scaleway | a `sh -c` exec emitting an `ExecCredential` from `SCW_SECRET_KEY` | built: minted at call time, no token in state |
 

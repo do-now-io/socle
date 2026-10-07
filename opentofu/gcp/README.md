@@ -102,7 +102,7 @@ The workflow prints that caveat on every run.
 ## Requirements
 
 | Name | Version |
-|------|---------|
+| ---- | ------- |
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.10 |
 | <a name="requirement_google"></a> [google](#requirement\_google) | >= 8.0, < 9.0 |
 
@@ -113,7 +113,7 @@ No modules.
 ## Resources
 
 | Name | Type |
-|------|------|
+| ---- | ---- |
 | [google_bigquery_dataset.billing_export](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/bigquery_dataset) | resource |
 | [google_certificate_manager_certificate.gateway](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/certificate_manager_certificate) | resource |
 | [google_certificate_manager_certificate.gateway_regional](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/certificate_manager_certificate) | resource |
@@ -141,7 +141,7 @@ No modules.
 ## Inputs
 
 | Name | Description | Type | Default | Required |
-|------|-------------|------|---------|:--------:|
+| ---- | ----------- | ---- | ------- | :------: |
 | <a name="input_cluster_name"></a> [cluster\_name](#input\_cluster\_name) | Name of the GKE cluster. Also prefixes the network resources the module creates. | `string` | n/a | yes |
 | <a name="input_environment"></a> [environment](#input\_environment) | Environment this cluster serves. Stamped as a label, and the axis the upgrade ring order follows. | `string` | n/a | yes |
 | <a name="input_maintenance_window"></a> [maintenance\_window](#input\_maintenance\_window) | When GKE may touch this cluster. Required on purpose — a silent default<br/>would mean nobody decided when production gets upgraded, and the day of<br/>the week is what orders a dev/staging/prod ring.<br/><br/>start\_time and end\_time are RFC3339 timestamps whose difference is the<br/>window length; recurrence is an RFC5545 RRULE. At least 48 hours of<br/>maintenance availability must remain in any 92-day rolling window, and<br/>only contiguous blocks of four hours or more count. | <pre>object({<br/>    start_time = string<br/>    end_time   = string<br/>    recurrence = string<br/>  })</pre> | n/a | yes |
@@ -183,7 +183,7 @@ No modules.
 ## Outputs
 
 | Name | Description |
-|------|-------------|
+| ---- | ----------- |
 | <a name="output_billing_export_dataset"></a> [billing\_export\_dataset](#output\_billing\_export\_dataset) | Reference of the BigQuery dataset waiting for the detailed billing export. Null when none was requested. The billing account still has to be linked to it by hand. |
 | <a name="output_cluster_ca_certificate"></a> [cluster\_ca\_certificate](#output\_cluster\_ca\_certificate) | Base64-encoded cluster CA certificate, for building a kubeconfig. |
 | <a name="output_cluster_dns_endpoint"></a> [cluster\_dns\_endpoint](#output\_cluster\_dns\_endpoint) | The control plane's DNS endpoint — the access path the socle and its automation use. Stable for the life of the cluster and authorised by IAM. |
@@ -195,7 +195,7 @@ No modules.
 | <a name="output_dns_zone_lister_role"></a> [dns\_zone\_lister\_role](#output\_dns\_zone\_lister\_role) | Full name of the custom role that lets external-dns list the project's zones, always among the roles Crossplane may grant. Built from its ID, so known on the first plan. Empty when crossplane is not set. |
 | <a name="output_gateway_certificate_map"></a> [gateway\_certificate\_map](#output\_gateway\_certificate\_map) | Name of the Certificate Manager map the public Gateway's networking.gke.io/certmap annotation takes — what the bootstrap module's gateway\_certificate\_map takes. Empty when gateway\_certificate is not set. |
 | <a name="output_gateway_regional_certificate"></a> [gateway\_regional\_certificate](#output\_gateway\_regional\_certificate) | Name of the regional Certificate Manager certificate the internal Gateway's HTTPS listener takes, in its networking.gke.io/cert-manager-certs TLS option — what the bootstrap module's gateway\_regional\_certificate takes. Empty when gateway\_certificate is not set. |
-| <a name="output_helm_kubernetes"></a> [helm\_kubernetes](#output\_helm\_kubernetes) | Drop-in value for the helm provider's kubernetes attribute, so a root configures it in one line. Uses the DNS endpoint, the only one enabled by default. Carries no credential: gke-gcloud-auth-plugin obtains a short-lived token from the caller's ambient gcloud credentials at call time. |
+| <a name="output_helm_kubernetes"></a> [helm\_kubernetes](#output\_helm\_kubernetes) | Drop-in value for the helm provider's kubernetes attribute, so a root configures it in one line. Uses the DNS endpoint, the only one enabled by default, which serves a publicly trusted certificate: no cluster CA is carried (use cluster\_ca\_certificate with the IP endpoint). Carries no credential: gke-gcloud-auth-plugin obtains a short-lived token from the caller's ambient gcloud credentials at call time. |
 | <a name="output_labels"></a> [labels](#output\_labels) | The standard label set applied to every billable resource this module creates. |
 | <a name="output_network_name"></a> [network\_name](#output\_network\_name) | Name of the VPC the cluster is attached to, whether the module created it or not. |
 | <a name="output_oidc_issuer_url"></a> [oidc\_issuer\_url](#output\_oidc\_issuer\_url) | The cluster's OIDC issuer, for federating an external identity provider against this cluster. |

@@ -119,10 +119,17 @@ output "labels" {
 }
 
 output "helm_kubernetes" {
-  description = "Drop-in value for the helm provider's kubernetes attribute, so a root configures it in one line. Uses the DNS endpoint, the only one enabled by default. Carries no credential: gke-gcloud-auth-plugin obtains a short-lived token from the caller's ambient gcloud credentials at call time."
+  description = "Drop-in value for the helm provider's kubernetes attribute, so a root configures it in one line. Uses the DNS endpoint, the only one enabled by default, which serves a publicly trusted certificate: no cluster CA is carried (use cluster_ca_certificate with the IP endpoint). Carries no credential: gke-gcloud-auth-plugin obtains a short-lived token from the caller's ambient gcloud credentials at call time."
+  # No cluster_ca_certificate on purpose. The DNS-based endpoint presents a
+  # certificate issued by Google Trust Services (subject *.<region>.gke.goog),
+  # not one signed by the cluster CA, so pinning the cluster CA makes helm fail
+  # with "x509: certificate signed by unknown authority". The system trust
+  # store verifies it; `gcloud container clusters get-credentials
+  # --dns-endpoint` likewise writes no CA for it. The cluster_ca_certificate
+  # output stays for clients who use the IP endpoint.
+  # https://cloud.google.com/kubernetes-engine/docs/concepts/network-isolation#dns-based_endpoint
   value = {
-    host                   = "https://${google_container_cluster.socle.control_plane_endpoints_config[0].dns_endpoint_config[0].endpoint}"
-    cluster_ca_certificate = base64decode(google_container_cluster.socle.master_auth[0].cluster_ca_certificate)
+    host = "https://${google_container_cluster.socle.control_plane_endpoints_config[0].dns_endpoint_config[0].endpoint}"
     exec = {
       api_version = "client.authentication.k8s.io/v1beta1"
       command     = "gke-gcloud-auth-plugin"

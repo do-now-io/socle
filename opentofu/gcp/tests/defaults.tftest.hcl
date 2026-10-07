@@ -201,6 +201,32 @@ run "helm_kubernetes_is_credential_free_and_uses_the_gke_exec_plugin" {
   }
 }
 
+run "helm_reaches_the_dns_endpoint_through_the_public_trust_store" {
+  command = plan
+
+  # The endpoint is computed by the API; a stub gives the plan one to read.
+  override_resource {
+    target = google_container_cluster.socle
+    values = {
+      master_auth = {
+        cluster_ca_certificate = "Zm9v"
+      }
+      control_plane_endpoints_config = {
+        dns_endpoint_config = { endpoint = "gke-abc123.europe-west1.gke.goog" }
+      }
+    }
+  }
+
+  assert {
+    condition     = !contains(keys(nonsensitive(output.helm_kubernetes)), "cluster_ca_certificate")
+    error_message = "the DNS endpoint serves a publicly trusted certificate, not one signed by the cluster CA: pinning the cluster CA makes helm fail with 'certificate signed by unknown authority'."
+  }
+  assert {
+    condition     = nonsensitive(output.helm_kubernetes.host) == "https://gke-abc123.europe-west1.gke.goog"
+    error_message = "helm_kubernetes must target the DNS-based endpoint (*.gke.goog)."
+  }
+}
+
 run "gateway_api_can_be_switched_off" {
   command = plan
 
