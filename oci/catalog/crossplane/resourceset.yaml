@@ -264,9 +264,11 @@ spec:
           runtimeConfigRef:
             name: provider-aws
         << else if eq inputs.cloud "gcp" >>
-        # Cloud Platform for the modules' project-level bindings; DNS,
-        # Storage and Secret Manager for the bindings a module writes on its
-        # own resources: what every module's GCP access is made of. One
+        # Cloud Platform for the modules' project-level bindings, Storage and
+        # Secret Manager for the bindings a module writes on its own
+        # resources: what every module's GCP access is made of. No Cloud DNS
+        # provider: a zone's own IAM is never honoured, so external-dns's
+        # binding is a project-level one (docs/catalog/crossplane.md). One
         # ServiceAccount name for every GCP provider pod, because the
         # foundations grant Crossplane's rights to exactly
         # `…/subject/ns/crossplane-system/sa/provider-gcp`: Crossplane
@@ -287,8 +289,8 @@ spec:
             fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
         ---
         # Requests set on purpose: Autopilot gives a container without them
-        # 500m / 2Gi, and bills what is requested — five providers would
-        # reserve 10Gi. The memory is AWS's, measured on k3s (306Mi to 441Mi
+        # 500m / 2Gi, and bills what is requested — four providers would
+        # reserve 8Gi. The memory is AWS's, measured on k3s (306Mi to 441Mi
         # per provider once its CRDs are loaded), until the sandbox measures
         # GCP's (docs/catalog/crossplane.md). 100m / 320Mi is 1 vCPU to
         # 3.1Gi, inside Autopilot's CPU:memory ratio (1:1 to 1:6.5), and
@@ -314,7 +316,7 @@ spec:
                           cpu: 100m
                           memory: 320Mi
         ---
-        # The family provider, a dependency of the other four, declared so
+        # The family provider, a dependency of the other three, declared so
         # that its version is pinned here, under the name Crossplane gives a
         # dependency it installs itself: the AWS family's reason, above.
         # Each sub-provider depends on
@@ -340,20 +342,6 @@ spec:
             fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
         spec:
           package: xpkg.crossplane.io/crossplane-contrib/provider-gcp-cloudplatform:v3.0.0
-          runtimeConfigRef:
-            name: provider-gcp
-        ---
-        # Cloud DNS kinds. No module binds through them: a zone's IAM granted on
-        # the zone is never honoured (docs/catalog/crossplane.md §6), so
-        # external-dns's role is a ProjectIAMMember.
-        apiVersion: pkg.crossplane.io/v1
-        kind: Provider
-        metadata:
-          name: provider-gcp-dns
-          annotations:
-            fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
-        spec:
-          package: xpkg.crossplane.io/crossplane-contrib/provider-gcp-dns:v3.0.0
           runtimeConfigRef:
             name: provider-gcp
         ---
@@ -448,11 +436,6 @@ spec:
             - apiVersion: pkg.crossplane.io/v1
               kind: Provider
               name: provider-gcp-cloudplatform
-              ready: true
-              readyExpr: status.conditions.exists(c, c.type == 'Healthy' && c.status == 'True')
-            - apiVersion: pkg.crossplane.io/v1
-              kind: Provider
-              name: provider-gcp-dns
               ready: true
               readyExpr: status.conditions.exists(c, c.type == 'Healthy' && c.status == 'True')
             - apiVersion: pkg.crossplane.io/v1
