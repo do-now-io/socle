@@ -11,7 +11,7 @@ module, on AWS and GCP. Issue #58; the catalog contract is [docs/flux-catalog.md
 > local k3s and in CI on floci (§9, *Measured*). The sandbox proof is still
 > to come.
 >
-> GCP: implemented on the gcp-parity branch (2026-10-07) — rendered,
+> GCP: implemented with the GCP parity work (2026-10-07) — rendered,
 > kubeconformed against provider-upjet-gcp v3.0.0's CRDs and `helm template`d;
 > its sandbox proof (§9, *On the GCP sandbox*) is still to come.
 

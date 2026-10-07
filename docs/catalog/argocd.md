@@ -148,11 +148,11 @@ the Autopilot floor) and, with `ha`, each Redis's `sentinel` and
 `split-brain-fix` sidecars (10m / 32Mi).
 
 Otherwise nothing. The four `oci/clusters/<cloud>/kustomization.yaml` list
-the same template and carry no `argocd` patch. Two things will differ per cloud later
-and neither is this module's: the Gateway implementation the HTTPRoute binds to
-(the gateway-api module), and the workload identity ArgoCD would use to read
-private repositories or deploy to other clusters (a foundations concern,
-wired through `kube.argocd` when it exists).
+the same template and carry no `argocd` patch. Two things differ per cloud,
+and neither is this module's: the Gateway implementation the HTTPRoute binds
+to (the gateway-api module), and the workload identity ArgoCD would use to
+read private repositories or deploy to other clusters (a foundations
+concern, wired through `kube.argocd` when it exists).
 
 ## Templating notes
 

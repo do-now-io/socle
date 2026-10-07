@@ -252,7 +252,8 @@ provider "helm" { kubernetes = module.foundations.helm_kubernetes }
 ```
 
 The object is `{ host, cluster_ca_certificate, exec = { api_version, command,
-args } }`. **No token, no kubeconfig**: the exec plugin gets a short-lived
+args } }`, without `cluster_ca_certificate` on GCP (below). **No token, no
+kubeconfig**: the exec plugin gets a short-lived
 token at call time from the runner's ambient credentials, exactly as the
 cloud provider does. A raw kubeconfig would put a credential in the state,
 which three of the four modules refuse by design, and the helm provider does
@@ -261,7 +262,7 @@ not accept a kubeconfig string anyway.
 | Cloud | `exec` | Note |
 | --- | --- | --- |
 | AWS | `aws eks get-token --cluster-name …` | measured on floci |
-| GCP | `gke-gcloud-auth-plugin` | host is the DNS endpoint, verified by the system trust store: no `cluster_ca_certificate` |
+| GCP | `gke-gcloud-auth-plugin` | host is the DNS endpoint, verified by the system trust store: no `cluster_ca_certificate`. The endpoint serves a Google Trust Services certificate, not one the cluster CA signed; with the CA pinned, helm failed `x509: certificate signed by unknown authority` (measured on the sandbox, 2026-10-07) |
 | Azure | `kubelogin get-token --login azurecli --server-id 6dae42f8-4368-4678-94ff-3960e28e3630` | *to verify* — only authenticates a cluster with Entra ID auth enabled (`azure_active_directory_role_based_access_control`), which `opentofu/azure` does not configure yet; enabling it is a pending decision for `docs/azure` — until then this is the shape a root will consume, not a working login |
 | Scaleway | a `sh -c` exec emitting an `ExecCredential` from `SCW_SECRET_KEY` | built: minted at call time, no token in state |
 
@@ -613,8 +614,9 @@ bootstrap module's validations (one failing case per block, plus the
 normalisation and the value-kind check), a check that `VERSION` and every
 `local.socle_version` agree, and two `kubeconform` passes. (a) The
 renders are kubeconformed **strictly**: `flux-operator build rset` of every
-`oci/catalog/*/resourceset.yaml` with `oci/.ci/inputs-sample.yaml`, and
-`helm template` of `opentofu/bootstrap/manifests` with
+`oci/catalog/*/resourceset.yaml` for each cloud the catalog runs on — aws
+with `oci/.ci/inputs-sample.yaml`, gcp with `oci/.ci/inputs-sample-gcp.yaml`
+— and `helm template` of `opentofu/bootstrap/manifests` with
 `oci/.ci/envelope-values.yaml` (its root `ResourceSet` also built, with
 `--inputs-from-provider`). (b) The raw templates under `oci/catalog` and
 `oci/clusters` are also kubeconformed, still with `-strict`, but with

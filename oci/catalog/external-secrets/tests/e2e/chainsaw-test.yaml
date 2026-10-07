@@ -1021,8 +1021,8 @@ spec:
 # Two secrets are seeded in the sandbox's Secret Manager before the run, by
 # the operator's own hand: these tests write nothing outside the cluster.
 # <cluster>_e2e-app, value `first`, under the prefix (<prefix>_<name>, "_"
-# the separator); e2e-outside-<cluster>, any value, outside it. The values the run passes: cluster, project_id and
-# project_number (--set). The rotation and Reloader's roll are not repeated
+# the separator); e2e-outside-<cluster>, any value, outside it. The values
+# the run passes: cluster, project_id and project_number (--set). The rotation and Reloader's roll are not repeated
 # here: they are ESO's and Reloader's, not the cloud's, and proven by the
 # floci test above; what only GCP can prove is the binding, the principal
 # and the prefix as IAM enforces it.
