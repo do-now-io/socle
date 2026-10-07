@@ -35,9 +35,22 @@ locals {
   # lowercase letters, digits and dashes, 63 at most, which a domain does not
   # fit, and a digest stays stable when the list is reordered.
   gateway_name = "${var.cluster_name}-gateway"
+
+  # A certificate's domains cannot change in place, so a new list is a new
+  # certificate — under a new name, the digest of the sorted list, so that it
+  # can exist next to the one still in use until it replaces it.
+  gateway_certificate_name = "${local.gateway_name}-${substr(sha1(join(",", sort(local.gateway_domains))), 0, 8)}"
 }
 
-# Global, for the global certificate: FIXED_RECORD, the default type.
+# Global, for the global certificate: FIXED_RECORD, the default type, whose
+# record is _acme-challenge.<domain>. That name must be free in the zone — a
+# record another ACME client left there makes this apply fail on a conflict,
+# and Cloud DNS has no overwrite. PER_PROJECT_RECORD would sidestep it, and
+# global certificates accept that type too
+# (https://cloud.google.com/certificate-manager/docs/deploy-google-managed-dns-auth),
+# but its record is per project and documented with one example only: nothing
+# says a global and a regional authorization of the same domain get distinct
+# names, and two record sets of the same name would conflict on every apply.
 resource "google_certificate_manager_dns_authorization" "gateway" {
   for_each = local.gateway_authorized_domains
 
@@ -51,7 +64,8 @@ resource "google_certificate_manager_dns_authorization" "gateway" {
 
 # Regional, for the regional certificate: a regional certificate takes only
 # regional authorizations, and only of the PER_PROJECT_RECORD type — whose
-# record name differs from the global one, so both live in the zone together.
+# record, _acme-challenge_<project digest>.<domain>, differs from the global
+# one, so both live in the zone together.
 # https://cloud.google.com/certificate-manager/docs/deploy-google-managed-regional
 resource "google_certificate_manager_dns_authorization" "gateway_regional" {
   for_each = local.gateway_authorized_domains
@@ -86,12 +100,19 @@ resource "google_certificate_manager_certificate" "gateway" {
   count = var.gateway_certificate == null ? 0 : 1
 
   project     = var.project_id
-  name        = local.gateway_name
+  name        = local.gateway_certificate_name
   description = "The ${var.cluster_name} socle's public Gateway."
 
   managed {
     domains            = local.gateway_domains
     dns_authorizations = [for a in google_certificate_manager_dns_authorization.gateway : a.id]
+  }
+
+  # A replacement is issued before the old one is released: the certificate map
+  # references it, and Certificate Manager refuses to delete a certificate
+  # still in use.
+  lifecycle {
+    create_before_destroy = true
   }
 
   labels = local.labels
@@ -126,12 +147,19 @@ resource "google_certificate_manager_certificate" "gateway_regional" {
 
   project     = var.project_id
   location    = var.region
-  name        = local.gateway_name
+  name        = local.gateway_certificate_name
   description = "The ${var.cluster_name} socle's internal Gateway."
 
   managed {
     domains            = local.gateway_domains
     dns_authorizations = [for a in google_certificate_manager_dns_authorization.gateway_regional : a.id]
+  }
+
+  # A replacement is issued before the old one is released: the internal Gateway's listener
+  # references it, and Certificate Manager refuses to delete a certificate
+  # still in use.
+  lifecycle {
+    create_before_destroy = true
   }
 
   labels = local.labels

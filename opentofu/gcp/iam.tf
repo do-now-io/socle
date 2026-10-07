@@ -43,12 +43,16 @@ resource "google_project_iam_member" "observability_reader" {
 # not members, so a compromised Crossplane could grant an allowed role to any
 # principal. The list is the answer — such a grant is worth exactly the
 # allowed roles, never an identity, the project, or a role that grants roles:
-# owner, editor, viewer, iam.* and resourcemanager.* are refused at plan.
-# What the plan cannot refuse is any other role carrying a setIamPolicy
-# permission, such as roles/storage.admin: Crossplane could grant it to
-# itself, unconditioned, and step outside this bound on every resource of that
-# service. Google's own warning, and the reviewer's job on the client's list:
+# owner, editor, viewer, iam.* and resourcemanager.* are refused at plan, and
+# so is every predefined admin role (roles/storage.admin,
+# roles/compute.instanceAdmin.v1, …): those carry a setIamPolicy permission,
+# and Crossplane could grant one to itself, unconditioned, and step outside
+# this bound on every resource of that service — Google's own warning:
 # https://cloud.google.com/iam/docs/setting-limits-on-granting-roles
+# One exception, roles/storage.objectAdmin, which Velero needs: its
+# storage.objects.setIamPolicy writes object ACLs, which a bucket with
+# uniform bucket-level access does not have. What the plan cannot refuse is a
+# custom role carrying setIamPolicy; that stays the reviewer's job.
 #
 # The list names roles, not resources: which secret, which bucket a module
 # reaches is that module's own binding, so a new module never needs a change
@@ -108,7 +112,8 @@ resource "google_project_iam_member" "crossplane_project_grants" {
 # and update its configuration, set its IAM policy so the module's principal
 # can use it. No delete of any kind and no object permission: Crossplane can
 # never remove a bucket of backups, nor read one, whatever a managed
-# resource's deletionPolicy says.
+# resource's deletionPolicy says. No storage.buckets.list either: it is
+# checked on the project, where a bucket-name condition never grants it.
 resource "google_project_iam_custom_role" "crossplane_buckets" {
   count = var.crossplane == null ? 0 : 1
 
@@ -122,7 +127,6 @@ resource "google_project_iam_custom_role" "crossplane_buckets" {
     "storage.buckets.update",
     "storage.buckets.getIamPolicy",
     "storage.buckets.setIamPolicy",
-    "storage.buckets.list",
   ]
 }
 
@@ -133,6 +137,11 @@ resource "google_project_iam_custom_role" "crossplane_buckets" {
 # permission. Cloud Storage recognises modifiedGrantsByRole
 # (https://cloud.google.com/iam/docs/conditions-attribute-reference), so the
 # same role list bounds a bucket's IAM policy.
+#
+# The prefix is <cluster_name>-, the shape AWS's bucket statement has, and
+# like it not exclusive between clusters: cluster socle reaches the buckets of
+# a cluster named socle-prod in the same project. Two clusters of one project
+# take names neither of which prefixes the other.
 resource "google_project_iam_member" "crossplane_buckets" {
   count = var.crossplane == null ? 0 : 1
 

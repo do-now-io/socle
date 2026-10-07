@@ -438,9 +438,10 @@ variable "crossplane" {
     Project IAM Admin under a modifiedGrantsByRole condition. Empty grants
     nothing but the socle's own zone lister role; owner, editor, viewer,
     iam.* and resourcemanager.* are refused, and Google caps the list at
-    nine. Never list a role that itself grants roles (one with a setIamPolicy
-    permission, such as roles/storage.admin): Crossplane could give it to
-    itself. Buckets are reachable under the <cluster_name>- prefix only, and
+    nine. Predefined admin roles (roles/storage.admin, …) are refused too,
+    roles/storage.objectAdmin excepted: they grant roles on their resources,
+    and Crossplane could give one to itself. A custom role that carries a
+    setIamPolicy permission must not be listed, for the same reason. Buckets are reachable under the <cluster_name>- prefix only, and
     never deletable. dns_zones are the Cloud DNS managed zones (by name) on
     which Crossplane may bind external-dns. Null, the default, creates
     nothing.
@@ -462,6 +463,18 @@ variable "crossplane" {
       if contains(["roles/owner", "roles/editor", "roles/viewer"], r) || startswith(r, "roles/iam.") || startswith(r, "roles/resourcemanager.")
     ]) == 0, true)
     error_message = "crossplane.allowed_roles must not name ${try(join(", ", [for r in var.crossplane.allowed_roles : r if contains(["roles/owner", "roles/editor", "roles/viewer"], r) || startswith(r, "roles/iam.") || startswith(r, "roles/resourcemanager.")]), "")}: Crossplane would then be able to grant itself the project. Basic roles, iam.* and resourcemanager.* are refused."
+  }
+
+  # An admin role carries setIamPolicy on its service's resources: granted to
+  # Crossplane itself, it would re-delegate beyond the bound.
+  # roles/storage.objectAdmin's only such permission writes object ACLs,
+  # which uniform bucket-level access disables.
+  validation {
+    condition = var.crossplane == null || try(length([
+      for r in var.crossplane.allowed_roles : r
+      if can(regex("^roles/[A-Za-z0-9_.]*(\\.admin|Admin)(\\.v[0-9]+)?$", r)) && r != "roles/storage.objectAdmin"
+    ]) == 0, true)
+    error_message = "crossplane.allowed_roles must not name ${try(join(", ", [for r in var.crossplane.allowed_roles : r if can(regex("^roles/[A-Za-z0-9_.]*(\\.admin|Admin)(\\.v[0-9]+)?$", r)) && r != "roles/storage.objectAdmin"]), "")}: an admin role grants roles on its service's resources, and Crossplane could give it to itself and step outside the roles it may grant. Name the narrower role the module needs."
   }
 
   # Google accepts at most ten roles in a hasOnly() condition, and the socle's
@@ -488,7 +501,9 @@ variable "gateway_certificate" {
     in the Cloud DNS managed zone `dns_zone` (its name, in this project).
     A global certificate in a certificate map serves the public Gateway; a
     regional one serves the internal Gateway. Every route published through a
-    Gateway — ArgoCD's included — is then `<name>.<domain>`. Null, the
+    Gateway — ArgoCD's included — is then `<name>.<domain>`. The zone must
+    not already hold an `_acme-challenge.<domain>` record (one another ACME
+    client left behind): the global authorization writes that name. Null, the
     default, creates nothing, and the bootstrap module creates no Gateway: the
     socle never serves a route in clear text.
   EOT

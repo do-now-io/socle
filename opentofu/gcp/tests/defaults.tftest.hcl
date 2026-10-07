@@ -374,8 +374,8 @@ run "buckets_are_bounded_to_the_cluster_prefix_and_never_deleted" {
     error_message = "the Crossplane identity must never delete a bucket, nor read or write anything in it: a bucket of backups outlives every managed resource."
   }
   assert {
-    condition     = contains(google_project_iam_custom_role.crossplane_buckets[0].permissions, "storage.buckets.create") && contains(google_project_iam_custom_role.crossplane_buckets[0].permissions, "storage.buckets.setIamPolicy")
-    error_message = "a module's bucket is created by Crossplane, and bound to the module's own principal by it."
+    condition     = toset(google_project_iam_custom_role.crossplane_buckets[0].permissions) == toset(["storage.buckets.create", "storage.buckets.get", "storage.buckets.update", "storage.buckets.getIamPolicy", "storage.buckets.setIamPolicy"])
+    error_message = "a module's bucket is created, configured and bound to the module's own principal by Crossplane — nothing more, and no storage.buckets.list, a project permission no bucket-name condition ever grants."
   }
 }
 
@@ -389,6 +389,9 @@ run "no_certificate_unless_asked" {
       length(google_certificate_manager_certificate.gateway) == 0 &&
       length(google_certificate_manager_certificate.gateway_regional) == 0 &&
       length(google_certificate_manager_dns_authorization.gateway) == 0 &&
+      length(google_certificate_manager_dns_authorization.gateway_regional) == 0 &&
+      length(google_certificate_manager_certificate_map.gateway) == 0 &&
+      length(google_certificate_manager_certificate_map_entry.gateway) == 0 &&
       length(google_dns_record_set.gateway_certificate_authorization) == 0 &&
       output.gateway_certificate_map == "" && output.gateway_regional_certificate == ""
     )
@@ -402,6 +405,26 @@ run "certificate_map_covers_every_domain" {
     gateway_certificate = {
       dns_zone = "sandbox-gcp-do-now-io"
       domains  = ["sandbox-gcp.do-now.io", "*.sandbox-gcp.do-now.io"]
+    }
+  }
+
+  # IDs are Google's, unknown at plan; pinned here so the wiring can be read.
+  override_resource {
+    target = google_certificate_manager_certificate.gateway
+    values = { id = "projects/socle-test-project/locations/global/certificates/global-cert" }
+  }
+  override_resource {
+    target = google_certificate_manager_dns_authorization.gateway
+    values = {
+      id                  = "projects/socle-test-project/locations/global/dnsAuthorizations/global-auth"
+      dns_resource_record = [{ name = "_acme-challenge.sandbox-gcp.do-now.io.", type = "CNAME", data = "0e40fc77.4.authorize.certificatemanager.goog.", domain = "sandbox-gcp.do-now.io" }]
+    }
+  }
+  override_resource {
+    target = google_certificate_manager_dns_authorization.gateway_regional
+    values = {
+      id                  = "projects/socle-test-project/locations/europe-west1/dnsAuthorizations/regional-auth"
+      dns_resource_record = [{ name = "_acme-challenge_abcdefgh.sandbox-gcp.do-now.io.", type = "CNAME", data = "0e40fc77.4.authorize.certificatemanager.goog.", domain = "sandbox-gcp.do-now.io" }]
     }
   }
 
@@ -426,11 +449,46 @@ run "certificate_map_covers_every_domain" {
     error_message = "the map must carry one hostname entry per domain: a name without an entry gets no certificate at the global load balancer."
   }
   assert {
+    condition     = alltrue([for e in google_certificate_manager_certificate_map_entry.gateway : e.certificates == tolist(["projects/socle-test-project/locations/global/certificates/global-cert"])])
+    error_message = "every map entry must serve the global certificate: the regional one cannot be served by a global load balancer."
+  }
+  assert {
+    condition     = google_certificate_manager_certificate.gateway_regional[0].managed[0].dns_authorizations == tolist(["projects/socle-test-project/locations/europe-west1/dnsAuthorizations/regional-auth"]) && google_certificate_manager_certificate.gateway[0].managed[0].dns_authorizations == tolist(["projects/socle-test-project/locations/global/dnsAuthorizations/global-auth"])
+    error_message = "each certificate must be authorised by its own scope's authorizations: a regional certificate refuses global ones."
+  }
+  assert {
+    condition     = google_certificate_manager_certificate.gateway[0].name == "socle-test-gateway-${substr(sha1("*.sandbox-gcp.do-now.io,sandbox-gcp.do-now.io"), 0, 8)}" && google_certificate_manager_certificate.gateway_regional[0].name == google_certificate_manager_certificate.gateway[0].name
+    error_message = "a certificate is named after the cluster and the digest of its sorted domains."
+  }
+  assert {
     condition     = output.gateway_certificate_map == google_certificate_manager_certificate_map.gateway[0].name
     error_message = "the map's name is what the public Gateway's networking.gke.io/certmap annotation takes."
   }
   assert {
     condition     = length(google_dns_record_set.gateway_certificate_authorization) == 2 && alltrue([for r in google_dns_record_set.gateway_certificate_authorization : r.managed_zone == "sandbox-gcp-do-now-io" && r.type == "CNAME"])
     error_message = "each authorization's CNAME, global and regional, must be written into the client's zone, or neither certificate is ever issued."
+  }
+  assert {
+    condition     = toset([for r in google_dns_record_set.gateway_certificate_authorization : r.name]) == toset(["_acme-challenge.sandbox-gcp.do-now.io.", "_acme-challenge_abcdefgh.sandbox-gcp.do-now.io."])
+    error_message = "the records written are the ones Certificate Manager asks for, the global and the regional one side by side."
+  }
+}
+
+run "a_new_domain_list_is_a_new_certificate" {
+  command = plan
+  variables {
+    gateway_certificate = {
+      dns_zone = "sandbox-gcp-do-now-io"
+      domains  = ["sandbox-gcp.do-now.io"]
+    }
+  }
+
+  assert {
+    condition     = google_certificate_manager_certificate.gateway[0].name == "socle-test-gateway-${substr(sha1("sandbox-gcp.do-now.io"), 0, 8)}" && google_certificate_manager_certificate.gateway[0].name != "socle-test-gateway-${substr(sha1("*.sandbox-gcp.do-now.io,sandbox-gcp.do-now.io"), 0, 8)}"
+    error_message = "a certificate's domains cannot change in place: a new list must be a new name, so the replacement can be issued while the old certificate is still in use."
+  }
+  assert {
+    condition     = output.gateway_regional_certificate == google_certificate_manager_certificate.gateway_regional[0].name && output.gateway_certificate_map == "socle-test-gateway"
+    error_message = "the regional certificate's new name reaches the bootstrap module; the map keeps its name and only its entries move."
   }
 }

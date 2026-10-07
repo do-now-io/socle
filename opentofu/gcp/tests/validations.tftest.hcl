@@ -381,10 +381,42 @@ run "crossplane_rejects_a_permission_instead_of_a_role" {
   expect_failures = [var.crossplane]
 }
 
-run "crossplane_rejects_a_basic_role" {
+run "crossplane_rejects_owner" {
+  command = plan
+  variables {
+    crossplane = { allowed_roles = ["roles/owner"] }
+  }
+  expect_failures = [var.crossplane]
+}
+
+run "crossplane_rejects_editor" {
   command = plan
   variables {
     crossplane = { allowed_roles = ["roles/secretmanager.secretAccessor", "roles/editor"] }
+  }
+  expect_failures = [var.crossplane]
+}
+
+run "crossplane_rejects_viewer" {
+  command = plan
+  variables {
+    crossplane = { allowed_roles = ["roles/viewer"] }
+  }
+  expect_failures = [var.crossplane]
+}
+
+run "crossplane_rejects_an_admin_role" {
+  command = plan
+  variables {
+    crossplane = { allowed_roles = ["roles/storage.objectAdmin", "roles/storage.admin"] }
+  }
+  expect_failures = [var.crossplane]
+}
+
+run "crossplane_rejects_a_versioned_admin_role" {
+  command = plan
+  variables {
+    crossplane = { allowed_roles = ["roles/compute.instanceAdmin.v1"] }
   }
   expect_failures = [var.crossplane]
 }
