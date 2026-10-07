@@ -1,6 +1,8 @@
 # The example tfvars is what a client copies, so it must plan as written.
-# tests/example.auto.tfvars is a link to it, which tofu test loads for every
-# file in this directory; this one sets no variable of its own.
+# tests/example.auto.tfvars is a symlink to ../prod.tfvars.example (a Windows
+# checkout needs core.symlinks), which tofu test loads for every file in this
+# directory; this one sets no variable of its own. aws is not mocked: the run
+# plans through the root's own stub provider, proving it makes no AWS call.
 
 provider "google" {
   project      = "acme-prod"
@@ -16,8 +18,6 @@ override_data {
 }
 
 mock_provider "helm" {}
-
-mock_provider "aws" {}
 
 run "the_example_plans" {
   command = plan

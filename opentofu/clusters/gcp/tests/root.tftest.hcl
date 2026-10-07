@@ -1,6 +1,7 @@
 # What the root adds over its two modules: the values it derives for the
 # catalog from the foundations, and the warning when Crossplane has no
-# identity. Every provider is mocked: no run reaches Google, AWS or a cluster.
+# identity. helm and aws are mocked; google is kept offline by a static
+# token: no run reaches Google, AWS or a cluster.
 
 # A static access token keeps the google provider offline, as in the
 # foundations' own tests: a plan creates every resource, so it reads none.
