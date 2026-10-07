@@ -1,0 +1,65 @@
+# The cluster's state as otel_gateway's k8s_cluster receiver reports it:
+# pods, nodes and Deployments, on the names VictoriaMetrics stores from
+# OpenTelemetry. Read by the alerting module's sidecar, inert without it.
+# Checked in CI with vmalert -dryRun (.github/scripts/check-rules.sh).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-gateway-rules
+  labels:
+    vmalert_rules: "1"
+data:
+  otel-gateway.yaml: |
+    groups:
+      - name: socle-kubernetes
+        rules:
+          # container_id changes at every restart, so each restart is a new
+          # series: the max over it is the container's own count. 20 minutes,
+          # as the kubelet's back-off reaches 5: a pod crash-looping for long
+          # restarts 3 or 4 times in that window, never once.
+          - alert: PodCrashLooping
+            expr: >-
+              increase((max without (container_id) (k8s_container_restarts))[20m:1m])
+              >= 3
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                {{ $labels.k8s_namespace_name }}/{{ $labels.k8s_pod_name }}
+                ({{ $labels.k8s_container_name }}) restarted
+                {{ $value | humanize }} times in the last 20 minutes.
+          # Phase 1 is Pending: no node fits it, or an image or a volume is
+          # missing. A rollout passes through it for seconds, not 15 minutes.
+          - alert: PodPending
+            expr: k8s_pod_phase == 1
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                {{ $labels.k8s_namespace_name }}/{{ $labels.k8s_pod_name }} has
+                been Pending for 15 minutes: no node fits it, or an image or a
+                volume is missing.
+          # 1 ready, 0 not ready, -1 unknown (the node stopped reporting).
+          - alert: NodeNotReady
+            expr: k8s_node_condition_ready != 1
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: >-
+                Node {{ $labels.k8s_node_name }} has not been Ready for 5
+                minutes; its pods are not running or not reachable.
+          - alert: DeploymentReplicasMissing
+            expr: >-
+              k8s_deployment_available
+              < on (k8s_namespace_name, k8s_deployment_name)
+              k8s_deployment_desired
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                {{ $labels.k8s_namespace_name }}/{{ $labels.k8s_deployment_name }}
+                has had fewer replicas available than desired for 15 minutes.
