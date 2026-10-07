@@ -347,6 +347,16 @@ RDS, the usual question: there is no RDS scaler. A table's depth is the
 (connections, CPU) is the `aws-cloudwatch` scaler on the `AWS/RDS` namespace,
 which `services = ["cloudwatch"]` grants to the operator's role.
 
+### An unavailable metrics apiserver blocks namespace deletion
+
+KEDA registers `external.metrics.k8s.io` as an aggregated API, served by
+`keda-operator-metrics-apiserver`. While that Deployment cannot run, the
+group goes stale and the namespace controller's discovery fails for the whole
+cluster, not for `keda` alone. Measured on the GKE sandbox (2026-10-07): with
+the metrics apiserver Pending, `external.metrics.k8s.io` went stale and a
+terminating namespace hung on "Discovery failed". Keep the metrics apiserver
+schedulable (capacity, no failing admission) before tearing anything down.
+
 ### Crossplane off, or another cloud
 
 With Crossplane off the list must be empty — refused at plan otherwise, with

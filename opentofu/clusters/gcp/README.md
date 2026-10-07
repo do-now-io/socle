@@ -118,6 +118,18 @@ reports whether they converged.
   module's binding. After a `state rm`, nothing deletes those bindings: they
   stay in the project, and a socle created there next inherits them; remove
   them by hand.
+- **Destroying takes two runs.** GKE's Gateway controller removes the
+  Gateways' load balancers asynchronously, after the cluster is gone, so the
+  first `tofu destroy` fails on what those load balancers still reference:
+  the certificate map ("can't delete certificate map that is referenced by a
+  target proxy"), the regional certificate ("referenced by a
+  CertificateMapEntry or other resources") and the proxy-only subnetwork
+  ("already being used"). A few minutes later a second `tofu destroy`
+  completes. Measured on a sandbox (2026-10-07): the first run otherwise
+  removed everything, and no Workload Identity binding was left in the
+  project policy — the catalog, and with it Crossplane's deletion of each
+  module's bindings, ran before Crossplane's own grants went. The Velero
+  bucket is kept, by design.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements

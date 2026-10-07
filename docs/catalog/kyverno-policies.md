@@ -229,6 +229,12 @@ The job took 9m36s, `tofu destroy` and the empty-cluster suite included.
 | Values order | Severity annotation: socle `medium`, `values` `high`, Secret `low` on the live policy; cleared, `medium` |
 | Off | Policies, native policies and namespace gone in 11 s |
 
+On GKE Autopilot (sandbox, 2026-10-07): the baseline set converged in Audit;
+`enforce: [disallow-host-path]` compiled into a native ValidatingAdmissionPolicy
+that denied the `hostPath` pod; a pod in a socle-excluded namespace was
+admitted. The content of the `PolicyReport` in the Audit step could not be
+measured, the sandbox ran out of capacity: to confirm on a full-size cluster.
+
 `tofu test`: 14 refusal cases and 1 positive for the two modules, defaults
 asserted. The CI run on floci adds its figures here once it lands.
 

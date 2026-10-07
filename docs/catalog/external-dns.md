@@ -437,6 +437,10 @@ off in the foundations, a role it may not grant) must hold the
 workload as visibly as on AWS: the child waits, the parent is not Ready, and
 `socle-root` with it, rather than a pod that silently writes nothing.
 
+Records an external-dns that is turned off leaves behind are not deleted: it
+is gone before the routes are. Turn the routes off first, or delete the
+records by hand.
+
 The same caveat on turning Crossplane off together with the module: the
 member's finalizer then has no provider to release it. Module first,
 Crossplane after.

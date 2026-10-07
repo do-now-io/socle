@@ -73,6 +73,14 @@ filter (`scheme: https`, `statusCode: 301`) on both classes the socle uses
 it is the older `gke-l7-gxlb` classes that cannot redirect,
 [Deploying Gateways](https://cloud.google.com/kubernetes-engine/docs/how-to/deploying-gateways)).
 
+Measured on the GKE sandbox (2026-10-07): the redirect answers
+`301 https://<host>:443/`. The explicit `:443` is GKE's, the socle's
+`RequestRedirect` sets only the scheme and the status; it is harmless. The
+public Gateway served HTTPS with the Google-managed certificate (certmap
+`ACTIVE`, Google Trust Services chain) about 10 minutes after the route
+attached. Grafana's `HealthCheckPolicy` on `/api/health` made its backend
+healthy: 200 end to end.
+
 ## Ordering
 
 A Gateway can be applied only once its CRD and class exist. The Gateways sit
