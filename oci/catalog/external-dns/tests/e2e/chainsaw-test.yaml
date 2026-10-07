@@ -1011,6 +1011,19 @@ spec:
   steps:
     - name: the IAM member is Ready, the module's own principal on the project
       try:
+        # The Namespace is in the ResourceSet's inventory: a template that
+        # drops it (a merged document, a broken block) makes Flux prune the
+        # namespace and everything in it. Inventory id: <namespace>_<name>_<group>_<kind>.
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: external-dns
+                namespace: flux-system
+              status:
+                (inventory.entries[?id == '_external-dns__Namespace'] || `[]`):
+                  - id: _external-dns__Namespace
         - assert:
             resource:
               apiVersion: cloudplatform.gcp.m.upbound.io/v1beta1

@@ -185,6 +185,7 @@ spec:
     << end >>
     << $gcpAccess := and (eq inputs.cloud "gcp") inputs.modules.crossplane.enabled ->>
     << if $gcpAccess >>
+    ---
     << $principal := printf
          "principal://iam.googleapis.com/projects/%s/locations/global/workloadIdentityPools/%s.svc.id.goog/subject/ns/%s/sa/%s"
          inputs.cluster.projectNumber inputs.cluster.projectId "external-dns" "external-dns" ->>
