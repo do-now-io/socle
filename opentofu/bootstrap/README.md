@@ -29,7 +29,28 @@ In the same root as the foundations module, in one apply — see
 `opentofu/clusters/<cloud>/`. It configures no provider itself; the root passes
 the foundations module's `helm_kubernetes` output to the `helm` provider, and
 on aws its own `aws` provider serves both modules. Elsewhere `aws` has no
-resource here and is never configured.
+resource here and makes no call, but OpenTofu still configures every provider
+a configuration names — even one whose resources all have `count = 0` — and an
+unconfigured `aws` provider looks for credentials and calls STS. A root on
+another cloud therefore declares a stub that skips every check
+(`tests/defaults.tftest.hcl`, `gcp_plans_without_an_aws_provider_call`, proves
+a gcp plan through it reaches no AWS endpoint):
+
+```hcl
+provider "aws" {
+  region                      = "us-east-1"
+  access_key                  = "unused"
+  secret_key                  = "unused"
+  skip_credentials_validation = true
+  skip_requesting_account_id  = true
+  skip_metadata_api_check     = true
+  skip_region_validation      = true
+}
+```
+
+On gcp the root also passes the foundations' `project_id` and
+`project_number` as `project`, and their `gateway_certificate_map` and
+`gateway_regional_certificate`.
 
 ## The catalog schema
 
@@ -39,12 +60,14 @@ type, is an error at plan, with the allowed list in the message.
 
 | Module | Attribute | Default | Meaning |
 | --- | --- | --- | --- |
-| `gateway_api` | `enabled` | `true` | Gateway API standard CRDs from upstream, pinned by commit, and Cilium's `cilium` class on aws and azure. Offered on aws, azure and scaleway; GKE owns its own. Disabling orphans the CRDs |
-| `gateway_api` | `gateways` | `true` | The shared Gateways `gateway-system/public` (internet-facing) and `private` (internal), HTTPS on 443, on aws and azure — on aws once the foundations issued `gateway_certificate`, with no port 80 yet; on azure HTTP on 80 redirects to HTTPS ([design note](../../docs/catalog/gateway-api.md)) |
+| `gateway_api` | `enabled` | `true` | Gateway API standard CRDs from upstream, pinned by commit, and Cilium's `cilium` class on aws and azure. On gcp GKE owns the CRDs and the class, and the module renders the shared Gateways only. Disabling orphans the CRDs |
+| `gateway_api` | `gateways` | `true` | The shared Gateways `gateway-system/public` (internet-facing) and `private` (internal), HTTPS on 443, on aws, azure and gcp — on aws once the foundations issued `gateway_certificate`, with no port 80 yet; on gcp once they issued the certificate map; on azure HTTP on 80 redirects to HTTPS ([design note](../../docs/catalog/gateway-api.md)) |
 | `crossplane` | `enabled` | `false` | Deploy Crossplane and, per cloud, its IAM providers — the tooling through which each catalog module declares its own cloud role ([design note](../../docs/catalog/crossplane.md)). Turning it off leaves the CRDs and orphans every module role still declared |
 | `crossplane` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan |
 | `crossplane` | `values_secret` | `""` | Name of a Secret in `crossplane-system` with a `values.yaml` key, created by the client, merged last |
-| `crossplane` | `permissions_boundary` | `""` | AWS: the boundary every module's role carries. The client root wires it from the foundations' `crossplane_permissions_boundary_arn` |
+| `crossplane` | `permissions_boundary` | `""` | AWS: the boundary every module's role carries. The client root wires it from the foundations' `crossplane_permissions_boundary_arn`. Refused on gcp |
+| `crossplane` | `dns_zones` | `[]` | GCP: the Cloud DNS managed zones external-dns may write. The client root wires it from the foundations' `crossplane_dns_zones`. Refused elsewhere |
+| `crossplane` | `dns_zone_lister_role` | `""` | GCP: the project custom role that lets external-dns list zones. The client root wires it from the foundations' `dns_zone_lister_role`. Refused elsewhere |
 | `external_dns` | `enabled` | `false` | Publish DNS records for Services, Ingresses and HTTPRoutes into the cloud's zone — needs `domain_filters`; on AWS with `crossplane` on it declares its own IAM role, elsewhere the client brings a credential ([design note](../../docs/catalog/external-dns.md)) |
 | `external_dns` | `domain_filters` | `[]` | Zones it may write to, as DNS names; required when enabled |
 | `external_dns` | `policy` | `"upsert-only"` | `upsert-only` never deletes a record; `sync` also deletes what it owns |
@@ -101,7 +124,7 @@ type, is an error at plan, with the allowed list in the message.
 | `kyverno_policies` | `values` | `{}` | The client's own `kyverno-policies` chart values, merged over the socle's, client wins; a list he sets replaces the socle's whole |
 | `kyverno_policies` | `values_secret` | `""` | Name of a Secret in `kyverno-policies` with a `values.yaml` key, created by the client, merged last |
 | `keda` | `enabled` | `false` | Deploy KEDA, event-driven autoscaling: a `ScaledObject` scales a Deployment on a queue's depth, a cron window or a PromQL query, and down to zero ([design note](../../docs/catalog/keda.md)). Off: it does nothing until a `ScaledObject` exists |
-| `keda` | `services` | `[]` | AWS services KEDA's own role may **read**, from `sqs`, `cloudwatch`, `kinesis`, `dynamodb`: one read-only statement per service named, declared through Crossplane, no role when empty. Needs `crossplane` on and the same services in the foundations' `aws.crossplane.allowed_services`; aws only for now |
+| `keda` | `services` | `[]` | The cloud's services KEDA's own identity may **read** — on aws `sqs`, `cloudwatch`, `kinesis`, `dynamodb`, one read-only statement each; on gcp `pubsub`, `roles/monitoring.viewer` on the project — declared through Crossplane, nothing when empty. Needs `crossplane` on and the matching allowance in the foundations (`aws.crossplane.allowed_services`, gcp `crossplane.allowed_roles`); aws and gcp only for now |
 | `keda` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan |
 | `keda` | `values_secret` | `""` | Name of a Secret in `keda` with a `values.yaml` key, created by the client, merged last |
 | `metrics_server` | `enabled` | `true` | Serve the `metrics.k8s.io` API that `kubectl top` and every HPA on CPU or memory read. Offered on aws only; the other clouds ship their own ([design note](../../docs/catalog/metrics-server.md)) |
@@ -109,19 +132,19 @@ type, is an error at plan, with the allowed list in the message.
 | `metrics_server` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. `--kubelet-insecure-tls` refused at plan |
 | `metrics_server` | `values_secret` | `""` | Name of a Secret in `metrics-server` with a `values.yaml` key, created by the client, merged last |
 | `external_secrets` | `enabled` | `false` | Deploy External Secrets Operator: an `ExternalSecret` becomes a `Secret` read from the cloud's secret manager, kept in step when it rotates ([design note](../../docs/catalog/external-secrets.md)). Pair it with `reloader` |
-| `external_secrets` | `prefixes` | `[<cluster_name>]` | On AWS with `crossplane` on: the module's own **read-only** role reads `secret:<prefix>/*` in the cluster's region for each prefix, and the `ClusterSecretStore` `secret-manager` is created on it. Needs `secretsmanager` in the foundations' `aws.crossplane.allowed_services`. `[]`: no role, no store |
+| `external_secrets` | `prefixes` | `[<cluster_name>]` | On AWS with `crossplane` on: the module's own **read-only** role reads `secret:<prefix>/*` in the cluster's region for each prefix, and the `ClusterSecretStore` `secret-manager` is created on it. Needs `secretsmanager` in the foundations' `aws.crossplane.allowed_services`. On gcp secrets are named `<prefix>_<name>`, so a prefix is letters, digits and `-` (no `_`, no `/`). `[]`: no role, no store |
 | `external_secrets` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan |
 | `external_secrets` | `values_secret` | `""` | Name of a Secret in `external-secrets` with a `values.yaml` key, created by the client, merged last |
 | `external_secrets` | `enabled` | `false` | Deploy External Secrets Operator: an `ExternalSecret` becomes a `Secret` read from the cloud's secret manager, kept in step when it rotates ([design note](../../docs/catalog/external-secrets.md)). Pair it with `reloader` |
-| `external_secrets` | `prefixes` | `[<cluster_name>]` | On AWS with `crossplane` on: the module's own **read-only** role reads `secret:<prefix>/*` in the cluster's region for each prefix, and the `ClusterSecretStore` `secret-manager` is created on it. Needs `secretsmanager` in the foundations' `aws.crossplane.allowed_services`. `[]`: no role, no store |
+| `external_secrets` | `prefixes` | `[<cluster_name>]` | On AWS with `crossplane` on: the module's own **read-only** role reads `secret:<prefix>/*` in the cluster's region for each prefix, and the `ClusterSecretStore` `secret-manager` is created on it. Needs `secretsmanager` in the foundations' `aws.crossplane.allowed_services`. On gcp secrets are named `<prefix>_<name>`, so a prefix is letters, digits and `-` (no `_`, no `/`). `[]`: no role, no store |
 | `external_secrets` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan |
 | `external_secrets` | `values_secret` | `""` | Name of a Secret in `external-secrets` with a `values.yaml` key, created by the client, merged last |
 | `reloader` | `enabled` | `false` | Deploy Stakater Reloader: a workload annotated `reloader.stakater.com/auto: "true"` is rolled when a ConfigMap or Secret it reads changes ([design note](../../docs/catalog/reloader.md)). **Off**: it reads every ConfigMap and Secret of the cluster |
 | `reloader` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets and `reloader.autoReloadAll` refused at plan |
 | `reloader` | `values_secret` | `""` | Name of a Secret in `reloader` with a `values.yaml` key, created by the client, merged last |
-| `velero` | `enabled` | `false` | Deploy Velero: backup and restore of the applications that opt in, by two labels, into the module's own bucket. **aws only**; needs `kube.crossplane.enabled` and `s3` in the foundations' allowlist ([design note](../../docs/catalog/velero.md)) |
+| `velero` | `enabled` | `false` | Deploy Velero: backup and restore of the applications that opt in, by two labels, into the module's own bucket. **aws and gcp**; needs `kube.crossplane.enabled`, the region, and the bucket's access in the foundations' allowlist ([design note](../../docs/catalog/velero.md)) |
 | `velero` | `policies` | seven pairs | `[{ frequency, retention, schedule }]`, one `Schedule` each, selecting `socle.do-now.io/backup-frequency` and `socle.do-now.io/backup-retention`; retention in hours or days, a five-field cron. Default: hourly 24h and 48h, daily 7d and 30d, weekly 30d and 90d, monthly 90d |
-| `velero` | `node_agent` | `eks_addons.efs_csi` | The node-agent DaemonSet (privileged), which backs EFS volumes up by file system. Off, the namespace stays `restricted` |
+| `velero` | `node_agent` | `eks_addons.efs_csi` | The node-agent DaemonSet (privileged), which backs EFS volumes up by file system. Off, the namespace stays `restricted`. Off and refused on gcp: Autopilot forbids its hostPath |
 | `velero` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan: name a Secret through `credentials.existingSecret` |
 | `velero` | `values_secret` | `""` | Name of a Secret in `velero` with a `values.yaml` key, created by the client, merged last |
 | `hello` | `enabled` | `true` | Deploy podinfo as a proof the pipeline works |
@@ -267,11 +290,14 @@ No modules.
 | <a name="input_flux_components"></a> [flux\_components](#input\_flux\_components) | Flux controllers to install. The image automation pair is absent by default: the socle's version moves through a reviewed tfvars change, not through a controller rewriting tags. | `list(string)` | <pre>[<br/>  "source-controller",<br/>  "kustomize-controller",<br/>  "helm-controller",<br/>  "notification-controller"<br/>]</pre> | no |
 | <a name="input_flux_version"></a> [flux\_version](#input\_flux\_version) | Flux version the operator installs and keeps converged. 2.x tracks the latest 2 series; an exact version pins it. | `string` | `"2.x"` | no |
 | <a name="input_gateway_certificate_arn"></a> [gateway\_certificate\_arn](#input\_gateway\_certificate\_arn) | On aws, the ACM certificate the shared Gateways' load balancers terminate<br/>TLS with — the foundations' gateway\_certificate\_arn output, never the<br/>client's. Null or empty on aws means no shared Gateway, and no route<br/>attached to one. Unknown at plan on the apply that issues it, which is<br/>why nothing validates it here. Ignored elsewhere. | `string` | `null` | no |
+| <a name="input_gateway_certificate_map"></a> [gateway\_certificate\_map](#input\_gateway\_certificate\_map) | On gcp, the Certificate Manager map the public shared Gateway's global<br/>load balancer terminates TLS with — the foundations'<br/>gateway\_certificate\_map output, never the client's. Null or empty on gcp<br/>means no shared Gateway, and no route attached to one. Unknown at plan on<br/>the apply that creates it, which is why nothing validates it here.<br/>Ignored elsewhere. | `string` | `null` | no |
+| <a name="input_gateway_regional_certificate"></a> [gateway\_regional\_certificate](#input\_gateway\_regional\_certificate) | On gcp, the regional Certificate Manager certificate the private shared<br/>Gateway's internal load balancer terminates TLS with — the foundations'<br/>gateway\_regional\_certificate output, never the client's. Unknown at plan<br/>on the apply that creates it, which is why nothing validates it here.<br/>Ignored elsewhere. | `string` | `null` | no |
 | <a name="input_helm_timeout_seconds"></a> [helm\_timeout\_seconds](#input\_helm\_timeout\_seconds) | How long to wait for each release to become ready. The instance release is the slow one: its health check waits for the operator to converge the controllers. | `number` | `600` | no |
 | <a name="input_instance_size"></a> [instance\_size](#input\_instance\_size) | Resource profile the operator applies to the controllers. Empty is the operator's own default; small, medium and large scale requests and limits together. | `string` | `""` | no |
 | <a name="input_kube"></a> [kube](#input\_kube) | The catalog modules this cluster enables and their values, as<br/>`{ <module> = { <attribute> = <value> } }`. List only what differs from<br/>the catalog's defaults; an absent module is at its default. Module names<br/>are snake\_case. Typed `any` on purpose: a map(any) refuses two modules with<br/>different attributes, and an object type silently drops a misspelt<br/>attribute — the validations below are what makes a typo an error at plan.<br/>The schema is catalog.tf; the README lists it module by module. | `any` | `{}` | no |
 | <a name="input_network_policy"></a> [network\_policy](#input\_network\_policy) | Let the operator install network policies isolating the Flux namespace. On by default; Cilium enforces them on every cloud we ship. | `bool` | `true` | no |
 | <a name="input_operator_version"></a> [operator\_version](#input\_operator\_version) | Chart version of flux-operator, which is also the operator's own version. Pinned exactly: the operator is pre-1.0 and its minors are not a stable contract. | `string` | `"0.60.0"` | no |
+| <a name="input_project"></a> [project](#input\_project) | On gcp, the project the cluster runs in, as `{ id, number }` — the<br/>foundations' project\_id and project\_number outputs, never the client's.<br/>Exposed to the catalog as inputs.cluster.projectId and projectNumber: a<br/>module's Workload Identity principal names the project number, and the<br/>pool named after the project id. Required on gcp, refused elsewhere. | <pre>object({<br/>    id     = string<br/>    number = string<br/>  })</pre> | `null` | no |
 | <a name="input_region"></a> [region](#input\_region) | Region the cluster runs in, exposed to the catalog as inputs.cluster.region. Regional cloud APIs need it — on AWS the Pod Identity associations the crossplane module creates. Empty when the caller does not know it; a module that needs it says so. | `string` | `""` | no |
 | <a name="input_schedulable_nodes"></a> [schedulable\_nodes](#input\_schedulable\_nodes) | How many nodes the foundations give the cluster before this module<br/>starts — on aws, the bootstrap node group's size. Everything but Cilium<br/>waits for it: Cilium's DaemonSet is what makes those nodes Ready, so it<br/>is installed beside them, and CoreDNS and the Flux operator, the first<br/>releases that need a scheduled pod, come after. Zero fails the plan with<br/>that reason, instead of Helm waiting helm\_timeout\_seconds for a node.<br/>Null skips the check, on a cluster whose compute this module cannot see. | `number` | `null` | no |
 | <a name="input_socle_version"></a> [socle\_version](#input\_socle\_version) | Tag of the socle artifact to pull. Null means this module's own version, so that one bump of the module tag moves module and artifact together. Set it only on a dev cluster testing a branch build, together with cosign\_identity. | `string` | `null` | no |

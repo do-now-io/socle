@@ -43,18 +43,23 @@ locals {
     scaleway = ""
   }[var.cloud]
 
-  # The foundations' output, null when they issued no certificate.
-  gateway_certificate_arn = var.gateway_certificate_arn == null ? "" : var.gateway_certificate_arn
+  # The foundations' outputs, null when they issued no certificate.
+  gateway_certificate_arn      = var.gateway_certificate_arn == null ? "" : var.gateway_certificate_arn
+  gateway_certificate_map      = var.gateway_certificate_map == null ? "" : var.gateway_certificate_map
+  gateway_regional_certificate = var.gateway_regional_certificate == null ? "" : var.gateway_regional_certificate
 
-  # docs/catalog/gateway-api.md. Where the socle's Cilium serves the
-  # `cilium` class, the client kept them, and — on aws, where TLS
-  # terminates at the load balancer — a certificate exists: the socle never
-  # serves a route in clear text.
+  # docs/catalog/gateway-api.md. Where the client kept them and a class
+  # serves them — the socle's Cilium's `cilium`, or on gcp GKE's — and,
+  # where TLS terminates at the load balancer (aws, gcp), a certificate
+  # exists: the socle never serves a route in clear text.
   shared_gateways = (
     local.modules.gateway_api.enabled
     && local.modules.gateway_api.gateways
-    && local.gateway_class_name == "cilium"
-    && (var.cloud != "aws" || local.gateway_certificate_arn != "")
+    && (
+      var.cloud == "gcp"
+      ? local.gateway_certificate_map != ""
+      : local.gateway_class_name == "cilium" && (var.cloud != "aws" || local.gateway_certificate_arn != "")
+    )
   )
 
   common_labels = {
@@ -77,6 +82,11 @@ locals {
       # global, so a module's bucket carries it (docs/catalog/velero.md).
       # Empty elsewhere.
       accountId = local.account_id
+      # The project the cluster runs in, on gcp: a module's Workload Identity
+      # principal names its number and the pool named after its id, and a
+      # bucket's name carries the number. Empty elsewhere.
+      projectId     = try(var.project.id, "")
+      projectNumber = try(var.project.number, "")
     }
     socle = {
       url        = var.artifact_url
@@ -105,17 +115,23 @@ locals {
     # `public` and `private`, in `namespace`, and a route may attach to
     # their `https` listener. `certificateArn` — on aws, the ACM certificate
     # their load balancers terminate TLS with; empty elsewhere.
-    # What the cluster offers for volumes, from the add-ons this module
-    # installed: `snapshots` — the CSI snapshot controller and its CRDs are
-    # there, so a template may render a VolumeSnapshotClass.
+    # `certificateMap` — on gcp, the Certificate Manager map of the public
+    # Gateway, and `regionalCertificate` the certificate of the private
+    # one; empty elsewhere.
+    # What the cluster offers for volumes: `snapshots` — the CSI snapshot
+    # controller and its CRDs are there, so a template may render a
+    # VolumeSnapshotClass. On aws from the add-on this module installed; on
+    # gcp always, GKE manages the PD CSI driver and the snapshot CRDs.
     storage = {
-      snapshots = local.eks_addon_installed.snapshot_controller
+      snapshots = var.cloud == "gcp" ? true : local.eks_addon_installed.snapshot_controller
     }
     gateway = {
-      className      = local.gateway_class_name
-      shared         = local.shared_gateways
-      namespace      = "gateway-system"
-      certificateArn = local.gateway_certificate_arn
+      className           = local.gateway_class_name
+      shared              = local.shared_gateways
+      namespace           = "gateway-system"
+      certificateArn      = local.gateway_certificate_arn
+      certificateMap      = local.gateway_certificate_map
+      regionalCertificate = local.gateway_regional_certificate
     }
   }
 }

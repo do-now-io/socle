@@ -40,18 +40,19 @@ locals {
     # The Gateway API standard CRDs, from upstream pinned by commit, and on
     # the clouds where the socle runs Cilium, the `cilium` GatewayClass and
     # the one operator restart that turns Cilium's controller on
-    # (docs/catalog/cilium.md §4). Not on gcp, where GKE owns the CRDs and
-    # the controller. No chart, so no values/values_secret. Disabling it
-    # removes the Flux objects and orphans the CRDs: every Gateway survives.
+    # (docs/catalog/cilium.md §4). On gcp GKE owns the CRDs and the
+    # controller: the module renders the shared Gateways only. No chart, so
+    # no values/values_secret. Disabling it removes the Flux objects and
+    # orphans the CRDs: every Gateway survives.
     #
     # gateways: the two shared Gateways every module and the client route
     # through, `public` (internet-facing) and `private` (internal), in
     # gateway-system — HTTPS on 443 (on azure also HTTP on 80, redirecting;
     # not on aws yet, docs/catalog/gateway-api.md). Created where
-    # the socle's Cilium serves Gateway API (aws, azure), and on aws only
-    # once the foundations issued their certificate: TLS terminates at the
-    # load balancer (docs/catalog/gateway-api.md). false keeps the CRDs and
-    # the class, and no Gateway.
+    # the socle's Cilium serves Gateway API (aws, azure) and on gcp, on aws
+    # and gcp only once the foundations issued their certificate: TLS
+    # terminates at the load balancer (docs/catalog/gateway-api.md). false
+    # keeps the CRDs and the class, and no Gateway.
     gateway_api = {
       enabled  = true
       gateways = true
@@ -70,6 +71,10 @@ locals {
     # must carry — the client root wires it from the foundations'
     # crossplane_permissions_boundary_arn; empty means the roles are created
     # without one, which the foundations' Crossplane identity refuses.
+    # dns_zones and dns_zone_lister_role (GCP) take its place there: the
+    # Cloud DNS managed zones external-dns may write, and the project custom
+    # role that lets it list zones — wired by the gcp root from the
+    # foundations' crossplane_dns_zones and dns_zone_lister_role.
     #
     # WARNING — turning it off does not delete what it provisioned. The
     # namespace and the release go; the CRDs and the crossplane-no-usages
@@ -82,6 +87,8 @@ locals {
       values               = {}
       values_secret        = ""
       permissions_boundary = ""
+      dns_zones            = []
+      dns_zone_lister_role = ""
     }
     # The client's GitOps layer: the official argo-cd chart, non-HA, ClusterIP,
     # no SSO. On by default: it is what a client gets a socle for, and it
@@ -221,13 +228,14 @@ locals {
     # KEDA: event-driven autoscaling — a ScaledObject scales a Deployment on a
     # queue's depth, a cron window or a PromQL query, and down to zero. Off
     # by default: KEDA does nothing until a client writes a ScaledObject.
-    # services names the AWS services the operator's OWN role may read —
-    # sqs, cloudwatch, kinesis, dynamodb — and the module declares that role
-    # through Crossplane with one read-only statement per service named,
-    # nothing for the rest, no role at all when the list is empty
+    # services names the cloud's services the operator's OWN role may read —
+    # on aws sqs, cloudwatch, kinesis, dynamodb, on gcp pubsub — and the
+    # module declares that access through Crossplane, scoped per service
+    # named, nothing for the rest, nothing at all when the list is empty
     # (docs/catalog/keda.md). A non-empty list needs kube.crossplane on and
-    # each service in the foundations' aws.crossplane.allowed_services;
-    # refused at plan otherwise (variables.tf). Cron, Prometheus, Kafka,
+    # the matching allowance in the foundations (aws.crossplane.
+    # allowed_services, gcp crossplane.allowed_roles); refused at plan
+    # otherwise (variables.tf). Cron, Prometheus, Kafka,
     # RabbitMQ and Redis triggers need no cloud, so no entry.
     keda = {
       enabled       = false
@@ -301,8 +309,8 @@ locals {
     }
     # Backup and restore of what GitOps cannot restore — the data in the
     # applications' EBS and EFS volumes, with their objects
-    # (docs/catalog/velero.md). AWS only in v1, and off by default: it needs
-    # Crossplane, which makes its bucket and its role. Nothing is backed up
+    # (docs/catalog/velero.md). On aws and gcp, and off by default: it needs
+    # Crossplane, which makes its bucket and its access. Nothing is backed up
     # unless an application opts in, its chart labelling every object of its
     # release with socle.do-now.io/backup-frequency and
     # socle.do-now.io/backup-retention: each entry of policies is one such
@@ -310,8 +318,9 @@ locals {
     # up — a warning at admission says so. EBS volumes are CSI snapshots, EFS
     # volumes a file-system backup through the node-agent, a privileged
     # DaemonSet installed only when node_agent is on (by default when the EFS
-    # driver is). values and values_secret as every module; credentials are
-    # refused in values.
+    # driver is; never on gcp, where Autopilot forbids its hostPath and every
+    # volume is a PD snapshot). values and values_secret as every module;
+    # credentials are refused in values.
     velero = {
       enabled = false
       policies = [
@@ -323,7 +332,7 @@ locals {
         { frequency = "weekly", retention = "90d", schedule = "30 2 * * 0" },
         { frequency = "monthly", retention = "90d", schedule = "0 3 1 * *" },
       ]
-      node_agent    = local.eks_addons.efs_csi
+      node_agent    = local.eks_addon_installed.efs_csi
       values        = {}
       values_secret = ""
     }
@@ -352,15 +361,20 @@ locals {
   # block by shape: one `name = ["cloud", ...]` per line.
   # var.kube refuses at plan a module this map does not offer on var.cloud.
   catalog_clouds = {
-    gateway_api    = ["aws", "azure", "scaleway"]
+    gateway_api    = ["aws", "azure", "gcp", "scaleway"]
     metrics_server = ["aws"]
-    velero         = ["aws"]
+    velero         = ["aws", "gcp"]
   }
 
-  # The AWS services kube.keda.services may name: those whose scaler the
-  # keda template scopes to its exact read calls (oci/catalog/keda/
-  # resourceset.yaml). Adding one is a statement there and a word here.
-  keda_services = ["sqs", "cloudwatch", "kinesis", "dynamodb"]
+  # The services kube.keda.services may name, per cloud: those whose scaler
+  # the keda template scopes to its exact read calls (oci/catalog/keda/
+  # resourceset.yaml). Adding one is a statement there and a word here. On
+  # gcp pubsub's scaler reads Cloud Monitoring: roles/monitoring.viewer on
+  # the project. A cloud absent here has no Crossplane provider yet.
+  keda_services = {
+    aws = ["sqs", "cloudwatch", "kinesis", "dynamodb"]
+    gcp = ["pubsub"]
+  }
   # The keys an Alertmanager receiver takes in clear, each with a *_file twin
   # that reads it from a file: kube.alerting.receivers refuses these, so no
   # webhook URL, token or password lands in the state (docs/catalog/alerting.md).

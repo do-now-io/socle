@@ -8,6 +8,7 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
+  - ../../catalog/gateway-api/resourceset.yaml
   - ../../catalog/crossplane/resourceset.yaml
   - ../../catalog/external-dns/resourceset.yaml
   - ../../catalog/argocd/resourceset.yaml
@@ -23,6 +24,7 @@ resources:
   - ../../catalog/kyverno-policies/resourceset.yaml
   - ../../catalog/external-secrets/resourceset.yaml
   - ../../catalog/reloader/resourceset.yaml
+  - ../../catalog/velero/resourceset.yaml
   - ../../catalog/hello/resourceset.yaml
 patches:
   - path: hello-color.patch.yaml

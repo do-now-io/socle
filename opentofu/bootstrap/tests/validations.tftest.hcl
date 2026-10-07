@@ -244,6 +244,7 @@ run "cilium_is_refused_where_the_cloud_operates_it" {
     cloud           = "gcp"
     cilium          = { hubble = true }
     cluster_network = null
+    project         = { id = "sandbox-2bace", number = "123456789012" }
   }
   expect_failures = [var.cilium]
 }
@@ -336,7 +337,8 @@ run "kube_refuses_a_module_not_offered_on_this_cloud" {
   variables {
     cloud           = "gcp"
     cluster_network = null
-    kube            = { gateway_api = { enabled = false } }
+    project         = { id = "sandbox-2bace", number = "123456789012" }
+    kube            = { metrics_server = { enabled = false } }
   }
   expect_failures = [var.kube]
 }
@@ -599,6 +601,7 @@ run "eks_addons_is_refused_off_aws" {
     cloud           = "gcp"
     eks_addons      = { ebs_csi = false }
     cluster_network = null
+    project         = { id = "sandbox-2bace", number = "123456789012" }
   }
   expect_failures = [var.eks_addons]
 }
@@ -814,12 +817,39 @@ run "keda_refuses_a_service_without_crossplane" {
   expect_failures = [var.kube]
 }
 
-run "keda_refuses_a_service_outside_aws" {
+# Each cloud's list is its own: an AWS service on gcp is a service the gcp
+# template cannot scope, and so is GCP's on aws.
+run "keda_services_are_the_clouds_own" {
   command = plan
   variables {
     cloud           = "gcp"
     cluster_network = null
+    project         = { id = "sandbox-2bace", number = "123456789012" }
     region          = "europe-west1"
+    kube = {
+      crossplane = { enabled = true }
+      keda       = { enabled = true, services = ["sqs"] }
+    }
+  }
+  expect_failures = [var.kube]
+}
+
+run "keda_refuses_a_gcp_service_on_aws" {
+  command = plan
+  variables {
+    region = "eu-west-3"
+    kube = {
+      crossplane = { enabled = true }
+      keda       = { enabled = true, services = ["pubsub"] }
+    }
+  }
+  expect_failures = [var.kube]
+}
+
+run "keda_refuses_a_service_where_the_socle_declares_no_role" {
+  command = plan
+  variables {
+    cloud = "azure"
     kube = {
       crossplane = { enabled = true }
       keda       = { enabled = true, services = ["sqs"] }
@@ -1081,12 +1111,61 @@ run "kube_refuses_velero_on_aws_without_a_region" {
   expect_failures = [var.kube]
 }
 
-run "kube_refuses_velero_off_aws" {
+run "kube_refuses_velero_on_azure" {
+  command = plan
+  variables {
+    cloud = "azure"
+    kube  = { velero = { enabled = false } }
+  }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_velero_on_scaleway" {
+  command = plan
+  variables {
+    cloud           = "scaleway"
+    cluster_network = null
+    kube            = { velero = { enabled = false } }
+  }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_velero_on_gcp_without_crossplane" {
   command = plan
   variables {
     cloud           = "gcp"
     cluster_network = null
-    kube            = { velero = { enabled = false } }
+    project         = { id = "sandbox-2bace", number = "123456789012" }
+    region          = "europe-west1"
+    kube            = { velero = { enabled = true } }
+  }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_velero_on_gcp_without_a_region" {
+  command = plan
+  variables {
+    cloud           = "gcp"
+    cluster_network = null
+    project         = { id = "sandbox-2bace", number = "123456789012" }
+    kube            = { crossplane = { enabled = true }, velero = { enabled = true } }
+  }
+  expect_failures = [var.kube]
+}
+
+# Autopilot refuses the node-agent's hostPath mount of the kubelet's pods
+# directory, so the DaemonSet would never schedule: refused at plan.
+run "velero_node_agent_is_refused_on_gcp" {
+  command = plan
+  variables {
+    cloud           = "gcp"
+    cluster_network = null
+    project         = { id = "sandbox-2bace", number = "123456789012" }
+    region          = "europe-west1"
+    kube = {
+      crossplane = { enabled = true }
+      velero     = { enabled = true, node_agent = true }
+    }
   }
   expect_failures = [var.kube]
 }
@@ -1189,6 +1268,7 @@ run "kube_refuses_metrics_server_on_gcp" {
     cloud           = "gcp"
     cluster_network = null
     kube            = { metrics_server = { enabled = true } }
+    project         = { id = "sandbox-2bace", number = "123456789012" }
   }
   expect_failures = [var.kube]
 }
@@ -1210,6 +1290,118 @@ run "kube_refuses_metrics_server_on_scaleway" {
     kube            = { metrics_server = { enabled = true } }
   }
   expect_failures = [var.kube]
+}
+
+# --- crossplane per cloud --------------------------------------------------
+
+run "crossplane_permissions_boundary_is_refused_on_gcp" {
+  command = plan
+  variables {
+    cloud           = "gcp"
+    cluster_network = null
+    project         = { id = "sandbox-2bace", number = "123456789012" }
+    kube            = { crossplane = { permissions_boundary = "arn:aws:iam::123456789012:policy/socle/socle-test/socle-test-crossplane-boundary" } }
+  }
+  expect_failures = [var.kube]
+}
+
+run "crossplane_dns_zones_are_refused_off_gcp" {
+  command = plan
+  variables { kube = { crossplane = { dns_zones = ["sandbox-gcp-do-now-io"] } } }
+  expect_failures = [var.kube]
+}
+
+run "crossplane_dns_zone_lister_role_is_refused_off_gcp" {
+  command = plan
+  variables { kube = { crossplane = { dns_zone_lister_role = "projects/sandbox-2bace/roles/socleDnsZoneLister_socle_test" } } }
+  expect_failures = [var.kube]
+}
+
+run "crossplane_refuses_a_dns_zone_that_is_not_a_managed_zone_name" {
+  command = plan
+  variables {
+    cloud           = "gcp"
+    cluster_network = null
+    project         = { id = "sandbox-2bace", number = "123456789012" }
+    kube            = { crossplane = { dns_zones = ["sandbox-gcp.do-now.io"] } }
+  }
+  expect_failures = [var.kube]
+}
+
+run "crossplane_refuses_a_dns_zone_lister_role_that_is_not_a_custom_role" {
+  command = plan
+  variables {
+    cloud           = "gcp"
+    cluster_network = null
+    project         = { id = "sandbox-2bace", number = "123456789012" }
+    kube            = { crossplane = { dns_zone_lister_role = "roles/dns.reader" } }
+  }
+  expect_failures = [var.kube]
+}
+
+# --- external_secrets per cloud --------------------------------------------
+
+# A Secret Manager secret id has no path: a "/" in a prefix would match no
+# secret on gcp, and the binding would grant nothing, silently.
+run "external_secrets_refuses_a_path_prefix_on_gcp" {
+  command = plan
+  variables {
+    cloud           = "gcp"
+    cluster_network = null
+    project         = { id = "sandbox-2bace", number = "123456789012" }
+    kube            = { external_secrets = { prefixes = ["shared/platform"] } }
+  }
+  expect_failures = [var.kube]
+}
+
+# "_" separates the prefix from the name on gcp: acme_prod as a prefix would
+# make acme's binding read it too.
+run "external_secrets_refuses_an_underscore_in_a_prefix_on_gcp" {
+  command = plan
+  variables {
+    cloud           = "gcp"
+    cluster_network = null
+    project         = { id = "sandbox-2bace", number = "123456789012" }
+    kube            = { external_secrets = { prefixes = ["acme_prod"] } }
+  }
+  expect_failures = [var.kube]
+}
+
+# --- project — gcp ---------------------------------------------------------
+
+run "gcp_requires_its_project" {
+  command = plan
+  variables {
+    cloud           = "gcp"
+    cluster_network = null
+  }
+  expect_failures = [var.project]
+}
+
+run "project_is_refused_off_gcp" {
+  command = plan
+  variables { project = { id = "sandbox-2bace", number = "123456789012" } }
+  expect_failures = [var.project]
+}
+
+run "project_refuses_an_id_that_is_not_a_project_id" {
+  command = plan
+  variables {
+    cloud           = "gcp"
+    cluster_network = null
+    project         = { id = "Sandbox_2bace", number = "123456789012" }
+  }
+  expect_failures = [var.project]
+}
+
+run "project_refuses_a_number_that_is_not_a_number" {
+  command = plan
+  variables {
+    cloud           = "gcp"
+    cluster_network = null
+    project         = { id = "sandbox-2bace", number = "sandbox-2bace" }
+  }
+  expect_failures = [var.project]
 }
 
 run "kube_refuses_alerting_watchdog_that_is_not_a_bool" {
