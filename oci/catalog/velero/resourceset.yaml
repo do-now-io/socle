@@ -37,7 +37,9 @@
 # s3:Delete* action at all (opentofu/aws/iam.tf), nor storage.buckets.delete
 # (opentofu/gcp/iam.tf). Turning the module off, or uninstalling the socle,
 # leaves the bucket and every backup in it; a cluster rebuilt under the same
-# name adopts it by its external name.
+# name adopts it by its external name. Never deleted is not never changed:
+# Crossplane's identity still updates the bucket's configuration — its
+# lifecycle rules on both clouds, its uniform bucket-level access on GCP.
 apiVersion: fluxcd.controlplane.io/v1
 kind: ResourceSet
 metadata:

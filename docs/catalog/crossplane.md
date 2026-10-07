@@ -433,7 +433,10 @@ for one module:
 On GCP the same capability is `provider-gcp-storage` and the custom role
 `socleCrossplaneBuckets_<cluster>` of §2, bounded by
 `projects/_/buckets/<cluster>-`: create, read and update a bucket and its IAM
-policy, no delete and no object permission. The bucket is
+policy, no delete and no object permission. Crossplane can never delete the
+bucket, but `storage.buckets.update` still changes its lifecycle rules and
+its uniform bucket-level access — as the AWS statement still writes
+lifecycle. The bucket is
 `<cluster>-<module>-<project number>`, with uniform bucket-level access —
 which is what keeps `roles/storage.objectAdmin`'s object ACLs out of play —
 and its binding is a `BucketIAMMember` for the module's principal, under the

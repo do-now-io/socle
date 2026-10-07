@@ -131,7 +131,10 @@ JSON API's resumable uploads, which GCS expires itself after a week.
 **Never deleted, here too.** No `Delete` in the bucket's management policies,
 and Crossplane's bucket role has no `storage.buckets.delete` (nor
 `storage.buckets.list`, nor any object permission): turning the module off
-releases the `Bucket` and leaves the bucket and its backups. The
+releases the `Bucket` and leaves the bucket and its backups. Never deleted
+is not never changed: `storage.buckets.update` still lets Crossplane rewrite
+the bucket's lifecycle rules and uniform bucket-level access, as it rewrites
+the lifecycle on AWS. The
 `BucketIAMMember` keeps the default policies, so the binding **is** removed
 with the module — nothing reaches the bucket once Velero is gone.
 

@@ -112,9 +112,12 @@ resource "google_project_iam_member" "crossplane_project_grants" {
 # (docs/catalog/crossplane.md §3, docs/catalog/velero.md §8). Create it, read
 # and update its configuration, set its IAM policy so the module's principal
 # can use it. No delete of any kind and no object permission: Crossplane can
-# never remove a bucket of backups, nor read one, whatever a managed
-# resource's deletionPolicy says. No storage.buckets.list either: it is
-# checked on the project, where a bucket-name condition never grants it.
+# never delete the bucket, nor read what is in it, whatever a managed
+# resource's deletionPolicy says. It can still change the bucket:
+# storage.buckets.update writes its lifecycle rules and its uniform
+# bucket-level access, as the AWS statement writes lifecycle. No
+# storage.buckets.list either: it is checked on the project, where a
+# bucket-name condition never grants it.
 resource "google_project_iam_custom_role" "crossplane_buckets" {
   count = var.crossplane == null ? 0 : 1
 
