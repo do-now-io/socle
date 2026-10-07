@@ -22,16 +22,28 @@
 # here as Crossplane managed resources (docs/catalog/crossplane.md §3), on
 # AWS with Crossplane on; the foundations never create it.
 #
+# On GCP the list may name pubsub only (OpenTofu refuses the rest): KEDA's
+# Pub/Sub scaler reads Cloud Monitoring, never Pub/Sub itself, so pubsub is
+# one project-level binding of roles/monitoring.viewer on the operator's
+# own Workload Identity principal — no Google service account
+# (docs/catalog/keda.md §2, *On GCP*).
+#
 # Two layers, so that the operator pod is admitted only after its AWS access
 # exists — EKS Pod Identity injects the credentials at pod admission, a pod
 # admitted before its association never gets them (docs/catalog/external-dns.md):
 # - this ResourceSet: the Namespace and, when a service is named, the
 #   module's own IAM Role and the Pod Identity association binding it to
-#   keda/keda-operator;
+#   keda/keda-operator — on GCP, the ProjectIAMMember;
 # - keda-workload, a child ResourceSet holding the chart, which dependsOn
 #   the Role and the association being Ready — an explicit readyExpr, since
 #   a managed resource not yet created carries no Ready condition at all
 #   and kstatus reads that as healthy (measured on floci by external-dns).
+#   GKE hands out tokens at call time, not at admission, so there the order
+#   only spares the operator minutes of denied reads; it is kept, the same
+#   chain on every cloud. So is the socle.do-now.io/cloud-access pod
+#   annotation in the socle's values: on GKE a roll is not needed for the
+#   credentials, but the pod still shows, and restarts on, a change of
+#   access, as on AWS.
 # This ResourceSet dependsOn the crossplane one, which always exists and is
 # Ready trivially when Crossplane is off.
 #
@@ -162,6 +174,37 @@ spec:
         roleArnRef:
           name: keda-operator
     << end >>
+    << $access := and (eq inputs.cloud "gcp") inputs.modules.crossplane.enabled (has "pubsub" inputs.modules.keda.services) >>
+    << if $access >>
+    << $principal := printf
+      "principal://iam.googleapis.com/projects/%s/locations/global/workloadIdentityPools/%s.svc.id.goog/subject/ns/%s/sa/%s"
+      inputs.cluster.projectNumber inputs.cluster.projectId "keda" "keda-operator" >>
+    ---
+    # The module's own GCP access, docs/catalog/crossplane.md §3: a binding
+    # on the operator's principal, no Google service account. KEDA's
+    # gcp-pubsub scaler asks Cloud Monitoring for the subscription's
+    # pubsub.googleapis.com/subscription/num_undelivered_messages
+    # (QueryTimeSeries, pkg/scalers/gcp/gcp_stackdriver_client.go, v2.21.0)
+    # and never calls Pub/Sub: monitoring.viewer is the whole of it, the
+    # narrowest predefined role holding monitoring.timeSeries.list. Project
+    # level, because the subscriptions are named in the client's
+    # ScaledObjects, which the socle does not read: it reads every metric of
+    # the project, never a message. The foundations refuse the binding
+    # unless roles/monitoring.viewer is in gcp.crossplane.allowed_roles — the
+    # client's tfvars, reviewed.
+    apiVersion: cloudplatform.gcp.m.upbound.io/v1beta1
+    kind: ProjectIAMMember
+    metadata:
+      name: keda-operator
+      namespace: keda
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.keda.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      forProvider:
+        project: << inputs.cluster.projectId | quote >>
+        role: roles/monitoring.viewer
+        member: << $principal | quote >>
+    << end >>
     ---
     # The workload, in a child ResourceSet so that it can wait on the
     # association explicitly (see the header).
@@ -183,6 +226,14 @@ spec:
           readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
         - apiVersion: eks.aws.m.upbound.io/v1beta1
           kind: PodIdentityAssociation
+          name: keda-operator
+          namespace: keda
+          ready: true
+          readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
+      << else if $access >>
+      dependsOn:
+        - apiVersion: cloudplatform.gcp.m.upbound.io/v1beta1
+          kind: ProjectIAMMember
           name: keda-operator
           namespace: keda
           ready: true
