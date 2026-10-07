@@ -16,6 +16,17 @@ variable "project_id" {
   }
 }
 
+variable "project_number" {
+  description = "The project's number, which every Workload Identity Federation principal names the project by. Null, the default, reads it from the project; set it only where that read cannot happen — the Cloud Billing call the provider makes alongside it is what an emulator lacks."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.project_number == null || can(regex("^[1-9][0-9]{5,19}$", var.project_number))
+    error_message = "project_number must be the project's number, digits only, such as 123456789012 — not its ID."
+  }
+}
+
 variable "region" {
   description = "Region of the cluster and its subnetwork. The cluster is regional; zonal clusters are not offered."
   type        = string
@@ -412,9 +423,96 @@ variable "observability_reader_members" {
 # ---------------------------------------------------------------------------
 
 # Workload Identity Federation has no variable: Autopilot pre-configures it and
-# it cannot be disabled. The pool is exposed as an output, and binding a
-# Kubernetes service account to a Google one belongs to the layer that owns
-# those objects.
+# it cannot be disabled. The pool is exposed as an output. No Google service
+# account is created: one set of grants is made here, Crossplane's, because
+# its principal is fixed by the socle artifact; every other identity is
+# Crossplane's to bind.
+
+variable "crossplane" {
+  description = <<-EOT
+    Give the catalog's crossplane module its Google Cloud identity — the one
+    the socle cannot make for itself: grants to the federated principal of
+    crossplane-system/provider-gcp, no Google service account. allowed_roles
+    is the boundary: the roles (predefined, or custom by full name) Crossplane
+    may grant any module's principal on the project or on a bucket, through
+    Project IAM Admin under a modifiedGrantsByRole condition. Empty grants
+    nothing but the socle's own zone lister role; owner, editor, viewer,
+    iam.* and resourcemanager.* are refused, and Google caps the list at
+    nine. Never list a role that itself grants roles (one with a setIamPolicy
+    permission, such as roles/storage.admin): Crossplane could give it to
+    itself. Buckets are reachable under the <cluster_name>- prefix only, and
+    never deletable. dns_zones are the Cloud DNS managed zones (by name) on
+    which Crossplane may bind external-dns. Null, the default, creates
+    nothing.
+  EOT
+  type = object({
+    allowed_roles = optional(list(string), [])
+    dns_zones     = optional(list(string), [])
+  })
+  default = null
+
+  validation {
+    condition     = var.crossplane == null || try(alltrue([for r in var.crossplane.allowed_roles : can(regex("^(roles|projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/roles)/[A-Za-z0-9_.]+$", r))]), false)
+    error_message = "crossplane.allowed_roles must be role names as IAM writes them, such as roles/secretmanager.secretAccessor or projects/<project>/roles/<id> — a role, not a permission."
+  }
+
+  validation {
+    condition = var.crossplane == null || try(length([
+      for r in var.crossplane.allowed_roles : r
+      if contains(["roles/owner", "roles/editor", "roles/viewer"], r) || startswith(r, "roles/iam.") || startswith(r, "roles/resourcemanager.")
+    ]) == 0, true)
+    error_message = "crossplane.allowed_roles must not name ${try(join(", ", [for r in var.crossplane.allowed_roles : r if contains(["roles/owner", "roles/editor", "roles/viewer"], r) || startswith(r, "roles/iam.") || startswith(r, "roles/resourcemanager.")]), "")}: Crossplane would then be able to grant itself the project. Basic roles, iam.* and resourcemanager.* are refused."
+  }
+
+  # Google accepts at most ten roles in a hasOnly() condition, and the socle's
+  # zone lister role always takes one of them:
+  # https://cloud.google.com/iam/docs/setting-limits-on-granting-roles
+  validation {
+    condition     = var.crossplane == null || try(length(var.crossplane.allowed_roles) <= 9, true)
+    error_message = "crossplane.allowed_roles accepts at most nine roles: Google caps a role-granting condition at ten, and the socle's zone lister role is always one of them."
+  }
+
+  validation {
+    condition     = var.crossplane == null || try(alltrue([for z in var.crossplane.dns_zones : can(regex("^[a-z][a-z0-9-]{0,62}$", z))]), false)
+    error_message = "crossplane.dns_zones must be Cloud DNS managed zone names, such as sandbox-gcp-do-now-io — the zone's name, not its DNS name."
+  }
+}
+
+# --- The shared Gateways' certificate — certificate.tf ---
+
+variable "gateway_certificate" {
+  description = <<-EOT
+    The Certificate Manager certificates the socle's two Gateways terminate
+    TLS with, at the load balancer: every name in `domains` (wildcards
+    included, such as ["acme.example", "*.acme.example"]), authorised by DNS
+    in the Cloud DNS managed zone `dns_zone` (its name, in this project).
+    A global certificate in a certificate map serves the public Gateway; a
+    regional one serves the internal Gateway. Every route published through a
+    Gateway — ArgoCD's included — is then `<name>.<domain>`. Null, the
+    default, creates nothing, and the bootstrap module creates no Gateway: the
+    socle never serves a route in clear text.
+  EOT
+  type = object({
+    dns_zone = string
+    domains  = list(string)
+  })
+  default = null
+
+  validation {
+    condition     = var.gateway_certificate == null || try(length(var.gateway_certificate.domains) > 0, false)
+    error_message = "gateway_certificate.domains must name at least one domain: a certificate covers names, and there is nothing to issue without one."
+  }
+
+  validation {
+    condition     = var.gateway_certificate == null || try(alltrue([for d in var.gateway_certificate.domains : can(regex("^(\\*\\.)?([a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$", d))]), false)
+    error_message = "gateway_certificate.domains must be lowercase DNS names such as acme.example, or a leading-wildcard *.acme.example — no other wildcard."
+  }
+
+  validation {
+    condition     = var.gateway_certificate == null || try(can(regex("^[a-z][a-z0-9-]{0,62}$", var.gateway_certificate.dns_zone)), false)
+    error_message = "gateway_certificate.dns_zone must be a Cloud DNS managed zone name, such as acme-example — the zone's name, not its DNS name."
+  }
+}
 
 # ---------------------------------------------------------------------------
 # Lifecycle

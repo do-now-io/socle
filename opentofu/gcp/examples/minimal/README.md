@@ -35,6 +35,9 @@ Federation, never a key — needs, on the target project:
 | `roles/resourcemanager.projectIamAdmin` | binding roles to it |
 | `roles/pubsub.admin` | the upgrade-notification topic |
 | `roles/bigquery.admin` | only when `billing_export_dataset_id` is set |
+| `roles/iam.roleAdmin` | Crossplane's custom roles — only when `crossplane` is set |
+| `roles/dns.admin` | zone bindings for `crossplane.dns_zones`, and the certificate's authorization records |
+| `roles/certificatemanager.editor` | only when `gateway_certificate` is set |
 | `roles/storage.objectAdmin` | reading and writing state — granted on the state bucket, not on the project |
 
 Setting the project up to receive an apply — APIs, budget, a hardened state
@@ -82,6 +85,7 @@ No resources.
 | <a name="output_cluster_ca_certificate"></a> [cluster\_ca\_certificate](#output\_cluster\_ca\_certificate) | Base64-encoded cluster CA certificate. |
 | <a name="output_cluster_dns_endpoint"></a> [cluster\_dns\_endpoint](#output\_cluster\_dns\_endpoint) | Control plane DNS endpoint. |
 | <a name="output_cluster_name"></a> [cluster\_name](#output\_cluster\_name) | Name of the cluster. |
+| <a name="output_crossplane_principal"></a> [crossplane\_principal](#output\_crossplane\_principal) | The federated principal Crossplane's GCP providers run as. |
 | <a name="output_oidc_issuer_url"></a> [oidc\_issuer\_url](#output\_oidc\_issuer\_url) | The cluster's OIDC issuer URL. |
 | <a name="output_upgrade_notifications_topic"></a> [upgrade\_notifications\_topic](#output\_upgrade\_notifications\_topic) | Pub/Sub topic carrying GKE upgrade notifications. |
 | <a name="output_workload_identity_pool"></a> [workload\_identity\_pool](#output\_workload\_identity\_pool) | The Workload Identity Federation pool. |

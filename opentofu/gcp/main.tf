@@ -7,7 +7,18 @@
 # and Crossplane.
 #
 # Every default here traces back to a research document under docs/gcp/.
-# Resources live in network.tf, cluster.tf, iam.tf and observability.tf.
+# Resources live in network.tf, cluster.tf, iam.tf, certificate.tf and
+# observability.tf.
+
+# The project's number: a Workload Identity Federation principal names the
+# project by it, not by its ID, and only the API knows it — unless the caller
+# already does. The provider reads the project's billing info in the same
+# call, which an emulator does not implement; project_number skips both.
+data "google_project" "this" {
+  count = var.project_number == null ? 1 : 0
+
+  project_id = var.project_id
+}
 
 locals {
   # Stamped onto every billable resource so cost can be attributed and orphans
@@ -43,4 +54,14 @@ locals {
   # Derived, not configurable: Autopilot enforces Workload Identity Federation
   # and the pool name follows the project.
   workload_identity_pool = "${var.project_id}.svc.id.goog"
+
+  # What every workload's principal starts with. The project number, not its
+  # ID: a principal built on the ID is a valid string that matches no
+  # workload, so every binding made with it silently grants nothing.
+  project_number                     = coalesce(var.project_number, one(data.google_project.this[*].number))
+  workload_identity_principal_prefix = "principal://iam.googleapis.com/projects/${local.project_number}/locations/global/workloadIdentityPools/${local.workload_identity_pool}/subject"
+
+  # Custom role IDs accept letters, digits, underscores and dots only, and a
+  # cluster name is a DNS label: its dashes become underscores.
+  cluster_snake = replace(var.cluster_name, "-", "_")
 }

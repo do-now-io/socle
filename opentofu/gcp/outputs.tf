@@ -39,8 +39,48 @@ output "workload_identity_pool" {
 }
 
 output "workload_identity_principal_prefix" {
-  description = "Prefix of a workload's IAM principal identifier. Append ns/NAMESPACE/sa/SERVICEACCOUNT. Note that two clusters in one project produce identical principals for the same namespace and service account."
-  value       = "principal://iam.googleapis.com/projects/${var.project_id}/locations/global/workloadIdentityPools/${local.workload_identity_pool}/subject"
+  description = "Prefix of a workload's IAM principal identifier, naming the project by its number as Workload Identity Federation requires. Append /ns/NAMESPACE/sa/SERVICEACCOUNT. Note that two clusters in one project produce identical principals for the same namespace and service account."
+  value       = local.workload_identity_principal_prefix
+}
+
+output "project_id" {
+  description = "The project the cluster lives in — half of every workload's principal, with project_number."
+  value       = var.project_id
+}
+
+output "project_number" {
+  description = "The project's number, which a Workload Identity Federation principal names the project by."
+  value       = local.project_number
+}
+
+output "region" {
+  description = "Region of the cluster, and of the internal Gateway's regional certificate."
+  value       = var.region
+}
+
+output "crossplane_principal" {
+  description = "The federated principal the catalog's crossplane module's GCP providers run as (crossplane-system/provider-gcp). Null when crossplane is not set."
+  value       = var.crossplane == null ? null : local.crossplane_principal
+}
+
+output "crossplane_dns_zones" {
+  description = "The Cloud DNS managed zones Crossplane may bind external-dns on — what the bootstrap module hands the catalog. Empty when crossplane is not set."
+  value       = try(var.crossplane.dns_zones, [])
+}
+
+output "dns_zone_lister_role" {
+  description = "Full name of the custom role that lets external-dns list the project's zones, always among the roles Crossplane may grant. Built from its ID, so known on the first plan. Empty when crossplane is not set."
+  value       = local.dns_zone_lister_role
+}
+
+output "gateway_certificate_map" {
+  description = "Name of the Certificate Manager map the public Gateway's networking.gke.io/certmap annotation takes — what the bootstrap module's gateway_certificate_map takes. Empty when gateway_certificate is not set."
+  value       = var.gateway_certificate == null ? "" : google_certificate_manager_certificate_map.gateway[0].name
+}
+
+output "gateway_regional_certificate" {
+  description = "Name of the regional Certificate Manager certificate the internal Gateway's HTTPS listener takes, in its networking.gke.io/cert-manager-certs TLS option — what the bootstrap module's gateway_regional_certificate takes. Empty when gateway_certificate is not set."
+  value       = var.gateway_certificate == null ? "" : google_certificate_manager_certificate.gateway_regional[0].name
 }
 
 output "upgrade_notifications_topic" {

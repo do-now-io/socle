@@ -48,6 +48,9 @@ Every default traces back to a research document. The short version:
 | Private nodes on, flipping Autopilot's default | default | [network & security](../../docs/gcp/network-security.md) |
 | DNS-based control plane endpoint, IP endpoints off | default | [network & security](../../docs/gcp/network-security.md) |
 | No Services secondary range — GKE manages it | enforced | [network & security](../../docs/gcp/network-security.md) |
+| No Google service account: every workload, Crossplane included, is a federated principal named by the project number | enforced | [crossplane](../../docs/catalog/crossplane.md) |
+| Crossplane's identity off unless asked; when on, it grants only `allowed_roles` (a `modifiedGrantsByRole` condition), buckets under `<cluster_name>-` only and never deleted, zone IAM on the listed zones only | opt-in | [crossplane](../../docs/catalog/crossplane.md) |
+| Gateway TLS at the load balancer with Google-managed Certificate Manager certificates, DNS-authorised: a map for the public Gateway, a regional certificate for the internal one | opt-in | [Gateway API](../../docs/catalog/gateway-api.md) |
 
 ## What is deliberately absent
 
@@ -80,7 +83,7 @@ Nothing breaks without that step — the cost data simply never arrives.
 ## Tests
 
 ```bash
-tofu test          # 35 runs: every validation, and the defaults
+tofu test          # 57 runs: every validation, and the defaults
 ```
 
 Integration: CI plans [`tests/emulator`](tests/emulator) against the floci-gcp
@@ -112,14 +115,28 @@ No modules.
 | Name | Type |
 |------|------|
 | [google_bigquery_dataset.billing_export](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/bigquery_dataset) | resource |
+| [google_certificate_manager_certificate.gateway](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/certificate_manager_certificate) | resource |
+| [google_certificate_manager_certificate.gateway_regional](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/certificate_manager_certificate) | resource |
+| [google_certificate_manager_certificate_map.gateway](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/certificate_manager_certificate_map) | resource |
+| [google_certificate_manager_certificate_map_entry.gateway](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/certificate_manager_certificate_map_entry) | resource |
+| [google_certificate_manager_dns_authorization.gateway](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/certificate_manager_dns_authorization) | resource |
+| [google_certificate_manager_dns_authorization.gateway_regional](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/certificate_manager_dns_authorization) | resource |
 | [google_compute_network.socle](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_network) | resource |
 | [google_compute_router.socle](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_router) | resource |
 | [google_compute_router_nat.socle](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_router_nat) | resource |
 | [google_compute_subnetwork.proxy_only](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_subnetwork) | resource |
 | [google_compute_subnetwork.socle](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_subnetwork) | resource |
 | [google_container_cluster.socle](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/container_cluster) | resource |
+| [google_dns_managed_zone_iam_member.crossplane](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/dns_managed_zone_iam_member) | resource |
+| [google_dns_record_set.gateway_certificate_authorization](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/dns_record_set) | resource |
+| [google_project_iam_custom_role.crossplane_buckets](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/project_iam_custom_role) | resource |
+| [google_project_iam_custom_role.crossplane_zone_iam](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/project_iam_custom_role) | resource |
+| [google_project_iam_custom_role.dns_zone_lister](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/project_iam_custom_role) | resource |
+| [google_project_iam_member.crossplane_buckets](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/project_iam_member) | resource |
+| [google_project_iam_member.crossplane_project_grants](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/project_iam_member) | resource |
 | [google_project_iam_member.observability_reader](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/project_iam_member) | resource |
 | [google_pubsub_topic.upgrade_notifications](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/pubsub_topic) | resource |
+| [google_project.this](https://registry.terraform.io/providers/hashicorp/google/latest/docs/data-sources/project) | data source |
 
 ## Inputs
 
@@ -142,10 +159,12 @@ No modules.
 | <a name="input_create_network"></a> [create\_network](#input\_create\_network) | Create the VPC instead of using an existing one. The common case is a network the consumer already owns. | `bool` | `false` | no |
 | <a name="input_create_proxy_only_subnet"></a> [create\_proxy\_only\_subnet](#input\_create\_proxy\_only\_subnet) | Create the proxy-only subnetwork. Set to false when another cluster in the same region and VPC already created it — the pool is shared. | `bool` | `true` | no |
 | <a name="input_create_subnetwork"></a> [create\_subnetwork](#input\_create\_subnetwork) | Create the cluster subnetwork. Set to false in a Shared VPC where the network team owns subnets, and supply subnetwork\_name and pod\_range\_name instead. | `bool` | `true` | no |
+| <a name="input_crossplane"></a> [crossplane](#input\_crossplane) | Give the catalog's crossplane module its Google Cloud identity — the one<br/>the socle cannot make for itself: grants to the federated principal of<br/>crossplane-system/provider-gcp, no Google service account. allowed\_roles<br/>is the boundary: the roles (predefined, or custom by full name) Crossplane<br/>may grant any module's principal on the project or on a bucket, through<br/>Project IAM Admin under a modifiedGrantsByRole condition. Empty grants<br/>nothing but the socle's own zone lister role; owner, editor, viewer,<br/>iam.* and resourcemanager.* are refused, and Google caps the list at<br/>nine. Never list a role that itself grants roles (one with a setIamPolicy<br/>permission, such as roles/storage.admin): Crossplane could give it to<br/>itself. Buckets are reachable under the <cluster\_name>- prefix only, and<br/>never deletable. dns\_zones are the Cloud DNS managed zones (by name) on<br/>which Crossplane may bind external-dns. Null, the default, creates<br/>nothing. | <pre>object({<br/>    allowed_roles = optional(list(string), [])<br/>    dns_zones     = optional(list(string), [])<br/>  })</pre> | `null` | no |
 | <a name="input_deletion_protection"></a> [deletion\_protection](#input\_deletion\_protection) | Refuse to destroy the cluster. On by default; test fixtures turn it off. | `bool` | `true` | no |
 | <a name="input_enable_private_nodes"></a> [enable\_private\_nodes](#input\_enable\_private\_nodes) | Nodes get no external address. Flips the Autopilot default, which is public. | `bool` | `true` | no |
 | <a name="input_enable_upgrade_notifications"></a> [enable\_upgrade\_notifications](#input\_enable\_upgrade\_notifications) | Create a Pub/Sub topic and publish cluster upgrade notifications to it, so automation can react instead of polling. | `bool` | `true` | no |
 | <a name="input_gateway_api_enabled"></a> [gateway\_api\_enabled](#input\_gateway\_api\_enabled) | Run GKE's Gateway API controller and let GKE install and upgrade the standard-channel Gateway API CRDs. On by default and stated rather than assumed: the socle installs nothing for Gateway API on GKE because of it, and its templates target GKE's classes. Off leaves the cluster without Gateway API at all. | `bool` | `true` | no |
+| <a name="input_gateway_certificate"></a> [gateway\_certificate](#input\_gateway\_certificate) | The Certificate Manager certificates the socle's two Gateways terminate<br/>TLS with, at the load balancer: every name in `domains` (wildcards<br/>included, such as ["acme.example", "*.acme.example"]), authorised by DNS<br/>in the Cloud DNS managed zone `dns_zone` (its name, in this project).<br/>A global certificate in a certificate map serves the public Gateway; a<br/>regional one serves the internal Gateway. Every route published through a<br/>Gateway — ArgoCD's included — is then `<name>.<domain>`. Null, the<br/>default, creates nothing, and the bootstrap module creates no Gateway: the<br/>socle never serves a route in clear text. | <pre>object({<br/>    dns_zone = string<br/>    domains  = list(string)<br/>  })</pre> | `null` | no |
 | <a name="input_kubernetes_min_version"></a> [kubernetes\_min\_version](#input\_kubernetes\_min\_version) | Floor for the control plane version. Raise-only escape hatch for promoting a minor deliberately; leave null in steady state and let the channel decide. | `string` | `null` | no |
 | <a name="input_logging_components"></a> [logging\_components](#input\_logging\_components) | GKE log sources to send to Cloud Logging. SYSTEM\_COMPONENTS cannot be removed; drop WORKLOADS when application logs are collected in-cluster. | `list(string)` | <pre>[<br/>  "SYSTEM_COMPONENTS",<br/>  "WORKLOADS"<br/>]</pre> | no |
 | <a name="input_maintenance_exclusions"></a> [maintenance\_exclusions](#input\_maintenance\_exclusions) | Windows during which GKE must not upgrade the cluster. The brake, not the routine: empty by default. | <pre>list(object({<br/>    name       = string<br/>    start_time = string<br/>    end_time   = string<br/>    scope      = string<br/>  }))</pre> | `[]` | no |
@@ -155,6 +174,7 @@ No modules.
 | <a name="input_observability_reader_members"></a> [observability\_reader\_members](#input\_observability\_reader\_members) | Principals granted read-only access to this project's metrics — the central observability cluster's federated identity, never a key. | `list(string)` | `[]` | no |
 | <a name="input_pod_range_cidr"></a> [pod\_range\_cidr](#input\_pod\_range\_cidr) | Secondary range for Pod addresses. Autopilot fixes 32 Pods per node, so a /26 is consumed per node: a /16 carries 1024 nodes. Sized generously on purpose — a cluster's Pod range cannot be changed after creation, while the primary range can be expanded in place. | `string` | `"10.4.0.0/16"` | no |
 | <a name="input_pod_range_name"></a> [pod\_range\_name](#input\_pod\_range\_name) | Name of the secondary range that carries Pod addresses. Defaults to <cluster\_name>-pods, which is what the module creates; set it when attaching to a subnetwork someone else owns. | `string` | `null` | no |
+| <a name="input_project_number"></a> [project\_number](#input\_project\_number) | The project's number, which every Workload Identity Federation principal names the project by. Null, the default, reads it from the project; set it only where that read cannot happen — the Cloud Billing call the provider makes alongside it is what an emulator lacks. | `string` | `null` | no |
 | <a name="input_proxy_only_range_cidr"></a> [proxy\_only\_range\_cidr](#input\_proxy\_only\_range\_cidr) | Range of the REGIONAL\_MANAGED\_PROXY subnetwork. Regional Application Load Balancers, and therefore Gateways, cannot exist without it. | `string` | `"10.8.0.0/23"` | no |
 | <a name="input_release_channel"></a> [release\_channel](#input\_release\_channel) | GKE release channel. REGULAR is Google's recommendation and the estate-wide default; RAPID is outside the GKE SLA and belongs in pre-production only. | `string` | `"REGULAR"` | no |
 | <a name="input_subnet_flow_logs_enabled"></a> [subnet\_flow\_logs\_enabled](#input\_subnet\_flow\_logs\_enabled) | Enable VPC flow logs on the cluster subnetwork, at half sampling over ten-minute windows. Vended network logs are billed at $0.25/GiB, which is a dollar or so a month at that sampling for a socle cluster. | `bool` | `true` | no |
@@ -170,14 +190,22 @@ No modules.
 | <a name="output_cluster_endpoint"></a> [cluster\_endpoint](#output\_cluster\_endpoint) | IP endpoint of the control plane. Empty when IP endpoints are disabled, which is the default. |
 | <a name="output_cluster_location"></a> [cluster\_location](#output\_cluster\_location) | Region of the cluster. Regional by default; there is no zonal option. |
 | <a name="output_cluster_name"></a> [cluster\_name](#output\_cluster\_name) | Name of the GKE cluster. |
+| <a name="output_crossplane_dns_zones"></a> [crossplane\_dns\_zones](#output\_crossplane\_dns\_zones) | The Cloud DNS managed zones Crossplane may bind external-dns on — what the bootstrap module hands the catalog. Empty when crossplane is not set. |
+| <a name="output_crossplane_principal"></a> [crossplane\_principal](#output\_crossplane\_principal) | The federated principal the catalog's crossplane module's GCP providers run as (crossplane-system/provider-gcp). Null when crossplane is not set. |
+| <a name="output_dns_zone_lister_role"></a> [dns\_zone\_lister\_role](#output\_dns\_zone\_lister\_role) | Full name of the custom role that lets external-dns list the project's zones, always among the roles Crossplane may grant. Built from its ID, so known on the first plan. Empty when crossplane is not set. |
+| <a name="output_gateway_certificate_map"></a> [gateway\_certificate\_map](#output\_gateway\_certificate\_map) | Name of the Certificate Manager map the public Gateway's networking.gke.io/certmap annotation takes — what the bootstrap module's gateway\_certificate\_map takes. Empty when gateway\_certificate is not set. |
+| <a name="output_gateway_regional_certificate"></a> [gateway\_regional\_certificate](#output\_gateway\_regional\_certificate) | Name of the regional Certificate Manager certificate the internal Gateway's HTTPS listener takes, in its networking.gke.io/cert-manager-certs TLS option — what the bootstrap module's gateway\_regional\_certificate takes. Empty when gateway\_certificate is not set. |
 | <a name="output_helm_kubernetes"></a> [helm\_kubernetes](#output\_helm\_kubernetes) | Drop-in value for the helm provider's kubernetes attribute, so a root configures it in one line. Uses the DNS endpoint, the only one enabled by default. Carries no credential: gke-gcloud-auth-plugin obtains a short-lived token from the caller's ambient gcloud credentials at call time. |
 | <a name="output_labels"></a> [labels](#output\_labels) | The standard label set applied to every billable resource this module creates. |
 | <a name="output_network_name"></a> [network\_name](#output\_network\_name) | Name of the VPC the cluster is attached to, whether the module created it or not. |
 | <a name="output_oidc_issuer_url"></a> [oidc\_issuer\_url](#output\_oidc\_issuer\_url) | The cluster's OIDC issuer, for federating an external identity provider against this cluster. |
 | <a name="output_pod_range_name"></a> [pod\_range\_name](#output\_pod\_range\_name) | Name of the secondary range carrying Pod addresses. |
+| <a name="output_project_id"></a> [project\_id](#output\_project\_id) | The project the cluster lives in — half of every workload's principal, with project\_number. |
+| <a name="output_project_number"></a> [project\_number](#output\_project\_number) | The project's number, which a Workload Identity Federation principal names the project by. |
 | <a name="output_proxy_only_subnetwork_name"></a> [proxy\_only\_subnetwork\_name](#output\_proxy\_only\_subnetwork\_name) | The REGIONAL\_MANAGED\_PROXY subnetwork regional Gateways draw their proxies from. Null when the module did not create it. |
+| <a name="output_region"></a> [region](#output\_region) | Region of the cluster, and of the internal Gateway's regional certificate. |
 | <a name="output_subnetwork_name"></a> [subnetwork\_name](#output\_subnetwork\_name) | Name of the cluster's subnetwork. |
 | <a name="output_upgrade_notifications_topic"></a> [upgrade\_notifications\_topic](#output\_upgrade\_notifications\_topic) | Pub/Sub topic carrying GKE upgrade and security bulletin notifications. Null when notifications are disabled. |
 | <a name="output_workload_identity_pool"></a> [workload\_identity\_pool](#output\_workload\_identity\_pool) | The Workload Identity Federation pool. Autopilot enforces it, so this is derived rather than configured. Grant IAM roles to principals in this pool to give a catalog workload direct resource access. |
-| <a name="output_workload_identity_principal_prefix"></a> [workload\_identity\_principal\_prefix](#output\_workload\_identity\_principal\_prefix) | Prefix of a workload's IAM principal identifier. Append ns/NAMESPACE/sa/SERVICEACCOUNT. Note that two clusters in one project produce identical principals for the same namespace and service account. |
+| <a name="output_workload_identity_principal_prefix"></a> [workload\_identity\_principal\_prefix](#output\_workload\_identity\_principal\_prefix) | Prefix of a workload's IAM principal identifier, naming the project by its number as Workload Identity Federation requires. Append /ns/NAMESPACE/sa/SERVICEACCOUNT. Note that two clusters in one project produce identical principals for the same namespace and service account. |
 <!-- END_TF_DOCS -->

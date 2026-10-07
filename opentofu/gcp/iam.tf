@@ -1,10 +1,11 @@
 # Identities — docs/gcp/managed-scope.md.
 #
 # Workload Identity Federation itself has nothing to configure: Autopilot
-# pre-configures it and it cannot be disabled. The pool is exposed as an
-# output, and what binds a Kubernetes service account to a Google one is left
-# to the layer that owns those Kubernetes objects — the in-cluster providers
-# arrive through the socle, not through this module.
+# pre-configures it and it cannot be disabled. No Google service account is
+# created, here or anywhere in the socle: a workload's identity is its
+# Kubernetes ServiceAccount as a federated principal, and what a catalog
+# module's principal may do is bound by Crossplane, from that module — the one
+# exception being Crossplane's own grants, below.
 
 # Read-only metric access for the central observability cluster. A federated
 # principal, never a key — the module refuses to accept a credential as input,
@@ -15,4 +16,182 @@ resource "google_project_iam_member" "observability_reader" {
   project = var.project_id
   role    = "roles/monitoring.viewer"
   member  = each.value
+}
+
+# --- crossplane — docs/catalog/crossplane.md ----------------------------------
+#
+# The one workload identity the socle cannot make for itself: Crossplane binds
+# every other one, and something has to bind Crossplane's. Its principal is
+# known before the cluster has a node — the socle artifact runs every GCP
+# provider pod as crossplane-system/provider-gcp — so its grants are written
+# here, and only when asked. No Google service account: the principal is the
+# Kubernetes ServiceAccount itself, federated by the pool Autopilot enforces,
+# as every module's will be.
+#
+# An identity that can grant IAM roles is the most powerful thing in the
+# cluster. What bounds it, grant by grant below:
+# - project-level roles through Project IAM Admin, under a condition on
+#   iam.googleapis.com/modifiedGrantsByRole: it may grant and revoke the roles
+#   the client allows (crossplane.allowed_roles) and the socle's zone lister
+#   role, nothing else — not Project IAM Admin itself, so it can never lift
+#   its own condition;
+# - buckets under the cluster's own name prefix only, through a custom role
+#   with no delete and no object access, bounded by the same role list when it
+#   sets a bucket's IAM policy;
+# - zone IAM on the zones the client lists (crossplane.dns_zones) only.
+# What it cannot bound: who a role is granted to. The condition names roles,
+# not members, so a compromised Crossplane could grant an allowed role to any
+# principal. The list is the answer — such a grant is worth exactly the
+# allowed roles, never an identity, the project, or a role that grants roles:
+# owner, editor, viewer, iam.* and resourcemanager.* are refused at plan.
+# What the plan cannot refuse is any other role carrying a setIamPolicy
+# permission, such as roles/storage.admin: Crossplane could grant it to
+# itself, unconditioned, and step outside this bound on every resource of that
+# service. Google's own warning, and the reviewer's job on the client's list:
+# https://cloud.google.com/iam/docs/setting-limits-on-granting-roles
+#
+# The list names roles, not resources: which secret, which bucket a module
+# reaches is that module's own binding, so a new module never needs a change
+# here, only, when it needs a new role, one line in the client's tfvars.
+#
+# Measured on a sandbox project (2026-10-07), on top of what the documents
+# below say: under the Project IAM Admin condition, granting an allowed role
+# succeeded and granting roles/owner was denied; under the bucket condition,
+# creating a bucket inside the prefix succeeded and outside it was denied,
+# granting roles/storage.objectAdmin on a bucket to a module's principal
+# succeeded and roles/storage.admin was denied.
+#
+# Custom roles are soft-deleted: a destroy followed by an apply within Google's
+# retention window finds the ID taken, and the provider undeletes and updates
+# the role rather than failing.
+
+locals {
+  crossplane_principal = "${local.workload_identity_principal_prefix}/ns/crossplane-system/sa/provider-gcp"
+
+  # Built from the role's ID rather than read off its name attribute, which
+  # stays unknown until Google creates the role: the conditions below embed
+  # it, and the bootstrap module receives it, on the very first plan.
+  dns_zone_lister_role = var.crossplane == null ? "" : "projects/${var.project_id}/roles/${google_project_iam_custom_role.dns_zone_lister[0].role_id}"
+
+  # Google accepts at most ten roles in hasOnly(), which is why the variable
+  # caps the client's list at nine: the lister role is always the tenth.
+  crossplane_granted_roles = concat(try(var.crossplane.allowed_roles, []), var.crossplane == null ? [] : [local.dns_zone_lister_role])
+
+  # The limited IAM admin condition, verbatim from Google's documentation:
+  # https://cloud.google.com/iam/docs/setting-limits-on-granting-roles
+  # The attribute is defined only on a request that sets an allow policy;
+  # everywhere else it is the default [], which hasOnly() accepts — so the
+  # condition limits grants and nothing else.
+  crossplane_grants_only_these = "api.getAttribute('iam.googleapis.com/modifiedGrantsByRole', []).hasOnly(${jsonencode(local.crossplane_granted_roles)})"
+}
+
+# Only projects, folders and organisations accept modifiedGrantsByRole in
+# their allow policies, so the bound sits on the project's policy, and Project
+# IAM Admin is the role Google documents for it:
+# https://cloud.google.com/iam/docs/setting-limits-on-granting-roles
+resource "google_project_iam_member" "crossplane_project_grants" {
+  count = var.crossplane == null ? 0 : 1
+
+  project = var.project_id
+  role    = "roles/resourcemanager.projectIamAdmin"
+  member  = local.crossplane_principal
+
+  condition {
+    title       = "socle-${var.cluster_name}-grants-only-allowed-roles"
+    description = "Crossplane may grant and revoke only the roles the client allows."
+    expression  = local.crossplane_grants_only_these
+  }
+}
+
+# A module's own bucket, as on AWS: under a prefix the cluster owns
+# (docs/catalog/crossplane.md §3, docs/catalog/velero.md §8). Create it, read
+# and update its configuration, set its IAM policy so the module's principal
+# can use it. No delete of any kind and no object permission: Crossplane can
+# never remove a bucket of backups, nor read one, whatever a managed
+# resource's deletionPolicy says.
+resource "google_project_iam_custom_role" "crossplane_buckets" {
+  count = var.crossplane == null ? 0 : 1
+
+  project     = var.project_id
+  role_id     = "socleCrossplaneBuckets_${local.cluster_snake}"
+  title       = "Socle ${var.cluster_name} Crossplane buckets"
+  description = "Create and configure the ${var.cluster_name} socle's buckets, never delete them."
+  permissions = [
+    "storage.buckets.create",
+    "storage.buckets.get",
+    "storage.buckets.update",
+    "storage.buckets.getIamPolicy",
+    "storage.buckets.setIamPolicy",
+    "storage.buckets.list",
+  ]
+}
+
+# resource.name is a bucket's projects/_/buckets/<name>
+# (https://cloud.google.com/iam/docs/conditions-resource-attributes), and it
+# bounds storage.buckets.create too — measured, see above: Google's documents
+# do not say so, and storage.buckets.create is described as a project
+# permission. Cloud Storage recognises modifiedGrantsByRole
+# (https://cloud.google.com/iam/docs/conditions-attribute-reference), so the
+# same role list bounds a bucket's IAM policy.
+resource "google_project_iam_member" "crossplane_buckets" {
+  count = var.crossplane == null ? 0 : 1
+
+  project = var.project_id
+  role    = "projects/${var.project_id}/roles/${google_project_iam_custom_role.crossplane_buckets[0].role_id}"
+  member  = local.crossplane_principal
+
+  condition {
+    title       = "socle-${var.cluster_name}-own-buckets"
+    description = "Only buckets under the ${var.cluster_name}- prefix, and only the allowed roles on them."
+    expression  = "resource.name.startsWith('projects/_/buckets/${var.cluster_name}-') && ${local.crossplane_grants_only_these}"
+  }
+}
+
+# A zone's IAM policy, for external-dns: its principal is bound on the zones
+# it writes, by Crossplane. Granted on each listed zone rather than on the
+# project, because no condition can do the bounding here: Cloud DNS does not
+# recognise modifiedGrantsByRole, and Google fails every grant a limited IAM
+# admin attempts on a service that does not
+# (https://cloud.google.com/iam/docs/conditions-attribute-reference). The
+# zone is the bound — on it Crossplane may grant any role, which is worth that
+# zone's records and nothing beyond.
+resource "google_project_iam_custom_role" "crossplane_zone_iam" {
+  count = var.crossplane == null ? 0 : 1
+
+  project     = var.project_id
+  role_id     = "socleCrossplaneZoneIam_${local.cluster_snake}"
+  title       = "Socle ${var.cluster_name} Crossplane zone IAM"
+  description = "Read and set the IAM policy of the zones the ${var.cluster_name} socle's modules write."
+  permissions = [
+    "dns.managedZones.get",
+    "dns.managedZones.getIamPolicy",
+    "dns.managedZones.setIamPolicy",
+  ]
+}
+
+resource "google_dns_managed_zone_iam_member" "crossplane" {
+  for_each = toset(try(var.crossplane.dns_zones, []))
+
+  project      = var.project_id
+  managed_zone = each.value
+  role         = "projects/${var.project_id}/roles/${google_project_iam_custom_role.crossplane_zone_iam[0].role_id}"
+  member       = local.crossplane_principal
+}
+
+# What the socle hands external-dns at project level: it lists the project's
+# zones to find the one a name belongs to, whatever zone it then writes in.
+# Its own, not roles/dns.reader, so that the one project-level DNS grant
+# Crossplane can make reads zones and nothing else — and it is always part of
+# what Crossplane may grant.
+resource "google_project_iam_custom_role" "dns_zone_lister" {
+  count = var.crossplane == null ? 0 : 1
+
+  project     = var.project_id
+  role_id     = "socleDnsZoneLister_${local.cluster_snake}"
+  title       = "Socle ${var.cluster_name} DNS zone lister"
+  description = "List the project's managed zones, for the ${var.cluster_name} socle's external-dns."
+  permissions = [
+    "dns.managedZones.list",
+    "dns.managedZones.get",
+  ]
 }

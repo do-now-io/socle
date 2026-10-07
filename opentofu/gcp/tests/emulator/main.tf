@@ -43,6 +43,10 @@ module "socle" {
   owner        = "platform"
   environment  = "dev"
 
+  # The emulator implements no Cloud Billing API, which the provider calls
+  # when it reads a project; a supplied number skips that read.
+  project_number = "101816500482"
+
   # No Compute Engine in the emulator: attach to a network and subnetwork
   # rather than creating them.
   create_network           = false

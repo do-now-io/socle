@@ -11,6 +11,14 @@ provider "google" {
   access_token = "offline-fixture-token"
 }
 
+# The project number is read through an API; stubbed so no run reaches it.
+override_data {
+  target = data.google_project.this
+  values = {
+    number = "123456789012"
+  }
+}
+
 variables {
   project_id   = "socle-test-project"
   region       = "europe-west1"
@@ -37,6 +45,16 @@ run "project_id_must_look_like_a_project" {
   }
 
   expect_failures = [var.project_id]
+}
+
+run "project_number_must_be_digits" {
+  command = plan
+
+  variables {
+    project_number = "socle-test-project"
+  }
+
+  expect_failures = [var.project_number]
 }
 
 run "region_must_not_be_a_zone" {
@@ -351,4 +369,80 @@ run "observability_readers_must_be_qualified_principals" {
   }
 
   expect_failures = [var.observability_reader_members]
+}
+
+# --- crossplane -------------------------------------------------------------
+
+run "crossplane_rejects_a_permission_instead_of_a_role" {
+  command = plan
+  variables {
+    crossplane = { allowed_roles = ["secretmanager.versions.access"] }
+  }
+  expect_failures = [var.crossplane]
+}
+
+run "crossplane_rejects_a_basic_role" {
+  command = plan
+  variables {
+    crossplane = { allowed_roles = ["roles/secretmanager.secretAccessor", "roles/editor"] }
+  }
+  expect_failures = [var.crossplane]
+}
+
+run "crossplane_rejects_an_iam_role" {
+  command = plan
+  variables {
+    crossplane = { allowed_roles = ["roles/iam.serviceAccountTokenCreator"] }
+  }
+  expect_failures = [var.crossplane]
+}
+
+run "crossplane_rejects_a_resource_manager_role" {
+  command = plan
+  variables {
+    crossplane = { allowed_roles = ["roles/resourcemanager.projectIamAdmin"] }
+  }
+  expect_failures = [var.crossplane]
+}
+
+run "crossplane_allows_at_most_nine_roles" {
+  command = plan
+  variables {
+    crossplane = { allowed_roles = [for i in range(10) : "roles/fake.role${i}"] }
+  }
+  expect_failures = [var.crossplane]
+}
+
+run "crossplane_dns_zones_must_be_zone_names" {
+  command = plan
+  variables {
+    crossplane = { dns_zones = ["sandbox-gcp.do-now.io"] }
+  }
+  expect_failures = [var.crossplane]
+}
+
+# --- The shared Gateways' certificate -----------------------------------------
+
+run "gateway_certificate_needs_a_domain" {
+  command = plan
+  variables {
+    gateway_certificate = { dns_zone = "acme-example", domains = [] }
+  }
+  expect_failures = [var.gateway_certificate]
+}
+
+run "gateway_certificate_domains_must_be_dns_names" {
+  command = plan
+  variables {
+    gateway_certificate = { dns_zone = "acme-example", domains = ["acme.example", "a.*.acme.example"] }
+  }
+  expect_failures = [var.gateway_certificate]
+}
+
+run "gateway_certificate_dns_zone_must_be_a_zone_name" {
+  command = plan
+  variables {
+    gateway_certificate = { dns_zone = "acme.example", domains = ["acme.example"] }
+  }
+  expect_failures = [var.gateway_certificate]
 }

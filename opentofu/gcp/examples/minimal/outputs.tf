@@ -31,3 +31,8 @@ output "upgrade_notifications_topic" {
   description = "Pub/Sub topic carrying GKE upgrade notifications."
   value       = module.socle.upgrade_notifications_topic
 }
+
+output "crossplane_principal" {
+  description = "The federated principal Crossplane's GCP providers run as."
+  value       = module.socle.crossplane_principal
+}
