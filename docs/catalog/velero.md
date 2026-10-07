@@ -51,7 +51,8 @@ external-dns set ([external-dns.md](external-dns.md), *Ordering*):
    - the `VolumeSnapshotClass` for `ebs.csi.aws.com`, labelled
      `velero.io/csi-volumesnapshot-class: "true"`, rendered only when the
      snapshot-controller add-on is on (§8) — on GCP `velero-pd`, for
-     `pd.csi.storage.gke.io`, always (GKE ships the snapshot controller);
+     `pd.csi.storage.gke.io`, when `storage.snapshots` is on, which it always
+     is on gcp (GKE ships the snapshot controller);
    - one `Schedule` per entry of `kube.velero.policies`;
    - the `ValidatingAdmissionPolicy` that warns on an unknown pair (§3).
 
@@ -271,14 +272,14 @@ warnings in its UI; the audit annotation is what a dashboard can count.
 
 | Attribute | Default | Rule at plan (`opentofu/bootstrap/variables.tf`) |
 | --- | --- | --- |
-| `enabled` | `false` | on aws: needs `kube.crossplane.enabled`, the cluster's region and its account id — refused otherwise, naming the missing piece. On gcp, Crossplane off renders the server with no bucket and no binding, its storage location `Unavailable` |
+| `enabled` | `false` | needs `kube.crossplane.enabled` on every cloud it runs on, aws and gcp; on aws also the cluster's region and its account id — refused otherwise, naming the missing piece |
 | `policies` | the seven pairs of §3 | a list of `{ frequency, retention, schedule }`; `frequency` and `retention` RFC 1123 label values, `retention` matching `^[0-9]+(h\|d)$`, `schedule` five cron fields, no pair twice |
 | `node_agent` | `eks_addons.efs_csi`; `false` on gcp | a bool; off, no privileged DaemonSet and the namespace stays `restricted`. On without EFS is allowed (a client's own NFS volumes, through `values`). Refused on gcp: Autopilot forbids the node-agent's hostPath — and the template renders nothing of it there regardless |
 | `values` | `{}` | the chart's secret-bearing paths refused: `credentials.secretContents`, `credentials.extraEnvVars`, a Secret in `extraObjects`, a `configuration.extraEnvVars` entry with a literal value named like a credential. A Secret is named through `credentials.existingSecret`, never inlined |
 | `values_secret` | `""` | an RFC 1123 Secret name, merged last |
 
-Velero with Crossplane off is refused at plan in v1: without Crossplane there
-is no bucket and no role. The way out — a client's own bucket and identity —
+Velero with Crossplane off is refused at plan in v1, on every cloud it runs
+on: without Crossplane there is no bucket and no role or binding. The way out — a client's own bucket and identity —
 is out of scope (§10).
 
 ## 5. Fixed by the socle, not by a named attribute
@@ -327,8 +328,9 @@ applications.
   ([external-dns.md](external-dns.md): steps alone do not order this).
 - **Off: the module first, Crossplane after** — Crossplane's own warning.
   The bucket's resources have no `Delete` in their management policies, so
-  turning the module off deletes nothing in S3. The role is still deleted,
-  and the provider must be there to release the finalizers.
+  turning the module off deletes nothing in S3 — on GCP, nothing in GCS; the
+  `BucketIAMMember` is deleted. The role is still deleted, and the provider
+  must be there to release the finalizers.
 - **Off: no `Restore` left.** Its finalizer is the server's, and the server
   goes with the module: the namespace would stay Terminating (§7, step 6).
 
