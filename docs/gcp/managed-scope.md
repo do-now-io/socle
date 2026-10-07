@@ -15,6 +15,7 @@ Who operates what on an Autopilot cluster — see
 | Backup | Velero, the same on four clouds |
 | Backup for GKE | Catalog option — $9 per namespace-month |
 | Workload Identity Federation | Google's — pre-configured, not optional |
+| Google service accounts | None — each workload is its own principal |
 
 ## Upgrades
 
@@ -86,14 +87,34 @@ the maintenance window — dev Tuesday, staging Wednesday, prod Saturday.**
 Autopilot pre-configures Workload Identity Federation and it cannot be
 disabled. The pool is `PROJECT_ID.svc.id.goog`.
 
-**Decision: workloads that need Google Cloud access get a Google service
-account bound to their Kubernetes service account.** That is all the shell
-needs today.
+**Decision: no Google service account, anywhere. A workload that needs Google
+Cloud access is granted roles directly on its Kubernetes ServiceAccount, as a
+federated principal:**
 
-- Trap: a principal is built from namespace and service account name, so two
-  clusters in one project produce identical principals. Isolation comes from
-  separate projects or distinct namespaces — decided in the network and
-  security work.
+```text
+principal://iam.googleapis.com/projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/PROJECT_ID.svc.id.goog/subject/ns/NAMESPACE/sa/SERVICE_ACCOUNT
+```
+
+- The project **number** in the path, the project **ID** in the pool's name:
+  Google's format, and the one the foundations output as
+  `workload_identity_principal_prefix` (it carried the ID in both places
+  until the GCP parity work fixed it).
+- No service account means no key that can leak, no
+  `iam.gke.io/gcp-service-account` annotation, and no impersonation grant to
+  keep in step with the binding. The pod's token is exchanged for a Google
+  one by the metadata server, nothing else.
+- Who grants what: of the cluster's workloads, the foundations grant only
+  Crossplane's principal, `…/ns/crossplane-system/sa/provider-gcp`; every catalog
+  module binds its own principal on its own resources through Crossplane,
+  bounded by the roles the client allows
+  ([crossplane.md](../catalog/crossplane.md) §2, §3).
+- The one place a principal is not enough: a signed URL needs a service
+  account to sign with. Velero's CLI downloads (`velero backup logs`) are the
+  one feature this costs ([velero.md](../catalog/velero.md) §2, *On GCP*).
+- Trap: a principal is built from the project, the namespace and the service
+  account name — never the cluster — so two clusters in one project produce
+  identical principals. **One socle cluster per project** is the supported
+  topology.
 
 ## Cost impact
 

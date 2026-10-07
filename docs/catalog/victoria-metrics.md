@@ -141,7 +141,7 @@ StorageClass under the claim:
 | Cloud | Default class | Consequence |
 | --- | --- | --- |
 | AWS | **None.** `opentofu/aws` installs no EBS CSI driver — an EKS-managed add-on left to the factory (`opentofu/aws/cluster.tf`, `docs/aws/eks-managed-scope.md`) — and EKS marks no class default since 1.30 | The claim stays `Pending`, the pod never starts, and the root `ResourceSet` does not turn Ready. **An AWS client sets `storage_size = ""`** until the driver exists; `opentofu/clusters/aws/prod.tfvars.example` does. A foundations/factory gap, tracked on its own |
-| GCP | `standard-rwo` (Persistent Disk CSI, managed by GKE) | To confirm when a GCP e2e exists |
+| GCP | `standard-rwo` (Persistent Disk CSI, managed by GKE) | The default, measured on the sandbox's Autopilot cluster (2026-10-07). Its disks are `pd-balanced` and count against the region's `SSD_TOTAL_GB` quota, as every node's boot disk does — 250 GB on a fresh project ([prerequisites](../gcp/prerequisites.md#quotas)) |
 | Azure | `managed-csi` (Azure Disk CSI, managed by AKS) | Same |
 | Scaleway | `scw-bssd` (Block Storage CSI, managed by Kapsule) | Same |
 

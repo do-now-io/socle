@@ -1,6 +1,8 @@
 # Google Cloud — decisions
 
-Autopilot throughout. Each decision is argued in the linked document.
+Autopilot throughout. Each decision is argued in the linked document. What
+the project needs before the first apply — APIs, roles, quotas — is in
+[prerequisites](prerequisites.md).
 
 | Decision | Position | Argued in |
 | --- | --- | --- |
@@ -18,6 +20,10 @@ Autopilot throughout. Each decision is argued in the linked document.
 | Backup | Velero, same on four clouds | [managed-scope](managed-scope.md) |
 | Backup for GKE | Catalog option — $9 per namespace-month | [managed-scope](managed-scope.md) |
 | Workload Identity Federation | Google's, pre-configured | [managed-scope](managed-scope.md) |
+| Google service accounts | None — each workload is its own federated principal | [managed-scope](managed-scope.md) |
+| Clusters per project | One socle cluster — principals name the project, not the cluster | [prerequisites](prerequisites.md) |
+| What bounds Crossplane | The roles it may grant, listed by the client | [crossplane](../catalog/crossplane.md) |
+| Quotas | Raised before the first apply — a fresh project fits two nodes | [prerequisites](prerequisites.md) |
 | CNI | Dataplane V2, enforced | [network-security](network-security.md) |
 | Self-managed Cilium | Refused — impossible on Autopilot | [network-security](network-security.md) |
 | Network policy | Plain Kubernetes NetworkPolicy | [network-security](network-security.md) |
