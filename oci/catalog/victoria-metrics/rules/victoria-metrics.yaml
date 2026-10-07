@@ -1,0 +1,62 @@
+# VictoriaMetrics' own health, from its metrics otel_gateway scrapes. Read by
+# the alerting module's sidecar, inert without it. Checked in CI with vmalert
+# -dryRun (.github/scripts/check-rules.sh).
+#
+# No "VictoriaMetrics down": vmalert asks VictoriaMetrics every question, so
+# with it down no rule can fire. The Watchdog stops instead, and the dead
+# man's switch outside the cluster raises the alarm.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: victoria-metrics-rules
+  labels:
+    vmalert_rules: "1"
+data:
+  victoria-metrics.yaml: |
+    groups:
+      - name: socle-victoria-metrics
+        rules:
+          # Its data's share of the disk it can use: free space counts what
+          # else the volume holds, so data over data plus free.
+          - alert: VictoriaMetricsDiskAlmostFull
+            expr: >-
+              sum by (k8s_namespace_name, k8s_pod_name) (vm_data_size_bytes)
+              / (
+                sum by (k8s_namespace_name, k8s_pod_name) (vm_free_disk_space_bytes)
+                + sum by (k8s_namespace_name, k8s_pod_name) (vm_data_size_bytes)
+              )
+              > 0.80
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                VictoriaMetrics' data fills {{ $value | humanizePercentage }}
+                of its disk. Raise storage_size or shorten retention before it
+                stops accepting writes.
+          # Before anything is dropped: the guard of storage.maxHourlySeries,
+          # past 90 % of its hourly budget.
+          - alert: VictoriaMetricsSeriesLimitNear
+            expr: >-
+              vm_hourly_series_limit_current_series
+              / vm_hourly_series_limit_max_series
+              > 0.90
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                VictoriaMetrics has used {{ $value | humanizePercentage }} of
+                its hourly series budget; past it, new series are dropped.
+          # Dropped data is lost and every rule reading it goes blind
+          # (measured, docs/catalog/victoria-metrics.md): never normal, no
+          # waiting.
+          - alert: VictoriaMetricsSeriesDropped
+            expr: increase(vm_hourly_series_limit_rows_dropped_total[5m]) > 0
+            labels:
+              severity: critical
+            annotations:
+              summary: >-
+                VictoriaMetrics is dropping new series past its hourly limit
+                ({{ $value | humanize }} samples in 5 minutes): metrics and the
+                alerts reading them are missing.

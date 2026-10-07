@@ -105,6 +105,13 @@ spec:
             # docs/catalog/victoria-metrics.md). Sorted first, a series counts
             # once.
             sortLabels: true
+            << if inputs.modules.alerting.enabled >>
+            # Grafana lists the rules of its VictoriaMetrics datasource by
+            # asking VictoriaMetrics, which runs none: forwarded to the
+            # alerting module's vmalert, the socle's rules show in Grafana's
+            # rule list instead of "No rules found".
+            vmalert.proxyURL: http://alerting-server.alerting.svc:8880
+            << end >>
           # Scraped by the otel_gateway module, which reads these annotations.
           podAnnotations:
             prometheus.io/scrape: "true"
@@ -170,3 +177,26 @@ spec:
       upgrade:
         remediation:
           retries: 3
+    ---
+    # The module's alert rules, a ConfigMap the alerting module's sidecar picks
+    # up by its vmalert_rules label: this namespace is on its list
+    # (docs/catalog/alerting.md). Applied from the socle artifact itself, under
+    # this module's toggle; inert with alerting off, as a dashboard with
+    # grafana off.
+    apiVersion: kustomize.toolkit.fluxcd.io/v1
+    kind: Kustomization
+    metadata:
+      name: victoria-metrics-rules
+      namespace: flux-system
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.victoria_metrics.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 1h
+      sourceRef:
+        kind: OCIRepository
+        name: socle
+      path: ./catalog/victoria-metrics/rules
+      targetNamespace: victoria-metrics
+      prune: true
+      wait: true
+      timeout: 2m
