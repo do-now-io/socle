@@ -681,3 +681,257 @@ spec:
             namespace: flux-system
             selector: app.kubernetes.io/name=flux-operator
             tail: 40
+---
+# The GCP proof, run by hand against the sandbox's GKE Autopilot (no GKE in
+# CI: floci-gcp serves neither Workload Identity nor Cloud DNS). The sandbox's
+# root turns the module on, and every cloud-backed module there needs it: this
+# test reads the module as it stands and never turns it off, unlike the floci
+# one above. What a module then binds is proven in that module's own test.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: crossplane-module-gcp
+  labels:
+    phase: module
+    cloud: gcp
+    platform: gke
+spec:
+  description: On, the GCP providers are Healthy on Workload Identity, as a ServiceAccount no revision owns.
+  timeouts:
+    # Autopilot provisions a node for pods that do not fit, minutes before
+    # a provider can turn Healthy.
+    assert: 10m
+    error: 3m
+  steps:
+    # In the order their CRDs appear, as on AWS: an assert on a kind whose
+    # CRD is not there yet fails at once.
+    - name: the GCP providers are Healthy and the ClusterProviderConfig is on InjectedIdentity
+      try:
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: crossplane
+                namespace: crossplane-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        # The family under the name Crossplane gives a dependency it installs
+        # itself: under any other name the lock holds it twice (#48).
+        - assert:
+            resource:
+              apiVersion: pkg.crossplane.io/v1
+              kind: Provider
+              metadata:
+                name: crossplane-contrib-provider-family-gcp
+              status:
+                (conditions[?type == 'Healthy'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: pkg.crossplane.io/v1
+              kind: Provider
+              metadata:
+                name: provider-gcp-cloudplatform
+              status:
+                (conditions[?type == 'Healthy'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: pkg.crossplane.io/v1
+              kind: Provider
+              metadata:
+                name: provider-gcp-dns
+              status:
+                (conditions[?type == 'Healthy'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: pkg.crossplane.io/v1
+              kind: Provider
+              metadata:
+                name: provider-gcp-storage
+              status:
+                (conditions[?type == 'Healthy'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: pkg.crossplane.io/v1
+              kind: Provider
+              metadata:
+                name: provider-gcp-secretmanager
+              status:
+                (conditions[?type == 'Healthy'] || `[]`):
+                  - status: 'True'
+        # A Provider is Healthy before every CRD it brings is served: the
+        # ones the modules declare, Established first.
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: clusterproviderconfigs.gcp.m.upbound.io
+              status:
+                (conditions[?type == 'Established'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: projectiammembers.cloudplatform.gcp.m.upbound.io
+              status:
+                (conditions[?type == 'Established'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: managedzoneiammembers.dns.gcp.m.upbound.io
+              status:
+                (conditions[?type == 'Established'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: buckets.storage.gcp.m.upbound.io
+              status:
+                (conditions[?type == 'Established'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: secretiammembers.secretmanager.gcp.m.upbound.io
+              status:
+                (conditions[?type == 'Established'] || `[]`):
+                  - status: 'True'
+        # No key and no Google service account: the pod's own principal, the
+        # project the root wrote in cluster.projectId.
+        - assert:
+            resource:
+              apiVersion: gcp.m.upbound.io/v1beta1
+              kind: ClusterProviderConfig
+              metadata:
+                name: default
+              spec:
+                (length(projectID) > `0`): true
+                credentials:
+                  source: InjectedIdentity
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: crossplane-provider-config
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: crossplane
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (length(inventory.entries || `[]`) > `0`): true
+      catch:
+        - describe:
+            apiVersion: pkg.crossplane.io/v1
+            kind: Provider
+        - describe:
+            apiVersion: pkg.crossplane.io/v1
+            kind: ProviderRevision
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: crossplane-provider-config
+        - describe:
+            apiVersion: v1
+            kind: Pod
+            namespace: crossplane-system
+        - events:
+            namespace: crossplane-system
+        - podLogs:
+            namespace: crossplane-system
+            tail: 40
+    # The foundations grant Crossplane's rights to exactly
+    # `…/ns/crossplane-system/sa/provider-gcp`: a provider pod under any other
+    # name is a principal with no right at all. And the ServiceAccount is the
+    # module's, only pointed at: no revision owns it and Crossplane never
+    # writes it, so none takes it back from another (#80). The AWS test also
+    # watches its resourceVersion hold for 30 s; that reading takes a script,
+    # which these tests do without — a write from Crossplane leaves its
+    # field manager behind, and that is asserted instead.
+    - name: every provider runs as provider-gcp, a ServiceAccount Crossplane never writes
+      try:
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ServiceAccount
+              metadata:
+                name: provider-gcp
+                namespace: crossplane-system
+                (ownerReferences == null): true
+                (length(managedFields[?contains(manager, 'crossplane')] || `[]`)): 0
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: crossplane-system
+                labels:
+                  pkg.crossplane.io/provider: provider-gcp-cloudplatform
+              spec:
+                serviceAccountName: provider-gcp
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: crossplane-system
+                labels:
+                  pkg.crossplane.io/provider: provider-gcp-dns
+              spec:
+                serviceAccountName: provider-gcp
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: crossplane-system
+                labels:
+                  pkg.crossplane.io/provider: provider-gcp-storage
+              spec:
+                serviceAccountName: provider-gcp
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: crossplane-system
+                labels:
+                  pkg.crossplane.io/provider: provider-gcp-secretmanager
+              spec:
+                serviceAccountName: provider-gcp
+      catch:
+        - get:
+            apiVersion: v1
+            kind: ServiceAccount
+            namespace: crossplane-system
+            name: provider-gcp
+            format: yaml
+        - describe:
+            apiVersion: pkg.crossplane.io/v1beta1
+            kind: DeploymentRuntimeConfig
+            name: provider-gcp

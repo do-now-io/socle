@@ -1,0 +1,175 @@
+- cloud: gcp
+  cluster:
+    name: t
+    environment: dev
+    owner: platform
+    region: europe-west1
+    accountId: ""
+    projectId: sandbox-2bace
+    projectNumber: "320449067541"
+  socle:
+    url: oci://x/y
+    version: 0.0.0 # x-release-please-version
+  modules:
+    gateway_api:
+      enabled: true
+      gateways: true
+    crossplane:
+      enabled: true
+      values:
+        metrics:
+          enabled: true
+        resourcesCrossplane:
+          requests:
+            memory: 256Mi
+      values_secret: crossplane-values
+      permissions_boundary: ""
+      dns_zones: [sandbox-gcp-do-now-io]
+      dns_zone_lister_role: projects/sandbox-2bace/roles/socleDnsZoneLister_socle_sandbox
+    external_dns:
+      enabled: true
+      domain_filters: [acme.example]
+      policy: upsert-only
+      txt_owner_id: t
+      values:
+        logLevel: debug
+        extraArgs:
+          aws-zone-type: public
+      values_secret: external-dns-private-values
+    argocd:
+      enabled: true
+      admin_enabled: true
+      domain: argocd.example.com
+      gateway: private
+      ha: false
+      values:
+        configs:
+          cm:
+            accounts.ci: apiKey, login
+          rbac:
+            policy.csv: |
+              g, ci, role:readonly
+      values_secret: argocd-values
+    victoria_metrics:
+      enabled: true
+      retention: 15d
+      storage_size: 20Gi
+      values:
+        server:
+          extraArgs:
+            storage.maxHourlySeries: "50000"
+      values_secret: victoria-metrics-values
+    otel_agent:
+      enabled: true
+      logs: true
+      values:
+        resources:
+          requests:
+            memory: 160Mi
+      values_secret: otel-agent-values
+    otel_gateway:
+      enabled: true
+      values:
+        resources:
+          requests:
+            memory: 320Mi
+      values_secret: otel-gateway-values
+    grafana:
+      enabled: true
+      domain: grafana.example.com
+      gateway: public
+      values:
+        resources:
+          requests:
+            memory: 160Mi
+      values_secret: grafana-values
+    victoria_logs:
+      enabled: true
+      retention: 7d
+      storage_size: 20Gi
+      values:
+        server:
+          resources:
+            requests:
+              memory: 160Mi
+      values_secret: victoria-logs-values
+    victoria_traces:
+      enabled: true
+      retention: 7d
+      storage_size: 10Gi
+      values: {}
+      values_secret: ""
+    keda:
+      enabled: true
+      services: [sqs, cloudwatch]
+      values:
+        resources:
+          operator:
+            requests:
+              memory: 160Mi
+      values_secret: keda-values
+    kyverno:
+      enabled: true
+      values:
+        admissionController:
+          container:
+            resources:
+              requests:
+                memory: 160Mi
+      values_secret: kyverno-values
+    kyverno_policies:
+      enabled: true
+      profile: restricted
+      enforce: [disallow-privileged-containers, require-requests]
+      allowed_registries: [ghcr.io, registry.k8s.io]
+      values:
+        podSecuritySeverity: high
+      values_secret: kyverno-policies-values
+    external_secrets:
+      enabled: true
+      prefixes: [t, shared/platform]
+      values:
+        log:
+          level: debug
+      values_secret: external-secrets-values
+    reloader:
+      enabled: true
+      values:
+        reloader:
+          logFormat: json
+      values_secret: reloader-values
+    velero:
+      enabled: true
+      policies:
+        - {frequency: daily, retention: 7d, schedule: "0 2 * * *"}
+        - {frequency: monthly, retention: 90d, schedule: "0 3 1 * *"}
+        - {frequency: hourly, retention: 48h, schedule: "0 * * * *"}
+      node_agent: true
+      values:
+        configuration:
+          logLevel: debug
+      values_secret: velero-values
+    metrics_server:
+      enabled: true
+      ha: false
+      values:
+        args:
+          - --v=2
+      values_secret: metrics-server-values
+    hello:
+      enabled: true
+      replicas: 2
+      message: hi
+  storage:
+    snapshots: true
+  cilium:
+    installed: false
+    gatewayApi: false
+    hubble: false
+  gateway:
+    className: gke-l7-global-external-managed
+    shared: true
+    namespace: gateway-system
+    certificateArn: ""
+    certificateMap: socle-sandbox
+    regionalCertificate: socle-sandbox-regional
