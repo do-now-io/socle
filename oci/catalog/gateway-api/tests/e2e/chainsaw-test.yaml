@@ -17,6 +17,8 @@
 #
 # The CRD tests are `cloud: aws`, not `any`: on gcp the module installs no
 # CRD — GKE owns them — and `gateway-api-gke` proves that side instead.
+# azure and scaleway, which install the CRDs too, need tests of their own
+# labelled for them once they get an e2e root (a label holds one cloud).
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -494,7 +496,7 @@ spec:
                 annotations:
                   networking.gke.io/certmap: ($gateway.certificateMap)
               spec:
-                gatewayClassName: gke-l7-global-external-managed
+                gatewayClassName: ($gateway.className)
               status:
                 (conditions[?type == 'Programmed'] || `[]`):
                   - status: 'True'
