@@ -52,7 +52,10 @@ collection layer.
   from the end of each existing file and from the first line of each new
   one, the agent's own logs excluded, **no checkpoints**;
 - the chart's read-only `hostPath` mounts of `/var/log/pods` and
-  `/var/lib/docker/containers`;
+  `/var/lib/docker/containers` — on GCP, `/var/log/pods` alone, since GKE
+  Autopilot admits no `hostPath` outside `/var/log`: the preset is off there
+  and the template carries its receiver and its one mount
+  ([otel-agent.md](otel-agent.md#per-cloud));
 - an exporter `otlp_http/victoria-logs` and a `logs` pipeline, `file_log` →
   `k8s_attributes` → `memory_limiter` → `batch` → VictoriaLogs;
 - **`runAsUser: 0`, with every capability dropped**, no privilege

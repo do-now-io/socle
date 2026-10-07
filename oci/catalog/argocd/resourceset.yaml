@@ -114,6 +114,20 @@ spec:
               requests:
                 cpu: 50m
                 memory: 64Mi
+          <<- if eq inputs.cloud "gcp" >>
+          # The two sidecars beside each Redis, which ask nothing elsewhere:
+          # GKE Autopilot would give each the default 500m CPU and 2 GiB.
+          sentinel:
+            resources:
+              requests:
+                cpu: 10m
+                memory: 32Mi
+          splitBrainDetection:
+            resources:
+              requests:
+                cpu: 10m
+                memory: 32Mi
+          <<- end >>
         << end >>
         controller:
           replicas: 1
@@ -146,6 +160,17 @@ spec:
             requests:
               cpu: 50m
               memory: 32Mi
+        <<- if eq inputs.cloud "gcp" >>
+        # The install hook that writes Redis's password asks nothing
+        # elsewhere; GKE Autopilot gives a container that requests nothing
+        # 500m CPU and 2 GiB, and sizes a node for it, for a few seconds'
+        # work. The Autopilot floor (50m, 52 MiB a pod) instead.
+        redisSecretInit:
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+        <<- end >>
         # SSO is a follow-up: no Dex until an identity provider is configured.
         dex:
           enabled: false

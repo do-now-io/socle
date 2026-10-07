@@ -133,6 +133,19 @@ spec:
                   values:
                     - kube-system
                     - flux-system
+                    <<- if eq inputs.cloud "gcp" >>
+                    # GKE's own namespaces, which it runs and a client
+                    # cannot deploy to: GKE rewrites a mutating webhook that
+                    # reaches them, and Kyverno would rewrite it back on every
+                    # reconcile. Leases in kube-node-lease are the nodes'
+                    # heartbeat, which GKE asks no webhook to intercept.
+                    - kube-node-lease
+                    - gke-managed-system
+                    - gke-managed-cim
+                    - gke-gmp-system
+                    - gmp-system
+                    - gmp-public
+                    <<- end >>
                 - key: resourceset.fluxcd.controlplane.io/namespace
                   operator: NotIn
                   values:

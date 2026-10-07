@@ -152,12 +152,12 @@ build, not a client's screen.
 
 ## Per cloud
 
-Nothing in the template. Around it:
+In the template, GCP's logs path only (below). Around it:
 
 | Cloud | Note |
 | --- | --- |
 | AWS | Kubelet serving certificates self-signed — hence `insecure_skip_verify` |
-| GCP | On Autopilot, a DaemonSet is billed per Pod request on every node: the 50m / 128Mi requests are the per-node price |
+| GCP | On Autopilot, a DaemonSet is billed per Pod request on every node: the 50m / 128Mi requests are the per-node price. With logs on, the chart's `logsCollection` preset is off on gcp: it always mounts `/var/lib/docker/containers` as well, and Autopilot admits no `hostPath` but `/var/log` read-only. The template mounts `/var/log/pods` read-only itself and writes the preset's `file_log` receiver out word for word (the collector's rendered config is identical to the preset's). `kubeletstats` stays: it reads `/stats/summary` on port 10250 with `nodes/stats`, not the `nodes/proxy` Autopilot withholds — to confirm on the sandbox |
 | Azure | Nothing until logs: the metrics path needs no `hostPath`, so Baseline Pod Security does not apply to this PR (`docs/monitoring.md` §10, question 1, is about logs) |
 | Scaleway | Nothing |
 

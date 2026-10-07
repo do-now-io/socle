@@ -116,7 +116,11 @@ the native policy and in background scans alike:
   selector ([kyverno.md](kyverno.md#failure-policy-what-happens-when-kyverno-is-down)).
 - **`kube-system`, `flux-system` and `kyverno`, by name**, through the chart's
   `vpolExclude`. They are not rendered by a ResourceSet, so they carry no
-  label.
+  label. On GCP, GKE's own namespaces join them (`kube-node-lease`,
+  `gke-managed-system`, `gke-managed-cim`, `gke-gmp-system`, `gmp-system`,
+  `gmp-public`): GKE keeps mutating webhooks out of them, not a native
+  `ValidatingAdmissionPolicy`, so an Enforce policy could otherwise refuse a
+  pod GKE runs there.
 
 Measured on a local k3s 1.34, with a namespace labelled as the socle's and one
 not, a privileged pod in each:
@@ -143,7 +147,7 @@ who enforces a policy.
 A client's third-party charts, an ingress controller or an operator he
 installs himself, live in his namespaces and are judged like his
 applications. He exempts them through `values` (`vpolExclude`, keeping the
-three names above).
+names above).
 
 ## What the client may set — `kube.kyverno_policies`
 

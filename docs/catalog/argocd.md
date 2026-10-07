@@ -141,8 +141,14 @@ ArgoCD's own declarative setup).
 
 ## Per cloud
 
-Nothing. The four `oci/clusters/<cloud>/kustomization.yaml` list the same
-template and carry no `argocd` patch. Two things will differ per cloud later
+Nothing but requests, on GCP. GKE Autopilot gives a container that requests
+nothing 500m CPU and 2 GiB, so on gcp the socle sets requests on the three
+the chart leaves empty: the `redis-secret-init` install hook (50m / 64Mi,
+the Autopilot floor) and, with `ha`, each Redis's `sentinel` and
+`split-brain-fix` sidecars (10m / 32Mi).
+
+Otherwise nothing. The four `oci/clusters/<cloud>/kustomization.yaml` list
+the same template and carry no `argocd` patch. Two things will differ per cloud later
 and neither is this module's: the Gateway implementation the HTTPRoute binds to
 (the gateway-api module), and the workload identity ArgoCD would use to read
 private repositories or deploy to other clusters (a foundations concern,

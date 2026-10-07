@@ -93,7 +93,7 @@ spec:
           # point, watching this node's pods only.
           kubernetesAttributes:
             enabled: true
-          << if and inputs.modules.victoria_logs.enabled inputs.modules.otel_agent.logs >>
+          << if and inputs.modules.victoria_logs.enabled inputs.modules.otel_agent.logs (ne inputs.cloud "gcp") >>
           # file_log: every container's log under /var/log/pods, mounted
           # read-only, read from the end of each file. No checkpoints: they
           # make the collector write to the node, and a restarted agent loses
@@ -101,6 +101,24 @@ spec:
           logsCollection:
             enabled: true
           << end >>
+        <<- if and inputs.modules.victoria_logs.enabled inputs.modules.otel_agent.logs (eq inputs.cloud "gcp") >>
+        # GKE Autopilot admits a hostPath under /var/log, read-only, and
+        # nothing else. The logsCollection preset always mounts
+        # /var/lib/docker/containers beside /var/log/pods — a Docker-era path
+        # containerd never writes to — and Autopilot refuses the whole pod
+        # for it. So the preset stays off on gcp and the one volume it needs,
+        # /var/log/pods read-only, is mounted here; its file_log receiver is
+        # written out below, as the preset writes it. Still no checkpoints:
+        # nothing is written anywhere.
+        extraVolumes:
+          - name: varlogpods
+            hostPath:
+              path: /var/log/pods
+        extraVolumeMounts:
+          - name: varlogpods
+            mountPath: /var/log/pods
+            readOnly: true
+        <<- end >>
         << if and inputs.modules.victoria_logs.enabled inputs.modules.otel_agent.logs >>
         # Reading /var/log/pods: containerd writes each container's log as
         # root, mode 0640, so only root may read it, and Kubernetes gives a
@@ -144,6 +162,25 @@ spec:
               # the scrape could not verify them. The call still carries the
               # ServiceAccount token, which the kubelet authorizes.
               insecure_skip_verify: true
+            <<- if and inputs.modules.victoria_logs.enabled inputs.modules.otel_agent.logs (eq inputs.cloud "gcp") >>
+            # The logsCollection preset's receiver as chart 0.173.1 writes
+            # it, since the preset is off on gcp: every container's log but
+            # the agent's own, from the end of each file.
+            file_log:
+              include:
+                - /var/log/pods/*/*/*.log
+              exclude:
+                - /var/log/pods/otel-agent_otel-agent*_*/opentelemetry-collector/*.log
+              start_at: end
+              retry_on_failure:
+                enabled: true
+              include_file_path: true
+              include_file_name: false
+              operators:
+                - type: container
+                  id: container-parser
+                  max_log_size: 102400
+            <<- end >>
           exporters:
             debug: null
             << if inputs.modules.victoria_metrics.enabled >>
@@ -165,7 +202,10 @@ spec:
               logs:
                 # The logsCollection preset adds file_log to this list and the
                 # kubernetesAttributes preset k8s_attributes to the processors.
-                receivers: []
+                <<- if eq inputs.cloud "gcp" >>
+                # On gcp the preset is off: file_log is listed here.
+                <<- end >>
+                receivers: << if eq inputs.cloud "gcp" >>[file_log]<< else >>[]<< end >>
                 processors:
                   - memory_limiter
                   - batch
