@@ -391,6 +391,15 @@ Rules for a module template, all measured:
   new module would add four more. That is unlivable, and it is the reason
   Crossplane is in the socle at all.
 
+  One exception, and it is a definition, not a grant: **on GCP the
+  foundations create the socle's custom roles** (`opentofu/gcp`: Crossplane's
+  bucket role, and the DNS records role external-dns is bound to). A custom
+  role is a project object Crossplane cannot make — it is denied
+  `iam.roles.create`, as it must be, since a role it wrote could carry any
+  permission. Only Crossplane ever grants such a role to a module, from that
+  module's own ResourceSet, under its `hasOnly` condition
+  ([crossplane.md §2](catalog/crossplane.md#on-gcp--opentofugcp)).
+
   The rule this enforces is an invariance: **a foundations module never
   changes because of the catalog.** `opentofu/aws` describes a cluster, and it
   describes the same cluster whether the client runs `external_dns`, ten

@@ -22,7 +22,7 @@ small PR written from this note.
 
 | Question | Position |
 | --- | --- |
-| What a module declares | Its own managed resources, per cloud: on AWS an `iam.aws.m.upbound.io` `Role` and an `eks.aws.m.upbound.io` `PodIdentityAssociation`; on GCP bindings of its own ServiceAccount's principal (`ProjectIAMMember`, `ManagedZoneIAMMember`, `BucketIAMMember`), no Google service account — the contracts in §3 |
+| What a module declares | Its own managed resources, per cloud: on AWS an `iam.aws.m.upbound.io` `Role` and an `eks.aws.m.upbound.io` `PodIdentityAssociation`; on GCP bindings of its own ServiceAccount's principal (`ProjectIAMMember`, `BucketIAMMember`), no Google service account — the contracts in §3 |
 | What `crossplane` installs | Core; on AWS `provider-{family-aws,aws-iam,aws-eks,aws-s3}` v2.8.1 and `ClusterProviderConfig default` on Pod Identity; on GCP `provider-{family-gcp,gcp-cloudplatform,gcp-dns,gcp-storage,gcp-secretmanager}` v3.0.0 and `ClusterProviderConfig default` on `InjectedIdentity`. No XRD, no Composition, nothing per module. The family is declared as `crossplane-contrib-provider-family-aws`, the name Crossplane gives a dependency it resolves itself: any other name lets it install the family twice, and the duplicate lock entry keeps every provider unhealthy |
 | What the foundations still owe | Crossplane's identity, and what bounds it. On AWS the **permissions boundary** every module role must carry: an allowlist of services the client writes, empty by default. On GCP the **roles it may grant**, an allowlist the client writes, through an IAM condition. Variable `crossplane` in `opentofu/aws` and `opentofu/gcp` |
 | How a module waits | Its `ResourceSet` `dependsOn` the `crossplane` ResourceSet and uses `steps`: its role first, health-checked Ready, then its workload |
@@ -156,11 +156,10 @@ gcp = {
   …
   crossplane = {
     allowed_roles = ["roles/secretmanager.secretAccessor", "roles/monitoring.viewer", "roles/storage.objectAdmin"]
-    dns_zones     = ["acme-example"]
   }
 }
 kube = {
-  crossplane = { enabled = true }   # dns_zones and the lister role are wired by the root
+  crossplane = { enabled = true }   # the DNS records role is wired by the root
 }
 ```
 
@@ -178,23 +177,50 @@ may grant**, read by IAM on the request: the condition
 `api.getAttribute('iam.googleapis.com/modifiedGrantsByRole', []).hasOnly([…])`
 holds only when every binding the request adds or removes is for a listed
 role ([Google's limited IAM admin](https://cloud.google.com/iam/docs/setting-limits-on-granting-roles)).
-The list is `crossplane.allowed_roles` plus the socle's zone lister role.
+The list is `crossplane.allowed_roles` plus the socle's DNS records role.
 Everything is created only when `crossplane` is set; `null`, the default,
 creates nothing.
 
 | Need | Grant to Crossplane's principal | Bound |
 | --- | --- | --- |
-| A module's project-level roles (external-secrets, keda, the lister for external-dns) | `roles/resourcemanager.projectIamAdmin` | condition `modifiedGrantsByRole.hasOnly(allowed_roles + lister)`. Project IAM Admin is not in the list, so Crossplane can never lift its own condition |
+| A module's project-level roles (external-secrets, keda, the DNS records role for external-dns) | `roles/resourcemanager.projectIamAdmin` | condition `modifiedGrantsByRole.hasOnly(allowed_roles + DNS records role)`. Project IAM Admin is not in the list, so Crossplane can never lift its own condition |
 | A module's bucket (velero) | custom role `socleCrossplaneBuckets_<cluster>`: `storage.buckets.{create,get,update,getIamPolicy,setIamPolicy}` — **no delete, no object permission, no list** | condition `resource.name.startsWith('projects/_/buckets/<cluster>-')` and the same `hasOnly` |
-| A zone's IAM policy (external-dns) | custom role `socleCrossplaneZoneIam_<cluster>`: `dns.managedZones.{get,getIamPolicy,setIamPolicy}` | bound **on each zone in `crossplane.dns_zones`**, not on the project. Cloud DNS does not recognise `modifiedGrantsByRole`, and Google fails every grant a limited admin attempts on a service that does not: the zone is the bound, worth that zone's records and nothing beyond |
-| What external-dns lists | custom role `socleDnsZoneLister_<cluster>`: `dns.managedZones.{list,get}` — Crossplane does not hold it, it may grant it | always part of the list; external-dns lists the project's zones on every loop, a project-level call no zone binding answers |
+| What external-dns writes | custom role `socleDnsRecords_<cluster>`: `dns.managedZones.{get,list}`, `dns.changes.{create,get,list}`, `dns.resourceRecordSets.{create,delete,get,list,update}` — Crossplane does not hold it, it may grant it, on the project | always part of the list. Every zone of the project, bounded in software by external-dns's `--domain-filter`: nothing in IAM narrows it to a zone (below) |
 
 | Object | What it is |
 | --- | --- |
-| variable `crossplane` | `object({ allowed_roles = optional(list(string), []), dns_zones = optional(list(string), []) })`, default `null` |
+| variable `crossplane` | `object({ allowed_roles = optional(list(string), []) })`, default `null` |
 | output `crossplane_principal` | the principal above, for the record; `null` without `crossplane` |
-| outputs `crossplane_dns_zones`, `dns_zone_lister_role` | wired by the root into `kube.crossplane.dns_zones` and `kube.crossplane.dns_zone_lister_role` (a value the client writes wins); the lister's name is built from its ID, so known on the first plan |
+| output `dns_records_role` | wired by the root into `kube.crossplane.dns_records_role` (a value the client writes wins); built from the role's ID, so known on the first plan |
 | outputs `project_id`, `project_number` | half of every module's principal each; wired by the root into `cluster.projectId` and `cluster.projectNumber` |
+
+**Crossplane holds nothing of Cloud DNS — measured on the sandbox project
+(2026-10-07).** The first design bound Crossplane on each zone external-dns
+writes, with a custom role carrying `dns.managedZones.{getIamPolicy,setIamPolicy}`,
+for Crossplane to bind external-dns there in turn. The sandbox apply refused
+it: the `ManagedZoneIAMMember` failed with `Error retrieving IAM policy for dns
+managedzone …: 403`. A probe with a temporary service account settled why: on
+a Cloud DNS managed zone, `getIamPolicy` and `setIamPolicy` granted **at zone
+level** — by a custom role, and even by `roles/dns.admin` — are never honoured
+(403 for over four minutes), while record operations granted at the same zone
+level (record sets listed, changes created and deleted) work. A zone's IAM
+needs a project-level grant, and IAM conditions do not apply to Cloud DNS, so
+nothing would bound such a grant to one zone. Crossplane therefore gets no DNS
+capability at all; external-dns gets the records role above on the project,
+through Crossplane's ordinary `hasOnly` grant. What it may write is every zone
+of the project, and what it does write is bounded by its `--domain-filter` —
+a software bound, which is why one socle cluster per project (below) is the
+rule and not a convenience.
+
+**Why the foundations create these custom roles.** The doctrine is that
+OpenTofu never creates a role for a module ([flux-catalog §6](../flux-catalog.md)).
+On GCP a custom role is a project object Crossplane cannot make: it is denied
+`iam.roles.create` (no `roles/iam.*` may be allowed), and it must be, since a
+role it wrote could carry any permission. So the socle's custom roles —
+Crossplane's bucket role and the DNS records role — are created by the
+foundations; only Crossplane ever grants one to a module, under `hasOnly`.
+The module still declares its own binding; the foundations only define what
+the role means.
 
 **What `allowed_roles` refuses, at plan.** `roles/owner`, `roles/editor`,
 `roles/viewer`, any `roles/iam.*` and `roles/resourcemanager.*`: Crossplane
@@ -208,11 +234,11 @@ permission writes object ACLs, which a bucket with uniform bucket-level
 access does not have — and the velero module's bucket enforces it. A custom
 role carrying `setIamPolicy` is the one thing the plan cannot see; it stays
 the reviewer's job. And **at most nine roles**: Google accepts ten values in
-`hasOnly()`, and the lister role is always the tenth.
+`hasOnly()`, and the DNS records role is always the tenth.
 
 **Names.** Custom role IDs take letters, digits, underscores and dots, up to
 64 characters: the cluster's name joins them with `-` turned into `_`, which
-is why the zone role is `socleCrossplaneZoneIam_`, not something longer.
+is why the prefixes stay short (`socleCrossplaneBuckets_`, `socleDnsRecords_`).
 Custom roles are soft-deleted by Google: a destroy followed by an apply within
 the retention window finds the ID taken, and the provider undeletes the role
 rather than failing.
@@ -350,7 +376,7 @@ spec:
 
 | Module | Managed resources | Scope |
 | --- | --- | --- |
-| external-dns | `ManagedZoneIAMMember` `roles/dns.admin`, one per zone in `inputs.modules.crossplane.dns_zones`; `ProjectIAMMember` the lister role | the zone — Cloud DNS has no condition on record names |
+| external-dns | `ProjectIAMMember` `inputs.modules.crossplane.dns_records_role`, the foundations' `socleDnsRecords_<cluster>` | the project's zones; `--domain-filter` bounds what it writes — Cloud DNS honours no zone-level IAM grant and no condition |
 | external-secrets | `ProjectIAMMember` `roles/secretmanager.secretAccessor`, one per prefix | IAM condition `resource.name.startsWith('projects/<number>/secrets/<prefix>_')` |
 | keda | `ProjectIAMMember` `roles/monitoring.viewer` | the project's metrics, read-only |
 | velero | `Bucket` `<cluster>-velero-<number>` and `BucketIAMMember` `roles/storage.objectAdmin` | the bucket |
@@ -365,7 +391,7 @@ The rules:
   IAM through Crossplane's own condition, and the managed resource never
   turns `Ready`. A module's documentation names the role its client must add
   to `gcp.crossplane.allowed_roles`.
-- **The module scopes resources itself**, on the resource (a zone, a bucket)
+- **The module scopes resources itself**, on the resource (a bucket)
   or by an IAM condition on the binding (external-secrets' secret prefix),
   because the role list scopes only roles.
 - **A bucket is under `<cluster>-`**, with uniform bucket-level access and

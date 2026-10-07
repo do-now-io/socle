@@ -32,12 +32,12 @@ apply itself needs are listed in
 | `serviceusage.googleapis.com` | enabling the others |
 | `compute.googleapis.com` | VPC, subnetworks, router, Cloud NAT, the Gateways' load balancers |
 | `container.googleapis.com` | the Autopilot cluster |
-| `iam.googleapis.com` | Crossplane's custom roles and the zone lister role |
+| `iam.googleapis.com` | Crossplane's bucket role and the DNS records role |
 | `sts.googleapis.com` | every workload's federated token: the exchange of a pod's Kubernetes token for a Google one |
 | `iamcredentials.googleapis.com` | a CI identity impersonating the service account that runs OpenTofu |
 | `logging.googleapis.com` | GKE's system and workload logs (`logging_components`) |
 | `monitoring.googleapis.com` | GKE's system metrics; what KEDA's GCP scalers read |
-| `dns.googleapis.com` | the certificate's DNS authorizations, Crossplane's zone bindings, external-dns |
+| `dns.googleapis.com` | the certificate's DNS authorizations, external-dns |
 | `certificatemanager.googleapis.com` | the shared Gateways' Google-managed certificates (`gateway_certificate`) |
 | `storage.googleapis.com` | the state bucket, and the buckets modules own (Velero's) |
 | `secretmanager.googleapis.com` | the external-secrets module |
@@ -52,8 +52,8 @@ apply itself needs are listed in
 | `roles/compute.networkAdmin` | network, subnetworks, router, NAT |
 | `roles/container.admin` | the cluster, and the bootstrap's Helm releases on it |
 | `roles/resourcemanager.projectIamAdmin` | project-level role bindings, Crossplane's included: its own conditional grant of Project IAM Admin and of the bucket role |
-| `roles/iam.roleAdmin` | Crossplane's custom roles and the zone lister role — only when `crossplane` is set |
-| `roles/dns.admin` | Crossplane's binding on each zone in `crossplane.dns_zones` — a zone's IAM policy — and the certificate's authorization records |
+| `roles/iam.roleAdmin` | Crossplane's bucket role and the DNS records role external-dns is granted — only when `crossplane` is set |
+| `roles/dns.admin` | the certificate's authorization records — only when `gateway_certificate` is set |
 | `roles/certificatemanager.editor` | only when `gateway_certificate` is set |
 | `roles/storage.admin` | creating the state bucket — one-time; the apply principal itself needs only object access on that bucket |
 | `roles/pubsub.admin` | only with upgrade notifications |
