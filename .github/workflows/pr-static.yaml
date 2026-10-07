@@ -192,6 +192,18 @@ jobs:
             kind="$(basename "${f}" -fluxcd-v1.json)"
             cp "${f}" "schemas/fluxcd.controlplane.io/${kind}_v1.json"
           done
+      - name: Install yq
+        if: steps.detect.outputs.found == 'true'
+        env:
+          YQ_VERSION: 4.47.2
+        run: |
+          # Pinned rather than the runner image's yq, which moves with the image:
+          # the schema conversion and the child-resource extraction below rely
+          # on its expression syntax.
+          url="https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64"
+          curl -sL "${url}" -o /usr/local/bin/yq
+          chmod +x /usr/local/bin/yq
+          yq --version
       - name: Fetch the GCP provider's CRD schemas
         if: steps.detect.outputs.found == 'true'
         env:
