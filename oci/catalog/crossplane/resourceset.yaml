@@ -288,10 +288,12 @@ spec:
         ---
         # Requests set on purpose: Autopilot gives a container without them
         # 500m / 2Gi, and bills what is requested — five providers would
-        # reserve 10Gi. 100m / 256Mi sits inside Autopilot's CPU:memory ratio
-        # (1:1 to 1:6.5) and above its floor, and a pod bursts past it on a
-        # cluster that supports bursting; to be replaced by what is measured
-        # on the sandbox (docs/catalog/crossplane.md).
+        # reserve 10Gi. The memory is AWS's, measured on k3s (306Mi to 441Mi
+        # per provider once its CRDs are loaded), until the sandbox measures
+        # GCP's (docs/catalog/crossplane.md). 100m / 320Mi is 1 vCPU to
+        # 3.1Gi, inside Autopilot's CPU:memory ratio (1:1 to 1:6.5), and
+        # above its floor; a pod bursts past it on a cluster that supports
+        # bursting.
         apiVersion: pkg.crossplane.io/v1beta1
         kind: DeploymentRuntimeConfig
         metadata:
@@ -310,7 +312,7 @@ spec:
                       resources:
                         requests:
                           cpu: 100m
-                          memory: 256Mi
+                          memory: 320Mi
         ---
         # The family provider, a dependency of the other four, declared so
         # that its version is pinned here, under the name Crossplane gives a

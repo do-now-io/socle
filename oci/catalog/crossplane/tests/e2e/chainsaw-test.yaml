@@ -884,6 +884,18 @@ spec:
                 namespace: crossplane-system
                 (ownerReferences == null): true
                 (length(managedFields[?contains(manager, 'crossplane')] || `[]`)): 0
+        # The label is the Provider object's name, not the package's: the
+        # family runs as crossplane-contrib-provider-family-gcp.
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: crossplane-system
+                labels:
+                  pkg.crossplane.io/provider: crossplane-contrib-provider-family-gcp
+              spec:
+                serviceAccountName: provider-gcp
         - assert:
             resource:
               apiVersion: v1
