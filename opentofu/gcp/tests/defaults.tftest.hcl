@@ -239,6 +239,21 @@ run "a_known_project_number_skips_the_lookup" {
   }
 }
 
+run "a_null_input_takes_the_module_default" {
+  command = plan
+  variables {
+    additional_labels        = null
+    create_nat               = null
+    subnet_flow_logs_enabled = null
+    release_channel          = null
+  }
+
+  assert {
+    condition     = length(google_compute_router_nat.socle) == 1 && google_container_cluster.socle.release_channel[0].channel == "REGULAR" && output.labels.owner == "platform"
+    error_message = "a root that passes an omitted optional key as null must get the module's recommended position, not a null: nullable = false is what makes that true."
+  }
+}
+
 # --- crossplane — docs/catalog/crossplane.md ----------------------------------
 
 run "crossplane_gets_no_identity_unless_asked" {
