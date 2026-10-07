@@ -15,6 +15,15 @@ eventually() {
 # rule_groups: the rule groups vmalert has loaded, one per line.
 rule_groups() { vmalert /api/v1/rules | python3 -c 'import sys, json; [print(g["name"]) for g in json.load(sys.stdin)["data"]["groups"]]'; }
 has_group() { rule_groups | grep -qx "$1"; }
+# rules_healthy: every rule vmalert holds has been evaluated, without error.
+rules_healthy() {
+  vmalert /api/v1/rules | python3 -c '
+import sys, json
+rules = [r for g in json.load(sys.stdin)["data"]["groups"] for r in g["rules"]]
+bad = [r["name"] for r in rules if r.get("health") != "ok" or r.get("lastError")]
+print("unhealthy:", " ".join(bad)) if bad else None
+sys.exit(1 if bad or not rules else 0)'
+}
 # firing <alertname>: vmalert holds it firing.
 firing() {
   vmalert /api/v1/alerts | python3 -c '
