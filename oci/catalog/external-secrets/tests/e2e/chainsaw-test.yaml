@@ -24,6 +24,10 @@
 # Not provable on floci: the association reaching EKS, the controller getting
 # the role's credentials, IAM enforcing the prefix and the boundary — the
 # sandbox's (docs/catalog/external-secrets.md).
+#
+# On gcp, a test of its own at the end of this file, run on the sandbox's
+# GKE: the binding, the controller's principal reading under the prefix, and
+# IAM refusing a secret outside it.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -1006,3 +1010,229 @@ spec:
             namespace: flux-system
             selector: app.kubernetes.io/name=flux-operator
             tail: 40
+---
+# The GCP proof, run by hand against the sandbox's GKE Autopilot (no GKE in
+# CI: floci-gcp serves no Workload Identity). The sandbox's root turns the
+# module on with Crossplane, the default prefix — the cluster's name — and
+# roles/secretmanager.secretAccessor in gcp.crossplane.allowed_roles; this
+# test reads the module as it stands and never turns it off, as the
+# crossplane module's GCP test does.
+#
+# Two secrets are seeded in the sandbox's Secret Manager before the run, by
+# the operator's own hand: these tests write nothing outside the cluster.
+# <cluster>-e2e-app, value `first`, under the prefix; e2e-outside-<cluster>,
+# any value, outside it. The values the run passes: cluster, project_id and
+# project_number (--set). The rotation and Reloader's roll are not repeated
+# here: they are ESO's and Reloader's, not the cloud's, and proven by the
+# floci test above; what only GCP can prove is the binding, the principal
+# and the prefix as IAM enforces it.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: external-secrets-module-gcp
+  labels:
+    phase: module
+    cloud: gcp
+    platform: gke
+spec:
+  description: >-
+    On with Crossplane, the controller's own principal reads the secrets under
+    the cluster's prefix through the socle's store, and IAM refuses one
+    outside it.
+  timeouts:
+    # Autopilot provisions a node for pods that do not fit, minutes before
+    # the controller can be Available.
+    assert: 10m
+    error: 3m
+  steps:
+    - name: the binding grants secretAccessor to the controller's principal, on the cluster's prefix only
+      try:
+        - assert:
+            resource:
+              apiVersion: cloudplatform.gcp.m.upbound.io/v1beta1
+              kind: ProjectIAMMember
+              metadata:
+                name: (join('-', ['external-secrets', $values.cluster]))
+                namespace: external-secrets
+              spec:
+                forProvider:
+                  project: ($values.project_id)
+                  role: roles/secretmanager.secretAccessor
+                  member: >-
+                    (join('', ['principal://iam.googleapis.com/projects/', to_string($values.project_number),
+                    '/locations/global/workloadIdentityPools/', $values.project_id,
+                    '.svc.id.goog/subject/ns/external-secrets/sa/external-secrets']))
+                  condition:
+                    title: (join('-', ['socle', $values.cluster, $values.cluster]))
+                    expression: >-
+                      (join('', ['resource.name.startsWith(\'projects/', to_string($values.project_number),
+                      '/secrets/', $values.cluster, '\')']))
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'Synced'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: cloudplatform.gcp.m.upbound.io/v1beta1
+            kind: ProjectIAMMember
+            namespace: external-secrets
+        - podLogs:
+            namespace: crossplane-system
+            selector: pkg.crossplane.io/provider=provider-gcp-cloudplatform
+            tail: 40
+    # The workload waited for the binding; it runs as the ServiceAccount the
+    # principal names, and the socle's store is on Secret Manager with no
+    # auth block — the pod's own principal, no key, no Google service
+    # account.
+    - name: the operator runs as external-secrets/external-secrets, and the socle's store is on Secret Manager
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: external-secrets-workload
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: external-secrets
+                namespace: external-secrets
+              spec:
+                template:
+                  spec:
+                    serviceAccountName: external-secrets
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: external-secrets.io/v1
+              kind: ClusterSecretStore
+              metadata:
+                name: secret-manager
+              spec:
+                provider:
+                  gcpsm:
+                    projectID: ($values.project_id)
+                    (auth == null): true
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+        - describe:
+            apiVersion: external-secrets.io/v1
+            kind: ClusterSecretStore
+            name: secret-manager
+        - podLogs:
+            namespace: external-secrets
+            tail: 40
+    # The store turns Ready without calling GCP (ESO validates a store with
+    # no auth block by its shape alone): a secret read is the proof.
+    - name: an ExternalSecret under the prefix becomes a Secret, read with the controller's own principal
+      try:
+        - apply:
+            resource:
+              apiVersion: external-secrets.io/v1
+              kind: ExternalSecret
+              metadata:
+                name: inside
+              spec:
+                refreshInterval: 1h
+                secretStoreRef:
+                  kind: ClusterSecretStore
+                  name: secret-manager
+                target:
+                  name: inside
+                data:
+                  - secretKey: value
+                    remoteRef:
+                      key: (join('-', [$values.cluster, 'e2e-app']))
+        - assert:
+            resource:
+              apiVersion: external-secrets.io/v1
+              kind: ExternalSecret
+              metadata:
+                name: inside
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: inside
+              data:
+                value: (base64_encode('first'))
+      catch:
+        - describe:
+            apiVersion: external-secrets.io/v1
+            kind: ExternalSecret
+            name: inside
+        - events: {}
+        - podLogs:
+            namespace: external-secrets
+            tail: 40
+    # The boundary, as IAM enforces it: the same principal, the same store,
+    # a secret whose name does not start with the prefix — refused with
+    # PermissionDenied, never turned into a Secret.
+    - name: a secret outside the prefix is refused by IAM, and no Secret is made
+      try:
+        - apply:
+            resource:
+              apiVersion: external-secrets.io/v1
+              kind: ExternalSecret
+              metadata:
+                name: outside
+              spec:
+                refreshInterval: 1h
+                secretStoreRef:
+                  kind: ClusterSecretStore
+                  name: secret-manager
+                target:
+                  name: outside
+                data:
+                  - secretKey: value
+                    remoteRef:
+                      key: (join('-', ['e2e-outside', $values.cluster]))
+        - assert:
+            resource:
+              apiVersion: external-secrets.io/v1
+              kind: ExternalSecret
+              metadata:
+                name: outside
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'False'
+                    reason: SecretSyncedError
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Event
+              involvedObject:
+                kind: ExternalSecret
+                name: outside
+              (contains(message, 'PermissionDenied')): true
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: outside
+      catch:
+        - describe:
+            apiVersion: external-secrets.io/v1
+            kind: ExternalSecret
+            name: outside
+        - events: {}

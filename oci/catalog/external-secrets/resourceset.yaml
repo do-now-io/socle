@@ -19,17 +19,24 @@
 # DescribeSecret on secret:<prefix>/* in the cluster's region for each prefix
 # in kube.external_secrets.prefixes (default: the cluster name), never `*`,
 # no write, no ListSecrets — bound by Pod Identity to the controller's
-# ServiceAccount, and one ClusterSecretStore named secret-manager on it.
-# Anywhere else the operator is installed alone and the client brings his
-# stores.
+# ServiceAccount, and one ClusterSecretStore named secret-manager on it. On
+# GCP, the same with Crossplane on and a prefix: roles/secretmanager.
+# secretAccessor (versions.access, no list, no write) granted to the
+# controller's own Workload Identity principal, one project-level binding per
+# prefix under an IAM condition on the secret's name — no Google service
+# account — and the same store on Secret Manager. Anywhere else the operator is installed alone
+# and the client brings his stores.
 #
 # Three layers, so that each object is applied once what it needs exists:
 # - this ResourceSet: the Namespace and, on AWS, the Role and the Pod
-#   Identity association binding it to external-secrets/external-secrets;
+#   Identity association binding it to external-secrets/external-secrets; on
+#   GCP, the ProjectIAMMembers binding that ServiceAccount's principal;
 # - external-secrets-workload, a child ResourceSet holding the chart, which
 #   dependsOn the Role and the association being Ready: EKS Pod Identity
 #   injects the credentials at pod admission, and a pod admitted before its
-#   association never gets them (docs/catalog/external-dns.md);
+#   association never gets them (docs/catalog/external-dns.md). On GCP it
+#   dependsOn each binding being Ready, so that the controller never starts
+#   on a principal that reads nothing yet;
 # - external-secrets-store, a child ResourceSet holding the ClusterSecretStore,
 #   which dependsOn the HelmRelease being Ready: the store's CRD is one the
 #   chart installs, and ESO's validating webhook must answer for it to apply.
@@ -70,7 +77,24 @@ spec:
       ready: true
   wait: true
   resourcesTemplate: |
-    << $access := and (eq inputs.cloud "aws") inputs.modules.crossplane.enabled inputs.modules.external_secrets.prefixes ->>
+    << $aws := and (eq inputs.cloud "aws") inputs.modules.crossplane.enabled inputs.modules.external_secrets.prefixes ->>
+    << $gcp := and (eq inputs.cloud "gcp") inputs.modules.crossplane.enabled inputs.modules.external_secrets.prefixes ->>
+    << $access := or $aws $gcp ->>
+    # One binding per prefix, named after it. A prefix may hold "_" and
+    # capitals, which an object name may not: those, a trailing "-" and a
+    # long prefix get a short hash of the prefix, so that two prefixes never
+    # share a name. The default, the cluster's name, is a valid name as it
+    # stands.
+    << $members := list ->>
+    << if $gcp ->>
+    << range $p := inputs.modules.external_secrets.prefixes ->>
+    << $n := $p | lower | replace "_" "-" ->>
+    << if or (ne $n $p) (hasSuffix "-" $p) (gt (len $p) 40) ->>
+    << $n = printf "%s-%s" ($n | trunc 37) ($p | sha1sum | trunc 8) ->>
+    << end ->>
+    << $members = append $members (dict "name" (printf "external-secrets-%s" $n) "prefix" $p) ->>
+    << end ->>
+    << end ->>
     apiVersion: v1
     kind: Namespace
     metadata:
@@ -82,7 +106,7 @@ spec:
         # seccomp (the chart's own security contexts): restricted holds, and
         # pins it.
         pod-security.kubernetes.io/enforce: restricted
-    << if $access >>
+    << if $aws >>
     ---
     # The module's own AWS access, docs/catalog/crossplane.md §3. Under
     # /socle/<cluster>/ and carrying Crossplane's boundary when the root wired
@@ -148,10 +172,59 @@ spec:
         roleArnRef:
           name: external-secrets
     << end >>
+    << if $gcp >>
+    << $principal := printf "%s/projects/%s/locations/global/workloadIdentityPools/%s.svc.id.goog/subject/ns/%s/sa/%s"
+      "principal://iam.googleapis.com" inputs.cluster.projectNumber inputs.cluster.projectId
+      "external-secrets" "external-secrets" ->>
+    << range $m := $members >>
+    ---
+    # The module's own GCP access, docs/catalog/crossplane.md §2: a binding
+    # of the controller's own principal, Workload Identity on
+    # external-secrets/external-secrets, no Google service account.
+    # Crossplane may grant only the roles the client listed in
+    # gcp.crossplane.allowed_roles: without roles/secretmanager.secretAccessor
+    # there, IAM refuses this binding and it never turns Ready.
+    #
+    # Read-only and scoped by name, as on AWS: secretAccessor is
+    # versions.access — the value, never the metadata, never a write — on
+    # the secrets whose name starts with the prefix. Its other two
+    # permissions, resourcemanager.projects.get and list, act on the project,
+    # whose name never starts with a secret's path: the condition voids them.
+    # A secret's binding cannot name a prefix (a SecretIAMMember is one
+    # secret), so the role is bound on the project under an IAM condition on
+    # resource.name, which Secret Manager presents as
+    # projects/<number>/secrets/<name>[/versions/<version>] — the project's
+    # number, not its id — so that the condition holds for a secret and every
+    # version of it. ListSecrets is not there, and with it dataFrom.find, as
+    # on AWS.
+    #
+    # One binding per prefix rather than one condition ORing them: a
+    # binding's condition cannot change in place, so adding a prefix would
+    # otherwise remove and re-create the module's whole access.
+    apiVersion: cloudplatform.gcp.m.upbound.io/v1beta1
+    kind: ProjectIAMMember
+    metadata:
+      name: << $m.name >>
+      namespace: external-secrets
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.external_secrets.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      forProvider:
+        project: << inputs.cluster.projectId >>
+        role: roles/secretmanager.secretAccessor
+        member: << $principal >>
+        condition:
+          # Titles need not be unique; the cluster's name tells two clusters'
+          # bindings apart in the project's policy.
+          title: << printf "socle-%s-%s" inputs.cluster.name $m.prefix | trunc 100 | quote >>
+          expression: << printf "resource.name.startsWith('projects/%s/secrets/%s')" inputs.cluster.projectNumber $m.prefix | quote >>
+    << end >>
+    << end >>
     ---
     # The workload, in a child ResourceSet so that it can wait on the
-    # association explicitly: a managed resource not yet created carries no
-    # Ready condition at all, which a step's health check reads as healthy.
+    # association (on GCP, the bindings) explicitly: a managed resource not
+    # yet created carries no Ready condition at all, which a step's health
+    # check reads as healthy.
     apiVersion: fluxcd.controlplane.io/v1
     kind: ResourceSet
     metadata:
@@ -160,7 +233,7 @@ spec:
       annotations:
         fluxcd.controlplane.io/reconcile: << if inputs.modules.external_secrets.enabled >>enabled<< else >>disabled<< end >>
     spec:
-      << if $access >>
+      << if $aws >>
       dependsOn:
         - apiVersion: iam.aws.m.upbound.io/v1beta1
           kind: Role
@@ -174,6 +247,16 @@ spec:
           namespace: external-secrets
           ready: true
           readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
+      << else if $gcp >>
+      dependsOn:
+        << range $m := $members >>
+        - apiVersion: cloudplatform.gcp.m.upbound.io/v1beta1
+          kind: ProjectIAMMember
+          name: << $m.name >>
+          namespace: external-secrets
+          ready: true
+          readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
+        << end >>
       << end >>
       wait: true
       resources:
@@ -291,10 +374,11 @@ spec:
               retries: 3
     << if $access >>
     ---
-    # The socle's one store, on the module's own role: no auth block, so the
-    # controller's default credential chain — the Pod Identity association
-    # above. A ClusterSecretStore, so every namespace may reference it: the
-    # IAM prefixes, not the store, bound what it reads
+    # The socle's one store, on the module's own access: no auth block, so
+    # the controller's default credential chain — the Pod Identity
+    # association above, or on GCP the pod's own Workload Identity principal
+    # through the metadata server. A ClusterSecretStore, so every namespace
+    # may reference it: the IAM prefixes, not the store, bound what it reads
     # (docs/catalog/external-secrets.md). Per-namespace SecretStores, and
     # stores on other backends, are the client's.
     apiVersion: fluxcd.controlplane.io/v1
@@ -319,7 +403,15 @@ spec:
           name: secret-manager
         spec:
           provider:
+            << if $aws >>
             aws:
               service: SecretsManager
               region: << inputs.cluster.region >>
+            << else >>
+            # Global secrets: no location, as the bindings' condition names
+            # projects/<number>/secrets/…, never a regional secret's
+            # projects/<number>/locations/<region>/secrets/….
+            gcpsm:
+              projectID: << inputs.cluster.projectId >>
+            << end >>
     << end >>
