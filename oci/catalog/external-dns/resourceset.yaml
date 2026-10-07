@@ -183,11 +183,11 @@ spec:
         roleArnRef:
           name: external-dns
     << end >>
-    << $access := and (eq inputs.cloud "gcp") inputs.modules.crossplane.enabled >>
-    << if $access >>
+    << $gcpAccess := and (eq inputs.cloud "gcp") inputs.modules.crossplane.enabled ->>
+    << if $gcpAccess >>
     << $principal := printf
          "principal://iam.googleapis.com/projects/%s/locations/global/workloadIdentityPools/%s.svc.id.goog/subject/ns/%s/sa/%s"
-         inputs.cluster.projectNumber inputs.cluster.projectId "external-dns" "external-dns" >>
+         inputs.cluster.projectNumber inputs.cluster.projectId "external-dns" "external-dns" ->>
     # The module's own GCP access, docs/catalog/crossplane.md §3: no Google
     # service account, the ServiceAccount external-dns/external-dns is the
     # principal itself (Workload Identity Federation). Both roles are among
@@ -267,7 +267,7 @@ spec:
           namespace: external-dns
           ready: true
           readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
-      << else if $access >>
+      << else if $gcpAccess >>
       dependsOn:
         << range $zone := inputs.modules.crossplane.dns_zones >>
         - apiVersion: dns.gcp.m.upbound.io/v1beta1

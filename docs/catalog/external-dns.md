@@ -385,7 +385,7 @@ refused, is the sandbox EKS apply.
 ## GCP: the module's own members, through Crossplane
 
 The same promise as on AWS ([crossplane.md](crossplane.md) §3), under
-`<< if $access >>`, `$access` being
+`<< if $gcpAccess >>`, `$gcpAccess` being
 `and (eq inputs.cloud "gcp") inputs.modules.crossplane.enabled`:
 
 | Object | What it is |

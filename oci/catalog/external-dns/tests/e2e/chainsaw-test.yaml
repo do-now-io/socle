@@ -1158,8 +1158,15 @@ spec:
     # is the run's namespace, so a record an earlier run left under
     # upsert-only cannot pass for this one. The wait before the lookup keeps
     # the resolver from caching an NXDOMAIN for the zone's negative TTL
-    # (five minutes on Cloud DNS's default SOA); a Job that still fails is
-    # retried with backoff.
+    # (five minutes on Cloud DNS's default SOA). 45 s is enough only because
+    # the socle sets triggerLoopOnEvent: the new Service starts a loop at
+    # once, instead of waiting for the next one-minute interval. A Job that
+    # still fails is retried with backoff.
+    #
+    # The limit: `host -t CNAME` exits 0 once the name resolves, whatever
+    # the CNAME points to. It proves the record exists under a name only
+    # this run could have written, not that its target is
+    # backend.example.org.
     - name: a Service's name becomes a CNAME in Cloud DNS, resolvable from the internet
       try:
         - apply:
