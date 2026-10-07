@@ -63,14 +63,9 @@ output "crossplane_principal" {
   value       = var.crossplane == null ? null : local.crossplane_principal
 }
 
-output "crossplane_dns_zones" {
-  description = "The Cloud DNS managed zones Crossplane may bind external-dns on — what the bootstrap module hands the catalog. Empty when crossplane is not set."
-  value       = try(var.crossplane.dns_zones, [])
-}
-
-output "dns_zone_lister_role" {
-  description = "Full name of the custom role that lets external-dns list the project's zones, always among the roles Crossplane may grant. Built from its ID, so known on the first plan. Empty when crossplane is not set."
-  value       = local.dns_zone_lister_role
+output "dns_records_role" {
+  description = "Full name of the custom role external-dns writes DNS records with: find the project's managed zones, read and change their record sets. Project-level, because a zone's IAM policy is never honoured when granted on the zone itself (measured 2026-10-07), so Crossplane binds it on the project, and --domain-filter bounds what external-dns writes. Always among the roles Crossplane may grant. Built from its ID, so known on the first plan. Empty when crossplane is not set."
+  value       = local.dns_records_role
 }
 
 output "gateway_certificate_map" {

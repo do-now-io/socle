@@ -35,8 +35,8 @@ Federation, never a key — needs, on the target project:
 | `roles/resourcemanager.projectIamAdmin` | binding roles to it |
 | `roles/pubsub.admin` | the upgrade-notification topic |
 | `roles/bigquery.admin` | only when `billing_export_dataset_id` is set |
-| `roles/iam.roleAdmin` | Crossplane's custom roles — only when `crossplane` is set |
-| `roles/dns.admin` | zone bindings for `crossplane.dns_zones`, and the certificate's authorization records |
+| `roles/iam.roleAdmin` | the socle's custom roles — only when `crossplane` is set |
+| `roles/dns.admin` | the certificate's authorization records — only when `gateway_certificate` is set |
 | `roles/certificatemanager.editor` | only when `gateway_certificate` is set |
 | `roles/storage.objectAdmin` | reading and writing state — granted on the state bucket, not on the project |
 

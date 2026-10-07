@@ -343,7 +343,9 @@ spec:
           runtimeConfigRef:
             name: provider-gcp
         ---
-        # ManagedZoneIAMMember: external-dns's role on each zone it may write.
+        # Cloud DNS kinds. No module binds through them: a zone's IAM granted on
+        # the zone is never honoured (docs/catalog/crossplane.md §6), so
+        # external-dns's role is a ProjectIAMMember.
         apiVersion: pkg.crossplane.io/v1
         kind: Provider
         metadata:

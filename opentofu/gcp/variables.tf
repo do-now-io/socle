@@ -462,19 +462,18 @@ variable "crossplane" {
     is the boundary: the roles (predefined, or custom by full name) Crossplane
     may grant any module's principal on the project or on a bucket, through
     Project IAM Admin under a modifiedGrantsByRole condition. Empty grants
-    nothing but the socle's own zone lister role; owner, editor, viewer,
+    nothing but the socle's own DNS records role; owner, editor, viewer,
     iam.* and resourcemanager.* are refused, and Google caps the list at
     nine. Predefined admin roles (roles/storage.admin, …) are refused too,
     roles/storage.objectAdmin excepted: they grant roles on their resources,
     and Crossplane could give one to itself. A custom role that carries a
     setIamPolicy permission must not be listed, for the same reason. Buckets are reachable under the <cluster_name>- prefix only, and
-    never deletable. dns_zones are the Cloud DNS managed zones (by name) on
-    which Crossplane may bind external-dns. Null, the default, creates
-    nothing.
+    never deletable. Nothing of Cloud DNS: external-dns writes records
+    through the socle's DNS records role, granted on the project. Null, the
+    default, creates nothing.
   EOT
   type = object({
     allowed_roles = optional(list(string), [])
-    dns_zones     = optional(list(string), [])
   })
   default = null
 
@@ -504,16 +503,11 @@ variable "crossplane" {
   }
 
   # Google accepts at most ten roles in a hasOnly() condition, and the socle's
-  # zone lister role always takes one of them:
+  # DNS records role always takes one of them:
   # https://cloud.google.com/iam/docs/setting-limits-on-granting-roles
   validation {
     condition     = var.crossplane == null || try(length(var.crossplane.allowed_roles) <= 9, true)
-    error_message = "crossplane.allowed_roles accepts at most nine roles: Google caps a role-granting condition at ten, and the socle's zone lister role is always one of them."
-  }
-
-  validation {
-    condition     = var.crossplane == null || try(alltrue([for z in var.crossplane.dns_zones : can(regex("^[a-z][a-z0-9-]{0,62}$", z))]), false)
-    error_message = "crossplane.dns_zones must be Cloud DNS managed zone names, such as sandbox-gcp-do-now-io — the zone's name, not its DNS name."
+    error_message = "crossplane.allowed_roles accepts at most nine roles: Google caps a role-granting condition at ten, and the socle's DNS records role is always one of them."
   }
 }
 

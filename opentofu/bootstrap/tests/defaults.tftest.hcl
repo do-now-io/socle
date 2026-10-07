@@ -59,8 +59,8 @@ run "defaults_are_the_recommended_position" {
     error_message = "crossplane must default to off with no client values and no boundary: no module claims cloud access yet, and the boundary is wired by the root from the foundations."
   }
   assert {
-    condition     = output.inputs.modules.crossplane.dns_zones == [] && output.inputs.modules.crossplane.dns_zone_lister_role == ""
-    error_message = "crossplane's gcp attributes must be present and empty off gcp: the templates test values, never presence."
+    condition     = output.inputs.modules.crossplane.dns_records_role == "" && !contains(keys(output.inputs.modules.crossplane), "dns_zones")
+    error_message = "crossplane's gcp attribute must be present and empty off gcp: the templates test values, never presence. No zone list: Crossplane holds nothing of Cloud DNS."
   }
   assert {
     condition     = output.inputs.cluster.projectId == "" && output.inputs.cluster.projectNumber == ""
@@ -1284,7 +1284,7 @@ run "gcp_has_snapshots" {
   }
 }
 
-run "gcp_takes_its_crossplane_dns_zones_and_lister_role" {
+run "gcp_takes_its_crossplane_dns_records_role" {
   command = plan
   variables {
     cloud           = "gcp"
@@ -1292,16 +1292,15 @@ run "gcp_takes_its_crossplane_dns_zones_and_lister_role" {
     project         = { id = "sandbox-2bace", number = "123456789012" }
     kube = {
       crossplane = {
-        enabled              = true
-        dns_zones            = ["sandbox-gcp-do-now-io"]
-        dns_zone_lister_role = "projects/sandbox-2bace/roles/socleDnsZoneLister_socle_test"
+        enabled          = true
+        dns_records_role = "projects/sandbox-2bace/roles/socleDnsRecords_socle_test"
       }
     }
   }
 
   assert {
-    condition     = output.inputs.modules.crossplane.dns_zones == ["sandbox-gcp-do-now-io"] && output.inputs.modules.crossplane.dns_zone_lister_role == "projects/sandbox-2bace/roles/socleDnsZoneLister_socle_test" && output.inputs.modules.crossplane.permissions_boundary == ""
-    error_message = "the zones and the custom role the gcp root wires from the foundations must reach the inputs as written."
+    condition     = output.inputs.modules.crossplane.dns_records_role == "projects/sandbox-2bace/roles/socleDnsRecords_socle_test" && output.inputs.modules.crossplane.permissions_boundary == ""
+    error_message = "the custom role the gcp root wires from the foundations must reach the inputs as written."
   }
 }
 

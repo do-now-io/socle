@@ -289,16 +289,14 @@ run "crossplane_gets_no_identity_unless_asked" {
     condition = (
       length(google_project_iam_member.crossplane_project_grants) == 0 &&
       length(google_project_iam_member.crossplane_buckets) == 0 &&
-      length(google_dns_managed_zone_iam_member.crossplane) == 0 &&
       length(google_project_iam_custom_role.crossplane_buckets) == 0 &&
-      length(google_project_iam_custom_role.crossplane_zone_iam) == 0 &&
-      length(google_project_iam_custom_role.dns_zone_lister) == 0
+      length(google_project_iam_custom_role.dns_records) == 0
     )
     error_message = "crossplane defaults to null: no grant, no custom role — the most powerful identity in the cluster exists only when the client asks for it."
   }
   assert {
-    condition     = output.crossplane_principal == null && length(output.crossplane_dns_zones) == 0 && output.dns_zone_lister_role == ""
-    error_message = "the crossplane outputs must say there is nothing: a null principal, no zone, no lister role."
+    condition     = output.crossplane_principal == null && output.dns_records_role == ""
+    error_message = "the crossplane outputs must say there is nothing: a null principal, no DNS records role."
   }
 }
 
@@ -322,31 +320,35 @@ run "crossplane_identity_grants_only_bounded_roles" {
     error_message = "project-level grants go through Project IAM Admin, the one predefined role Google documents for a limited IAM admin."
   }
   assert {
-    condition     = strcontains(google_project_iam_member.crossplane_project_grants[0].condition[0].expression, "api.getAttribute('iam.googleapis.com/modifiedGrantsByRole', []).hasOnly([\"roles/secretmanager.secretAccessor\",\"projects/socle-test-project/roles/socleDnsZoneLister_socle_prod\"])")
-    error_message = "Crossplane may grant exactly the client's allowed roles plus the socle's zone lister role, nothing else: the condition is the boundary."
+    condition     = strcontains(google_project_iam_member.crossplane_project_grants[0].condition[0].expression, "api.getAttribute('iam.googleapis.com/modifiedGrantsByRole', []).hasOnly([\"roles/secretmanager.secretAccessor\",\"projects/socle-test-project/roles/socleDnsRecords_socle_prod\"])")
+    error_message = "Crossplane may grant exactly the client's allowed roles plus the socle's DNS records role, nothing else: the condition is the boundary."
   }
   assert {
-    condition     = output.dns_zone_lister_role == "projects/socle-test-project/roles/socleDnsZoneLister_socle_prod"
-    error_message = "the lister role's full name, built without waiting for Google, must name the role as it is created."
+    condition     = output.dns_records_role == "projects/socle-test-project/roles/socleDnsRecords_socle_prod"
+    error_message = "the DNS records role's full name, built without waiting for Google, must name the role as it is created."
   }
   assert {
-    condition     = toset(google_project_iam_custom_role.dns_zone_lister[0].permissions) == toset(["dns.managedZones.list", "dns.managedZones.get"])
-    error_message = "the lister role lets external-dns find its zones at project level, and change nothing."
+    condition = toset(google_project_iam_custom_role.dns_records[0].permissions) == toset([
+      "dns.managedZones.get", "dns.managedZones.list",
+      "dns.changes.create", "dns.changes.get", "dns.changes.list",
+      "dns.resourceRecordSets.create", "dns.resourceRecordSets.delete", "dns.resourceRecordSets.get", "dns.resourceRecordSets.list", "dns.resourceRecordSets.update",
+    ])
+    error_message = "the DNS records role lets external-dns find the project's zones and write their records — nothing of a zone's own configuration, nothing of its IAM policy."
   }
 }
 
-run "crossplane_without_a_role_grants_nothing_but_the_lister" {
+run "crossplane_without_a_role_grants_nothing_but_the_dns_records_role" {
   command = plan
   variables {
     crossplane = {}
   }
 
   assert {
-    condition     = endswith(google_project_iam_member.crossplane_project_grants[0].condition[0].expression, ".hasOnly([\"projects/socle-test-project/roles/socleDnsZoneLister_socle_test\"])")
-    error_message = "with no role allowed, Crossplane may grant only the socle's own lister role: a module that asks for anything else fails visibly instead of being granted it."
+    condition     = endswith(google_project_iam_member.crossplane_project_grants[0].condition[0].expression, ".hasOnly([\"projects/socle-test-project/roles/socleDnsRecords_socle_test\"])")
+    error_message = "with no role allowed, Crossplane may grant only the socle's own DNS records role: a module that asks for anything else fails visibly instead of being granted it."
   }
   assert {
-    condition     = endswith(google_project_iam_member.crossplane_buckets[0].condition[0].expression, ".hasOnly([\"projects/socle-test-project/roles/socleDnsZoneLister_socle_test\"])")
+    condition     = endswith(google_project_iam_member.crossplane_buckets[0].condition[0].expression, ".hasOnly([\"projects/socle-test-project/roles/socleDnsRecords_socle_test\"])")
     error_message = "the bucket grant is bounded by the same list."
   }
 }
@@ -361,8 +363,7 @@ run "crossplane_roles_are_named_after_their_cluster" {
   assert {
     condition = (
       google_project_iam_custom_role.crossplane_buckets[0].role_id == "socleCrossplaneBuckets_socle_prod" &&
-      google_project_iam_custom_role.crossplane_zone_iam[0].role_id == "socleCrossplaneZoneIam_socle_prod" &&
-      google_project_iam_custom_role.dns_zone_lister[0].role_id == "socleDnsZoneLister_socle_prod"
+      google_project_iam_custom_role.dns_records[0].role_id == "socleDnsRecords_socle_prod"
     )
     error_message = "custom role IDs are unique per project and take no dash: each must carry the cluster's name, dashes turned to underscores, or a second cluster in the project collides with the first."
   }
@@ -372,23 +373,23 @@ run "crossplane_roles_are_named_after_their_cluster" {
   }
 }
 
-run "crossplane_binds_only_the_listed_zones" {
+# Measured 2026-10-07: a zone's getIamPolicy and setIamPolicy granted on the
+# zone are never honoured, and Cloud DNS takes no IAM condition. Crossplane
+# holds nothing of Cloud DNS; external-dns writes through the socle's records
+# role, granted on the project.
+run "crossplane_gets_no_dns_iam_capability" {
   command = plan
   variables {
-    crossplane = { dns_zones = ["zone-a", "zone-b"] }
+    crossplane = { allowed_roles = ["roles/storage.objectAdmin"] }
   }
 
   assert {
-    condition     = toset(keys(google_dns_managed_zone_iam_member.crossplane)) == toset(["zone-a", "zone-b"]) && alltrue([for b in google_dns_managed_zone_iam_member.crossplane : b.role == "projects/socle-test-project/roles/socleCrossplaneZoneIam_socle_test" && length(b.condition) == 0])
-    error_message = "zone IAM is granted on each listed zone and nowhere else, without a condition: Cloud DNS does not recognise modifiedGrantsByRole and would refuse every request under one."
+    condition     = !anytrue([for r in [google_project_iam_custom_role.crossplane_buckets[0], google_project_iam_custom_role.dns_records[0]] : anytrue([for p in r.permissions : startswith(p, "dns.") && endswith(p, "IamPolicy")])])
+    error_message = "no socle custom role may carry a Cloud DNS getIamPolicy or setIamPolicy: a zone's IAM is never honoured on the zone, and on the project it would be unbounded."
   }
   assert {
-    condition     = toset(google_project_iam_custom_role.crossplane_zone_iam[0].permissions) == toset(["dns.managedZones.get", "dns.managedZones.getIamPolicy", "dns.managedZones.setIamPolicy"])
-    error_message = "on a zone Crossplane may read and set its IAM policy, and touch no record."
-  }
-  assert {
-    condition     = output.crossplane_dns_zones == tolist(["zone-a", "zone-b"])
-    error_message = "the zones Crossplane may bind on are handed on to the bootstrap module, for external-dns."
+    condition     = !anytrue([for p in google_project_iam_custom_role.crossplane_buckets[0].permissions : startswith(p, "dns.")])
+    error_message = "Crossplane's own role reaches buckets, never Cloud DNS."
   }
 }
 
@@ -407,7 +408,7 @@ run "buckets_are_bounded_to_the_cluster_prefix_and_never_deleted" {
     error_message = "Crossplane may create and manage buckets only under the cluster's own name prefix."
   }
   assert {
-    condition     = strcontains(google_project_iam_member.crossplane_buckets[0].condition[0].expression, ".hasOnly([\"roles/storage.objectAdmin\",\"projects/socle-test-project/roles/socleDnsZoneLister_socle_test\"])")
+    condition     = strcontains(google_project_iam_member.crossplane_buckets[0].condition[0].expression, ".hasOnly([\"roles/storage.objectAdmin\",\"projects/socle-test-project/roles/socleDnsRecords_socle_test\"])")
     error_message = "a bucket's IAM policy is bounded by the same allowed roles as the project's."
   }
   assert {

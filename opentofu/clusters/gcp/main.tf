@@ -128,30 +128,27 @@ module "socle" {
 # one input or output into another. A value the client wrote always wins.
 #
 # crossplane: when the foundations grant Crossplane its identity
-# (gcp.crossplane), the Cloud DNS zones it may bind external-dns on, and the
-# custom role that lets external-dns list them, are what
-# kube.crossplane.dns_zones and dns_zone_lister_role take.
+# (gcp.crossplane), the custom role external-dns writes DNS records with is
+# what kube.crossplane.dns_records_role takes.
 #
 # external_dns: when the client already named the domains the Gateways serve
-# (gcp.gateway_certificate) and gave Crossplane what external-dns's bindings
-# need — the module on, its identity, and at least one zone in its
-# dns_zones — it is on by default, filtered to those domains, a wildcard
+# (gcp.gateway_certificate) and gave Crossplane what external-dns's binding
+# needs — the module on and its identity — it is on by default, filtered to
+# those domains, a wildcard
 # counted once by its apex. Every route on either Gateway is <name>.<domain>,
 # so that is the zone it has to write to. The try() hands a kube that is not
 # an object to the bootstrap module untouched, for its validations to refuse
 # with their own message.
 locals {
-  # Both are empty when gcp.crossplane is null: the catalog's own defaults.
+  # Empty when gcp.crossplane is null: the catalog's own default.
   crossplane_derived = {
-    dns_zones            = module.foundations.crossplane_dns_zones
-    dns_zone_lister_role = module.foundations.dns_zone_lister_role
+    dns_records_role = module.foundations.dns_records_role
   }
 
   external_dns_derived = (
     var.gcp.gateway_certificate != null
     && try(var.kube.crossplane.enabled, false) == true
     && var.gcp.crossplane != null
-    && length(try(var.gcp.crossplane.dns_zones, [])) > 0
   )
   # Through JSON, like kube below: the two branches are objects of different
   # shapes, which a conditional refuses to unify.

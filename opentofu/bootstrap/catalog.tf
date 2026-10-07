@@ -71,10 +71,9 @@ locals {
     # must carry — the client root wires it from the foundations'
     # crossplane_permissions_boundary_arn; empty means the roles are created
     # without one, which the foundations' Crossplane identity refuses.
-    # dns_zones and dns_zone_lister_role (GCP) take its place there: the
-    # Cloud DNS managed zones external-dns may write, and the project custom
-    # role that lets it list zones — wired by the gcp root from the
-    # foundations' crossplane_dns_zones and dns_zone_lister_role.
+    # dns_records_role (GCP) takes its place there: the project custom role
+    # Crossplane grants external-dns to write DNS records — wired by the gcp
+    # root from the foundations' dns_records_role.
     #
     # WARNING — turning it off does not delete what it provisioned. The
     # namespace and the release go; the CRDs and the crossplane-no-usages
@@ -87,8 +86,7 @@ locals {
       values               = {}
       values_secret        = ""
       permissions_boundary = ""
-      dns_zones            = []
-      dns_zone_lister_role = ""
+      dns_records_role     = ""
     }
     # The client's GitOps layer: the official argo-cd chart, non-HA, ClusterIP,
     # no SSO. On by default: it is what a client gets a socle for, and it

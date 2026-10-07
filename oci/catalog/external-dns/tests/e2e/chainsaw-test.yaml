@@ -963,15 +963,17 @@ spec:
 # CI: floci-gcp serves neither Workload Identity nor Cloud DNS). As the
 # crossplane module's GCP test does, it reads the module as the sandbox's root
 # sets it and turns nothing off: kube.external_dns on with a domain filter,
-# Crossplane on, and that filter's zone in the foundations'
-# gcp.crossplane.dns_zones. Every name it needs — project, zone, domain — is
+# Crossplane on with its identity in the foundations, and that filter's zone
+# a public zone of the project. Every name it needs — project, domain — is
 # read from the socle's ResourceSetInputProvider, so nothing here names the
 # sandbox.
 #
-# What it proves: each binding is the module's own principal, Crossplane
-# made it in GCP, the workload waited for them, and a name reaches Cloud DNS
-# and the internet. A resolver outside the cluster is the witness, in a Job
-# the test asserts Complete: `host` exits non-zero until the CNAME resolves.
+# What it proves: the one binding, on the project, is the module's own
+# principal with the foundations' DNS records role, Crossplane made it in GCP
+# (no zone-level IAM: never honoured, docs/catalog/external-dns.md), the
+# workload waited for it, and a name reaches Cloud DNS and the internet. A
+# resolver outside the cluster is the witness, in a Job the test asserts
+# Complete: `host` exits non-zero until the CNAME resolves.
 # What it leaves: under upsert-only the record outlives its Service (one
 # CNAME and its TXT per run, named after the run's namespace); with
 # policy = "sync" on the sandbox, external-dns removes both.
@@ -985,9 +987,9 @@ metadata:
     platform: gke
 spec:
   description: >-
-    The module's IAM members on its zones and its project, bound to its own
-    principal; the workload on Cloud DNS after them; a name resolvable from
-    the internet.
+    The module's IAM member on its project, the DNS records role bound to
+    its own principal; the workload on Cloud DNS after it; a name resolvable
+    from the internet.
   timeouts:
     # Autopilot provisions a node for a pod that does not fit, minutes before
     # the workload can turn Ready.
@@ -1002,39 +1004,13 @@ spec:
       value: >-
         (join('', ['principal://iam.googleapis.com/projects/', $inputs.cluster.projectNumber,
         '/locations/global/workloadIdentityPools/', $project, '.svc.id.goog/subject/ns/external-dns/sa/external-dns']))
-    # The sandbox lists one zone; the count of members is asserted below
-    # against the whole list, the fields on the first.
-    - name: zone
-      value: ($inputs.modules.crossplane.dns_zones[0])
     - name: domain
       value: ($inputs.modules.external_dns.domain_filters[0])
     - name: hostname
       value: (join('.', [$namespace, $domain]))
   steps:
-    - name: each IAM member is Ready, the module's own principal on its zone and on the project
+    - name: the IAM member is Ready, the module's own principal on the project
       try:
-        - assert:
-            resource:
-              apiVersion: dns.gcp.m.upbound.io/v1beta1
-              kind: ManagedZoneIAMMember
-              metadata:
-                name: (join('-', ['external-dns', $zone]))
-                namespace: external-dns
-              spec:
-                forProvider:
-                  project: ($project)
-                  managedZone: ($zone)
-                  role: roles/dns.admin
-                  member: ($principal)
-              status:
-                # What GCP holds, as Crossplane read it back.
-                atProvider:
-                  role: roles/dns.admin
-                  member: ($principal)
-                (conditions[?type == 'Synced'] || `[]`):
-                  - status: 'True'
-                (conditions[?type == 'Ready'] || `[]`):
-                  - status: 'True'
         - assert:
             resource:
               apiVersion: cloudplatform.gcp.m.upbound.io/v1beta1
@@ -1045,17 +1021,17 @@ spec:
               spec:
                 forProvider:
                   project: ($project)
-                  role: ($inputs.modules.crossplane.dns_zone_lister_role)
+                  role: ($inputs.modules.crossplane.dns_records_role)
                   member: ($principal)
               status:
                 atProvider:
-                  role: ($inputs.modules.crossplane.dns_zone_lister_role)
+                  role: ($inputs.modules.crossplane.dns_records_role)
                   member: ($principal)
                 (conditions[?type == 'Synced'] || `[]`):
                   - status: 'True'
                 (conditions[?type == 'Ready'] || `[]`):
                   - status: 'True'
-        # One member per listed zone and the project's, each waited on.
+        # The project's member, waited on, and nothing else.
         - assert:
             resource:
               apiVersion: fluxcd.controlplane.io/v1
@@ -1064,27 +1040,20 @@ spec:
                 name: external-dns-workload
                 namespace: flux-system
               spec:
-                (length(dependsOn[?kind == 'ManagedZoneIAMMember'])): (length($inputs.modules.crossplane.dns_zones))
-                (length(dependsOn[?kind == 'ProjectIAMMember'])): 1
+                (length(dependsOn)): 1
+                (dependsOn[0].kind): ProjectIAMMember
+                (dependsOn[0].name): external-dns
       catch:
-        - describe:
-            apiVersion: dns.gcp.m.upbound.io/v1beta1
-            kind: ManagedZoneIAMMember
-            namespace: external-dns
         - describe:
             apiVersion: cloudplatform.gcp.m.upbound.io/v1beta1
             kind: ProjectIAMMember
             namespace: external-dns
         - podLogs:
             namespace: crossplane-system
-            selector: pkg.crossplane.io/provider=provider-gcp-dns
-            tail: 40
-        - podLogs:
-            namespace: crossplane-system
             selector: pkg.crossplane.io/provider=provider-gcp-cloudplatform
             tail: 40
     # No Google service account between the pod and Cloud DNS: the
-    # ServiceAccount is the principal the members name, with no
+    # ServiceAccount is the principal the member names, with no
     # iam.gke.io/gcp-service-account annotation to swap it for another.
     - name: the workload runs on Cloud DNS in the cluster's project, as its own ServiceAccount
       try:

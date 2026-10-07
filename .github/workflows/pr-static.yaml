@@ -218,7 +218,6 @@ jobs:
           base="https://raw.githubusercontent.com/crossplane-contrib/provider-upjet-gcp/${PROVIDER_GCP_VERSION}/package/crds"
           for crd in gcp.m.upbound.io_clusterproviderconfigs \
             cloudplatform.gcp.m.upbound.io_projectiammembers \
-            dns.gcp.m.upbound.io_managedzoneiammembers \
             storage.gcp.m.upbound.io_buckets \
             storage.gcp.m.upbound.io_bucketiammembers; do
             curl -sfL "${base}/${crd}.yaml" -o /tmp/crd.yaml

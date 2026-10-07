@@ -66,8 +66,7 @@ type, is an error at plan, with the allowed list in the message.
 | `crossplane` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan |
 | `crossplane` | `values_secret` | `""` | Name of a Secret in `crossplane-system` with a `values.yaml` key, created by the client, merged last |
 | `crossplane` | `permissions_boundary` | `""` | AWS: the boundary every module's role carries. The client root wires it from the foundations' `crossplane_permissions_boundary_arn`. Refused on gcp |
-| `crossplane` | `dns_zones` | `[]` | GCP: the Cloud DNS managed zones external-dns may write. The client root wires it from the foundations' `crossplane_dns_zones`. Refused elsewhere |
-| `crossplane` | `dns_zone_lister_role` | `""` | GCP: the project custom role that lets external-dns list zones. The client root wires it from the foundations' `dns_zone_lister_role`. Refused elsewhere |
+| `crossplane` | `dns_records_role` | `""` | GCP: the project custom role Crossplane grants external-dns to write DNS records, on the project — a zone's own IAM is never honoured. The client root wires it from the foundations' `dns_records_role`. Refused elsewhere |
 | `external_dns` | `enabled` | `false` | Publish DNS records for Services, Ingresses and HTTPRoutes into the cloud's zone — needs `domain_filters`; on AWS with `crossplane` on it declares its own IAM role, elsewhere the client brings a credential ([design note](../../docs/catalog/external-dns.md)) |
 | `external_dns` | `domain_filters` | `[]` | Zones it may write to, as DNS names; required when enabled |
 | `external_dns` | `policy` | `"upsert-only"` | `upsert-only` never deletes a record; `sync` also deletes what it owns |

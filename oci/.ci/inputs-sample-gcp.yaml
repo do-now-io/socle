@@ -24,8 +24,7 @@
             memory: 256Mi
       values_secret: crossplane-values
       permissions_boundary: ""
-      dns_zones: [sandbox-gcp-do-now-io]
-      dns_zone_lister_role: projects/sandbox-2bace/roles/socleDnsZoneLister_socle_sandbox
+      dns_records_role: projects/sandbox-2bace/roles/socleDnsRecords_socle_sandbox
     external_dns:
       enabled: true
       domain_filters: [sandbox-gcp.do-now.io]

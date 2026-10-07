@@ -19,8 +19,8 @@
 # (docs/catalog/external-dns.md):
 # - this ResourceSet: the Namespace and, with Crossplane on, the module's own
 #   access, bound to external-dns/external-dns (docs/catalog/crossplane.md
-#   §3): on AWS an IAM Role and its Pod Identity association, on GCP an IAM
-#   member on each zone it may write and one on the project to list zones;
+#   §3): on AWS an IAM Role and its Pod Identity association, on GCP one IAM
+#   member on the project, the foundations' DNS records role;
 # - external-dns-workload, a child ResourceSet holding the chart, which
 #   dependsOn each of those being Ready. EKS Pod Identity injects the
 #   credentials at pod admission: a pod admitted before its association never
@@ -190,40 +190,17 @@ spec:
          inputs.cluster.projectNumber inputs.cluster.projectId "external-dns" "external-dns" ->>
     # The module's own GCP access, docs/catalog/crossplane.md §3: no Google
     # service account, the ServiceAccount external-dns/external-dns is the
-    # principal itself (Workload Identity Federation). Both roles are among
+    # principal itself (Workload Identity Federation). Its one role is among
     # what the foundations let Crossplane grant, and nothing else is.
     #
-    # Scoped by zone, not by record name as on AWS: Cloud DNS has no condition
-    # on the names in a change, and a zone is a resource IAM can bind on. The
-    # zones are the ones the client listed in the foundations
-    # (gcp.crossplane.dns_zones), the only ones whose IAM policy Crossplane may
-    # set. roles/dns.admin there is that zone's records and nothing beyond.
-    #
-    # No zone listed, no member: external-dns still lists the project's zones,
-    # matches its domain filters, and every write it attempts is refused —
-    # Forbidden in its log, nothing in Cloud DNS.
-    << range $zone := inputs.modules.crossplane.dns_zones >>
-    ---
-    apiVersion: dns.gcp.m.upbound.io/v1beta1
-    kind: ManagedZoneIAMMember
-    metadata:
-      name: external-dns-<< $zone >>
-      namespace: external-dns
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if inputs.modules.external_dns.enabled >>enabled<< else >>disabled<< end >>
-    spec:
-      forProvider:
-        project: << inputs.cluster.projectId | quote >>
-        managedZone: << $zone | quote >>
-        role: roles/dns.admin
-        member: << $principal | quote >>
-    << end >>
-    ---
-    # external-dns lists the project's zones on every loop to find the one a
-    # name belongs to (ManagedZones.List, provider/google/google.go, v0.22.0),
-    # whatever zone it then writes: a project-level call, which no zone
-    # binding answers. The foundations' lister role carries list and get on
-    # zones, nothing on records.
+    # On the project, not on a zone: measured on a sandbox project
+    # (2026-10-07), a zone's getIamPolicy and setIamPolicy granted on the zone
+    # are never honoured, so Crossplane cannot bind anything on a zone, and
+    # Cloud DNS takes no IAM condition. The foundations' records role finds
+    # the project's zones — external-dns lists them on every loop
+    # (ManagedZones.List, provider/google/google.go, v0.22.0) — and writes
+    # their records: every zone of the project, bounded in software by
+    # --domain-filter. One socle cluster per project.
     apiVersion: cloudplatform.gcp.m.upbound.io/v1beta1
     kind: ProjectIAMMember
     metadata:
@@ -234,7 +211,7 @@ spec:
     spec:
       forProvider:
         project: << inputs.cluster.projectId | quote >>
-        role: << inputs.modules.crossplane.dns_zone_lister_role | quote >>
+        role: << inputs.modules.crossplane.dns_records_role | quote >>
         member: << $principal | quote >>
     << end >>
     ---
@@ -269,14 +246,6 @@ spec:
           readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
       << else if $gcpAccess >>
       dependsOn:
-        << range $zone := inputs.modules.crossplane.dns_zones >>
-        - apiVersion: dns.gcp.m.upbound.io/v1beta1
-          kind: ManagedZoneIAMMember
-          name: external-dns-<< $zone >>
-          namespace: external-dns
-          ready: true
-          readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
-        << end >>
         - apiVersion: cloudplatform.gcp.m.upbound.io/v1beta1
           kind: ProjectIAMMember
           name: external-dns
@@ -339,14 +308,14 @@ spec:
             << else if eq inputs.cloud "gcp" >>
             # Cloud DNS, through the metadata server's Workload Identity
             # credentials: the ServiceAccount's own principal — with Crossplane
-            # on, the one the module's members above bind — or, with it off, a
+            # on, the one the module's member above binds — or, with it off, a
             # Google service account the client binds and names through values
             # (serviceAccount.annotations, iam.gke.io/gcp-service-account).
             #
             # The project is named rather than asked of the metadata server, the
             # default when --google-project is absent (provider/google/google.go,
             # v0.22.0): the zones are the cluster's project's, which is where the
-            # members are bound. Public zones only: a split-horizon private zone
+            # member is bound. Public zones only: a split-horizon private zone
             # of the same name matches the same domain filters and would get
             # every record twice; a client who wants private zones says so
             # through values. A map, not a list: a client's extraArgs map

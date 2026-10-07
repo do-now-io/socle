@@ -69,19 +69,19 @@ run "crossplane_inputs_come_from_the_foundations" {
         end_time   = "2026-01-03T14:00:00Z"
         recurrence = "FREQ=WEEKLY;BYDAY=SA"
       }
-      crossplane = { allowed_roles = ["roles/secretmanager.secretAccessor"], dns_zones = ["sandbox-gcp-do-now-io"] }
+      crossplane = { allowed_roles = ["roles/secretmanager.secretAccessor"] }
     }
     kube = { crossplane = { enabled = true } }
   }
 
   assert {
-    condition     = tolist(output.inputs.modules.crossplane.dns_zones) == tolist(["sandbox-gcp-do-now-io"])
-    error_message = "kube.crossplane.dns_zones must be the foundations' crossplane_dns_zones when gcp.crossplane is set."
+    condition     = output.inputs.modules.crossplane.dns_records_role == "projects/socle-test-project/roles/socleDnsRecords_socle_test"
+    error_message = "kube.crossplane.dns_records_role must be the foundations' dns_records_role when gcp.crossplane is set."
   }
 
   assert {
-    condition     = output.inputs.modules.crossplane.dns_zone_lister_role == "projects/socle-test-project/roles/socleDnsZoneLister_socle_test"
-    error_message = "kube.crossplane.dns_zone_lister_role must be the foundations' dns_zone_lister_role when gcp.crossplane is set."
+    condition     = !contains(keys(output.inputs.modules.crossplane), "dns_zones")
+    error_message = "Crossplane holds nothing of Cloud DNS: no zone list reaches the catalog."
   }
 }
 
@@ -89,8 +89,8 @@ run "crossplane_inputs_stay_empty_without_an_identity" {
   command = plan
 
   assert {
-    condition     = length(output.inputs.modules.crossplane.dns_zones) == 0 && output.inputs.modules.crossplane.dns_zone_lister_role == ""
-    error_message = "without gcp.crossplane there is no zone to bind and no lister role: the catalog gets neither."
+    condition     = output.inputs.modules.crossplane.dns_records_role == ""
+    error_message = "without gcp.crossplane there is no DNS records role: the catalog gets none."
   }
 }
 
@@ -109,23 +109,23 @@ run "client_value_wins" {
         end_time   = "2026-01-03T14:00:00Z"
         recurrence = "FREQ=WEEKLY;BYDAY=SA"
       }
-      crossplane          = { dns_zones = ["sandbox-gcp-do-now-io"] }
+      crossplane          = {}
       gateway_certificate = { dns_zone = "sandbox-gcp-do-now-io", domains = ["sandbox-gcp.do-now.io"] }
     }
     kube = {
-      crossplane   = { enabled = true, dns_zones = ["client-zone"] }
+      crossplane   = { enabled = true, dns_records_role = "projects/socle-test-project/roles/clientDnsRecords" }
       external_dns = { enabled = false }
     }
   }
 
   assert {
-    condition     = tolist(output.inputs.modules.crossplane.dns_zones) == tolist(["client-zone"])
-    error_message = "a dns_zones the client wrote under kube.crossplane must win over the derived one."
+    condition     = output.inputs.modules.crossplane.dns_records_role == "projects/socle-test-project/roles/clientDnsRecords"
+    error_message = "a dns_records_role the client wrote under kube.crossplane must win over the derived one."
   }
 
   assert {
-    condition     = output.inputs.modules.crossplane.dns_zone_lister_role == "projects/socle-test-project/roles/socleDnsZoneLister_socle_test"
-    error_message = "a key the client did not write is still derived."
+    condition     = output.inputs.modules.crossplane.enabled == true
+    error_message = "a key the client wrote alongside it is kept."
   }
 
   assert {
@@ -149,7 +149,7 @@ run "external_dns_follows_the_certificate" {
         end_time   = "2026-01-03T14:00:00Z"
         recurrence = "FREQ=WEEKLY;BYDAY=SA"
       }
-      crossplane          = { dns_zones = ["sandbox-gcp-do-now-io"] }
+      crossplane          = {}
       gateway_certificate = { dns_zone = "sandbox-gcp-do-now-io", domains = ["sandbox-gcp.do-now.io", "*.sandbox-gcp.do-now.io"] }
     }
     kube = { crossplane = { enabled = true } }
@@ -157,7 +157,7 @@ run "external_dns_follows_the_certificate" {
 
   assert {
     condition     = output.inputs.modules.external_dns.enabled == true
-    error_message = "with the certificate, Crossplane on, its identity and a zone to write, external_dns is on by default."
+    error_message = "with the certificate, Crossplane on and its identity, external_dns is on by default — no zone list: it writes through a project role."
   }
 
   assert {
@@ -166,7 +166,7 @@ run "external_dns_follows_the_certificate" {
   }
 }
 
-run "external_dns_stays_off_without_a_zone" {
+run "external_dns_stays_off_without_crossplane" {
   command = plan
   variables {
     gcp = {
@@ -184,12 +184,12 @@ run "external_dns_stays_off_without_a_zone" {
       crossplane          = { allowed_roles = ["roles/secretmanager.secretAccessor"] }
       gateway_certificate = { dns_zone = "sandbox-gcp-do-now-io", domains = ["sandbox-gcp.do-now.io"] }
     }
-    kube = { crossplane = { enabled = true } }
+    kube = { crossplane = { enabled = false } }
   }
 
   assert {
     condition     = output.inputs.modules.external_dns.enabled == false
-    error_message = "without a zone in gcp.crossplane.dns_zones Crossplane cannot bind external-dns anywhere: it stays off."
+    error_message = "without the crossplane module on, nothing binds external-dns's role: it stays off."
   }
 }
 

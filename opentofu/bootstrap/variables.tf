@@ -193,29 +193,19 @@ variable "kube" {
     error_message = "kube.crossplane.permissions_boundary is aws's: on gcp no binding carries a boundary, the foundations' crossplane.allowed_roles bound what Crossplane may grant. Leave it empty."
   }
 
-  # The Cloud DNS zones external-dns may write, and the custom role that lets
-  # it list them, are gcp's: the gcp root wires both from the foundations.
-  # Elsewhere nothing reads them, so a value there is a mistake.
+  # The custom role external-dns writes DNS records with is gcp's: the gcp
+  # root wires it from the foundations. Elsewhere nothing reads it, so a
+  # value there is a mistake.
   validation {
-    condition = !can(keys(var.kube)) || var.cloud == "gcp" || (
-      length(try(tolist(var.kube.crossplane.dns_zones), [])) == 0
-      && try(var.kube.crossplane.dns_zone_lister_role == "", true)
-    )
-    error_message = "kube.crossplane.dns_zones and dns_zone_lister_role are gcp's: the Cloud DNS zones external-dns may write, and the custom role that lets it list them, wired by the gcp root from the foundations. Leave them empty on ${var.cloud}."
+    condition     = !can(keys(var.kube)) || var.cloud == "gcp" || try(var.kube.crossplane.dns_records_role == "", true)
+    error_message = "kube.crossplane.dns_records_role is gcp's: the custom role Crossplane grants external-dns on the project, wired by the gcp root from the foundations. Leave it empty on ${var.cloud}."
   }
 
+  # The root wires it from the foundations' dns_records_role output; a client
+  # who writes it himself must write a project-level custom role.
   validation {
-    condition = !can(var.kube.crossplane.dns_zones) || try(alltrue([
-      for z in tolist(var.kube.crossplane.dns_zones) : can(regex("^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$", z))
-    ]), true)
-    error_message = "kube.crossplane.dns_zones must be Cloud DNS managed zone names, such as sandbox-gcp-do-now-io — the zone's name, not its DNS name: lowercase letters, digits and dashes."
-  }
-
-  # The root wires it from the foundations' dns_zone_lister_role output; a
-  # client who writes it himself must write a project-level custom role.
-  validation {
-    condition     = !can(var.kube.crossplane.dns_zone_lister_role) || try(var.kube.crossplane.dns_zone_lister_role == "" || can(regex("^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/roles/[A-Za-z0-9_.]{3,64}$", var.kube.crossplane.dns_zone_lister_role)), true)
-    error_message = "kube.crossplane.dns_zone_lister_role must be empty or a project custom role's full name, such as projects/sandbox-2bace/roles/socleDnsZoneLister_acme_prod."
+    condition     = !can(var.kube.crossplane.dns_records_role) || try(var.kube.crossplane.dns_records_role == "" || can(regex("^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/roles/[A-Za-z0-9_.]{3,64}$", var.kube.crossplane.dns_records_role)), true)
+    error_message = "kube.crossplane.dns_records_role must be empty or a project custom role's full name, such as projects/sandbox-2bace/roles/socleDnsRecords_acme_prod."
   }
 
   validation {

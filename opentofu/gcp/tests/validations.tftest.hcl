@@ -445,14 +445,6 @@ run "crossplane_allows_at_most_nine_roles" {
   expect_failures = [var.crossplane]
 }
 
-run "crossplane_dns_zones_must_be_zone_names" {
-  command = plan
-  variables {
-    crossplane = { dns_zones = ["sandbox-gcp.do-now.io"] }
-  }
-  expect_failures = [var.crossplane]
-}
-
 # --- The shared Gateways' certificate -----------------------------------------
 
 run "gateway_certificate_needs_a_domain" {

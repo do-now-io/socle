@@ -32,13 +32,13 @@ resource "google_project_iam_member" "observability_reader" {
 # cluster. What bounds it, grant by grant below:
 # - project-level roles through Project IAM Admin, under a condition on
 #   iam.googleapis.com/modifiedGrantsByRole: it may grant and revoke the roles
-#   the client allows (crossplane.allowed_roles) and the socle's zone lister
+#   the client allows (crossplane.allowed_roles) and the socle's DNS records
 #   role, nothing else — not Project IAM Admin itself, so it can never lift
 #   its own condition;
 # - buckets under the cluster's own name prefix only, through a custom role
 #   with no delete and no object access, bounded by the same role list when it
 #   sets a bucket's IAM policy;
-# - zone IAM on the zones the client lists (crossplane.dns_zones) only.
+# - nothing of Cloud DNS: no zone's IAM policy (below, at dns_records).
 # What it cannot bound: who a role is granted to. The condition names roles,
 # not members, so a compromised Crossplane could grant an allowed role to any
 # principal. The list is the answer — such a grant is worth exactly the
@@ -75,11 +75,11 @@ locals {
   # Built from the role's ID rather than read off its name attribute, which
   # stays unknown until Google creates the role: the conditions below embed
   # it, and the bootstrap module receives it, on the very first plan.
-  dns_zone_lister_role = var.crossplane == null ? "" : "projects/${var.project_id}/roles/${google_project_iam_custom_role.dns_zone_lister[0].role_id}"
+  dns_records_role = var.crossplane == null ? "" : "projects/${var.project_id}/roles/${google_project_iam_custom_role.dns_records[0].role_id}"
 
   # Google accepts at most ten roles in hasOnly(), which is why the variable
-  # caps the client's list at nine: the lister role is always the tenth.
-  crossplane_granted_roles = concat(try(var.crossplane.allowed_roles, []), var.crossplane == null ? [] : [local.dns_zone_lister_role])
+  # caps the client's list at nine: the DNS records role is always the tenth.
+  crossplane_granted_roles = concat(try(var.crossplane.allowed_roles, []), var.crossplane == null ? [] : [local.dns_records_role])
 
   # The limited IAM admin condition, verbatim from Google's documentation:
   # https://cloud.google.com/iam/docs/setting-limits-on-granting-roles
@@ -156,51 +156,37 @@ resource "google_project_iam_member" "crossplane_buckets" {
   }
 }
 
-# A zone's IAM policy, for external-dns: its principal is bound on the zones
-# it writes, by Crossplane. Granted on each listed zone rather than on the
-# project, because no condition can do the bounding here: Cloud DNS does not
-# recognise modifiedGrantsByRole, and Google fails every grant a limited IAM
-# admin attempts on a service that does not
-# (https://cloud.google.com/iam/docs/conditions-attribute-reference). The
-# zone is the bound — on it Crossplane may grant any role, which is worth that
-# zone's records and nothing beyond.
-resource "google_project_iam_custom_role" "crossplane_zone_iam" {
+# What the socle hands external-dns: its records, at project level. Never a
+# zone's IAM policy, and so nothing of Cloud DNS for Crossplane itself —
+# measured on a sandbox project (2026-10-07): dns.managedZones.getIamPolicy
+# and setIamPolicy granted on a managed zone, by a custom role and even by
+# roles/dns.admin, are never honoured (403 for minutes on end), while record
+# operations granted on the same zone are. A zone's IAM therefore needs a
+# project-level grant, and IAM conditions do not apply to Cloud DNS to bound
+# it to a zone. So the socle creates this role, Crossplane grants it to
+# external-dns's principal on the project under the hasOnly() condition
+# above, and the bound on what external-dns writes is its --domain-filter.
+# One socle cluster per project, then: this role reaches every zone of it.
+#
+# The socle's custom roles are created here, not by a module: Crossplane is
+# denied iam.roles.create, and only Crossplane grants them to a module.
+resource "google_project_iam_custom_role" "dns_records" {
   count = var.crossplane == null ? 0 : 1
 
   project     = var.project_id
-  role_id     = "socleCrossplaneZoneIam_${local.cluster_snake}"
-  title       = "Socle ${var.cluster_name} Crossplane zone IAM"
-  description = "Read and set the IAM policy of the zones the ${var.cluster_name} socle's modules write."
+  role_id     = "socleDnsRecords_${local.cluster_snake}"
+  title       = "Socle ${var.cluster_name} DNS records"
+  description = "Find the project's managed zones and write their records, for the ${var.cluster_name} socle's external-dns."
   permissions = [
     "dns.managedZones.get",
-    "dns.managedZones.getIamPolicy",
-    "dns.managedZones.setIamPolicy",
-  ]
-}
-
-resource "google_dns_managed_zone_iam_member" "crossplane" {
-  for_each = toset(try(var.crossplane.dns_zones, []))
-
-  project      = var.project_id
-  managed_zone = each.value
-  role         = "projects/${var.project_id}/roles/${google_project_iam_custom_role.crossplane_zone_iam[0].role_id}"
-  member       = local.crossplane_principal
-}
-
-# What the socle hands external-dns at project level: it lists the project's
-# zones to find the one a name belongs to, whatever zone it then writes in.
-# Its own, not roles/dns.reader, so that the one project-level DNS grant
-# Crossplane can make reads zones and nothing else — and it is always part of
-# what Crossplane may grant.
-resource "google_project_iam_custom_role" "dns_zone_lister" {
-  count = var.crossplane == null ? 0 : 1
-
-  project     = var.project_id
-  role_id     = "socleDnsZoneLister_${local.cluster_snake}"
-  title       = "Socle ${var.cluster_name} DNS zone lister"
-  description = "List the project's managed zones, for the ${var.cluster_name} socle's external-dns."
-  permissions = [
     "dns.managedZones.list",
-    "dns.managedZones.get",
+    "dns.changes.create",
+    "dns.changes.get",
+    "dns.changes.list",
+    "dns.resourceRecordSets.create",
+    "dns.resourceRecordSets.delete",
+    "dns.resourceRecordSets.get",
+    "dns.resourceRecordSets.list",
+    "dns.resourceRecordSets.update",
   ]
 }

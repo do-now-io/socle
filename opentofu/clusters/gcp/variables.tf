@@ -49,7 +49,7 @@ variable "gcp" {
     billing_export_dataset_location          = optional(string)
     observability_reader_members             = optional(list(string))
     deletion_protection                      = optional(bool)
-    crossplane                               = optional(object({ allowed_roles = optional(list(string), []), dns_zones = optional(list(string), []) }))
+    crossplane                               = optional(object({ allowed_roles = optional(list(string), []) }))
     gateway_certificate                      = optional(object({ dns_zone = string, domains = list(string) }))
   })
   nullable = false

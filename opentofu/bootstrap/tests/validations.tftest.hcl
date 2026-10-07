@@ -1305,36 +1305,32 @@ run "crossplane_permissions_boundary_is_refused_on_gcp" {
   expect_failures = [var.kube]
 }
 
-run "crossplane_dns_zones_are_refused_off_gcp" {
+run "crossplane_dns_records_role_is_refused_off_gcp" {
   command = plan
-  variables { kube = { crossplane = { dns_zones = ["sandbox-gcp-do-now-io"] } } }
+  variables { kube = { crossplane = { dns_records_role = "projects/sandbox-2bace/roles/socleDnsRecords_socle_test" } } }
   expect_failures = [var.kube]
 }
 
-run "crossplane_dns_zone_lister_role_is_refused_off_gcp" {
-  command = plan
-  variables { kube = { crossplane = { dns_zone_lister_role = "projects/sandbox-2bace/roles/socleDnsZoneLister_socle_test" } } }
-  expect_failures = [var.kube]
-}
-
-run "crossplane_refuses_a_dns_zone_that_is_not_a_managed_zone_name" {
+# Crossplane holds nothing of Cloud DNS (measured 2026-10-07: a zone's IAM
+# granted on the zone is never honoured), so there is no zone list to give it.
+run "crossplane_takes_no_dns_zones" {
   command = plan
   variables {
     cloud           = "gcp"
     cluster_network = null
     project         = { id = "sandbox-2bace", number = "123456789012" }
-    kube            = { crossplane = { dns_zones = ["sandbox-gcp.do-now.io"] } }
+    kube            = { crossplane = { dns_zones = ["sandbox-gcp-do-now-io"] } }
   }
   expect_failures = [var.kube]
 }
 
-run "crossplane_refuses_a_dns_zone_lister_role_that_is_not_a_custom_role" {
+run "crossplane_refuses_a_dns_records_role_that_is_not_a_custom_role" {
   command = plan
   variables {
     cloud           = "gcp"
     cluster_network = null
     project         = { id = "sandbox-2bace", number = "123456789012" }
-    kube            = { crossplane = { dns_zone_lister_role = "roles/dns.reader" } }
+    kube            = { crossplane = { dns_records_role = "roles/dns.admin" } }
   }
   expect_failures = [var.kube]
 }

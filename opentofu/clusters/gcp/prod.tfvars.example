@@ -35,11 +35,11 @@ gcp = {
   # allowed_roles is the ceiling of every role a catalog module gets: add one
   # when you enable a module that needs it (secretmanager.secretAccessor for
   # external_secrets, monitoring.viewer for keda, storage.objectAdmin for
-  # velero). dns_zones are the Cloud DNS managed zones external-dns may write.
-  # Empty grants nothing but the zone lister role external-dns always needs.
+  # velero). Empty grants nothing but the DNS records role external-dns
+  # always needs, on the project: every zone of it, bounded by external-dns's
+  # domain filters — one socle cluster per project.
   # crossplane = {
   #   allowed_roles = ["roles/secretmanager.secretAccessor", "roles/monitoring.viewer", "roles/storage.objectAdmin"]
-  #   dns_zones     = ["acme-example"]
   # }
 
   # The Google-managed certificates of the two shared Gateways, public
@@ -48,8 +48,8 @@ gcp = {
   # TLS terminates at their load balancers; without it no Gateway is created,
   # and ArgoCD gets no route.
   # gateway_certificate = { dns_zone = "acme-example", domains = ["acme.example", "*.acme.example"] }
-  # With it, kube.crossplane on and a zone in crossplane.dns_zones,
-  # external_dns turns on by itself, filtered to those domains.
+  # With it, kube.crossplane on and crossplane set above, external_dns turns
+  # on by itself, filtered to those domains.
 }
 
 # Only what differs from the catalog's defaults. An unknown module or
@@ -57,7 +57,7 @@ gcp = {
 kube = {
   # How catalog modules get their cloud access (docs/catalog/crossplane.md).
   # Off until a module needs it; with gcp.crossplane set above, the root wires
-  # the zones and the lister role for you. Before turning it off again, delete
+  # the DNS records role for you. Before turning it off again, delete
   # the modules' claims.
   # crossplane = { enabled = true }
   argocd = {
