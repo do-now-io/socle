@@ -224,10 +224,11 @@ the role means.
 
 **What `allowed_roles` refuses, at plan.** `roles/owner`, `roles/editor`,
 `roles/viewer`, any `roles/iam.*` and `roles/resourcemanager.*`: Crossplane
-could grant itself the project. Every **predefined admin role** too
-(`roles/storage.admin`, `roles/compute.instanceAdmin.v1`, …, any ID ending in
-`admin` or `Admin`): an admin role carries `setIamPolicy` on its service's
-resources, and Crossplane could grant one to itself, unconditioned, and step
+could grant itself the project. Every **predefined admin or owner role** too
+(`roles/storage.admin`, `roles/compute.instanceAdmin.v1`,
+`roles/bigquery.dataOwner`, `roles/storage.legacyBucketOwner`, …, any ID
+ending in `admin`, `Admin`, `owner` or `Owner`): such a role carries
+`setIamPolicy` on its service's resources, and Crossplane could grant one to itself, unconditioned, and step
 outside the bound on every resource of that service. One exception,
 `roles/storage.objectAdmin`, which Velero needs: its only IAM-granting
 permission writes object ACLs, which a bucket with uniform bucket-level

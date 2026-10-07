@@ -44,8 +44,9 @@ resource "google_project_iam_member" "observability_reader" {
 # principal. The list is the answer — such a grant is worth exactly the
 # allowed roles, never an identity, the project, or a role that grants roles:
 # owner, editor, viewer, iam.* and resourcemanager.* are refused at plan, and
-# so is every predefined admin role (roles/storage.admin,
-# roles/compute.instanceAdmin.v1, …): those carry a setIamPolicy permission,
+# so is every predefined admin or owner role (roles/storage.admin,
+# roles/compute.instanceAdmin.v1, roles/bigquery.dataOwner,
+# roles/storage.legacyBucketOwner, …): those carry a setIamPolicy permission,
 # and Crossplane could grant one to itself, unconditioned, and step outside
 # this bound on every resource of that service — Google's own warning:
 # https://cloud.google.com/iam/docs/setting-limits-on-granting-roles

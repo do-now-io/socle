@@ -421,6 +421,31 @@ run "crossplane_rejects_a_versioned_admin_role" {
   expect_failures = [var.crossplane]
 }
 
+# An owner role carries setIamPolicy as an admin role does.
+run "crossplane_rejects_a_data_owner_role" {
+  command = plan
+  variables {
+    crossplane = { allowed_roles = ["roles/bigquery.dataOwner"] }
+  }
+  expect_failures = [var.crossplane]
+}
+
+run "crossplane_rejects_a_bucket_owner_role" {
+  command = plan
+  variables {
+    crossplane = { allowed_roles = ["roles/storage.legacyBucketOwner"] }
+  }
+  expect_failures = [var.crossplane]
+}
+
+run "crossplane_rejects_a_dotted_owner_role" {
+  command = plan
+  variables {
+    crossplane = { allowed_roles = ["roles/datastore.owner"] }
+  }
+  expect_failures = [var.crossplane]
+}
+
 run "crossplane_rejects_an_iam_role" {
   command = plan
   variables {
