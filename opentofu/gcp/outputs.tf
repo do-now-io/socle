@@ -59,8 +59,17 @@ output "region" {
 }
 
 output "crossplane_principal" {
-  description = "The federated principal the catalog's crossplane module's GCP providers run as (crossplane-system/provider-gcp). Null when crossplane is not set."
-  value       = var.crossplane == null ? null : local.crossplane_principal
+  description = "The federated principal the catalog's crossplane module's GCP providers run as (crossplane-system/provider-gcp), read off its grants: whatever consumes it is applied after them and destroyed before them. Null when crossplane is not set."
+  # Read off the two grants, never the local string: a reference to them is
+  # what orders the catalog after Crossplane's grants on an apply, and before
+  # them on a destroy — Crossplane must still hold them while it deletes the
+  # modules' bindings, or each delete is a 403 and the binding stays in the
+  # project for the next socle to inherit. The member is known at plan, so
+  # the value is too.
+  value = one(distinct(concat(
+    google_project_iam_member.crossplane_project_grants[*].member,
+    google_project_iam_member.crossplane_buckets[*].member,
+  )))
 }
 
 output "dns_records_role" {

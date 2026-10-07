@@ -129,7 +129,12 @@ module "socle" {
 #
 # crossplane: when the foundations grant Crossplane its identity
 # (gcp.crossplane), the custom role external-dns writes DNS records with is
-# what kube.crossplane.dns_records_role takes.
+# what kube.crossplane.dns_records_role takes. The condition reads the
+# principal, which the foundations read off Crossplane's grants: that reference is what
+# holds the catalog until the grants exist, and on a destroy uninstalls it —
+# Crossplane deleting every module's binding — while Crossplane still holds
+# them. Without it the two go in parallel, the deletes fail with 403, and the
+# bindings stay in the project for the next socle to inherit.
 #
 # external_dns: when the client already named the domains the Gateways serve
 # (gcp.gateway_certificate) and gave Crossplane what external-dns's binding
@@ -142,7 +147,7 @@ module "socle" {
 locals {
   # Empty when gcp.crossplane is null: the catalog's own default.
   crossplane_derived = {
-    dns_records_role = module.foundations.dns_records_role
+    dns_records_role = module.foundations.crossplane_principal == null ? "" : module.foundations.dns_records_role
   }
 
   external_dns_derived = (

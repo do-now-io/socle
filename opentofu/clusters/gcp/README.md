@@ -104,7 +104,12 @@ reports whether they converged.
 - **Destroying.** The cluster carries deletion protection: set
   `gcp.deletion_protection = false` and apply before `tofu destroy`. Releases
   are deleted before the cluster, which needs the API: if the runner can no
-  longer reach it, `tofu state rm module.socle` first.
+  longer reach it, `tofu state rm module.socle` first. The catalog is also
+  uninstalled before Crossplane's grants are removed — it reads Crossplane's
+  principal off them — so Crossplane still holds them while it deletes every
+  module's binding. After a `state rm`, nothing deletes those bindings: they
+  stay in the project, and a socle created there next inherits them; remove
+  them by hand.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements

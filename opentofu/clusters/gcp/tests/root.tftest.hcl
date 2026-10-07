@@ -201,3 +201,40 @@ run "crossplane_without_identity_warns" {
 
   expect_failures = [check.crossplane_has_an_identity]
 }
+
+# On a destroy, the catalog must be uninstalled — Crossplane deleting every
+# module's binding — while Crossplane still holds its grants, or each delete
+# is a 403 and the binding stays in the project. A plan targeting the
+# catalog's envelope alone evaluates only what it depends on: the
+# foundations' crossplane_principal is there only if the root threads it
+# into the catalog's inputs. That it is read off the grants is the
+# foundations' own test (crossplane_principal_is_read_off_the_grants).
+run "the_catalog_depends_on_crossplane_grants" {
+  command = plan
+  variables {
+    gcp = {
+      project_id     = "socle-test-project"
+      region         = "europe-west1"
+      cluster_name   = "socle-test"
+      owner          = "platform"
+      environment    = "prod"
+      create_network = true
+      maintenance_window = {
+        start_time = "2026-01-03T02:00:00Z"
+        end_time   = "2026-01-03T14:00:00Z"
+        recurrence = "FREQ=WEEKLY;BYDAY=SA"
+      }
+      crossplane = {}
+    }
+    kube = { crossplane = { enabled = true } }
+  }
+
+  plan_options {
+    target = [module.socle.helm_release.socle]
+  }
+
+  assert {
+    condition     = module.foundations.crossplane_principal != null
+    error_message = "the catalog's envelope must depend on Crossplane's grants, so a destroy uninstalls the catalog before it removes them."
+  }
+}

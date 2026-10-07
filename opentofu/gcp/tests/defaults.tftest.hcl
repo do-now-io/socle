@@ -337,6 +337,28 @@ run "crossplane_identity_grants_only_bounded_roles" {
   }
 }
 
+# The root threads crossplane_principal into the catalog's inputs, and the
+# reference is what holds the catalog's uninstall ahead of the grants'
+# removal on a destroy — only if the output reads the grants. A plan that
+# targets only the project's lookup, which the principal names, shows it:
+# read off the grants, left out of the plan, the principal is null; built
+# from the local string, it would be there.
+run "crossplane_principal_is_read_off_the_grants" {
+  command = plan
+  variables {
+    crossplane = {}
+  }
+
+  plan_options {
+    target = [data.google_project.this]
+  }
+
+  assert {
+    condition     = output.crossplane_principal == null
+    error_message = "crossplane_principal must be read off Crossplane's grants, not built from the local string: it is the reference that orders the catalog's uninstall before the grants' removal."
+  }
+}
+
 run "crossplane_without_a_role_grants_nothing_but_the_dns_records_role" {
   command = plan
   variables {
