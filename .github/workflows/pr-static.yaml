@@ -192,16 +192,59 @@ jobs:
             kind="$(basename "${f}" -fluxcd-v1.json)"
             cp "${f}" "schemas/fluxcd.controlplane.io/${kind}_v1.json"
           done
+      - name: Fetch the GCP provider's CRD schemas
+        if: steps.detect.outputs.found == 'true'
+        env:
+          PROVIDER_GCP_VERSION: v3.0.0
+        run: |
+          # The datree catalog has no namespaced (.m) provider-upjet-gcp kinds,
+          # so the ones the gcp render holds come from the provider's own CRDs,
+          # at the version the crossplane module installs. Every object that
+          # lists its properties is closed (additionalProperties: false), as
+          # datree closes its own: -strict then refuses a misspelt field.
+          # Same layout as the operator's schemas above.
+          base="https://raw.githubusercontent.com/crossplane-contrib/provider-upjet-gcp/${PROVIDER_GCP_VERSION}/package/crds"
+          for crd in gcp.m.upbound.io_clusterproviderconfigs \
+            cloudplatform.gcp.m.upbound.io_projectiammembers \
+            dns.gcp.m.upbound.io_managedzoneiammembers \
+            storage.gcp.m.upbound.io_buckets \
+            storage.gcp.m.upbound.io_bucketiammembers; do
+            curl -sfL "${base}/${crd}.yaml" -o /tmp/crd.yaml
+            group="$(yq '.spec.group' /tmp/crd.yaml)"
+            kind="$(yq '.spec.names.kind | downcase' /tmp/crd.yaml)"
+            mkdir -p "schemas/${group}"
+            for version in $(yq '.spec.versions[].name' /tmp/crd.yaml); do
+              version="${version}" yq -o=json '
+                .spec.versions[] | select(.name == strenv(version)) | .schema.openAPIV3Schema
+                | (.. | select(tag == "!!map" and .type == "object" and has("properties")
+                    and (has("additionalProperties") | not)
+                    and (has("x-kubernetes-preserve-unknown-fields") | not)))
+                  |= . + {"additionalProperties": false}' /tmp/crd.yaml \
+                > "schemas/${group}/${kind}_${version}.json"
+            done
+          done
+          find schemas -name '*.json' -path '*gcp*' | sort
       - name: Render the catalog and the bootstrap envelope
         if: steps.detect.outputs.found == 'true'
         run: |
           mkdir -p rendered
-          # One ResourceSet per catalog module, rendered with the committed
-          # sample inputs — the same shape OpenTofu deposits at bootstrap.
-          for rs in oci/catalog/*/resourceset.yaml; do
-            module="$(basename "$(dirname "${rs}")")"
-            flux-operator build rset -f "${rs}" --inputs-from oci/.ci/inputs-sample.yaml \
-              > "rendered/${module}.yaml"
+          # One ResourceSet per catalog module, rendered once per cloud with
+          # that cloud's committed sample inputs — the same shape OpenTofu
+          # deposits at bootstrap — into rendered/<cloud>/. The child
+          # ResourceSets' resources (routes, stores, provider configs) are
+          # pulled out to nested/ so kubeconform reads them as objects too.
+          for cloud in aws gcp; do
+            inputs=oci/.ci/inputs-sample.yaml
+            [ "${cloud}" = aws ] || inputs="oci/.ci/inputs-sample-${cloud}.yaml"
+            mkdir -p "rendered/${cloud}/nested"
+            for rs in oci/catalog/*/resourceset.yaml; do
+              module="$(basename "$(dirname "${rs}")")"
+              flux-operator build rset -f "${rs}" --inputs-from "${inputs}" \
+                > "rendered/${cloud}/${module}.yaml"
+              nested="$(yq 'select(.kind == "ResourceSet") | .spec.resources[] | split_doc' \
+                "rendered/${cloud}/${module}.yaml")"
+              [ -z "${nested}" ] || echo "${nested}" > "rendered/${cloud}/nested/${module}.yaml"
+            done
           done
           # The bootstrap envelope Helm deposits: the literal templates (the
           # << >> operator syntax stays as text — Helm never touches it) ...
@@ -262,7 +305,8 @@ jobs:
         run: |
           {
             echo "### kubeconform ✅"
-            echo "Rendered (\`flux-operator build rset\` + \`helm template\`, strict):"
+            echo "Rendered for aws and gcp, child ResourceSets' resources included"
+            echo "(\`flux-operator build rset\` + \`helm template\`, strict):"
             echo '```'
             tail -1 kubeconform-rendered.out
             echo '```'

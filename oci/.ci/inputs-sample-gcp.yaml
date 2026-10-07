@@ -28,18 +28,18 @@
       dns_zone_lister_role: projects/sandbox-2bace/roles/socleDnsZoneLister_socle_sandbox
     external_dns:
       enabled: true
-      domain_filters: [acme.example]
+      domain_filters: [sandbox-gcp.do-now.io]
       policy: upsert-only
       txt_owner_id: t
       values:
         logLevel: debug
         extraArgs:
-          aws-zone-type: public
+          google-batch-change-size: "500"
       values_secret: external-dns-private-values
     argocd:
       enabled: true
       admin_enabled: true
-      domain: argocd.example.com
+      domain: argocd.sandbox-gcp.do-now.io
       gateway: private
       ha: false
       values:
@@ -76,7 +76,7 @@
       values_secret: otel-gateway-values
     grafana:
       enabled: true
-      domain: grafana.example.com
+      domain: grafana.sandbox-gcp.do-now.io
       gateway: public
       values:
         resources:
@@ -101,7 +101,7 @@
       values_secret: ""
     keda:
       enabled: true
-      services: [sqs, cloudwatch]
+      services: [pubsub]
       values:
         resources:
           operator:
@@ -127,7 +127,7 @@
       values_secret: kyverno-policies-values
     external_secrets:
       enabled: true
-      prefixes: [t, shared/platform]
+      prefixes: [t, Shared-Platform]
       values:
         log:
           level: debug
@@ -144,7 +144,7 @@
         - {frequency: daily, retention: 7d, schedule: "0 2 * * *"}
         - {frequency: monthly, retention: 90d, schedule: "0 3 1 * *"}
         - {frequency: hourly, retention: 48h, schedule: "0 * * * *"}
-      node_agent: true
+      node_agent: false
       values:
         configuration:
           logLevel: debug

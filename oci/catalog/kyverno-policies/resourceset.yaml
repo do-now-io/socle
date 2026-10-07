@@ -109,7 +109,10 @@ spec:
           # ValidatingAdmissionPolicy — an Enforce policy would judge, and
           # could refuse, the pods GKE runs there.
           <<- end >>
-          excludeNamespaces: [kube-system, flux-system, kyverno<< if eq inputs.cloud "gcp" >>, kube-node-lease, gke-managed-system, gke-managed-cim, gke-gmp-system, gmp-system, gmp-public<< end >>]
+          excludeNamespaces: [kube-system, flux-system, kyverno
+            <<- if eq inputs.cloud "gcp" >>, kube-node-lease, gke-managed-system, gke-managed-cim
+            <<- ", gke-gmp-system, gmp-system, gmp-public" >>
+            <<- end >>]
         customPolicies:
           - |
             apiVersion: policies.kyverno.io/v1beta1
