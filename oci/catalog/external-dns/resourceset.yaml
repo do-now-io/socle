@@ -15,15 +15,19 @@
 # YAML document inside a ConfigMap string, which a JSON 6902 patch cannot
 # reach by path, and one place reads better than five.
 #
-# Two layers, so that the pod is admitted only after its AWS access exists
+# Two layers, so that the pod is admitted only after its cloud access exists
 # (docs/catalog/external-dns.md):
-# - this ResourceSet: the Namespace and, on AWS with Crossplane on, the
-#   module's own IAM Role and the Pod Identity association binding it to
-#   external-dns/external-dns (docs/catalog/crossplane.md §3);
+# - this ResourceSet: the Namespace and, with Crossplane on, the module's own
+#   access, bound to external-dns/external-dns (docs/catalog/crossplane.md
+#   §3): on AWS an IAM Role and its Pod Identity association, on GCP an IAM
+#   member on each zone it may write and one on the project to list zones;
 # - external-dns-workload, a child ResourceSet holding the chart, which
-#   dependsOn the Role and the association being Ready. EKS Pod Identity
-#   injects the credentials at pod admission: a pod admitted before its
-#   association never gets them.
+#   dependsOn each of those being Ready. EKS Pod Identity injects the
+#   credentials at pod admission: a pod admitted before its association never
+#   gets them. GCP's Workload Identity has no such moment, but a binding that
+#   never turns Ready — Crossplane without its grants in the foundations —
+#   must hold the workload as visibly as on AWS, rather than leave a pod that
+#   writes nothing.
 # This ResourceSet dependsOn the crossplane one, which always exists and is
 # Ready trivially when Crossplane is off: the providers' CRDs are there
 # before a Role is applied, and nothing waits when there are none.
@@ -43,10 +47,10 @@
 # - the ServiceAccount is named external-dns in namespace external-dns, on
 #   every cloud: the subject the module's own cloud identity is bound to.
 #
-# Cloud access: on AWS the module declares its own role through Crossplane,
-# the foundations never do (docs/flux-catalog.md §6). With Crossplane off,
-# and on the other clouds until their Crossplane providers land, each cloud
-# block below reads a credential the client brings.
+# Cloud access: on AWS and GCP the module declares its own access through
+# Crossplane, the foundations never do (docs/flux-catalog.md §6). With
+# Crossplane off, and on the other clouds until their Crossplane providers
+# land, each cloud block below reads a credential the client brings.
 # - the Gateway API source is added only when the gateway_api module is on.
 #   external-dns builds an informer per source at start-up and exits when the
 #   Gateway CRDs are absent (source/gateway.go WaitForCacheSync → log.Fatal in
@@ -179,6 +183,60 @@ spec:
         roleArnRef:
           name: external-dns
     << end >>
+    << $access := and (eq inputs.cloud "gcp") inputs.modules.crossplane.enabled >>
+    << if $access >>
+    << $principal := printf
+         "principal://iam.googleapis.com/projects/%s/locations/global/workloadIdentityPools/%s.svc.id.goog/subject/ns/%s/sa/%s"
+         inputs.cluster.projectNumber inputs.cluster.projectId "external-dns" "external-dns" >>
+    # The module's own GCP access, docs/catalog/crossplane.md §3: no Google
+    # service account, the ServiceAccount external-dns/external-dns is the
+    # principal itself (Workload Identity Federation). Both roles are among
+    # what the foundations let Crossplane grant, and nothing else is.
+    #
+    # Scoped by zone, not by record name as on AWS: Cloud DNS has no condition
+    # on the names in a change, and a zone is a resource IAM can bind on. The
+    # zones are the ones the client listed in the foundations
+    # (gcp.crossplane.dns_zones), the only ones whose IAM policy Crossplane may
+    # set. roles/dns.admin there is that zone's records and nothing beyond.
+    #
+    # No zone listed, no member: external-dns still lists the project's zones,
+    # matches its domain filters, and every write it attempts is refused —
+    # Forbidden in its log, nothing in Cloud DNS.
+    << range $zone := inputs.modules.crossplane.dns_zones >>
+    ---
+    apiVersion: dns.gcp.m.upbound.io/v1beta1
+    kind: ManagedZoneIAMMember
+    metadata:
+      name: external-dns-<< $zone >>
+      namespace: external-dns
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.external_dns.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      forProvider:
+        project: << inputs.cluster.projectId | quote >>
+        managedZone: << $zone | quote >>
+        role: roles/dns.admin
+        member: << $principal | quote >>
+    << end >>
+    ---
+    # external-dns lists the project's zones on every loop to find the one a
+    # name belongs to (ManagedZones.List, provider/google/google.go, v0.22.0),
+    # whatever zone it then writes: a project-level call, which no zone
+    # binding answers. The foundations' lister role carries list and get on
+    # zones, nothing on records.
+    apiVersion: cloudplatform.gcp.m.upbound.io/v1beta1
+    kind: ProjectIAMMember
+    metadata:
+      name: external-dns
+      namespace: external-dns
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.external_dns.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      forProvider:
+        project: << inputs.cluster.projectId | quote >>
+        role: << inputs.modules.crossplane.dns_zone_lister_role | quote >>
+        member: << $principal | quote >>
+    << end >>
     ---
     # The workload, in a child ResourceSet so that it can wait on the
     # association explicitly. A step's health check does not: a Crossplane
@@ -205,6 +263,22 @@ spec:
           readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
         - apiVersion: eks.aws.m.upbound.io/v1beta1
           kind: PodIdentityAssociation
+          name: external-dns
+          namespace: external-dns
+          ready: true
+          readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
+      << else if $access >>
+      dependsOn:
+        << range $zone := inputs.modules.crossplane.dns_zones >>
+        - apiVersion: dns.gcp.m.upbound.io/v1beta1
+          kind: ManagedZoneIAMMember
+          name: external-dns-<< $zone >>
+          namespace: external-dns
+          ready: true
+          readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
+        << end >>
+        - apiVersion: cloudplatform.gcp.m.upbound.io/v1beta1
+          kind: ProjectIAMMember
           name: external-dns
           namespace: external-dns
           ready: true
@@ -264,13 +338,24 @@ spec:
                 valueFrom: { secretKeyRef: { name: external-dns-aws, key: AWS_ENDPOINT_URL, optional: true } }
             << else if eq inputs.cloud "gcp" >>
             # Cloud DNS, through the metadata server's Workload Identity
-            # credentials: the ServiceAccount's own principal, or a Google service
-            # account the client binds and names through values
-            # (serviceAccount.annotations, iam.gke.io/gcp-service-account). The
-            # project comes from the metadata server when --google-project is
-            # absent (provider/google/google.go, v0.22.0).
+            # credentials: the ServiceAccount's own principal — with Crossplane
+            # on, the one the module's members above bind — or, with it off, a
+            # Google service account the client binds and names through values
+            # (serviceAccount.annotations, iam.gke.io/gcp-service-account).
+            #
+            # The project is named rather than asked of the metadata server, the
+            # default when --google-project is absent (provider/google/google.go,
+            # v0.22.0): the zones are the cluster's project's, which is where the
+            # members are bound. Public zones only: a split-horizon private zone
+            # of the same name matches the same domain filters and would get
+            # every record twice; a client who wants private zones says so
+            # through values. A map, not a list: a client's extraArgs map
+            # merges into it, where a list would replace it whole.
             provider:
               name: google
+            extraArgs:
+              google-project: << inputs.cluster.projectId | quote >>
+              google-zone-visibility: public
             << else if eq inputs.cloud "azure" >>
             # Azure DNS. azure.json — tenant, subscription, resource group, and
             # either a service principal or useWorkloadIdentityExtension — comes

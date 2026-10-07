@@ -11,8 +11,10 @@ DNS provider per cloud. Issue #32; the catalog contract is
 | Where the cloud lives | One `<< if eq inputs.cloud … >>` block per cloud inside the template's socle-values document |
 | Default | Off: it needs a zone, which has no default |
 | Cloud access, AWS | **The module's own**, with `kube.crossplane` on: an IAM `Role` and its `PodIdentityAssociation`, declared in the module's ResourceSet as Crossplane managed resources. The foundations grant nothing to it |
+| Cloud access, GCP | **The module's own**, with `kube.crossplane` on: a `ManagedZoneIAMMember` per zone the client listed and one `ProjectIAMMember` to list zones, bound to the ServiceAccount's own Workload Identity principal. No Google service account |
 | Cloud access, elsewhere | A credential the client brings, until Crossplane has a provider on that cloud |
 | Route 53 scope | Writes allowed only on names under `domain_filters`, by condition key; reads on every zone (below) |
+| Cloud DNS scope | `roles/dns.admin` on each zone in `gcp.crossplane.dns_zones`, nothing else on records; zone listing on the project ([below](#gcp-the-modules-own-members-through-crossplane)) |
 | Records | `registry: txt`, owner = cluster name, prefix `socle-`, `upsert-only` unless the client says `sync` |
 
 ## What is installed, per cloud
@@ -21,14 +23,17 @@ Two layers, after the `crossplane` ResourceSet is Ready — which it is
 trivially when Crossplane is off:
 
 1. **The `external-dns` ResourceSet**: the `Namespace` (`external-dns`, Pod
-   Security `restricted`) and, on AWS with `kube.crossplane.enabled`, the
-   module's own `Role` and `PodIdentityAssociation`
-   ([the AWS section](#aws-the-modules-own-role-through-crossplane)).
-2. **A child ResourceSet, `external-dns-workload`**, which `dependsOn` the
-   Role and the association being `Ready` on AWS with Crossplane on: one
-   `HelmRepository`, two values ConfigMaps and one `HelmRelease` running as
-   ServiceAccount `external-dns/external-dns`. That name is fixed on every
-   cloud: it is the subject the association binds.
+   Security `restricted`) and, with `kube.crossplane.enabled`, the module's
+   own access: on AWS its `Role` and `PodIdentityAssociation`
+   ([the AWS section](#aws-the-modules-own-role-through-crossplane)), on GCP
+   its `ManagedZoneIAMMember`s and `ProjectIAMMember`
+   ([the GCP section](#gcp-the-modules-own-members-through-crossplane)).
+2. **A child ResourceSet, `external-dns-workload`**, which `dependsOn` each
+   of those being `Ready` with Crossplane on: one `HelmRepository`, two
+   values ConfigMaps and one `HelmRelease` running as ServiceAccount
+   `external-dns/external-dns`. That name is fixed on every cloud: it is the
+   subject the association binds on AWS, and the principal the members name
+   on GCP.
 
 A foundations module never changes because of the catalog
 ([docs/flux-catalog.md](../flux-catalog.md) §6): nothing in `opentofu/` is
@@ -37,7 +42,7 @@ specific to this module.
 | Cloud | Provider | Where the credential comes from |
 | --- | --- | --- |
 | aws | `aws` (Route 53) | **Crossplane on: the module's own role**, through its Pod Identity association. Crossplane off: the Secret `external-dns-aws` (static keys, see [below](#the-external-dns-aws-secret)), or an association the client made outside the socle — with no Secret, the SDK's default chain picks it up |
-| gcp | `google` (Cloud DNS) | The client: a Google service account bound with Workload Identity, named through `values` as `serviceAccount.annotations."iam.gke.io/gcp-service-account"`; or DNS roles granted directly to the ServiceAccount's Workload Identity Federation principal |
+| gcp | `google` (Cloud DNS) | **Crossplane on: the module's own members**, on the ServiceAccount's Workload Identity Federation principal. Crossplane off: the client's — a Google service account bound with Workload Identity, named through `values` as `serviceAccount.annotations."iam.gke.io/gcp-service-account"`, or DNS roles the client grants that principal himself |
 | azure | `azure` (Azure DNS) | The client: the Secret `external-dns-azure` with `azure.json`, a service principal, or `useWorkloadIdentityExtension` plus the `azure.workload.identity/client-id` annotation and `azure.workload.identity/use` pod label through `values` |
 | scaleway | `scaleway` (Scaleway DNS) | The client: the Secret `external-dns-scaleway` with `SCW_ACCESS_KEY` and `SCW_SECRET_KEY`, an API key scoped to DomainsDNSFullAccess |
 
@@ -72,6 +77,15 @@ Nothing more for the AWS role: `enabled` and `domain_filters` build it, with
 [crossplane.md](crossplane.md) §2). On AWS with both on, the bootstrap's `region` must
 be set — the association is regional, and the socle's
 `ClusterProviderConfig` names no region — or the plan fails.
+
+On GCP, nothing more in `kube` either: the zones external-dns may write are
+the ones the client lists in the foundations, `gcp.crossplane.dns_zones`
+(managed zone names, in the cluster's project), the only zones whose IAM
+policy Crossplane may set. Nothing goes in `gcp.crossplane.allowed_roles`:
+`roles/dns.admin` is granted on a zone, which the zone grant allows, and the
+project-level lister role is always among the roles Crossplane may grant.
+Each `domain_filters` entry should sit in a listed zone; a name in a zone
+that is not listed is refused at write, and only external-dns's log says so.
 
 ### Free-form values — `values` and `values_secret`
 
@@ -159,6 +173,12 @@ Each of these is a socle default. A client can still override it through
   HTTPS Helm repository, pinned exactly.
 - **The AWS region.** It is fixed to `us-east-1`, because Route 53 is a
   global service served from there.
+- **The GCP project and zone visibility.** `--google-project` is the
+  cluster's project, named rather than read from the metadata server: it is
+  where the zones and the members are. `--google-zone-visibility=public`: a
+  split-horizon private zone of the same name would match the same filters
+  and get every record twice. Both are set as an `extraArgs` map, so that a
+  client's `extraArgs` map merges into it; a list would replace it whole.
 - **Zone ids, filters by label or annotation, extra args, and resources.**
   None of these are in v1.
 
@@ -183,6 +203,20 @@ Each of these is a socle default. A client can still override it through
   capitals, render as
   `["acme.example","*.acme.example","internal.acme.example","*.internal.acme.example"]`
   and the policy parses as JSON.
+- **Render of the GCP access.** With `oci/.ci/inputs-sample-gcp.yaml`
+  (Crossplane on, one zone) the ResourceSet renders `Namespace`, one
+  `ManagedZoneIAMMember` `external-dns-<zone>`, the `ProjectIAMMember`
+  `external-dns`, then `external-dns-workload` depending on both; with two
+  zones, two members and three dependencies; with no zone, the
+  `ProjectIAMMember` alone; with Crossplane off, neither, and no
+  `dependsOn`. Both kinds pass `kubeconform -strict` against the
+  `provider-upjet-gcp` v3.0.0 CRDs
+  (`package/crds/dns.gcp.m.upbound.io_managedzoneiammembers.yaml`,
+  `cloudplatform.gcp.m.upbound.io_projectiammembers.yaml`). The gcp
+  container args end `--provider=google --google-project=<project>
+  --google-zone-visibility=public`, and a client's `extraArgs` map is merged
+  in beside them (`helm template` of chart 1.22.0). The AWS render is
+  byte-identical to what it was before GCP.
 - **`tofu test`.** The bootstrap's runs pass, and each new validation has a
   failing case.
 - **e2e, disabled.** Both jobs assert that the `external-dns` ResourceSet
@@ -212,9 +246,10 @@ Each of these is a socle default. A client can still override it through
 - **Not provable on floci.** The fake Route 53 steps run with Crossplane off
   and the Secret seam; the module's role reaching EKS and the pod using it
   are not provable there, for the reasons in
-  [the AWS section](#what-floci-proves-and-what-needs-a-real-account). GCP,
+  [the AWS section](#what-floci-proves-and-what-needs-a-real-account).
   Azure and Scaleway have no DNS emulator; their blocks are proven by render
-  only.
+  only. GCP has none either: its proof is a test run by hand on the
+  sandbox's GKE ([below](#what-the-sandbox-proves-on-gcp)).
 
 ## The `external-dns-aws` Secret
 
@@ -346,6 +381,85 @@ So the fake Route 53 steps keep the `external-dns-aws` Secret seam, with
 Crossplane off. The proof that external-dns writes Route 53 **as its own
 role**, that the boundary is carried, and that a name outside the filters is
 refused, is the sandbox EKS apply.
+
+## GCP: the module's own members, through Crossplane
+
+The same promise as on AWS ([crossplane.md](crossplane.md) §3), under
+`<< if $access >>`, `$access` being
+`and (eq inputs.cloud "gcp") inputs.modules.crossplane.enabled`:
+
+| Object | What it is |
+| --- | --- |
+| `dns.gcp.m.upbound.io/v1beta1` `ManagedZoneIAMMember` `external-dns/external-dns-<zone>`, one per zone in `inputs.modules.crossplane.dns_zones` | `roles/dns.admin` on that managed zone, in `inputs.cluster.projectId` |
+| `cloudplatform.gcp.m.upbound.io/v1beta1` `ProjectIAMMember` `external-dns/external-dns` | `inputs.modules.crossplane.dns_zone_lister_role`, the foundations' `socleDnsZoneLister_<cluster>`, on the project |
+
+Both name one member, the ServiceAccount's own principal:
+`principal://iam.googleapis.com/projects/<project number>/locations/global/workloadIdentityPools/<project id>.svc.id.goog/subject/ns/external-dns/sa/external-dns`.
+No Google service account is created: GKE's metadata server hands the pod a
+token for that principal, and Cloud DNS checks the members against it. Both
+carry the module's reconcile toggle, so disabling the module removes them —
+the zone and its records stay. `providerConfigRef` is left at its default,
+the socle's `ClusterProviderConfig default` on the providers' own Workload
+Identity.
+
+### The Cloud DNS scope — by zone
+
+Route 53's answer, a condition on the record names, does not exist here:
+Cloud DNS has no condition on the names in a change. A zone, though, is a
+resource IAM binds on, and its name is something the client already knows —
+it is the name in the console, not a random id as on Route 53. So the scope
+is the zone: `roles/dns.admin` on each zone the client listed in the
+foundations' `gcp.crossplane.dns_zones`, the only zones on which the
+foundations let Crossplane set IAM. That role on a zone is that zone's
+records and its own policy, nothing beyond.
+
+What the zone binding cannot answer: external-dns lists the project's zones
+on every loop (`ManagedZones.List`, `provider/google/google.go` in v0.22.0)
+to find the zone a name belongs to, whatever zone it then writes. That call
+is on the project. The `ProjectIAMMember` grants the foundations' lister
+role there, `dns.managedZones.list` and `dns.managedZones.get` and nothing on
+records, so external-dns **sees** every zone of the project, and writes in
+the listed ones only.
+
+**No zone listed**: no `ManagedZoneIAMMember`, the `ProjectIAMMember`
+alone. external-dns starts, lists the zones, matches its domain filters,
+and every write it attempts is refused — a 403 in its log, nothing in Cloud
+DNS. The plan does not refuse it: which zones a cluster may write is the
+foundations' decision, and the bootstrap only reads it.
+
+### Ordering
+
+As on AWS: the ResourceSet `dependsOn` the `crossplane` one, and
+`external-dns-workload` `dependsOn` each member with
+`readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')`.
+Workload Identity has no admission-time injection to wait for — the token
+is exchanged on each call — but a member that never turns Ready (Crossplane
+off in the foundations, a zone the foundations did not list) must hold the
+workload as visibly as on AWS: the child waits, the parent is not Ready, and
+`socle-root` with it, rather than a pod that silently writes nothing.
+
+The same caveat on turning Crossplane off together with the module: the
+members' finalizers then have no provider to release them. Module first,
+Crossplane after.
+
+### What the sandbox proves on GCP
+
+No GKE in CI, and floci-gcp serves neither Workload Identity nor Cloud DNS.
+`external-dns-module-gcp`, in `tests/e2e/chainsaw-test.yaml`
+(labels `phase: module`, `cloud: gcp`, `platform: gke`), is run by hand on
+the sandbox's GKE, with the module on as the sandbox's root sets it. It reads
+project, zone and domain from the `ResourceSetInputProvider`, names nothing
+of the sandbox itself, and turns nothing off:
+
+| Step | What it proves |
+| --- | --- |
+| each IAM member is Ready | The `ManagedZoneIAMMember` on the first listed zone and the `ProjectIAMMember` carry `roles/dns.admin` and the lister role for the module's own principal, `Synced` and `Ready`, and GCP reports the same role and member back (`status.atProvider`); the workload's `dependsOn` names one member per listed zone and the project's |
+| the workload runs on Cloud DNS | The release Ready, the ServiceAccount without an `iam.gke.io/gcp-service-account` annotation, the Deployment on `--provider=google` with the cluster's project, public zones, the domain filter and the `socle-` TXT prefix |
+| a Service's name becomes a CNAME | An `ExternalName` Service annotated `<run namespace>.<domain>`; a Job running `host -t CNAME <name> 8.8.8.8` turns `Complete` — `host` exits non-zero until the record resolves, so the internet is the witness |
+
+The record outlives its Service under `upsert-only`, one CNAME and its TXT
+per run, named after the run; with `policy = "sync"` on the sandbox,
+external-dns removes both.
 
 ## Prerequisite and assumptions for the coordinator
 
