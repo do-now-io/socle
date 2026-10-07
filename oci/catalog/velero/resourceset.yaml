@@ -65,7 +65,10 @@ spec:
     # The project's keys exist on gcp only until every cloud's inputs carry
     # them: read under the cloud's condition.
     << $principal := "" >>
-    << if $gcp >><< $principal = printf "principal://iam.googleapis.com/projects/%s/locations/global/workloadIdentityPools/%s.svc.id.goog/subject/ns/%s/sa/%s" inputs.cluster.projectNumber inputs.cluster.projectId "velero" "velero-server" >><< end >>
+    << if $gcp >>
+    << $principal = printf "%s%s/locations/global/workloadIdentityPools/%s.svc.id.goog/subject/ns/%s/sa/%s"
+      "principal://iam.googleapis.com/projects/" inputs.cluster.projectNumber inputs.cluster.projectId "velero" "velero-server" >>
+    << end >>
     << $provider := "aws" >>
     << if $gcp >><< $provider = "gcp" >><< end >>
     # Autopilot refuses the node-agent's hostPath: the plan refuses
