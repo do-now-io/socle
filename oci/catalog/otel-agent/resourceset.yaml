@@ -273,3 +273,26 @@ spec:
       prune: true
       wait: true
       timeout: 2m
+    ---
+    # The module's alert rules, a ConfigMap the alerting module's sidecar picks
+    # up by its vmalert_rules label: this namespace is on its list
+    # (docs/catalog/alerting.md). Applied from the socle artifact itself, under
+    # this module's toggle; inert with alerting off, as a dashboard with
+    # grafana off.
+    apiVersion: kustomize.toolkit.fluxcd.io/v1
+    kind: Kustomization
+    metadata:
+      name: otel-agent-rules
+      namespace: flux-system
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.otel_agent.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 1h
+      sourceRef:
+        kind: OCIRepository
+        name: socle
+      path: ./catalog/otel-agent/rules
+      targetNamespace: otel-agent
+      prune: true
+      wait: true
+      timeout: 2m

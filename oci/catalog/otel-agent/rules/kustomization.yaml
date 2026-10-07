@@ -1,0 +1,7 @@
+# Applied by the otel-agent-rules Kustomization the module's ResourceSet renders,
+# into the otel-agent namespace, and pruned with it. The alerting module's rules
+# sidecar reads every ConfigMap labelled vmalert_rules there.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - otel-agent.yaml
