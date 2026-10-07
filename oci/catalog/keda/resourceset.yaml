@@ -174,11 +174,11 @@ spec:
         roleArnRef:
           name: keda-operator
     << end >>
-    << $access := and (eq inputs.cloud "gcp") inputs.modules.crossplane.enabled (has "pubsub" inputs.modules.keda.services) >>
-    << if $access >>
+    << $gcpAccess := and (eq inputs.cloud "gcp") inputs.modules.crossplane.enabled (has "pubsub" inputs.modules.keda.services) ->>
+    << if $gcpAccess >>
     << $principal := printf
       "principal://iam.googleapis.com/projects/%s/locations/global/workloadIdentityPools/%s.svc.id.goog/subject/ns/%s/sa/%s"
-      inputs.cluster.projectNumber inputs.cluster.projectId "keda" "keda-operator" >>
+      inputs.cluster.projectNumber inputs.cluster.projectId "keda" "keda-operator" ->>
     ---
     # The module's own GCP access, docs/catalog/crossplane.md §3: a binding
     # on the operator's principal, no Google service account. KEDA's
@@ -207,7 +207,7 @@ spec:
     << end >>
     ---
     # The workload, in a child ResourceSet so that it can wait on the
-    # association explicitly (see the header).
+    # association (the binding on GCP) explicitly (see the header).
     apiVersion: fluxcd.controlplane.io/v1
     kind: ResourceSet
     metadata:
@@ -230,7 +230,7 @@ spec:
           namespace: keda
           ready: true
           readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
-      << else if $access >>
+      << else if $gcpAccess >>
       dependsOn:
         - apiVersion: cloudplatform.gcp.m.upbound.io/v1beta1
           kind: ProjectIAMMember
