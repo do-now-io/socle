@@ -102,7 +102,8 @@ kubectl -n flux-system get resourceset    # socle-root and one per module
 
 The full walkthrough is in [opentofu/clusters/aws](opentofu/clusters/aws/README.md),
 and every option is documented in
-[prod.tfvars.example](opentofu/clusters/aws/prod.tfvars.example).
+[prod.tfvars.example](opentofu/clusters/aws/prod.tfvars.example). On Google
+Cloud, the same in [opentofu/clusters/gcp](opentofu/clusters/gcp/README.md).
 
 ## The catalog
 
@@ -173,7 +174,7 @@ module installs them ahead of Flux. GKE and Kapsule run their own:
 | Cloud | Foundations | One-apply root | Docs |
 | --- | :---: | :---: | --- |
 | AWS · EKS | ✅ | ✅ [`clusters/aws`](opentofu/clusters/aws) | [docs/aws](docs/aws/README.md) |
-| GCP · GKE | ✅ | ⏳ | [docs/gcp](docs/gcp/README.md) |
+| GCP · GKE | ✅ | ✅ [`clusters/gcp`](opentofu/clusters/gcp) | [docs/gcp](docs/gcp/README.md) |
 | Azure · AKS | ✅ | ⏳ | [docs/azure](docs/azure/prerequisites.md) |
 | Scaleway · Kapsule | ✅ | ⏳ | [docs/scaleway](docs/scaleway/README.md) |
 
@@ -182,7 +183,7 @@ module installs them ahead of Flux. GKE and Kapsule run their own:
 Socle is **pre-0.1.0**, and no version has been released yet.
 
 - The foundations modules exist for all four clouds. The single-apply root
-  exists for AWS only, so far.
+  exists for AWS and GCP, so far.
 - Every catalog module ships its own [Chainsaw](https://kyverno.github.io/chainsaw/)
   suite. CI runs these suites on floci,
   an AWS emulator with k3s, with one job per module and cloud. Each job applies
@@ -199,7 +200,7 @@ Socle is **pre-0.1.0**, and no version has been released yet.
 opentofu/
 ├── aws/  gcp/  azure/  scaleway/   # foundations, one module per cloud
 ├── bootstrap/                      # Cilium, Flux Operator, inputs, catalog schema
-└── clusters/aws/                   # the root a client copies: one apply
+└── clusters/aws/  gcp/             # the root a client copies: one apply
 oci/
 ├── catalog/<module>/               # one ResourceSet + its e2e suite
 └── clusters/<cloud>/               # which modules each cloud offers

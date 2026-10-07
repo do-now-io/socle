@@ -183,8 +183,8 @@ declaration would be a no-op). A root that groups its inputs in an object
 OpenTofu keeps that null — the child module's default is *not* applied —
 unless the variable itself declares `nullable = false` (measured, 1.12.6).
 That is what lets the root stay bare passthrough with no copy of the
-modules' defaults. `gcp`, `azure` and `scaleway` get the same declaration
-when their roots are written — pending.
+modules' defaults. `gcp` carries the same declaration since its root was
+written; `azure` and `scaleway` get it with theirs — pending.
 
 ### Interface
 
@@ -765,7 +765,7 @@ the `flux-instance` chart is the follow-up if the apply itself must fail.
 
 ## 10. Out of scope for v1
 
-Real catalog modules (cert-manager, external-dns, monitoring); the GCP, Azure
+Real catalog modules (cert-manager, external-dns, monitoring); the Azure
 and Scaleway roots; the health check Job; multi-instance modules; a mirror
 registry per client.
 
