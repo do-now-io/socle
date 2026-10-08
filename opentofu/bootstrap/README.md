@@ -84,6 +84,13 @@ type, is an error at plan, with the allowed list in the message.
 | `victoria_traces` | `storage_size` | `"10Gi"` | Size of the claim on the default StorageClass; `""` means an `emptyDir` |
 | `victoria_traces` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan |
 | `victoria_traces` | `values_secret` | `""` | Name of a Secret in `victoria-traces` with a `values.yaml` key, created by the client, merged last |
+| `alerting` | `enabled` | `false` | Deploy vmalert and Alertmanager: the socle's rules on `victoria_metrics`, which it needs, routed to the client's receivers. **Off**: it needs where alerts go ([design note](../../docs/catalog/alerting.md)) |
+| `alerting` | `watchdog` | `true` | Route an always-firing alert to the dead man's switch whose URL is the `watchdog-url` key of `receivers_secret` |
+| `alerting` | `receivers` | `[]` | Alertmanager receivers as Alertmanager writes them; keys only through `*_file` fields, under `/etc/alertmanager/secrets/` |
+| `alerting` | `route` | `{}` | Alertmanager's routing tree; `route.receiver` names one of `receivers` |
+| `alerting` | `receivers_secret` | `""` | Name of a Secret in `alerting`, created by the client, holding the receivers' keys and the watchdog's URL, mounted as files |
+| `alerting` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Rules, Alertmanager's config and secrets refused at plan |
+| `alerting` | `values_secret` | `""` | Name of a Secret in `alerting` with a `values.yaml` key, created by the client, merged last |
 | `kyverno` | `enabled` | `false` | Deploy the Kyverno engine: admission (three replicas, a PodDisruptionBudget), background and reports controllers, no policy; its webhooks never see `kube-system`, `flux-system` or the socle's own namespaces. **Off**: an admission webhook is opted into ([design note](../../docs/catalog/kyverno.md)) |
 | `kyverno` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Registry credentials (`imagePullSecrets`) and literal credential env refused at plan |
 | `kyverno` | `values_secret` | `""` | Name of a Secret in `kyverno` with a `values.yaml` key, created by the client, merged last |

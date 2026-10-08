@@ -470,6 +470,7 @@ The monitoring stack, six modules designed together — [docs/monitoring.md](mon
 `grafana` — [docs/catalog/grafana.md](catalog/grafana.md);
 `victoria_logs` — [docs/catalog/victoria-logs.md](catalog/victoria-logs.md);
 `victoria_traces` — [docs/catalog/victoria-traces.md](catalog/victoria-traces.md);
+`alerting` — [docs/catalog/alerting.md](catalog/alerting.md);
 `keda` — [docs/catalog/keda.md](catalog/keda.md);
 `metrics_server` — [docs/catalog/metrics-server.md](catalog/metrics-server.md).
 The admission layer, two modules designed together —

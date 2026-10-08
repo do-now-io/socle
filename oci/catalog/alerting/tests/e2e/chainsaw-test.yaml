@@ -1,0 +1,274 @@
+# The alerting module's proof (docs/catalog/alerting.md): vmalert and
+# Alertmanager, OFF by default. Selected by label:
+#   health   the disabled shape: the ResourceSet Ready with nothing rendered,
+#            no namespace, no Alertmanager datasource in Grafana.
+#   module   on, with a receiver and the watchdog both pointed at podinfo's
+#            /echo (the hello module): vmalert and Alertmanager Available,
+#            the module's rules loaded by the sidecar, the Watchdog firing
+#            and delivered through the webhook with no failure, Grafana's
+#            Alertmanager datasource; a ConfigMap labelled vmalert_rules in a
+#            client namespace — broken on purpose — never read, vmalert's
+#            reload still successful; off garbage-collects the release, the
+#            namespace and the ClusterRole.
+# The checks that read vmalert's and Alertmanager's own APIs are the
+# `script` steps (alerting.sh beside this file).
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: alerting-health
+  labels:
+    phase: health
+    cloud: any
+    platform: any
+spec:
+  description: Off by default, the ResourceSet renders nothing.
+  timeouts:
+    assert: 3m
+    error: 1m
+  steps:
+    - name: the ResourceSet is Ready with nothing in its inventory, and Grafana has no Alertmanager datasource
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: alerting
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (length(inventory.entries || `[]`)): 0
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: alerting
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: grafana
+                namespace: grafana
+              data:
+                (contains("datasources.yaml", 'alerting-alertmanager')): false
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: alerting
+---
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: alerting-module
+  labels:
+    phase: module
+    cloud: any
+    platform: any
+spec:
+  description: >-
+    On, the Watchdog fires and reaches its webhook, and a client's rule file
+    is never read; off, everything goes.
+  timeouts:
+    assert: 5m
+    error: 5m
+    exec: 6m
+  steps:
+    # The keys the receivers read as files: the client's Secret, created
+    # before the module, in the namespace the module then takes over. Both
+    # URLs are podinfo's /echo, which answers 202 to any POST.
+    - name: enabled = true with a receiver and the watchdog converges
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: alerting
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: alerting-keys
+                namespace: alerting
+              stringData:
+                team-url: http://podinfo.hello.svc:9898/echo
+                watchdog-url: http://podinfo.hello.svc:9898/echo
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    alerting:
+                      enabled: true
+                      receivers_secret: alerting-keys
+                      receivers:
+                        - name: team
+                          webhook_configs:
+                            - url_file: /etc/alertmanager/secrets/team-url
+                      route:
+                        receiver: team
+                        group_wait: 10s
+                        group_interval: 30s
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: alerting
+                namespace: alerting
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: alerting-server
+                namespace: alerting
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'rules-sidecar'] | length(@)): 1
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: alerting-alertmanager
+                namespace: alerting
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: grafana
+                namespace: grafana
+              data:
+                (contains("datasources.yaml", 'http://alerting-alertmanager.alerting.svc:9093')): true
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: alerting
+            name: alerting
+        - events:
+            namespace: alerting
+        - podLogs:
+            namespace: alerting
+            tail: 40
+    # The module's rules reach vmalert through the sidecar, the Watchdog
+    # fires, and Alertmanager delivers it through the webhook — the path a
+    # dead man's switch hears.
+    - name: the module's rules are loaded, the Watchdog fires and is delivered
+      try:
+        - script:
+            content: |
+              . ./alerting.sh
+              eventually 120 has_group socle-alerting
+              echo "rule groups: $(rule_groups | tr '\n' ' ')"
+              eventually 120 firing Watchdog
+              eventually 180 delivered
+      catch:
+        - podLogs:
+            namespace: alerting
+            tail: 60
+    # vmalert refuses its whole configuration over one bad file, so the
+    # sidecar reads the socle's module namespaces only. A labelled
+    # ConfigMap in a client namespace — this test's — broken on purpose:
+    # after two reload periods, never loaded, and vmalert still reloading.
+    - name: a client's labelled ConfigMap is never read
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: client-rules
+                labels:
+                  vmalert_rules: "1"
+              data:
+                client.yaml: |
+                  groups:
+                    - name: client
+                      rules:
+                        - alert: Broken
+                          expr: rate(x[5m] > 1
+        - sleep:
+            duration: 70s
+        - script:
+            content: |
+              . ./alerting.sh
+              reloaded_ok
+              ! has_group client
+      catch:
+        - podLogs:
+            namespace: alerting
+            tail: 60
+    - name: enabled = false garbage-collects the release, the namespace and the ClusterRole
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    alerting:
+                      enabled: false
+        - error:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: alerting
+                namespace: alerting
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: alerting
+        - error:
+            resource:
+              apiVersion: rbac.authorization.k8s.io/v1
+              kind: ClusterRole
+              metadata:
+                name: alerting-rules
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: alerting
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (length(inventory.entries || `[]`)): 0
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: alerting

@@ -74,6 +74,16 @@ jobs:
       - name: The catalog and the per-cloud overlays agree
         run: |
           .github/scripts/check-catalog-clouds.sh | tee -a "$GITHUB_STEP_SUMMARY"
+      # vmalert reads its rule files all or nothing: one that does not load
+      # stops it at its next start (docs/catalog/alerting.md). The version is
+      # the one the alerting module's chart runs.
+      - name: Every alerting rule the socle ships loads in vmalert
+        env:
+          VMALERT_VERSION: v1.153.0
+        run: |
+          base="https://github.com/VictoriaMetrics/VictoriaMetrics/releases/download/${VMALERT_VERSION}"
+          curl -sfL "${base}/vmutils-linux-amd64-${VMALERT_VERSION}.tar.gz" | tar xz -C "$RUNNER_TEMP" vmalert-prod
+          VMALERT="$RUNNER_TEMP/vmalert-prod" .github/scripts/check-rules.sh | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Detect OpenTofu sources
         id: detect
         run: |

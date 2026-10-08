@@ -56,6 +56,7 @@ The socle's values, all in `victoria-metrics-socle-values`, and why:
 | `server.persistentVolume.storageClassName` | unset | The cluster's default class, the foundations' choice |
 | `server.extraArgs."opentelemetry.usePrometheusNaming"` | `true` | OTLP names become Prometheus ones (dots to underscores, unit and `_total` suffixes), so a scraped Cilium or Flux metric reads as its upstream dashboards expect |
 | `server.extraArgs."storage.maxHourlySeries"` | `"100000"` | The cardinality guard of `docs/monitoring.md` §3. A string on purpose (below) |
+| `server.extraArgs.sortLabels` | `true` | Without it the guard counts one series many times and drops fresh data within minutes (measured below, "The guard and the order of labels") |
 | `server.podAnnotations` | `prometheus.io/scrape: "true"`, `prometheus.io/port: "8428"` | So the `otel_gateway` module scrapes VictoriaMetrics' own metrics |
 | `server.resources.requests` | cpu 50m, memory 128Mi | Measured idle on floci at 1–2m and 12Mi; the requests leave room for the collectors' ingest, measured by the next PR. No limits, as argocd. Without a limit, `-memory.allowedPercent` (60 %) is taken of the node's memory: caches may grow that far, but only as the data demands |
 | `server.securityContext`, `podSecurityContext` | chart defaults (enabled) | Non-root, as the chart ships it |
@@ -220,6 +221,35 @@ job (`health`) and the module's own job (`health`, then `module`): `victoria-met
 Job totals: `e2e-aws-root` 2m46s, `e2e-aws-catalog` 12m43s — of which
 Crossplane's step is 5m06s and external-dns' four 2m54s; this module's own
 steps add about half a minute.
+
+### The guard and the order of labels
+
+Found while measuring the alerting module on floci: a crash-looping pod never
+fired, because its metrics never reached the storage.
+
+- **Symptom.** With the socle's `100000` and nothing else, the guard was full
+  **12 minutes** after VictoriaMetrics started, on a one-node cluster.
+  From then on, new series were dropped with a `skip series … because
+  -storage.maxHourlySeries=100000 reached` warning: ordinary ones (a pod's
+  phase, Alertmanager's and Flux's metrics), and **575 000 samples within the
+  hour**. Grafana and every alert rule go blind without an error anywhere
+  else.
+- **Not a cardinality problem.** `vm_new_timeseries_created_total` was
+  **7 250**, the TSDB status the same, while
+  `vm_hourly_series_limit_current_series` read **100 000**.
+- **The mechanism, reproduced alone.** A throwaway VictoriaMetrics of the
+  same image, `-storage.maxHourlySeries=100`, two samples of one series with
+  its two labels in either order (`essai{a="1",b="2"}`, then
+  `essai{b="2",a="1"}`): one series created, **two** counted by the guard.
+  With `-sortLabels`: one and one.
+- **On the cluster, with `sortLabels`.** The socle's `100000` kept, the flag
+  added (both on the live args): the guard read 7 667, 7 736, 7 769 and
+  7 784 at 1½, 6, 12 and 20 minutes — the real series, flat.
+
+So the labels of what the collectors send over OTLP arrive in varying order;
+which side varies it is not established. Sorting costs some ingestion
+throughput, by the flag's own description. The `victoria-metrics-health`
+assertion checks the flag on the live args.
 
 **What floci cannot prove:** a cloud StorageClass, volume expansion, and the
 EKS gap itself — floci's k3s brings its own class.

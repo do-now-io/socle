@@ -355,9 +355,11 @@ This document is the base of that stack, as `docs/flux-catalog.md` §6 was for
 ## 9. Out of scope for v1
 
 - **Alerting.** No vmalert, no Alertmanager, no rules, no Grafana alerting
-  contact points. The cloud-observability notes assume "one Alertmanager for
-  four clouds" in a central plane; whether per-cluster alerting exists at all,
-  or is only ever central, is decided with that plane.
+  contact points in v1. Since decided: alerting is **per cluster**, an
+  `alerting` module off by default and meant for production clusters (#59,
+  [`docs/catalog/alerting.md`](catalog/alerting.md)). A central Alertmanager,
+  as the cloud-observability notes assume, stays possible: a client points
+  vmalert at it.
 - **Anything central**: remote-write, federation, multi-cluster Grafana.
 - **Backups** of the backends (`vmbackup` to a bucket, through Crossplane).
 - **Exposure** through Gateway API, and SSO on Grafana.

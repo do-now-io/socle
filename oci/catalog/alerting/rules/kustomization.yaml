@@ -1,0 +1,7 @@
+# Applied by the alerting-rules Kustomization the module's ResourceSet
+# renders, into the alerting namespace, and pruned with it. The rules
+# sidecar beside vmalert reads every ConfigMap labelled vmalert_rules there.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - alerting.yaml

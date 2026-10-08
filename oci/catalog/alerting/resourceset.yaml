@@ -1,0 +1,303 @@
+# The alerting module: vmalert and Alertmanager from the official
+# victoria-metrics-alert chart. vmalert evaluates the socle's rules against
+# victoria_metrics; Alertmanager routes what fires to the client's receivers,
+# and the watchdog to a dead man's switch outside the cluster. Design:
+# docs/catalog/alerting.md.
+#
+# resourcesTemplate rather than resources: Alertmanager's configuration is
+# built from the client's receivers and route with the watchdog's put first,
+# and the Secrets exist only when named — the operator's block
+# `<< if >>`/`<< end >>` is text templating, which the structured resources
+# list cannot carry.
+#
+# Values: no spec.values on the HelmRelease. The socle's defaults are a
+# ConfigMap listed first in valuesFrom, the client's second, the client's
+# Secret last — later wins (docs/flux-catalog.md §6). OpenTofu refuses rules
+# and Alertmanager's configuration in the client's values.
+#
+# Rules: no module is named here. A module ships its rules as ConfigMaps
+# labelled vmalert_rules, under its rules/ folder, and a sidecar beside
+# vmalert gathers them — from the socle's module namespaces only, listed
+# below, so a client's ConfigMap is never read: vmalert refuses its whole
+# configuration over one bad file.
+#
+# Every other rule is the hello module's: inputsFrom the one provider, the
+# reconcile toggle on each resource, values tested never presence.
+apiVersion: fluxcd.controlplane.io/v1
+kind: ResourceSet
+metadata:
+  name: alerting
+  namespace: flux-system
+spec:
+  inputsFrom:
+    - apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSetInputProvider
+      name: socle
+  wait: true
+  resourcesTemplate: |
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: alerting
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.alerting.enabled >>enabled<< else >>disabled<< end >>
+    ---
+    # What the rules sidecar may read: ConfigMaps, nothing else. The chart has
+    # no RBAC of its own. Cluster-wide, as the namespaces read are the
+    # sidecar's list; bound to the release's ServiceAccount, alerting.
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata:
+      name: alerting-rules
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.alerting.enabled >>enabled<< else >>disabled<< end >>
+    rules:
+      - apiGroups: [""]
+        resources: ["configmaps"]
+        verbs: ["get", "watch", "list"]
+    ---
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRoleBinding
+    metadata:
+      name: alerting-rules
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.alerting.enabled >>enabled<< else >>disabled<< end >>
+    roleRef:
+      apiGroup: rbac.authorization.k8s.io
+      kind: ClusterRole
+      name: alerting-rules
+    subjects:
+      - kind: ServiceAccount
+        name: alerting
+        namespace: alerting
+    ---
+    apiVersion: source.toolkit.fluxcd.io/v1
+    kind: OCIRepository
+    metadata:
+      name: victoria-metrics-alert-chart
+      namespace: alerting
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.alerting.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 1h
+      url: oci://ghcr.io/victoriametrics/helm-charts/victoria-metrics-alert
+      layerSelector:
+        mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+        operation: copy
+      ref:
+        tag: 0.50.0  # vmalert v1.153.0, Alertmanager v0.34.1
+    ---
+    # The socle's own chart values, listed first in valuesFrom. (No template
+    # delimiters in these comments: the operator templates them too.)
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: alerting-socle-values
+      namespace: alerting
+      labels:
+        # helm-controller watches a valuesFrom ConfigMap only with this label;
+        # without it, a change here waits for the next interval (10m).
+        reconcile.fluxcd.io/watch: Enabled
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.alerting.enabled >>enabled<< else >>disabled<< end >>
+    data:
+      values.yaml: |
+        # Constant names: alerting-server (vmalert, port 8880) and
+        # alerting-alertmanager (port 9093), ServiceAccount alerting.
+        fullnameOverride: alerting
+        serviceAccount:
+          create: true
+          name: alerting
+        server:
+          datasource:
+            url: http://victoria-metrics.victoria-metrics.svc:8428
+          # Alerts' state written back and read at start, so a restart does
+          # not reset every for: timer.
+          remoteWrite:
+            url: http://victoria-metrics.victoria-metrics.svc:8428
+          remoteRead:
+            url: http://victoria-metrics.victoria-metrics.svc:8428
+          extraArgs:
+            # The sidecar's directory instead of the chart's one ConfigMap,
+            # re-read every 30 s: a rule shipped or removed is live within it.
+            rule:
+              - /rules/*.yaml
+            configCheckInterval: 30s
+          extraVolumes:
+            - name: rules
+              emptyDir: {}
+          extraVolumeMounts:
+            - name: rules
+              mountPath: /rules
+              readOnly: true
+          # The same sidecar Grafana runs for its dashboards. NAMESPACE is the
+          # list of the module namespaces that ship rules: a module that
+          # starts shipping some adds its namespace here. UNIQUE_FILENAMES, as
+          # two modules may name their key alike.
+          extraContainers:
+            - name: rules-sidecar
+              image: quay.io/kiwigrid/k8s-sidecar:2.11.2
+              env:
+                - name: LABEL
+                  value: vmalert_rules
+                - name: LABEL_VALUE
+                  value: "1"
+                - name: FOLDER
+                  value: /rules
+                - name: NAMESPACE
+                  value: alerting,otel-agent,otel-gateway,victoria-metrics
+                - name: RESOURCE
+                  value: configmap
+                - name: UNIQUE_FILENAMES
+                  value: "true"
+              volumeMounts:
+                - name: rules
+                  mountPath: /rules
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+              # Measured on floci at 1m / 72Mi.
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 96Mi
+          # So otel_gateway scrapes vmalert's own metrics, which the
+          # module's health rules read.
+          podAnnotations:
+            prometheus.io/scrape: "true"
+            prometheus.io/port: "8880"
+          # Measured on floci at 3m / 31Mi with the socle's rules; room for
+          # the other modules' rules.
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+        alertmanager:
+          # The chart then points vmalert at it by itself.
+          enabled: true
+          podAnnotations:
+            prometheus.io/scrape: "true"
+            prometheus.io/port: "9093"
+          # Measured on floci at 2m / 30Mi; it grows with the alerts held.
+          resources:
+            requests:
+              cpu: 10m
+              memory: 48Mi
+          << if inputs.modules.alerting.receivers_secret >>
+          # The client's keys, as files the receivers' *_file fields read.
+          # Not optional: a missing Secret keeps Alertmanager from starting,
+          # rather than the watchdog going silently.
+          extraVolumes:
+            - name: receivers
+              secret:
+                secretName: << inputs.modules.alerting.receivers_secret | quote >>
+          extraVolumeMounts:
+            - name: receivers
+              mountPath: /etc/alertmanager/secrets
+              readOnly: true
+          << end >>
+          << if inputs.modules.alerting.enabled >>
+          # The client's routing tree and receivers, with the watchdog's route
+          # put first and its receiver added. OpenTofu checked that the
+          # default route names one of the client's receivers.
+          config:
+            route:<< toYaml (omit inputs.modules.alerting.route "routes") | nindent 10 >>
+              routes:
+                # Every few minutes to the dead man's switch, never to the
+                # client's receivers: matched first, it stops here.
+                - receiver: watchdog
+                  matchers:
+                    - alertname="Watchdog"
+                  group_by: [alertname]
+                  group_wait: 0s
+                  group_interval: 1m
+                  repeat_interval: 5m
+                # Looked up with get: a route with no sub-routes has no such
+                # key, and a missing key fails the whole render.
+                << with get inputs.modules.alerting.route "routes" >><< toYaml . | nindent 12 >><< end >>
+            receivers:
+              # With watchdog off, a receiver with no integration: the
+              # Watchdog alert is dropped rather than sent to the client's.
+              - name: watchdog
+                << if inputs.modules.alerting.watchdog >>
+                webhook_configs:
+                  - url_file: /etc/alertmanager/secrets/watchdog-url
+                    send_resolved: false
+                << end >>
+              << with inputs.modules.alerting.receivers >><< toYaml . | nindent 10 >><< end >>
+          << end >>
+    ---
+    # The client's own chart values, as written in kube.alerting.values,
+    # merged over the socle's document above — the client wins wherever the
+    # two meet. OpenTofu refuses rules, Alertmanager's configuration and
+    # secrets in there.
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: alerting-client-values
+      namespace: alerting
+      labels:
+        reconcile.fluxcd.io/watch: Enabled
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.alerting.enabled >>enabled<< else >>disabled<< end >>
+    data:
+      values.yaml: |<< toYaml inputs.modules.alerting.values | nindent 4 >>
+    ---
+    apiVersion: helm.toolkit.fluxcd.io/v2
+    kind: HelmRelease
+    metadata:
+      name: alerting
+      namespace: alerting
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.alerting.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 10m
+      releaseName: alerting
+      chartRef:
+        kind: OCIRepository
+        name: victoria-metrics-alert-chart
+      # No spec.values, on purpose: it would be merged last and win. The order
+      # below is the precedence, later wins — the socle's defaults, the
+      # client's values, then the client's Secret when named, never read by
+      # OpenTofu, optional so the release does not wait for it.
+      valuesFrom:
+        - kind: ConfigMap
+          name: alerting-socle-values
+          valuesKey: values.yaml
+        - kind: ConfigMap
+          name: alerting-client-values
+          valuesKey: values.yaml
+        << if inputs.modules.alerting.values_secret >>
+        - kind: Secret
+          name: << inputs.modules.alerting.values_secret | quote >>
+          valuesKey: values.yaml
+          optional: true
+        << end >>
+      install:
+        remediation:
+          retries: 3
+      upgrade:
+        remediation:
+          retries: 3
+    ---
+    # The module's own rules — the watchdog and the stack's health — applied
+    # from the socle artifact into alerting, where the sidecar reads them.
+    # The shape of otel_agent's dashboards Kustomization.
+    apiVersion: kustomize.toolkit.fluxcd.io/v1
+    kind: Kustomization
+    metadata:
+      name: alerting-rules
+      namespace: flux-system
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.alerting.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 1h
+      sourceRef:
+        kind: OCIRepository
+        name: socle
+      path: ./catalog/alerting/rules
+      targetNamespace: alerting
+      prune: true
+      wait: true
+      timeout: 2m
