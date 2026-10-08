@@ -13,7 +13,7 @@ copies.
 | Where | Every cloud, the same template, no cloud patch |
 | Default | **On**, like every monitoring module but traces |
 | Shape | One pod, a `Deployment` with strategy `Recreate`, and a standalone PVC — not the chart's default StatefulSet |
-| Storage | 20Gi on the cluster's default StorageClass; `storage_size = ""` for an `emptyDir`. **A socle EKS has no StorageClass today** (below) |
+| Storage | 20Gi on the cluster's default StorageClass; `storage_size = ""` for an `emptyDir`, with a 2Gi ephemeral-storage request. **A socle EKS has no StorageClass today** (below) |
 | Retention | 15 days |
 | Ingest | OTLP over HTTP at `/opentelemetry/v1/metrics`, names converted to the Prometheus form |
 | Cardinality | At most 100 000 new series an hour, then new series are dropped with a log line |
@@ -58,7 +58,7 @@ The socle's values, all in `victoria-metrics-socle-values`, and why:
 | `server.extraArgs."storage.maxHourlySeries"` | `"100000"` | The cardinality guard of `docs/monitoring.md` §3. A string on purpose (below) |
 | `server.extraArgs.sortLabels` | `true` | Without it the guard counts one series many times and drops fresh data within minutes (measured below, "The guard and the order of labels") |
 | `server.podAnnotations` | `prometheus.io/scrape: "true"`, `prometheus.io/port: "8428"` | So the `otel_gateway` module scrapes VictoriaMetrics' own metrics |
-| `server.resources.requests` | cpu 50m, memory 128Mi | Measured idle on floci at 1–2m and 12Mi; the requests leave room for the collectors' ingest, measured by the next PR. No limits, as argocd. Without a limit, `-memory.allowedPercent` (60 %) is taken of the node's memory: caches may grow that far, but only as the data demands |
+| `server.resources.requests` | cpu 50m, memory 192Mi, ephemeral storage 64Mi or 2Gi | Measured idle on floci at 1–2m and 12Mi, about 150Mi under both collectors' ingest: 192Mi sits above it. The ephemeral-storage request follows `storage_size`: 64Mi with a claim, **2Gi** without — the `emptyDir` counts against it, and GKE Autopilot makes it the limit (a pod past it is evicted, its data lost; on EKS it is first evicted under DiskPressure). Raise it in `values` to keep more. No limits, as argocd. Without a limit, `-memory.allowedPercent` (60 %) is taken of the node's memory: caches may grow that far, but only as the data demands |
 | `server.securityContext`, `podSecurityContext` | chart defaults (enabled) | Non-root, as the chart ships it |
 
 ## What the client may set — `kube.victoria_metrics`
@@ -209,7 +209,7 @@ run. `wait-converged.sh` reads `EXPECT_VICTORIA_METRICS`:
 | both | a sample written through `/api/v1/import`, read back through `/api/v1/query` via the API server's service proxy | `socle_e2e_probe=42` |
 | `e2e-aws-root` | live args, `tests/floci.tfvars` overriding the socle's value | `--storage.maxHourlySeries=50000`, with `--opentelemetry.usePrometheusNaming`, `--retentionPeriod=15d` and the chart's `--envflag.*`, `--loggerFormat=json` intact |
 | `e2e-aws-catalog` | live args, no client value | `--storage.maxHourlySeries=100000`, the socle's own |
-| both | idle, `kubectl top` | **1–2m CPU, 12Mi** — the requests were lowered to 50m/128Mi from it |
+| both | idle, `kubectl top` | **1–2m CPU, 12Mi** — the requests were lowered to 50m/128Mi from it, memory raised to 192Mi since (about 150Mi under ingest) |
 | `e2e-aws-catalog` | disabled with hello and argocd | HelmRelease NotFound within the 10 s step |
 | `e2e-aws-catalog` | re-enabled | Ready again with a **new** claim `Bound` **20 s** after hello |
 

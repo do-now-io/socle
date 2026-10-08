@@ -116,13 +116,24 @@ spec:
           podAnnotations:
             prometheus.io/scrape: "true"
             prometheus.io/port: "8428"
-          # Measured idle on floci: 1-2m CPU, 12Mi. The requests leave room
-          # for the collectors' ingest, which the otel_agent e2e measures.
+          # Measured idle on floci: 1-2m CPU, 12Mi; about 150Mi under both
+          # collectors' ingest (the otel_agent e2e), so the request is above it.
           resources:
             requests:
               cpu: 50m
-              memory: 128Mi
+              memory: 192Mi
+              # With a claim, the data live on it: the container's own disk is
+              # its log files and scratch. Without one, the emptyDir is counted
+              # against this request — and on Autopilot the request is also the
+              # limit, so a pod that outgrows it is evicted and its data lost.
+              # 2Gi is chosen, not measured, and promises no full retention:
+              # data to keep belong on a storage_size claim, or a client
+              # raises this request in values.
+              << if inputs.modules.victoria_metrics.storage_size >>
               ephemeral-storage: 64Mi
+              << else >>
+              ephemeral-storage: 2Gi
+              << end >>
     ---
     # The client's own chart values, as he wrote them in
     # kube.victoria_metrics.values, merged over the socle's document above — the

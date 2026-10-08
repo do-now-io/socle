@@ -67,7 +67,7 @@ not read. A dashboard in a Secret is not supported, deliberately.
 | `grafana.ini.server` | `domain`, `root_url: https://<domain>`, only when `domain` is set | Redirects and links; the HTTPRoute reads the same host later |
 | `datasources` | VictoriaMetrics, under `<< if inputs.modules.victoria_metrics.enabled >>` | The Prometheus type needs no plugin download; `timeInterval: 30s`, the gateway's scrape cadence |
 | `sidecar.dashboards` | on, label `grafana_dashboard` = `"1"`, `searchNamespace: ALL`, `resource: configmap` | Any module or client ships a dashboard by labelling a ConfigMap |
-| `resources.requests` | 50m / 256Mi; the sidecar 10m / 64Mi | Measured on floci at about 300Mi with both dashboards loaded, the sidecar at 72Mi. No limits, as argocd |
+| `resources.requests` | 50m / 320Mi; the sidecar 10m / 64Mi | Measured on floci at about 300Mi with both dashboards loaded, the sidecar at 72Mi: the pod asks 60m / 384Mi, 6.25 GiB a vCPU, inside GKE Autopilot's 1:6.5. No limits, as argocd |
 
 ## What the client may set — `kube.grafana`
 
@@ -150,8 +150,8 @@ checked to raise its own message only.
 | both | `/api/datasources` | exactly one: VictoriaMetrics, `prometheus`, `http://victoria-metrics.victoria-metrics.svc:8428`, default |
 | both | the collectors' dashboards, by uid | *Kubernetes / Nodes and pods*, 11 panels; *Kubernetes / Workloads*, 15 panels |
 | both | `count(k8s_pod_cpu_usage)` through Grafana's datasource proxy | **20** |
-| `e2e-aws-root` | live resources, `tests/floci.tfvars` then setting 160Mi | `cpu: 50m, memory: 160Mi` — the client's value. The e2e now sets 320Mi over the socle's 256Mi |
-| both | `kubectl top` | Grafana **302–308Mi**, 7–8m CPU; the sidecar 72Mi, 1m. The socle's 128Mi request was too low: raised to 256Mi after this run |
+| `e2e-aws-root` | live resources, `tests/floci.tfvars` then setting 160Mi | `cpu: 50m, memory: 160Mi` — the client's value. The e2e now sets 400Mi over the socle's 320Mi |
+| both | `kubectl top` | Grafana **302–308Mi**, 7–8m CPU; the sidecar 72Mi, 1m. The socle's 128Mi request was too low: raised to 256Mi after this run, then 320Mi so the request sits above the measure |
 | `e2e-aws-catalog` | `victoria_metrics` disabled | the provisioning names no datasource **4 s** later, the pod rolled |
 | `e2e-aws-catalog` | `victoria_metrics` re-enabled | VictoriaMetrics provisioned again 1 s after it was Ready |
 | `e2e-aws-catalog` | disabled with the collectors, then re-enabled | HelmRelease and `ClusterRole/grafana-dashboards` NotFound; Ready again with its ClusterRole after **24 s** |
@@ -159,7 +159,7 @@ checked to raise its own message only.
 **e2e, through Chainsaw** (`tests/e2e/chainsaw-test.yaml`, since the e2e moved
 into the modules — `docs/flux-catalog.md` §8). The table above is the bash phase
 this module shipped with; the same proof now runs on every push in the `root`
-job (`health`) and the module's own job (`health`, then `module`): `grafana-health` asserts the Deployment, the ClusterRole and the provisioning ConfigMap, then through Grafana's API (`grafana.sh`, a port-forward): exactly the datasources the socle provisions, the VictoriaLogs datasource healthy, both collectors' dashboards loaded, `k8s_pod_cpu_usage` read through the datasource proxy; `grafana-module` patches the memory request (320Mi over 256Mi), then off (release and ClusterRole gone) and on; `grafana-floci` (`platform: floci`) asserts no `grafana-route` ResourceSet without a shared Gateway.
+job (`health`) and the module's own job (`health`, then `module`): `grafana-health` asserts the Deployment, the ClusterRole and the provisioning ConfigMap, then through Grafana's API (`grafana.sh`, a port-forward): exactly the datasources the socle provisions, the VictoriaLogs datasource healthy, both collectors' dashboards loaded, `k8s_pod_cpu_usage` read through the datasource proxy; `grafana-module` patches the memory request (400Mi over 320Mi), then off (release and ClusterRole gone) and on; `grafana-floci` (`platform: floci`) asserts no `grafana-route` ResourceSet without a shared Gateway.
 
 The same run is the gateway's first green one. Its OTLP probe, from podinfo,
 came back enriched with `k8s_deployment_name=podinfo`. The workloads

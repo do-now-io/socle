@@ -197,11 +197,13 @@ spec:
               ephemeral-storage: 64Mi
         service:
           type: ClusterIP
-        # Measured on floci: about 300Mi once both dashboards are loaded.
+        # Measured on floci: about 300Mi once both dashboards are loaded,
+        # so the request is above it. With the sidecar the pod asks
+        # 60m / 384Mi: 6.25 GiB a vCPU, inside Autopilot's 1:6.5.
         resources:
           requests:
             cpu: 50m
-            memory: 256Mi
+            memory: 320Mi
             ephemeral-storage: 256Mi
     ---
     # The client's own chart values, as he wrote them in kube.grafana.values,

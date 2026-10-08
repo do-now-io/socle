@@ -101,7 +101,18 @@ spec:
             requests:
               cpu: 50m
               memory: 128Mi
+              # With a claim, the traces live on it: the container's own disk is
+              # its log files and scratch. Without one, the emptyDir is counted
+              # against this request — and on Autopilot the request is also the
+              # limit, so a pod that outgrows it is evicted and its traces lost.
+              # 2Gi is chosen, not measured, and promises no full retention:
+              # traces to keep belong on a storage_size claim, or a client
+              # raises this request in values.
+              << if inputs.modules.victoria_traces.storage_size >>
               ephemeral-storage: 64Mi
+              << else >>
+              ephemeral-storage: 2Gi
+              << end >>
     ---
     # The client's own chart values, as he wrote them in
     # kube.victoria_traces.values, merged over the socle's document above — the

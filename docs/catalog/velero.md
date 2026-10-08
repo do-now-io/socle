@@ -319,7 +319,16 @@ says:
   gives a container without requests 500m / 2Gi, and bills what is
   requested. Every container states its ephemeral storage too: 512Mi for the
   server, whose `emptyDir`s hold the plugin and Kopia's cache
-  ([docs/gcp/sizing.md](../gcp/sizing.md)).
+  ([docs/gcp/sizing.md](../gcp/sizing.md));
+- **requests on the Kopia repository maintenance Jobs** the server starts
+  at runtime, one per repository: `configuration.repositoryMaintenanceJob`
+  `.repositoryConfigData.global.podResources` (chart 12.2.0 has no
+  `requests` key there any more), which the chart writes to the
+  `velero-repo-maintenance` ConfigMap — the server's 50m / 128Mi / 512Mi,
+  since the Jobs mount its volumes and Kopia's cache with them. Velero
+  parses every field it sets, so the limits are written as `"0"` (none).
+  No render shows these Jobs: the requests guard of `pr-static.yaml` cannot
+  see them, this setting is the only thing that sizes them.
 
 The volume policy and the `VolumeSnapshotClass` are objects of the
 ResourceSet, not chart values: they are part of the socle's contract with the

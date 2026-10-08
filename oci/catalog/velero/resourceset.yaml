@@ -454,6 +454,25 @@ spec:
               << end >>
               uploaderType: kopia
               defaultVolumesToFsBackup: false
+              # The Kopia repository maintenance Jobs the server starts, one
+              # per repository (file-system backups). Created at runtime: no
+              # render shows them, so the requests guard cannot either.
+              # Without this they run with no request, which Autopilot sizes
+              # at 500m / 2Gi / 1Gi. The chart writes it to the
+              # velero-repo-maintenance ConfigMap; Velero 1.18 parses every
+              # field it sets (an empty limit fails the Job), "0" being no
+              # limit. The Jobs mount the server's volumes, Kopia's cache
+              # among them: the server's 50m / 128Mi / 512Mi.
+              repositoryMaintenanceJob:
+                repositoryConfigData:
+                  global:
+                    keepLatestMaintenanceJobs: 3
+                    podResources:
+                      cpuRequest: 50m
+                      memoryRequest: 128Mi
+                      ephemeralStorageRequest: 512Mi
+                      cpuLimit: "0"
+                      memoryLimit: "0"
               backupStorageLocation:
                 - name: default
                   provider: << $provider >>
