@@ -38,17 +38,17 @@ On aws, in one apply:
 2. **The Pod Identity Agent**, without which Crossplane's AWS providers hang
    on `169.254.170.23`.
 3. **`coredns`** (chart 1.47.1), once Cilium gives its pods a network.
-4. **`snapshot-controller`**, the **EBS CSI** driver and, with
-   `eks_addons.efs_csi`, the **EFS CSI** driver, each with its own role.
-5. **`flux-operator`**, then the instance and the envelope
-   ([The Flux catalog](flux-catalog.md#what-opentofu-deposits)).
+4. **`flux-operator`**, then the instance and the envelope
+   ([The Flux catalog](flux-catalog.md#what-opentofu-deposits)). Alongside
+   it, after CoreDNS: **`snapshot-controller`**, the **EBS CSI** driver and,
+   with `eks_addons.efs_csi`, the **EFS CSI** driver, each with its own role.
 
 On azure, the same without CoreDNS and the add-ons. On every cloud, what
 hands out cloud identities runs before the first module.
 
 Everything after Cilium waits for the node group through `schedulable_nodes`,
-and is uninstalled before it on a destroy. Zero nodes fails the plan with
-"The cluster has no schedulable node".
+and is uninstalled before it on a destroy. The foundations refuse
+`bootstrap_node_count = 0` at plan.
 
 ## Cilium's configuration
 

@@ -11,7 +11,7 @@ Every foundations module, and the bootstrap module, passes this checklist.
 
 - [ ] **One flat root module per cloud** at `opentofu/<cloud>/`, no `modules/`. *Verify:* `ls opentofu/*/`.
 - [ ] **`main.tf`, `variables.tf`, `outputs.tf`, `versions.tf`**, plus topic files. *Verify:* review.
-- [ ] **A minimal example.** *Verify:* `test -d opentofu/<cloud>/examples/minimal`.
+- [ ] **A minimal example** (foundations modules; the bootstrap is shown by the roots). *Verify:* `test -d opentofu/<cloud>/examples/minimal`.
 - [ ] **Tests.** *Verify:* `test -d opentofu/<cloud>/tests`.
 - [ ] **OpenTofu 1.10 or later**, for OCI modules. *Verify:* `required_version = ">= 1.10"`.
 

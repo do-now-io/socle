@@ -41,7 +41,7 @@ alerting: vmalert ──rules──▶ victoria_metrics;  firing ──▶ Alert
 - **The agent exports straight to the backends**, not through the gateway.
 - **Pipelines follow the modules that are on**: turning a backend off removes
   its pipelines and its datasource in one reconciliation. No `dependsOn`
-  links the six.
+  links the seven.
 - **Do not override `fullnameOverride`** in `values`: the endpoints rely on
   it, and the plan does not refuse it.
 

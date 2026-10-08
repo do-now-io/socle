@@ -87,8 +87,8 @@ in `daemonset` mode, in the `otel-agent` namespace, with the
 *Kubernetes / Nodes and pods* dashboard for Grafana. It receives nothing: no
 port, no `hostPort`.
 
-**What the socle sets**: `kubeletstats` every 20 s over the node IP (on aws,
-`insecure_skip_verify`: kubelet certificates are self-signed), `file_log` on
+**What the socle sets**: `kubeletstats` every 20 s over the node IP
+(`insecure_skip_verify`: kubelet certificates are self-signed), `file_log` on
 `/var/log/pods` while logs are on, `k8s_attributes` on both; each exporter
 follows its backend's `enabled`. Host metrics are off. Requests 50m CPU and
 128Mi, a 512Mi memory limit.

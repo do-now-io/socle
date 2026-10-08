@@ -41,6 +41,6 @@ What runs before the catalog, then Flux and the inputs. Its `kube` schema: [Inpu
 
 ## clusters/aws
 
-The AWS root you copy: foundations and bootstrap in one apply.
+The AWS root your `main.tf` calls: foundations and bootstrap in one apply.
 
 ::include{file="opentofu/clusters/aws/README.md" section="tf-docs"}

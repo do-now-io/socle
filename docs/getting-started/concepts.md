@@ -12,8 +12,8 @@ it to Flux, which installs and keeps converged the modules you chose.
 ## 1. Foundations: the cluster, created once by OpenTofu
 
 One OpenTofu module per cloud builds the network, the managed cluster, the
-first nodes and the identities. You copy a root that calls it and fill the
-cloud block:
+first nodes and the identities. Your `main.tf` calls the socle's root for your
+cloud and fills its cloud block:
 
 ```hcl
 aws = {

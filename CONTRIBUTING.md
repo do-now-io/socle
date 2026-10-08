@@ -26,7 +26,7 @@ The type is not decoration: it is what names the next version (see
 opentofu/
 ├── aws/  gcp/  azure/  scaleway/   # foundations, one module per cloud
 ├── bootstrap/                      # Cilium, Flux Operator, inputs, catalog.tf
-└── clusters/aws/                   # the root a client copies: one apply
+└── clusters/aws/                   # the root a client calls as a module: one apply
 oci/
 ├── catalog/<module>/               # one ResourceSet + its Chainsaw suite (tests/e2e)
 ├── clusters/<cloud>/               # which modules each cloud offers
@@ -64,7 +64,7 @@ the repository: `check-version.sh`, `check-catalog-clouds.sh`.
 | `pr-static.yaml` | every PR, every push to `main` | YAML and workflows lint clean; `VERSION` is stamped everywhere; `catalog.tf` and the cloud overlays agree and every module ships its e2e suite; every OpenTofu module formats, validates, passes `tofu test` and TFLint, and its terraform-docs block is current; the catalog renders and kubeconforms strictly, and every cloud overlay builds with kustomize; every alert rule file loads in `vmalert -dryRun`; no secret is committed. Trivy's misconfiguration findings: on same-repo PRs and pushes the SARIF is uploaded and the gate is the **Code scanning results / Trivy** check; only on fork PRs does the job itself fail on HIGH/CRITICAL |
 | `integration.yaml` | every PR, every push to `main` | each foundations module plans against a cloud emulator: [floci](https://floci.io) for AWS, floci-gcp, floci-az; Scaleway, which has no emulator, plans its minimal example offline. The Azure leg is `continue-on-error`: floci-az's certificate fails Go's x509 validation. A plan, not an apply |
 | `docs.yaml` | every PR, forks included | the documentation site builds in strict mode: no broken internal link or anchor, no page outside the navigation, no include that does not resolve |
-| `pages.yaml` | every push to `main`, every PR event, after every run of `publish-artifact.yaml` | the site is deployed: the last release at the root, `main` under `/dev/`, and a preview of each open PR from a branch of this repository under `/pr/<N>/`, linked from a comment on the PR |
+| `pages.yaml` | every push to `main`, every run of `docs.yaml` (the PR events), every run of `publish-artifact.yaml` on `main` | the site is deployed: the last release at the root, `main` under `/dev/`, and a preview of each open PR from a branch of this repository under `/pr/<N>/`, linked from a comment on the PR |
 | `publish-artifact.yaml` | every push, every branch | both packages are pushed to GHCR and signed; the artifact converges on floci's k3s through `e2e.yaml` (one job per module and cloud, each ending in `tofu destroy`). On `main` only: release-please refreshes its PR, and on the release, `promote` tags the alpha |
 | `cleanup-artifacts.yaml` | branch deletion, manual dispatch, nightly | pre-release tags are deleted: a branch's when it goes or after 7 days, alphas after 30. Release tags are never touched |
 | `renovate.yaml` | hourly, Dependency Dashboard edits | dependency updates, opened only once their box is ticked on the dashboard. Skipped until the `RENOVATE_APP_ID` variable and the `RENOVATE_APP_PRIVATE_KEY` secret exist |
@@ -116,8 +116,9 @@ The e2e jobs:
 
 What a module's suite holds, its labels, and the habits every suite keeps
 are in the [Catalog module standard](docs/reference/catalog-module-standard.md).
-`.github/actions/e2e-cluster` is the only shell in the e2e: it brings floci
-up and tears it down.
+`.github/actions/e2e-cluster` brings floci up and tears it down. A module's
+`tests/e2e` may hold a shell helper only for what Chainsaw cannot assert
+itself, such as a query to a backend or an AWS API call.
 
 What floci cannot prove, and the e2e therefore does not claim:
 

@@ -6,9 +6,9 @@ sidebar:
 ---
 
 What one socle version pins and requires; they move with `socle_version`
-([Upgrade the socle](../guides/upgrade.md)). No version is released yet.
+([Upgrade the socle](../guides/upgrade.md)).
 
-## main (unreleased)
+## 0.1.0
 
 ### Tooling and providers
 

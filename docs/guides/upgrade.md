@@ -13,8 +13,7 @@ OpenTofu modules, the Flux artifact and every version they pin
 
 Read the `CHANGELOG.md` entries, or the GitHub releases, between your version
 and the target; a breaking change is marked. Before 1.0.0 a breaking change
-bumps the minor: `0.3.x` to `0.4.0` may need a change on your side. No
-version has been released yet.
+bumps the minor: `0.3.x` to `0.4.0` may need a change on your side.
 
 ## 2. Verify the modules
 

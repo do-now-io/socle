@@ -64,8 +64,8 @@ oci/
     └── <module>/resourceset.yaml
 ```
 
-The cluster applies `./clusters/<cloud>`. Not pushed: `oci/catalog/<module>/tests/`,
-`oci/tests/` and `oci/.ci/`.
+The cluster applies `./clusters/<cloud>`. Not pushed: every `tests/` folder
+(`oci/catalog/<module>/tests/`, `oci/tests/`).
 
 ## Signatures
 

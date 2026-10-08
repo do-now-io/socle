@@ -26,16 +26,16 @@ deposited. `socle-root` is Ready only when every module is.
 
 ```text
 kube = { external_dsn = { enabled = true } }
-→ kube: unknown module(s) external_dsn. Catalog: argocd, crossplane, external_dns, …
+→ kube: unknown module(s) external_dsn. Catalog: alerting, argocd, crossplane, external_dns, …
 
 kube = { argocd = { domian = "argocd.acme.example" } }
-→ kube: unknown attribute. Allowed per module: {"argocd":["admin_enabled","domain",…],…}
+→ kube: unknown attribute. Allowed per module: {"alerting":[…],"argocd":["admin_enabled","domain",…],…}
 
 kube = { hello = { replicas = "three" } }
 → kube: an attribute has the wrong type. Each value must have the type of its catalog default: …
 
 kube = { velero = { enabled = true } }        # on gcp
-→ kube: a module is not offered on gcp. Cloud-bound modules: {"gateway_api":["aws","azure","scaleway"],"velero":["aws"]}
+→ kube: a module is not offered on gcp. Cloud-bound modules: {"gateway_api":["aws","azure","scaleway"],"metrics_server":["aws"],"velero":["aws"]}
 ```
 
 **Why:** `kube` is validated against the catalog at plan. Modules add their
@@ -57,9 +57,9 @@ API.
 **Fix:** `aws.crossplane = { allowed_services = [ … ] }` with the services
 your modules use, or keep Crossplane off.
 
-### The plan says the cluster has no schedulable node
+### The plan refuses a cluster with no node
 
-**What you see:** `The cluster has no schedulable node (schedulable_nodes = 0), so CoreDNS and the Flux operator cannot start.`
+**What you see:** `bootstrap_node_count must be a whole number of at least 1: a cluster with no node runs nothing, the socle included.`
 
 **Why:** the foundations' `bootstrap_node_count` is 0 (on aws).
 

@@ -73,8 +73,8 @@ kube = {
 - **Its alert rules ship with it**: a pod crash-looping or `Pending`, a node
   not ready, a Deployment missing replicas. They fire once
   [alerting](alerting.md) is on.
-- **Two replicas**: `replicaCount = 2`; the chart then elects a leader for
-  cluster metrics, so objects are not reported twice.
+- **Keep one replica**: the socle configures no leader election, so with
+  `replicaCount = 2` every object's state is reported twice.
 
 <details>
 <summary>Under the hood</summary>

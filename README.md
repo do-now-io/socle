@@ -20,9 +20,9 @@ pulls, and upgrading the whole platform is a one-line change in Git.
 
 **Documentation: <https://do-now-io.github.io/socle/>**
 
-> [!WARNING]
-> **Pre-0.1.0. Socle is still being built, and nothing has been released.**
-> Every push to `main` publishes a signed alpha. See [Status](#status).
+> [!NOTE]
+> **0.1.0 is the first release.** Before 1.0.0 a minor may break; every push
+> to `main` publishes a signed alpha. See [Status](#status).
 
 ## Why Socle
 
@@ -151,13 +151,13 @@ The stack's design: [Observability](docs/architecture/observability.md).
 | Module | What it does | Version | Default | Clouds | Notes |
 | --- | --- | --- | :---: | --- | --- |
 | [`gateway_api`](docs/catalog/gateway-api.md) | Gateway API CRDs and the shared `public` and `private` Gateways | 1.6.1 | on | AWS · Azure · Scaleway | Built into GKE on GCP |
-| [`external_dns`](docs/catalog/external-dns.md) | Publishes routes into the cloud's DNS zone | 0.22.0 | off | All | Turned on for you on AWS once a certificate is set |
+| [`external_dns`](docs/catalog/external-dns.md) | Publishes routes into the cloud's DNS zone | 0.22.0 | off | All | Turned on for you on AWS once a certificate is set and Crossplane can use `route53` |
 
 ### Cloud resources
 
 | Module | What it does | Version | Default | Clouds | Notes |
 | --- | --- | --- | :---: | --- | --- |
-| [`crossplane`](docs/catalog/crossplane.md) | Lets each module declare its own cloud IAM | 2.4.2 | off | All | Needed by `external_dns` and `velero`, and by `keda` and `external_secrets` for their cloud access |
+| [`crossplane`](docs/catalog/crossplane.md) | Lets each module declare its own cloud IAM | 2.4.2 | off | All | Needed by `velero`, and on AWS by `external_dns`, `keda` (`services`) and `external_secrets` for their own roles |
 
 ### Autoscaling
 
@@ -186,7 +186,8 @@ module installs them ahead of Flux. GKE and Kapsule run their own:
 
 ## Status
 
-Socle is **pre-0.1.0**, and no version has been released yet.
+Socle's first release is **0.1.0**. Before 1.0.0, a breaking change bumps
+the minor.
 
 - The foundations modules exist for all four clouds. The single-apply root
   exists for AWS only, so far.

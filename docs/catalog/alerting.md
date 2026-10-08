@@ -105,7 +105,7 @@ kube = {
   Grafana's UI notifies no one and is lost when its pod restarts.
 - **`tofu plan` refuses** a literal key in `receivers` (`api_url`,
   `routing_key`, `url`, `token`… use the `*_file` twin), a route to an
-  unknown receiver, a receiver named `watchdog`, the watchdog without
+  unknown receiver, a receiver named `watchdog` or `devnull`, the watchdog without
   `receivers_secret`, and rules or `alertmanager.config` in `values`.
 - **Silences are lost when Alertmanager restarts**, unless you set
   `alertmanager.persistentVolume` in `values`.

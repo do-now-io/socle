@@ -68,7 +68,7 @@ installed before `flux-operator`.
 
 | Cloud | Crossplane providers | A module that needs access |
 | --- | --- | --- |
-| AWS | IAM, EKS and S3, on Pod Identity | declares its role, policy and association; refused at plan when Crossplane is off, a service is not allowed, or the region is missing |
+| AWS | IAM, EKS and S3, on Pod Identity | declares its role, policy and association. Refused at plan when the role is required and Crossplane is off (`keda.services`, `velero`) or the region is missing; a service missing from `allowed_services` fails at IAM, on the Role's `Synced` condition |
 | GCP, Azure, Scaleway | none yet | runs without a socle-made role; you bring a credential, as its page says |
 
 Versions and the AWS contract: [crossplane](../catalog/crossplane.md).

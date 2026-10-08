@@ -35,7 +35,7 @@ namespace included, in the cluster. Step 1 prevents it.
 <summary>Under the hood</summary>
 
 The releases go in reverse: the envelope, the Flux instance, the operator,
-then on aws and azure CoreDNS and Cilium, and on aws the EKS add-ons. The
+then on aws the EKS add-ons and CoreDNS, and on aws and azure Cilium. The
 `socle` Kustomization's `deletionPolicy: WaitForTermination` holds the
 envelope until every catalog `ResourceSet` is finalized, so the operator is
 never removed with work left
