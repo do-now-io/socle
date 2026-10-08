@@ -33,7 +33,8 @@ Exact provider builds: each root's `.terraform.lock.hcl`.
 | Azure · AKS | none yet | `kubernetes_version`, required, `1.x`; the `stable` auto-upgrade channel within the maintenance window |
 | Scaleway · Kapsule | none yet | `kubernetes_version`, required, a minor or a patch; auto-upgrade moves patches only |
 
-Policy (proposed): [SOCLE-05](../decisions/socle.md#socle-05-the-kubernetes-version-moves-by-rings-n-1-then-n).
+Policy (proposed): the minor is pinned per cluster and moves dev, then
+staging, then prod, never into a cloud's extended support.
 
 ### Flux and what precedes it
 

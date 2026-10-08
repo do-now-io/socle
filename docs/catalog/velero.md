@@ -123,6 +123,4 @@ namespace deleted and restored in 10 s, the file read back unchanged; off,
 the role deleted and the bucket kept. EBS snapshots and Pod Identity on EKS
 are not measured yet.
 
-**Decisions**: [velero decisions](../decisions/velero.md).
-
 </details>

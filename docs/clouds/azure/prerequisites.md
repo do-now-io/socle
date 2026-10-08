@@ -19,7 +19,7 @@ az provider register --namespace Microsoft.ContainerService
 az provider register --namespace Microsoft.Network
 az provider register --namespace Microsoft.Compute
 az provider register --namespace Microsoft.ManagedIdentity
-# Only while the module still creates Container Insights and Managed Prometheus (AZURE-05):
+# Only while the module still creates Container Insights and Managed Prometheus:
 az provider register --namespace Microsoft.OperationalInsights
 az provider register --namespace Microsoft.Monitor
 ```
@@ -69,8 +69,7 @@ az ad app federated-credential create --id "$APP_ID" --parameters '{
 
 ### Reaching the cluster for the bootstrap
 
-The cluster is private, with no public FQDN
-([AZURE-12](../../decisions/azure.md#azure-12-a-private-cluster-with-no-public-fqdn)).
+The cluster is private, with no public FQDN.
 The foundations apply runs from anywhere; the bootstrap's runner needs:
 
 - [ ] a route to the API server's private endpoint: in the VNet, or peered,

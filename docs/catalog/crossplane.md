@@ -87,22 +87,18 @@ in `crossplane-system`. On aws, the providers `provider-family-aws`,
 **What the socle sets**: requests with no limits (about 1440Mi in all on aws),
 and every provider pod on the fixed ServiceAccount
 `crossplane-system/provider-aws`, so the foundations can bind it before the
-cluster has a node. Your `values` are merged over these
-([SOCLE-06](../decisions/socle.md#socle-06-the-clients-values-win)).
+cluster has a node. Your `values` are merged over these.
 
 **Cloud access**: the foundations' role for `crossplane-system/provider-aws`
 creates roles only under `/socle/<cluster>/` and only with the boundary, which
 allows `allowed_services` and always denies `iam`, `sts` and the account
-services ([CROSSPLANE-01](../decisions/crossplane.md#crossplane-01-the-boundary-is-an-allowlist-of-services)).
+services.
 The whole chain: [Module-owned cloud access](../architecture/module-iam.md).
 
 **Ordering**: every module that declares a role waits for the `crossplane`
-ResourceSet, Ready trivially when the module is off
-([SOCLE-04](../decisions/socle.md#socle-04-each-module-owns-its-cloud-access-the-foundations-never-change)).
+ResourceSet, Ready trivially when the module is off.
 
 **Measured** on floci 2.1.0, GitHub runner, 2026-09-30: on, providers and
 ProviderConfig converged, a module role in IAM, and off again in under 4 min.
-
-**Decisions**: [crossplane decisions](../decisions/crossplane.md).
 
 </details>

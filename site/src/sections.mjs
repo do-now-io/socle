@@ -18,15 +18,16 @@ const sidebar = [
   { label: 'Catalog', items: [{ autogenerate: { directory: 'catalog' } }] },
   { label: 'Guides', items: [{ autogenerate: { directory: 'guides' } }] },
   { label: 'Architecture', items: [{ autogenerate: { directory: 'architecture' } }] },
-  // 22 files: folded until opened, so the navigation stays readable.
-  { label: 'Decisions', collapsed: true, items: [{ autogenerate: { directory: 'decisions' } }] },
   { label: 'Reference', items: [{ autogenerate: { directory: 'reference' } }] },
   { label: 'Contributing', slug: 'contributing' },
 ];
 
 // The landing page is not one of them: it is site/src/pages/index.astro.
 const pages = ['contributing.md'];
-const directories = ['getting-started', 'clouds', 'catalog', 'guides', 'architecture', 'decisions', 'reference'];
+const directories = ['getting-started', 'clouds', 'catalog', 'guides', 'architecture', 'reference'];
+// In docs/ for contributors, read on GitHub; the site does not publish them,
+// and no published page links to them.
+const unpublished = ['decisions'];
 
 export const sections = {
   sidebar,
@@ -36,4 +37,5 @@ export const sections = {
   // A file whose name starts with `_` (a template) is not published.
   covers: (file) => pages.includes(file) || directories.some((d) => file.startsWith(`${d}/`) && !/(^|\/)_[^/]*$/.test(file)),
   isTemplate: (file) => /(^|\/)_[^/]*$/.test(file),
+  isUnpublished: (file) => unpublished.some((d) => file.startsWith(`${d}/`)),
 };

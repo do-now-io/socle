@@ -73,10 +73,9 @@ commit `8bb74df`, through `GitRepository/gateway-api` in `flux-system`; then
 `gateway-system` (and on azure `HTTPRoute/https-redirect`).
 
 **What the socle sets**: once the CRDs exist, a Job restarts the Cilium
-operator once per cluster, since it looks for them only at start
-([GATEWAY-API-01](../decisions/gateway-api.md#gateway-api-01-the-crds-from-upstream-pinned-by-commit-and-one-operator-restart)).
+operator once per cluster, since it looks for them only at start.
 The Gateways' annotations ask the cloud for a load balancer, internal for
-`private` ([GATEWAY-API-02](../decisions/gateway-api.md#gateway-api-02-shared-public-and-private-gateways-on-cilium)).
+`private`.
 
 **Cloud access**: none. The cloud's own controller creates the load balancers.
 
@@ -85,7 +84,5 @@ for its Gateway to be `Accepted`.
 
 **Measured** on k3s with Cilium 1.20.2, 2026-09-24: the class `Accepted` 17 s
 after the operator restart, the node Ready throughout.
-
-**Decisions**: [gateway-api decisions](../decisions/gateway-api.md).
 
 </details>

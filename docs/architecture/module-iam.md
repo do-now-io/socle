@@ -16,8 +16,7 @@ policy and its binding as Crossplane managed resources, then installs the
 workload that runs under it. One template, one review.
 
 **OpenTofu never creates a role for a module**, not even as an option. A
-foundations module therefore never changes because of the catalog
-([SOCLE-04](../decisions/socle.md#socle-04-each-module-owns-its-cloud-access-the-foundations-never-change)).
+foundations module therefore never changes because of the catalog.
 
 ## The one grant the foundations make
 
@@ -72,5 +71,4 @@ installed before `flux-operator`.
 | AWS | IAM, EKS and S3, on Pod Identity | declares its role, policy and association; refused at plan when Crossplane is off, a service is not allowed, or the region is missing |
 | GCP, Azure, Scaleway | none yet | runs without a socle-made role; you bring a credential, as its page says |
 
-Versions and the AWS contract: [crossplane](../catalog/crossplane.md);
-reasoning per cloud: [crossplane decisions](../decisions/crossplane.md).
+Versions and the AWS contract: [crossplane](../catalog/crossplane.md).

@@ -20,8 +20,7 @@ in the [Catalog module standard](../reference/catalog-module-standard.md).
 | Rendering | the Flux Operator, in the cluster | reads the inputs, renders, reconciles, garbage-collects |
 
 OpenTofu knows the catalog only as a schema, the artifact knows no client,
-and the operator joins them: no client repository, no templating in OpenTofu
-([SOCLE-01](../decisions/socle.md#socle-01-opentofu-ships-the-inputs-the-flux-operator-renders-them)).
+and the operator joins them: no client repository, no templating in OpenTofu.
 
 ## What OpenTofu deposits
 
@@ -37,17 +36,11 @@ and the operator joins them: no client repository, no templating in OpenTofu
 | 6 | `socle` | every cloud | the envelope, two objects below |
 
 - **`ResourceSetInputProvider` `flux-system/socle`**: your configuration, as
-  OpenTofu validated and normalised it. Every module reads this one provider
-  ([SOCLE-12](../decisions/socle.md#socle-12-one-input-provider-per-cluster)).
+  OpenTofu validated and normalised it. Every module reads this one provider.
 - **`ResourceSet` `flux-system/socle-root`**: renders the `OCIRepository`
   `socle` (URL, tag, optional pull secret, cosign `verify`) and the
   `Kustomization` `socle` on `./clusters/<cloud>`. It is Ready only when
   every module is: that, not a green apply, is convergence.
-
-Why a `ResourceSet` rather than the instance's `sync`, and why Helm only
-applies:
-[SOCLE-07](../decisions/socle.md#socle-07-the-root-source-is-a-resourceset-not-the-fluxinstance-sync),
-[SOCLE-08](../decisions/socle.md#socle-08-helm_release-is-the-applier-never-the-templater).
 
 <details>
 <summary>Under the hood</summary>
@@ -74,8 +67,7 @@ What the inputs hold (`defaultValues`, the bootstrap's `inputs` output):
 | `storage.snapshots` | the CSI snapshot controller is installed (aws) |
 
 The schema is [`catalog.tf`](../../opentofu/bootstrap/catalog.tf): `kube` is
-`any`, validated against it at plan
-([SOCLE-11](../decisions/socle.md#socle-11-kube-is-typed-any-and-validated-against-the-catalog)),
+`any`, validated against it at plan,
 then merged over the defaults, so every attribute exists and templates test
 values, never presence. What Flux deploys per cloud is declared again in
 `oci/clusters/<cloud>/kustomization.yaml`;
@@ -110,8 +102,7 @@ The `HelmRelease` has no inline `values:`; its `valuesFrom` reads, in order:
 
 Later entries win, so yours beat the socle's, and `values` beats a named
 attribute on the same key. Secrets are refused in `values`, which reaches the
-state and a ConfigMap
-([SOCLE-06](../decisions/socle.md#socle-06-the-clients-values-win)).
+state and a ConfigMap.
 
 <details>
 <summary>Under the hood</summary>

@@ -20,7 +20,7 @@ Models: `hello` for structure and tests, `argocd` for chart values.
 | Cloud binding | `<snake_name> = ["aws", …]` in `catalog_clouds`, one per line, when not on every cloud | `check-catalog-clouds.sh`; refused at plan elsewhere |
 | The e2e proof | `oci/catalog/<kebab-name>/tests/e2e/chainsaw-test.yaml`, optional `values.yaml` | `check-catalog-clouds.sh`; `e2e.yaml` runs it |
 | The page | `docs/catalog/<kebab-name>.md`, from [`_template.md`](https://github.com/do-now-io/socle/blob/main/docs/catalog/_template.md) | rule 6 of [CONTRIBUTING](../contributing.md#the-rules); the site build |
-| The decisions | `docs/decisions/<kebab-name>.md`, from [`_template.md`](https://github.com/do-now-io/socle/blob/main/docs/decisions/_template.md) | review |
+| The decisions | `docs/decisions/<kebab-name>.md`, from [`_template.md`](https://github.com/do-now-io/socle/blob/main/docs/decisions/_template.md); not published on the site | review |
 
 ## Template rules
 
@@ -32,13 +32,11 @@ Models: `hello` for structure and tests, `argocd` for chart values.
 - [ ] Cloud-specific values from `inputs.cloud` or an overlay patch; never a new OpenTofu input.
 - [ ] The chart pinned exactly (OCI tag, or `HelmRepository` `version`), listed in [Compatibility](compatibility.md).
 - [ ] No inline `spec.values`; `valuesFrom`: `<module>-socle-values`, `<module>-client-values`, then the
-      `values_secret` Secret (`optional: true`); ConfigMaps labelled `reconcile.fluxcd.io/watch: Enabled`
-      ([SOCLE-06](../decisions/socle.md#socle-06-the-clients-values-win)).
+      `values_secret` Secret (`optional: true`); ConfigMaps labelled `reconcile.fluxcd.io/watch: Enabled`.
 - [ ] `values` and `values_secret` in the schema; secret-bearing paths refused at plan, each with a failing `tofu test`.
 - [ ] `resourcesTemplate` when a block appears under a condition.
 - [ ] Cloud access as Crossplane resources in this `ResourceSet`, the chart in a child `<module>-workload`
-      that `dependsOn` the role with a `readyExpr`; nothing under `opentofu/<cloud>/`
-      ([SOCLE-04](../decisions/socle.md#socle-04-each-module-owns-its-cloud-access-the-foundations-never-change)).
+      that `dependsOn` the role with a `readyExpr`; nothing under `opentofu/<cloud>/`.
 - [ ] CRDs that hold your objects kept when off, or the page says not
       ([CRDs when a module is off](../architecture/flux-catalog.md#crds-when-a-module-is-off)).
 - [ ] New attributes in `oci/.ci/inputs-sample.yaml`; `flux-operator build rset` renders, kubeconform `-strict` passes.

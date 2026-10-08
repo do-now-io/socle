@@ -24,8 +24,7 @@ RUNNER_CIDR=203.0.113.10/32   # the CI runner's egress address
 - [ ] **A validated identity**: without it most production instance types
   have no quota, and the apply fails while building a pool.
 - [ ] **One Project per environment**, never one that held a cluster whose
-  state is not archived
-  ([SCALEWAY-08](../../decisions/scaleway.md#scaleway-08-one-project-per-environment-one-scoped-crossplane-key)).
+  state is not archived.
 - [ ] A billing alert on the Organization: the autoscaler never
   consolidates, so an oversized `pool_min_size` is silent.
 

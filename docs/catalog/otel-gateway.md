@@ -91,6 +91,4 @@ traces pipelines follow their backend's `enabled`. Requests 100m CPU and
 **Measured** on floci k3s, 2026-09-29: 5–6m CPU and 45–50Mi; an OTLP gauge
 from podinfo read back with its namespace and deployment labels.
 
-**Decisions**: [otel-gateway decisions](../decisions/otel-gateway.md).
-
 </details>

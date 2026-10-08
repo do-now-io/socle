@@ -111,7 +111,7 @@ tofu init
 tofu apply -var-file=prod.tfvars
 ```
 
-The outputs include `crossplane_access_key` and the sensitive `crossplane_secret_key`. Nothing in the cluster uses them yet ([SCALEWAY-14](../decisions/scaleway.md#scaleway-14-crossplane-through-scaleways-own-provider-pinned-with-a-regenerable-fork)): leave the key in state, never copy it into a Secret. `oidc_issuer_url` and `workload_identity_pool` are null on Scaleway.
+The outputs include `crossplane_access_key` and the sensitive `crossplane_secret_key`. Nothing in the cluster uses them yet: leave the key in state, never copy it into a Secret. `oidc_issuer_url` and `workload_identity_pool` are null on Scaleway.
 
 **Step 2, Flux and the catalog.** Add to `main.tf`:
 

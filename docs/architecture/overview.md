@@ -60,8 +60,7 @@ provider "helm" {
 ```
 
 It holds no token: an exec plugin gets a short-lived one from the runner's
-ambient credentials
-([SOCLE-13](../decisions/socle.md#socle-13-helm_kubernetes-is-an-exec-no-credential-in-the-state)).
+ambient credentials.
 
 <details>
 <summary>Under the hood</summary>
@@ -76,8 +75,7 @@ command, args } }`.
 | Azure | `kubelogin get-token --login azurecli --server-id 6dae42f8-4368-4678-94ff-3960e28e3630` | needs Entra ID authentication, which `opentofu/azure` does not configure yet |
 | Scaleway | `sh -c` emitting an `ExecCredential` from `SCW_SECRET_KEY` | output exists; no Scaleway root yet |
 
-No `kubernetes` provider exists in the chain
-([SOCLE-10](../decisions/socle.md#socle-10-no-kubernetes-provider)). On aws
+No `kubernetes` provider exists in the chain. On aws
 the bootstrap does not `depends_on` the whole foundations module: Cilium
 follows the cluster alone (the nodes become Ready only once it runs), and
 everything else follows the node group through `schedulable_nodes`

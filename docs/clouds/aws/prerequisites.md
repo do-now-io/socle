@@ -18,8 +18,7 @@ none of it.
   Spot or Auto Scaling.
 - [ ] With `gateway_certificate`: a **public** Route 53 hosted zone in the same
   account, for the domain or a parent of it.
-- [ ] GuardDuty, if wanted, turned on by the account owner
-  ([AWS-14](../../decisions/aws.md#aws-14-guardduty-is-the-account-owners)).
+- [ ] GuardDuty, if wanted, turned on by the account owner.
 
 ## Permissions for the apply
 

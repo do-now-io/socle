@@ -7,8 +7,7 @@ category: observability
 VictoriaTraces single-node stores your applications' traces, read in
 [grafana](grafana.md) through the Jaeger API. **Off by default**, on every
 cloud: VictoriaTraces is not yet GA, and an upgrade may drop the traces it
-holds
-([VICTORIA-TRACES-01](../decisions/victoria-traces.md#victoria-traces-01-off-by-default-until-victoriatraces-is-ga)).
+holds.
 
 ## Getting started
 
@@ -93,7 +92,5 @@ otel-gateway and a Jaeger datasource to Grafana.
 
 **Measured** on floci k3s, 2026-09-30: Ready in 26 s; a span posted to the
 gateway found by its trace id 24 s later.
-
-**Decisions**: [victoria-traces decisions](../decisions/victoria-traces.md).
 
 </details>

@@ -1,6 +1,6 @@
 ---
 title: Scaleway · Kapsule
-description: What the socle builds on Scaleway, the decisions behind it, what it costs and what is proven.
+description: What the socle builds on Scaleway, what is decided for you, what it costs and what is proven.
 sidebar:
   label: Overview
   order: 0
@@ -18,25 +18,6 @@ then installs Flux and the catalog; Kapsule operates Cilium and CoreDNS.
 Start with [Prerequisites](prerequisites.md), then the
 [Scaleway quickstart](../../getting-started/scaleway.md). What is decided for
 you is in [Foundations](foundations.md).
-
-## The decisions
-
-All in [Scaleway decisions](../../decisions/scaleway.md).
-
-- [SCALEWAY-01](../../decisions/scaleway.md#scaleway-01-kapsule-not-kosmos) · accepted · Kapsule, not Kosmos
-- [SCALEWAY-02](../../decisions/scaleway.md#scaleway-02-a-dedicated-control-plane-in-production-mutualized-elsewhere) · accepted · dedicated control plane in production, mutualized elsewhere
-- [SCALEWAY-03](../../decisions/scaleway.md#scaleway-03-kapsules-own-cilium) · accepted · Kapsule's own Cilium
-- [SCALEWAY-04](../../decisions/scaleway.md#scaleway-04-compute3-x-pools-in-two-zones-under-the-cluster-autoscaler) · accepted · COMPUTE3-X pools in two zones, autoscaled
-- [SCALEWAY-05](../../decisions/scaleway.md#scaleway-05-an-explicit-version-patches-in-a-required-window) · accepted · explicit version, patches in a required window
-- [SCALEWAY-06](../../decisions/scaleway.md#scaleway-06-full-isolation-behind-one-public-gateway-per-zone) · accepted · full isolation behind a Public Gateway per zone
-- [SCALEWAY-07](../../decisions/scaleway.md#scaleway-07-add-ons-and-load-balancers-delegated-load-balancer-certificates-refused) · accepted · add-ons and load balancers delegated
-- [SCALEWAY-08](../../decisions/scaleway.md#scaleway-08-one-project-per-environment-one-scoped-crossplane-key) · accepted · one Project per environment, one scoped Crossplane key
-- [SCALEWAY-09](../../decisions/scaleway.md#scaleway-09-dns-and-certificates-through-external-dns-and-the-scaleway-webhook) · proposed · DNS and certificates through External-DNS
-- [SCALEWAY-10](../../decisions/scaleway.md#scaleway-10-backup-with-velero-into-object-storage) · proposed · Velero into Object Storage
-- [SCALEWAY-11](../../decisions/scaleway.md#scaleway-11-workload-metrics-stay-in-the-cluster-never-pushed-to-cockpit) · accepted · workload metrics never pushed to Cockpit
-- [SCALEWAY-12](../../decisions/scaleway.md#scaleway-12-a-query-only-cockpit-token) · accepted · a query-only Cockpit token
-- [SCALEWAY-13](../../decisions/scaleway.md#scaleway-13-scaleways-own-signals-federated-costed-per-project) · proposed · Scaleway's signals federated, costed per Project
-- [SCALEWAY-14](../../decisions/scaleway.md#scaleway-14-crossplane-through-scaleways-own-provider-pinned-with-a-regenerable-fork) · proposed · Crossplane through Scaleway's own provider
 
 ## Cost
 

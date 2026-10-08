@@ -7,8 +7,7 @@ sidebar:
 
 This guide restores one namespace from a backup taken by the
 [velero](../catalog/velero.md) module, on aws. It is an operator's task: a
-`Restore` can rewrite any namespace
-([VELERO-04](../decisions/velero.md#velero-04-restore-is-an-operator-action)).
+`Restore` can rewrite any namespace.
 
 **What you need:** the `velero` CLI 1.18, a kubeconfig with cluster-admin
 rights, and the module's server running

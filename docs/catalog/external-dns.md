@@ -94,12 +94,10 @@ every cloud. On aws with crossplane on, `Role/external-dns` and
 **What the socle sets**: sources `service`, `ingress`, and `gateway-httproute`
 when gateway-api is on; a TXT registry with the `socle-` prefix; reaction on
 events, so a new route resolves within seconds; the provider of the cloud.
-Your `values` are merged over these
-([SOCLE-06](../decisions/socle.md#socle-06-the-clients-values-win)).
+Your `values` are merged over these.
 
 **Cloud access**: on aws with crossplane on, the role `<cluster>-external-dns`
-may change records only when every name is under a `domain_filters` entry
-([EXTERNAL-DNS-01](../decisions/external-dns.md#external-dns-01-route-53-writes-scoped-by-record-name)),
+may change records only when every name is under a `domain_filters` entry,
 and read every zone of the account. Elsewhere, the credential is yours.
 
 **Ordering**: waits for the `crossplane` ResourceSet; on aws the chart is
@@ -108,7 +106,5 @@ hands credentials at admission only.
 
 **Measured** on floci, 2026-09-24: an Ingress became an A record with its
 `socle-` TXT; with `sync`, both went when the Ingress did.
-
-**Decisions**: [external-dns decisions](../decisions/external-dns.md).
 
 </details>

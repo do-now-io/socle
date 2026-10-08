@@ -111,6 +111,4 @@ collectors and Grafana rely on.
 **Measured** on floci k3s, 2026-09-29: under both collectors on one node,
 10–14m CPU and about 150Mi.
 
-**Decisions**: [victoria-metrics decisions](../decisions/victoria-metrics.md).
-
 </details>

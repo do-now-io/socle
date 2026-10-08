@@ -9,16 +9,16 @@ sidebar:
 
 - **Replacing the cluster** (`cluster_name`, `bootstrap_cluster_creator_admin_permissions`): apply `-target=module.foundations` first, then the full apply ([root README](../../../opentofu/clusters/aws/README.md)).
 - **Destroying with the API unreachable**: if the runner left `cluster_endpoint_public_access_cidrs`, run `tofu state rm module.socle` first.
-- **The GuardDuty detector**: the account owner's ([AWS-14](../../decisions/aws.md#aws-14-guardduty-is-the-account-owners)).
+- **The GuardDuty detector**: the account owner's.
 - **The Route 53 zone**: with `gateway_certificate`, the public zone must already exist; the module never creates it.
 
 ## Provider limits
 
-- **No IPv6 cluster**: Cilium's ENI IPv6 mode is beta ([AWS-06](../../decisions/aws.md#aws-06-ipv6-refused)).
-- **No Auto Mode, no Fargate**: neither runs Cilium ([AWS-01](../../decisions/aws.md#aws-01-eks-standard-not-auto-mode)).
+- **No IPv6 cluster**: Cilium's ENI IPv6 mode is beta.
+- **No Auto Mode, no Fargate**: neither runs Cilium.
 - **EKS picks the service CIDR** (`172.20.0.0/16` or `10.100.0.0/16`); no variable for it.
-- **The API endpoint is public**, restricted to `cluster_endpoint_public_access_cidrs`, which must include the runner ([AWS-11](../../decisions/aws.md#aws-11-public-api-endpoint-restricted-by-cidr-private-access-on)).
-- **AWS upgrades the cluster at the end of standard support**, whatever the pipeline did ([AWS-15](../../decisions/aws.md#aws-15-no-extended-support)).
+- **The API endpoint is public**, restricted to `cluster_endpoint_public_access_cidrs`, which must include the runner.
+- **AWS upgrades the cluster at the end of standard support**, whatever the pipeline did.
 - **An existing VPC** (`create_vpc = false`) gets no VPC endpoints and no flow logs.
 - **The NLBs' TLS policy is AWS's default**; the socle sets none.
 - **Elastic IPs**: one per AZ per cluster, 5 per region by default ([Prerequisites](prerequisites.md#quotas)).
@@ -28,4 +28,4 @@ sidebar:
 - **Capacity for workloads**: no Karpenter ([#53](https://github.com/do-now-io/socle/issues/53)); everything runs on the two bootstrap Spot nodes.
 - **A default StorageClass**: a claim with no class stays `Pending`. Keep `storage_size = ""` on `victoria_metrics`, `victoria_logs` and `victoria_traces` (an `emptyDir`), or create a StorageClass with provisioner `ebs.csi.aws.com` annotated `storageclass.kubernetes.io/is-default-class: "true"`.
 - **Backups outside the cluster's account and region** ([velero](../../catalog/velero.md)).
-- **The Upgrade Insights pre-check** ([AWS-04](../../decisions/aws.md#aws-04-upgrade-insights-as-a-pipeline-pre-check)) and **cloud-resource observability** ([AWS-13](../../decisions/aws.md#aws-13-cloud-resources-observed-from-a-central-cluster)): proposed, not built.
+- **The Upgrade Insights pre-check** and **cloud-resource observability**: proposed, not built.

@@ -23,8 +23,7 @@ printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io -u <github user> --password-s
 tofu init
 ```
 
-At v1 the package goes public and this step goes away
-([SOCLE-26](../decisions/socle.md#socle-26-opentofu-modules-goes-public-at-v1)).
+At v1 the package goes public and this step goes away.
 
 ## A private mirror of the Flux artifact
 

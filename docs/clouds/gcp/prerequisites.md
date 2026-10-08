@@ -19,8 +19,7 @@ PRINCIPAL=user:you@example.com   # or serviceAccount:…, principalSet://… for
 ## Account
 
 - [ ] **One project per environment**, its ID matching
-  `^[a-z][a-z0-9-]{4,28}[a-z0-9]$`
-  ([GCP-06](../../decisions/gcp.md#gcp-06-workload-identity-federation-a-google-service-account-per-kubernetes-service-account)).
+  `^[a-z][a-z0-9-]{4,28}[a-z0-9]$`.
 - [ ] A billing account linked, and a budget with alert thresholds.
 - [ ] Org policies that permit private GKE nodes, Cloud NAT and external NAT
   addresses.

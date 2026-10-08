@@ -96,6 +96,4 @@ follows its backend's `enabled`. Host metrics are off. Requests 50m CPU and
 **Measured** on floci k3s, 2026-09-30: one agent collecting metrics and
 logs at 10–12m CPU and 52Mi.
 
-**Decisions**: [otel-agent decisions](../decisions/otel-agent.md).
-
 </details>

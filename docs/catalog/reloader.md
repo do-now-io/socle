@@ -93,6 +93,4 @@ memory limit, and `prometheus.io/scrape` for [otel-gateway](otel-gateway.md).
 **Measured** on floci k3s, 2026-10-02: Available in 16 s; a ConfigMap change
 rolled the annotated workload in under 1 s, a Secret change in 10 s.
 
-**Decisions**: [reloader decisions](../decisions/reloader.md).
-
 </details>

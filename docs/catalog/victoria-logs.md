@@ -93,6 +93,4 @@ persistence from the attributes, requests 50m CPU and 128Mi, and
 **Measured** on floci k3s, 2026-09-30: a container's line found 6 s after
 its pod was created; VictoriaLogs at 2m CPU and 32–47Mi.
 
-**Decisions**: [victoria-logs decisions](../decisions/victoria-logs.md).
-
 </details>

@@ -84,20 +84,16 @@ kube = {
 **Installed**: chart `argo-cd` 10.9.2 (ArgoCD v3.5.3) from
 `oci://ghcr.io/argoproj/argo-helm/argo-cd`, in the `argocd` namespace. With a
 `domain`, a `gateway` and the shared Gateways, a child `ResourceSet/argocd-route`
-holds `HTTPRoute/argocd-server`, which waits for its Gateway to be `Accepted`
-([ARGOCD-02](../decisions/argocd.md#argocd-02-the-socle-owns-the-httproute-not-the-chart)).
+holds `HTTPRoute/argocd-server`, which waits for its Gateway to be `Accepted`.
 
 **What the socle sets**: one replica of each component (two with `ha`; the
 controller stays at one), requests with no limits, `server.insecure` (TLS
 ends at the Gateway), `dex` and `notifications` off, `admin.enabled` and
-`global.domain` from the attributes. Your `values` are merged over these
-([SOCLE-06](../decisions/socle.md#socle-06-the-clients-values-win)).
+`global.domain` from the attributes. Your `values` are merged over these.
 
 **Cloud access**: none.
 
 **Measured** on floci k3s, 2026-09-24: Ready 42 s after the wait started
 (53 s on the full aws root); turned off, removed in 8 s.
-
-**Decisions**: [argocd decisions](../decisions/argocd.md).
 
 </details>

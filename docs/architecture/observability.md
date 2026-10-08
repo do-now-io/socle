@@ -7,14 +7,12 @@ sidebar:
 
 Every cluster carries its own monitoring stack: OpenTelemetry collects,
 the Victoria family stores, Grafana reads. Same templates on all four clouds,
-no remote-write, no federation
-([SOCLE-03](../decisions/socle.md#socle-03-one-in-cluster-monitoring-stack-on-every-cloud)),
+no remote-write, no federation,
 and no cloud access: every backend stores on a volume.
 
 ## Six modules
 
-One module per chart release
-([SOCLE-27](../decisions/socle.md#socle-27-one-module-per-chart-release-two-collector-modules)):
+One module per chart release:
 
 | Module | Runs as | Default |
 | --- | --- | --- |
@@ -37,13 +35,11 @@ kubelet, /var/log/pods ◀──── otel_agent ─────────┤
 grafana ──▶ Prometheus, VictoriaLogs and Jaeger datasources, one per backend that is on
 ```
 
-- **Every signal is OTLP over HTTP**, which all three backends ingest
-  ([SOCLE-28](../decisions/socle.md#socle-28-otlp-everywhere-the-otelcol-k8s-collector-no-remote-write)).
+- **Every signal is OTLP over HTTP**, which all three backends ingest.
 - **The agent exports straight to the backends**, not through the gateway.
 - **Pipelines follow the modules that are on**: turning a backend off removes
   its pipelines and its datasource in one reconciliation. No `dependsOn`
-  links the six
-  ([SOCLE-29](../decisions/socle.md#socle-29-no-dependson-between-the-monitoring-modules)).
+  links the six.
 - **Do not override `fullnameOverride`** in `values`: the endpoints rely on
   it, and the plan does not refuse it.
 
@@ -78,8 +74,7 @@ written while it was down.
 
 Both are attributes, `retention` and `storage_size`
 ([Inputs](../reference/inputs.md)). The claim uses the cluster's default
-StorageClass
-([SOCLE-30](../decisions/socle.md#socle-30-a-pvc-by-default-an-emptydir-on-request)).
+StorageClass.
 
 - **On EKS, set `storage_size = ""`** until a StorageClass is marked
   default: EKS marks none, and the claim would stay `Pending`. The backend
@@ -103,8 +98,7 @@ VictoriaMetrics caps new series per hour (`-storage.maxHourlySeries`,
 Grafana gets one datasource per backend that is on: Prometheus type for
 VictoriaMetrics, the `victoriametrics-logs-datasource` plugin, Jaeger type
 for VictoriaTraces. Dashboards are ConfigMaps labelled `grafana_dashboard`,
-shipped by the module they describe, on OpenTelemetry names
-([SOCLE-31](../decisions/socle.md#socle-31-the-socles-dashboards-on-opentelemetry-names)).
+shipped by the module they describe, on OpenTelemetry names.
 
 - **No egress to grafana.com, no logs**: the VictoriaLogs plugin downloads
   at start.
@@ -133,6 +127,4 @@ Grafana.
 The cloud's metrics on managed services, and its billing, are designed to be
 read by a central plane that is not built yet: service metrics pulled every
 300 s, cluster metrics never through the cloud API, one Alertmanager for all
-clouds, cost data in your own account. Each cloud's design is in its
-decision file: [AWS](../decisions/aws.md), [GCP](../decisions/gcp.md),
-[Azure](../decisions/azure.md), [Scaleway](../decisions/scaleway.md).
+clouds, cost data in your own account.

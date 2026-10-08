@@ -11,7 +11,7 @@ requires: # only what the module does not work without; each also appears in its
 <!--
 The page of one catalog module, for the client who turns it on. Copy this file
 to docs/catalog/<module>.md (the folder name under oci/catalog/). Design
-rationale goes to docs/decisions/<module>.md; no PR history, no test counts,
+rationale goes to docs/decisions/<module>.md, which the site does not publish; no PR history, no test counts,
 no questions for a reviewer. Files starting with `_` are not published.
 -->
 
@@ -90,5 +90,3 @@ What to know when the socle moves this module to a new chart version.
 | Date | Where | What |
 | --- | --- | --- |
 | 2026-10-01 | floci, k3s | converged in 42 s; 120 MiB at idle |
-
-Its decisions: [<module> decisions](../decisions/<module>.md).

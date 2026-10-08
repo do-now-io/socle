@@ -56,9 +56,9 @@ Control plane tiers, fr-par, 2026-10-05:
 ## What the socle does not offer here yet
 
 - **No Gateway API implementation**: CRDs only, no shared Gateway, no route; ArgoCD and Grafana are not exposed.
-- **No Crossplane provider**: the foundations' Crossplane key has no consumer ([SCALEWAY-14](../../decisions/scaleway.md#scaleway-14-crossplane-through-scaleways-own-provider-pinned-with-a-regenerable-fork)).
-- **No Velero**: AWS only ([SCALEWAY-10](../../decisions/scaleway.md#scaleway-10-backup-with-velero-into-object-storage)).
-- **No cert-manager** ([SCALEWAY-09](../../decisions/scaleway.md#scaleway-09-dns-and-certificates-through-external-dns-and-the-scaleway-webhook)).
-- **No Cockpit federation, no billing reader**: the query token only ([SCALEWAY-13](../../decisions/scaleway.md#scaleway-13-scaleways-own-signals-federated-costed-per-project)).
+- **No Crossplane provider**: the foundations' Crossplane key has no consumer.
+- **No Velero**: AWS only.
+- **No cert-manager**.
+- **No Cockpit federation, no billing reader**: the query token only.
 - **No `opentofu/clusters/scaleway` root** ([quickstart](../../getting-started/scaleway.md)).
 - **No key rotation**: changing `crossplane_key_expires_at` replaces the key; nothing carries it into the cluster.

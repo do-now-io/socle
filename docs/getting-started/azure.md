@@ -75,7 +75,7 @@ module "foundations" {
   owner               = "platform"
   environment         = "dev"
 
-  # Required, no default. The version policy is the socle's (SOCLE-05);
+  # Required, no default: pin the minor per cluster, dev before prod;
   # AKS's stable channel then moves the cluster inside the window below.
   kubernetes_version = var.kubernetes_version
 
@@ -219,5 +219,4 @@ not.
 - [Upgrade](../guides/upgrade.md) with `socle_version`; keep
   `kubernetes_version` at the cluster's minor once AKS has moved it
   ([limits](../clouds/azure/limits.md#what-no-apply-can-finish)).
-- [Foundations](../clouds/azure/foundations.md) and
-  [Azure decisions](../decisions/azure.md).
+- [Foundations](../clouds/azure/foundations.md): what is decided for you.

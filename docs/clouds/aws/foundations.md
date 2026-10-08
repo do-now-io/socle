@@ -15,22 +15,22 @@ module together with the bootstrap.
 
 *Enforced*: no variable. *Default*: a variable changes it.
 
-| Position | | Decision |
-| --- | --- | --- |
-| EKS Standard, no Auto Mode | enforced | [AWS-01](../../decisions/aws.md#aws-01-eks-standard-not-auto-mode) |
-| No VPC CNI, kube-proxy or CoreDNS add-on | enforced | [AWS-02](../../decisions/aws.md#aws-02-vpc-cni-and-kube-proxy-refused-aws-only-add-ons-stay-eks-add-ons) |
-| Pod Identity only, no IAM OIDC provider | enforced | [AWS-03](../../decisions/aws.md#aws-03-pod-identity-not-irsa) |
-| `force_update_version = false` | default | [AWS-04](../../decisions/aws.md#aws-04-upgrade-insights-as-a-pipeline-pre-check) |
-| Secrets encrypted with a module KMS key, rotated | default | [AWS-10](../../decisions/aws.md#aws-10-secrets-encrypted-with-kms-by-default) |
-| Public endpoint restricted by CIDR (`0.0.0.0/0` refused), private on | enforced | [AWS-11](../../decisions/aws.md#aws-11-public-api-endpoint-restricted-by-cidr-private-access-on) |
-| A public and a private subnet per AZ, at least two AZs | enforced | [AWS-12](../../decisions/aws.md#aws-12-reference-network-public-and-private-per-az) |
-| A NAT Gateway and private route table per AZ | default | [AWS-12](../../decisions/aws.md#aws-12-reference-network-public-and-private-per-az) |
-| S3 gateway endpoint; `ecr.api`, `ecr.dkr`, `sts`, `ec2`, `logs` interface endpoints | enforced on a module VPC | [AWS-12](../../decisions/aws.md#aws-12-reference-network-public-and-private-per-az) |
-| Standard support only | enforced | [AWS-15](../../decisions/aws.md#aws-15-no-extended-support) |
-| Log groups owned by the module, 90 days, KMS; all five control-plane logs; VPC flow logs | default | [AWS-16](../../decisions/aws.md#aws-16-the-account-keeps-custody-of-the-logs) |
-| Two Spot Graviton bootstrap nodes, untainted, not autoscaled | default | [AWS-17](../../decisions/aws.md#aws-17-a-bootstrap-node-group-of-two-spot-nodes) |
-| Bootstrap nodes on AL2023, IMDSv2 hop limit 1, encrypted gp3, private subnets | enforced | [AWS-17](../../decisions/aws.md#aws-17-a-bootstrap-node-group-of-two-spot-nodes) |
-| Crossplane's role and permissions boundary, only when `crossplane` is set | default | [AWS-18](../../decisions/aws.md#aws-18-crossplanes-identity-and-its-permissions-boundary-in-the-foundations) |
+| Position | |
+| --- | --- |
+| EKS Standard, no Auto Mode | enforced |
+| No VPC CNI, kube-proxy or CoreDNS add-on | enforced |
+| Pod Identity only, no IAM OIDC provider | enforced |
+| `force_update_version = false` | default |
+| Secrets encrypted with a module KMS key, rotated | default |
+| Public endpoint restricted by CIDR (`0.0.0.0/0` refused), private on | enforced |
+| A public and a private subnet per AZ, at least two AZs | enforced |
+| A NAT Gateway and private route table per AZ | default |
+| S3 gateway endpoint; `ecr.api`, `ecr.dkr`, `sts`, `ec2`, `logs` interface endpoints | enforced on a module VPC |
+| Standard support only | enforced |
+| Log groups owned by the module, 90 days, KMS; all five control-plane logs; VPC flow logs | default |
+| Two Spot Graviton bootstrap nodes, untainted, not autoscaled | default |
+| Bootstrap nodes on AL2023, IMDSv2 hop limit 1, encrypted gp3, private subnets | enforced |
+| Crossplane's role and permissions boundary, only when `crossplane` is set | default |
 
 <details>
 <summary>Under the hood</summary>
@@ -60,20 +60,18 @@ unavailable at a time), `crossplane = null`.
 
 ## What is deliberately absent
 
-- **IPv6** ([AWS-06](../../decisions/aws.md#aws-06-ipv6-refused)) and
-  **security groups for pods** ([AWS-07](../../decisions/aws.md#aws-07-security-groups-for-pods-refused)).
+- **IPv6** and
+  **security groups for pods**.
 - **EKS add-ons**: the bootstrap module creates them once Cilium runs.
 - **Load balancers**: EKS's in-tree controller gives the shared Gateways
-  their NLBs; this module only creates their ACM certificate
-  ([GATEWAY-API-02](../../decisions/gateway-api.md#gateway-api-02-shared-public-and-private-gateways-on-cilium)).
+  their NLBs; this module only creates their ACM certificate.
 - **IRSA**: the OIDC issuer URL is an output, unused.
 - **Workload identities other than Crossplane's**: each catalog module
-  declares its own
-  ([SOCLE-04](../../decisions/socle.md#socle-04-each-module-owns-its-cloud-access-the-foundations-never-change));
+  declares its own;
   the CSI drivers' roles are the bootstrap's.
 - **Fargate and Karpenter**: Karpenter is to be a catalog module
   ([#53](https://github.com/do-now-io/socle/issues/53)).
-- **GuardDuty** ([AWS-14](../../decisions/aws.md#aws-14-guardduty-is-the-account-owners)).
+- **GuardDuty**.
 - **A DynamoDB endpoint, a region variable, any credential as input.**
 
 ## Measured

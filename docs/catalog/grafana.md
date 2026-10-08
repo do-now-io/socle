@@ -87,17 +87,13 @@ be `Accepted`.
 
 **What the socle sets**: read-only datasources for VictoriaMetrics (the
 default), VictoriaLogs and VictoriaTraces, each only while its backend is on;
-a dashboard sidecar reading ConfigMaps only
-([GRAFANA-01](../decisions/grafana.md#grafana-01-a-socle-clusterrole-limited-to-configmaps));
+a dashboard sidecar reading ConfigMaps only;
 no persistence, no analytics; requests with no limits. Your `values` are
-merged over these ([SOCLE-06](../decisions/socle.md#socle-06-the-clients-values-win)).
+merged over these.
 
-**Cloud access**: none; egress to grafana.com for the plugin
-([GRAFANA-02](../decisions/grafana.md#grafana-02-the-victorialogs-plugin-downloaded-at-start)).
+**Cloud access**: none; egress to grafana.com for the plugin.
 
 **Measured** on floci k3s, 2026-09-30: Grafana 302–308Mi with both
 collectors' dashboards; a backend turned off drops its datasource in 4 s.
-
-**Decisions**: [grafana decisions](../decisions/grafana.md).
 
 </details>

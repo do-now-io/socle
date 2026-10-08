@@ -84,12 +84,9 @@ kube = {
 `oci://ghcr.io/kyverno/charts/kyverno`, in the `kyverno` namespace.
 
 **What the socle sets**: three admission replicas with a PodDisruptionBudget,
-one background and one reports controller, no cleanup controller
-([KYVERNO-02](../decisions/kyverno.md#kyverno-02-no-cleanup-controller)),
+one background and one reports controller, no cleanup controller,
 requests with no limits, scrape annotations and the chart's Grafana
-dashboard. Your `values` are merged over these
-([SOCLE-06](../decisions/socle.md#socle-06-the-clients-values-win),
-[KYVERNO-01](../decisions/kyverno.md#kyverno-01-engine-and-policies-two-modules-failing-open)).
+dashboard. Your `values` are merged over these.
 
 **Cloud access**: none.
 
@@ -97,7 +94,5 @@ dashboard. Your `values` are merged over these
 
 **Measured** on floci, GitHub runner, 2026-10-01: three admission replicas
 Ready in 52 s; off, uninstalled in 16 s.
-
-**Decisions**: [kyverno decisions](../decisions/kyverno.md).
 
 </details>

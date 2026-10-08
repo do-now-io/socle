@@ -88,12 +88,11 @@ kube = {
 
 **What the socle sets**: CRDs kept on removal, `PushSecret` processing off,
 small requests with memory limits, and scrape annotations for
-[otel-gateway](otel-gateway.md). Your `values` are merged over these
-([SOCLE-06](../decisions/socle.md#socle-06-the-clients-values-win)).
+[otel-gateway](otel-gateway.md). Your `values` are merged over these.
 
 **Cloud access**: on aws, the role `<cluster>-external-secrets` may only
 `GetSecretValue` and `DescribeSecret` on `secret:<prefix>/*` in the cluster's
-region ([EXTERNAL-SECRETS-01](../decisions/external-secrets.md#external-secrets-01-the-name-prefix-is-the-boundary)).
+region.
 Elsewhere, none.
 
 **Ordering**: waits for the `crossplane` ResourceSet; the chart waits for the
@@ -102,7 +101,5 @@ crossplane, never in the same apply.
 
 **Measured** on floci, 2026-10-02: a rotation reached the `Secret` and
 Reloader rolled the Deployment in 25 s (`refreshInterval: 10s`).
-
-**Decisions**: [external-secrets decisions](../decisions/external-secrets.md).
 
 </details>

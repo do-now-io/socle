@@ -11,21 +11,21 @@ Flux.
 
 ## What is decided for you
 
-| Position | How | Decision |
-| --- | --- | --- |
-| Kapsule; Kosmos refused | validation | [SCALEWAY-01](../../decisions/scaleway.md#scaleway-01-kapsule-not-kosmos) |
-| Dedicated 4 control plane in `prod`, mutualized elsewhere | from `environment`; `prod` on mutualized fails the plan | [SCALEWAY-02](../../decisions/scaleway.md#scaleway-02-a-dedicated-control-plane-in-production-mutualized-elsewhere) |
-| Kapsule's Cilium | enforced | [SCALEWAY-03](../../decisions/scaleway.md#scaleway-03-kapsules-own-cilium) |
-| One pool per zone, `fr-par-1` and `fr-par-2`, `COMPUTE3-X8C-16G`, 2 to 5 nodes | default; shared-vCPU and dev types refused | [SCALEWAY-04](../../decisions/scaleway.md#scaleway-04-compute3-x-pools-in-two-zones-under-the-cluster-autoscaler) |
-| `least_waste` expander, a placement group per zone | default; `price` refused | [SCALEWAY-04](../../decisions/scaleway.md#scaleway-04-compute3-x-pools-in-two-zones-under-the-cluster-autoscaler) |
-| An explicit version, patches in a window | both required | [SCALEWAY-05](../../decisions/scaleway.md#scaleway-05-an-explicit-version-patches-in-a-required-window) |
-| No public IP on nodes; a Public Gateway per zone | enforced | [SCALEWAY-06](../../decisions/scaleway.md#scaleway-06-full-isolation-behind-one-public-gateway-per-zone) |
-| API server allow-list, `0.0.0.0/0` refused | required | [SCALEWAY-06](../../decisions/scaleway.md#scaleway-06-full-isolation-behind-one-public-gateway-per-zone) |
-| A /22 Private Network, a security group per cluster and zone | default | [SCALEWAY-06](../../decisions/scaleway.md#scaleway-06-full-isolation-behind-one-public-gateway-per-zone) |
-| One Project per environment | `project_id` required | [SCALEWAY-08](../../decisions/scaleway.md#scaleway-08-one-project-per-environment-one-scoped-crossplane-key) |
-| One Project-scoped Crossplane key, bound to the gateways' addresses | `crossplane_permission_sets` required, `AllProductsFullAccess` refused | [SCALEWAY-08](../../decisions/scaleway.md#scaleway-08-one-project-per-environment-one-scoped-crossplane-key) |
-| Nothing written to Cockpit; a query-only token | default | [SCALEWAY-11](../../decisions/scaleway.md#scaleway-11-workload-metrics-stay-in-the-cluster-never-pushed-to-cockpit), [SCALEWAY-12](../../decisions/scaleway.md#scaleway-12-a-query-only-cockpit-token) |
-| `owner`, `environment`, `socle-version`, `cluster` tags on every resource | enforced | — |
+| Position | How |
+| --- | --- |
+| Kapsule; Kosmos refused | validation |
+| Dedicated 4 control plane in `prod`, mutualized elsewhere | from `environment`; `prod` on mutualized fails the plan |
+| Kapsule's Cilium | enforced |
+| One pool per zone, `fr-par-1` and `fr-par-2`, `COMPUTE3-X8C-16G`, 2 to 5 nodes | default; shared-vCPU and dev types refused |
+| `least_waste` expander, a placement group per zone | default; `price` refused |
+| An explicit version, patches in a window | both required |
+| No public IP on nodes; a Public Gateway per zone | enforced |
+| API server allow-list, `0.0.0.0/0` refused | required |
+| A /22 Private Network, a security group per cluster and zone | default |
+| One Project per environment | `project_id` required |
+| One Project-scoped Crossplane key, bound to the gateways' addresses | `crossplane_permission_sets` required, `AllProductsFullAccess` refused |
+| Nothing written to Cockpit; a query-only token | default |
+| `owner`, `environment`, `socle-version`, `cluster` tags on every resource | enforced |
 
 <details>
 <summary>Under the hood</summary>
@@ -51,8 +51,8 @@ Flux.
 - **Shared-vCPU and development node types**: a 99% SLO or less.
 - **`feature_gates`, `admission_plugins`, `apiserver_cert_sans`, `open_id_connect_config`**: the socle needs none.
 - **A Public Gateway bastion**: an inbound surface the allow-list does not cover.
-- **Cockpit alerting, contacts, dashboards, exports**: catalog concerns ([SCALEWAY-13](../../decisions/scaleway.md#scaleway-13-scaleways-own-signals-federated-costed-per-project)).
-- **Load Balancers, DNS records, certificates**: the cloud controller manager and the catalog own them ([SCALEWAY-07](../../decisions/scaleway.md#scaleway-07-add-ons-and-load-balancers-delegated-load-balancer-certificates-refused)).
+- **Cockpit alerting, contacts, dashboards, exports**: catalog concerns.
+- **Load Balancers, DNS records, certificates**: the cloud controller manager and the catalog own them.
 - **A backend block and a state bucket**: yours ([prerequisites](prerequisites.md#state)).
 
 ## Measured

@@ -1,6 +1,6 @@
 ---
 title: AWS · EKS
-description: What the socle builds on AWS, the decisions behind it, what it costs, and what is proven.
+description: What the socle builds on AWS, what is decided for you, what it costs, and what is proven.
 sidebar:
   label: Overview
   order: 0
@@ -19,31 +19,6 @@ catalog from the signed artifact.
 Start with [Prerequisites](prerequisites.md), then the
 [AWS quickstart](../../getting-started/aws.md). What is decided for you is in
 [Foundations](foundations.md).
-
-## The decisions
-
-All in [AWS decisions](../../decisions/aws.md). The Kubernetes version policy
-is the socle's:
-[SOCLE-05](../../decisions/socle.md#socle-05-the-kubernetes-version-moves-by-rings-n-1-then-n).
-
-- [AWS-01](../../decisions/aws.md#aws-01-eks-standard-not-auto-mode) · accepted · EKS Standard, not Auto Mode
-- [AWS-02](../../decisions/aws.md#aws-02-vpc-cni-and-kube-proxy-refused-aws-only-add-ons-stay-eks-add-ons) · accepted · no VPC CNI or kube-proxy; AWS-only add-ons stay EKS add-ons
-- [AWS-03](../../decisions/aws.md#aws-03-pod-identity-not-irsa) · accepted · Pod Identity, not IRSA
-- [AWS-04](../../decisions/aws.md#aws-04-upgrade-insights-as-a-pipeline-pre-check) · proposed · Upgrade Insights as a pipeline pre-check
-- [AWS-05](../../decisions/aws.md#aws-05-backup-with-velero-not-aws-backup) · accepted · Velero, not AWS Backup
-- [AWS-06](../../decisions/aws.md#aws-06-ipv6-refused) · accepted · IPv6 refused
-- [AWS-07](../../decisions/aws.md#aws-07-security-groups-for-pods-refused) · accepted · security groups for pods refused
-- [AWS-08](../../decisions/aws.md#aws-08-gateway-api-through-the-aws-load-balancer-controller) · superseded by [GATEWAY-API-02](../../decisions/gateway-api.md#gateway-api-02-shared-public-and-private-gateways-on-cilium) · Gateway API through the AWS Load Balancer Controller
-- [AWS-09](../../decisions/aws.md#aws-09-guardduty-eks-protection-as-a-catalog-option) · superseded by AWS-14 · GuardDuty as a catalog option
-- [AWS-10](../../decisions/aws.md#aws-10-secrets-encrypted-with-kms-by-default) · accepted · Secrets encrypted with KMS by default
-- [AWS-11](../../decisions/aws.md#aws-11-public-api-endpoint-restricted-by-cidr-private-access-on) · accepted · public endpoint restricted by CIDR, private access on
-- [AWS-12](../../decisions/aws.md#aws-12-reference-network-public-and-private-per-az) · accepted · public and private subnets per AZ
-- [AWS-13](../../decisions/aws.md#aws-13-cloud-resources-observed-from-a-central-cluster) · proposed · cloud resources observed from a central cluster
-- [AWS-14](../../decisions/aws.md#aws-14-guardduty-is-the-account-owners) · accepted · GuardDuty is the account owner's
-- [AWS-15](../../decisions/aws.md#aws-15-no-extended-support) · accepted · no extended support
-- [AWS-16](../../decisions/aws.md#aws-16-the-account-keeps-custody-of-the-logs) · accepted · the account keeps custody of the logs
-- [AWS-17](../../decisions/aws.md#aws-17-a-bootstrap-node-group-of-two-spot-nodes) · accepted · two Spot bootstrap nodes
-- [AWS-18](../../decisions/aws.md#aws-18-crossplanes-identity-and-its-permissions-boundary-in-the-foundations) · accepted · Crossplane's identity and boundary in the foundations
 
 ## Cost
 
@@ -88,5 +63,4 @@ September 2026, 730 hours a month.
   ([`e2e.yaml`](../../../.github/workflows/e2e.yaml)). Not proven: Cilium on
   real nodes, Pod Identity, IAM enforcement, ACM, Route 53, the NLBs.
 - **Not built**: Karpenter ([#53](https://github.com/do-now-io/socle/issues/53)),
-  the Upgrade Insights pre-check (AWS-04), cloud-resource observability
-  (AWS-13).
+  the Upgrade Insights pre-check, cloud-resource observability.

@@ -112,6 +112,4 @@ install after it.
 policy refused a privileged pod with Kyverno's admission scaled to 0. A
 refusal starts a few seconds after the native binding appears.
 
-**Decisions**: [kyverno-policies decisions](../decisions/kyverno-policies.md).
-
 </details>

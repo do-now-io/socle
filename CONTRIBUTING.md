@@ -159,7 +159,7 @@ the folder says which:
 | `reference/` | reference | look something up: inputs, artifacts, compatibility, the standards |
 | `clouds/<cloud>/` | per cloud | know what the socle builds on that cloud: `index`, `prerequisites`, `foundations`, `limits` |
 | `catalog/` | per module | know what a module installs, what it may be given, and what it needs |
-| `decisions/` | decision records | know what was decided, when, and whether it still holds |
+| `decisions/` | decision records, not published on the site | know what was decided, when, and whether it still holds |
 
 ### The rules
 
@@ -179,9 +179,9 @@ the folder says which:
    follows it), its date, context, decision, consequences (including cost)
    and sources. An accepted section is never edited, except to mark it
    superseded; a changed decision is a new section. A new file starts from
-   [`docs/decisions/_template.md`](https://github.com/do-now-io/socle/blob/main/docs/decisions/_template.md), which the
-   site does not publish. A cloud's `index.md` summarises its decisions and
-   links to them.
+   [`docs/decisions/_template.md`](https://github.com/do-now-io/socle/blob/main/docs/decisions/_template.md). The site
+   publishes none of `docs/decisions/`, and no published page links to it:
+   a page states what holds, the decision file keeps why.
 4. **No working notes in `docs/`.** Questions for a reviewer, session logs and
    "what I measured today" go in the issue or the pull request. A measurement
    that stays true, such as the convergence time of a module, goes in the

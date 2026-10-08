@@ -78,7 +78,7 @@ kube = {
 ```
 
 `kubernetes_version` has no default: `1.34` is what CI applies; pick a minor
-in EKS standard support ([SOCLE-05](../decisions/socle.md#socle-05-the-kubernetes-version-moves-by-rings-n-1-then-n)).
+in EKS standard support.
 `availability_zones` takes at least two; each adds a NAT Gateway.
 
 Optionally, under `aws`:

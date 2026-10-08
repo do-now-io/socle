@@ -61,8 +61,7 @@ release-please keeps one release PR open, advanced only to a commit whose
 alpha passed the e2e proofs. Merging it is the release: `promote` gives that
 commit's alpha the version as a second tag, so the release is the exact bytes
 and signature the proofs ran on. A release tag is never overwritten
-([SOCLE-20](../decisions/socle.md#socle-20-a-release-re-tags-the-alpha-release-please-runs-in-the-same-workflow);
-contributor side in [CONTRIBUTING](../contributing.md#releases)).
+(contributor side in [CONTRIBUTING](../contributing.md#releases)).
 
 <details>
 <summary>Under the hood</summary>
@@ -89,8 +88,7 @@ https://github.com/do-now-io/socle/.github/workflows/publish-artifact.yaml@refs/
 ```
 
 - **Flux verifies** the artifact on every reconciliation against
-  `cosign_identity`, which trusts `main` by default and cannot be turned off
-  ([SOCLE-16](../decisions/socle.md#socle-16-cosign-verification-is-mandatory-mains-identity-trusted-by-default)).
+  `cosign_identity`, which trusts `main` by default and cannot be turned off.
 - **OpenTofu does not.** Run [the command](../reference/artifacts.md#verify-a-signature)
   in CI before `init`; nothing forces it.
 - **Renaming `publish-artifact.yaml`** breaks every deployed verification.

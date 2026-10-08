@@ -91,13 +91,12 @@ CRDs. On aws with `services`, `Role/keda-operator` and
 
 **What the socle sets**: CRDs kept on removal, webhooks failing open
 (`Ignore`), requests under the chart's limits, and an annotation that rolls
-the operator when `services` changes. Your `values` are merged over these
-([SOCLE-06](../decisions/socle.md#socle-06-the-clients-values-win)).
+the operator when `services` changes. Your `values` are merged over these.
 
 **Cloud access**: on aws, the role `<cluster>-keda-operator` holds one
 read-only statement per service named, the exact calls each scaler makes, on
 every resource: depths, never messages; `dynamodb` grants `Query` on every
-table ([KEDA-01](../decisions/keda.md#keda-01-the-operators-role-scoped-per-aws-service)).
+table.
 
 **Ordering**: waits for the `crossplane` ResourceSet; on aws the chart waits
 for the role and its association. Turn the module off before crossplane,
@@ -105,7 +104,5 @@ never in the same apply.
 
 **Measured** on floci, 2026-09-30: 10 messages with `queueLength: 5` scaled
 a Deployment from 0 to 2 in 12 s, and a purge back to 0 in 12 s.
-
-**Decisions**: [keda decisions](../decisions/keda.md).
 
 </details>

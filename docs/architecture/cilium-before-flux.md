@@ -14,8 +14,7 @@ installs it first, with Helm, in the same apply.
 EKS is created with no VPC CNI, kube-proxy or CoreDNS; AKS with
 `network_plugin = "none"`. Every pod without `hostNetwork` stays `Pending`,
 Flux included. Cilium's agent, operator and Envoy run `hostNetwork`, so Helm
-can install them there
-([SOCLE-02](../decisions/socle.md#socle-02-cilium-and-coredns-before-flux-from-the-bootstrap)).
+can install them there.
 Cilium is therefore not a catalog module: one release, one owner.
 
 ## What is installed, per cloud
@@ -45,8 +44,7 @@ On aws, in one apply:
    ([The Flux catalog](flux-catalog.md#what-opentofu-deposits)).
 
 On azure, the same without CoreDNS and the add-ons. On every cloud, what
-hands out cloud identities runs before the first module
-([SOCLE-23](../decisions/socle.md#socle-23-eks-add-ons-from-the-bootstrap-the-pod-identity-agent-before-flux)).
+hands out cloud identities runs before the first module.
 
 Everything after Cilium waits for the node group through `schedulable_nodes`,
 and is uninstalled before it on a destroy. Zero nodes fails the plan with
@@ -80,8 +78,7 @@ and 256Mi, Envoy and operator 50m and 128Mi. `gatewayClass.create: "false"`.
 
 On aws CoreDNS is installed by Helm, not as the EKS add-on: the add-on
 cannot be created before a CNI and would sit `DEGRADED` until a 20-minute
-timeout
-([SOCLE-24](../decisions/socle.md#socle-24-coredns-by-helm-on-aws-not-the-eks-add-on)).
+timeout.
 On azure AKS deploys its own once Cilium runs.
 
 <details>

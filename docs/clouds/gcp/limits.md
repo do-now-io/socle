@@ -7,7 +7,7 @@ sidebar:
 
 ## What no apply can finish
 
-- **Linking the billing account to the cost export dataset**: a Cloud Console step, no API; without it the cost data never arrives ([GCP-12](../../decisions/gcp.md#gcp-12-cost-attribution-through-the-detailed-billing-export)).
+- **Linking the billing account to the cost export dataset**: a Cloud Console step, no API; without it the cost data never arrives.
 - **VPC Service Controls** in front of the DNS endpoint: set at organisation level; without it, IAM is the only gate.
 
 ## Provider limits
@@ -25,16 +25,16 @@ sidebar:
 - **No inter-node transparent encryption**; FQDN policies are a GKE alpha CRD.
 - **Only GKE's GatewayClasses**: the socle's `cilium` class does not exist here.
 - **One proxy-only subnetwork per region and VPC**: a second cluster sets `create_proxy_only_subnet = false`.
-- **Two clusters in one project share Workload Identity principals**: one project per environment ([GCP-06](../../decisions/gcp.md#gcp-06-workload-identity-federation-a-google-service-account-per-kubernetes-service-account)).
-- **Alert policies billed from 1 September 2027**; the socle defines none ([GCP-11](../../decisions/gcp.md#gcp-11-service-metrics-read-every-300-s-cloud-monitoring-alert-policies-refused)).
+- **Two clusters in one project share Workload Identity principals**: one project per environment.
+- **Alert policies billed from 1 September 2027**; the socle defines none.
 - **Cost allocation does not backfill**, hence on from creation.
 
 ## What the socle does not offer here yet
 
-- **Velero**: aws only; Backup for GKE with `backup_agent_enabled = true` ([GCP-05](../../decisions/gcp.md#gcp-05-velero-by-default-backup-for-gke-as-a-priced-option)).
-- **Crossplane providers**: the core only ([GCP-13](../../decisions/gcp.md#gcp-13-crossplane-not-config-connector)).
+- **Velero**: aws only; Backup for GKE with `backup_agent_enabled = true`.
+- **Crossplane providers**: the core only.
 - **`kube.keda.services`**: bind your own identity through `podIdentity.gcp` in values, or use a TriggerAuthentication Secret.
 - **The shared Gateways**: `gateway_api` is not offered on gcp; write your own Gateway on `gke-l7-global-external-managed`.
 - **Hubble**: no variable.
-- **Service metrics from outside the cluster**: GCP-11's `stackdriver_exporter` is not built, only the reader binding.
+- **Service metrics from outside the cluster**: the `stackdriver_exporter` is not built, only the reader binding.
 - **A ready root**: no `opentofu/clusters/gcp`; the [quickstart](../../getting-started/gcp.md) shows the one to write.

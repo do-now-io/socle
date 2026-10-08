@@ -20,9 +20,8 @@ Every foundations module, and the bootstrap module, passes this checklist.
 - [ ] **Every variable typed**; a bare `any` says why in a comment. *Verify:* review.
 - [ ] **Constraints in `validation` blocks.** *Verify:* a `tofu test` case asserts the rejection.
 - [ ] **Defaults are the recommended positions.** *Verify:* the example sets only per-consumer values.
-- [ ] **`nullable = false` on every defaulted variable**, unless the default is null
-      ([SOCLE-14](../decisions/socle.md#socle-14-nullable--false-on-every-defaulted-variable)). *Verify:* review.
-- [ ] **No default where none is good**; a silent default means nobody decided. *Verify:* review against the decisions.
+- [ ] **`nullable = false` on every defaulted variable**, unless the default is null. *Verify:* review.
+- [ ] **No default where none is good**; a silent default means nobody decided. *Verify:* review against the [decisions](https://github.com/do-now-io/socle/tree/main/docs/decisions).
 - [ ] **Options we would not recommend are absent.** *Verify:* review against the decisions.
 - [ ] **Names consistent across clouds.** *Verify:* diff `opentofu/*/variables.tf`.
 - [ ] **Outputs for the bootstrap**: endpoint, CA, `helm_kubernetes` (an exec), the workload
@@ -39,8 +38,7 @@ Every foundations module, and the bootstrap module, passes this checklist.
 
 ## 4. Tests
 
-- [ ] **Unit: `tofu test`**, no Go: validations, defaults, conditional logic
-      ([SOCLE-22](../decisions/socle.md#socle-22-tofu-test-not-terratest)). *Verify:* `tofu test` passes.
+- [ ] **Unit: `tofu test`**, no Go: validations, defaults, conditional logic. *Verify:* `tofu test` passes.
 - [ ] **Every `validation` has a test that trips it.** *Verify:* review.
 - [ ] **Integration: a plan against an emulator** (`integration.yaml`: floci, floci-gcp, floci-az;
       Scaleway offline; Azure `continue-on-error`). *Verify:* green, or the summary says why.
