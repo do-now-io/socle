@@ -67,7 +67,9 @@ From each `oci/catalog/<module>/resourceset.yaml`. Offered is not proven: CI app
 | `grafana` | `grafana`, `oci://ghcr.io/grafana-community/helm-charts` | `13.2.6` | 13.2.2 | all |
 | `victoria_logs` | `victoria-logs-single`, `oci://ghcr.io/victoriametrics/helm-charts` | `0.13.9` | v1.52.0 | all |
 | `victoria_traces` | `victoria-traces-single`, `oci://ghcr.io/victoriametrics/helm-charts` | `0.1.11` | v0.11.0 | all |
+| `alerting` | `victoria-metrics-alert`, `oci://ghcr.io/victoriametrics/helm-charts` | `0.50.0` | vmalert v1.153.0; Alertmanager v0.34.1 | all |
 | `keda` | `keda`, `https://kedacore.github.io/charts` | `2.21.0` | 2.21.0 | all (`services` on aws only) |
+| `metrics_server` | `metrics-server`, `https://kubernetes-sigs.github.io/metrics-server/` | `3.14.0` | 0.9.0 | aws |
 | `kyverno` | `kyverno`, `oci://ghcr.io/kyverno/charts` | `3.9.1` | v1.19.1 | all |
 | `kyverno_policies` | `kyverno-policies`, `oci://ghcr.io/kyverno/charts` | `3.9.1` | v1.19.1 | all |
 | `external_secrets` | `external-secrets`, `oci://ghcr.io/external-secrets/charts` | `2.11.0` | v2.11.0 | all (its role and store on aws only) |

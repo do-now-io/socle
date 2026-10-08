@@ -65,8 +65,15 @@ module's namespace with a `values.yaml` key, merged last); not repeated below.
 | `victoria_traces` | `enabled` | `false` | VictoriaTraces single-node, the traces storage. Off: pre-GA, an upgrade may drop stored traces |
 | `victoria_traces` | `retention` | `"7d"` | as `victoria_metrics` |
 | `victoria_traces` | `storage_size` | `"10Gi"` | as `victoria_metrics` |
+| `alerting` | `enabled` | `false` | vmalert and Alertmanager: the socle's rules, routed to your receivers. Needs `victoria_metrics`, a receiver and, with `watchdog`, `receivers_secret` |
+| `alerting` | `watchdog` | `true` | an always-firing alert to the URL in the `watchdog-url` key of `receivers_secret` |
+| `alerting` | `receivers` | `[]` | Alertmanager receivers as Alertmanager writes them; keys only through `*_file` fields |
+| `alerting` | `route` | `{}` | Alertmanager's routing tree; `route.receiver` names one of `receivers` |
+| `alerting` | `receivers_secret` | `""` | a Secret in `alerting` with the keys, mounted under `/etc/alertmanager/secrets/` |
 | `keda` | `enabled` | `false` | KEDA, event-driven autoscaling down to zero |
 | `keda` | `services` | `[]` | aws only: the services KEDA's own role may read, from `sqs`, `cloudwatch`, `kinesis`, `dynamodb`. Needs `crossplane` on and each service in `aws.crossplane.allowed_services` |
+| `metrics_server` | `enabled` | `true` | the `metrics.k8s.io` API behind `kubectl top` and HPAs on CPU or memory. aws only |
+| `metrics_server` | `ha` | `false` | two replicas on two nodes, with a disruption budget |
 | `kyverno` | `enabled` | `false` | the Kyverno engine, no policy |
 | `kyverno_policies` | `enabled` | `false` | the socle's policy set, every policy in Audit; needs `kyverno` |
 | `kyverno_policies` | `profile` | `"baseline"` | `baseline`, or `restricted` for baseline plus six |

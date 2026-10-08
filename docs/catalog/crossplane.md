@@ -75,6 +75,10 @@ kube = {
 - **Upgrades**: the chart moves with `socle_version`, and its CRDs with it
   (Crossplane applies them at start). The four providers move together, on
   one tag.
+- **Coming from an alpha before 0.1.0?** Once 0.1.0 is applied, strip the
+  owners the old providers left on their ServiceAccount, once, or the garbage
+  collector deletes it, and every provider's AWS access with it:
+  `kubectl -n crossplane-system patch serviceaccount provider-aws --type json -p '[{"op":"remove","path":"/metadata/ownerReferences"}]'`.
 
 <details>
 <summary>Under the hood</summary>
@@ -85,9 +89,12 @@ in `crossplane-system`. On aws, the providers `provider-family-aws`,
 `ClusterProviderConfig/default` on EKS Pod Identity, once they are `Healthy`.
 
 **What the socle sets**: requests with no limits (about 1440Mi in all on aws),
-and every provider pod on the fixed ServiceAccount
-`crossplane-system/provider-aws`, so the foundations can bind it before the
-cluster has a node. Your `values` are merged over these.
+and every provider pod on `crossplane-system/provider-aws`, a ServiceAccount
+the module creates itself, so the foundations can bind it before the cluster
+has a node. Named through Crossplane's `serviceAccountTemplate` instead, each
+provider revision would take it from the others about 25 times a second, each
+write a billed line of the EKS audit log
+([crossplane#7769](https://github.com/crossplane/crossplane/issues/7769)). Your `values` are merged over these.
 
 **Cloud access**: the foundations' role for `crossplane-system/provider-aws`
 creates roles only under `/socle/<cluster>/` and only with the boundary, which

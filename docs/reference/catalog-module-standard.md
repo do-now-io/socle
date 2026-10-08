@@ -18,6 +18,7 @@ Models: `hello` for structure and tests, `argocd` for chart values.
 | Per-attribute rules | `kube` validations in `opentofu/bootstrap/variables.tf`, each failing case in `tests/validations.tftest.hcl` | `tofu test` |
 | The overlays | `../../catalog/<kebab-name>/resourceset.yaml` in each offering `oci/clusters/<cloud>/kustomization.yaml` | `check-catalog-clouds.sh`, both directions |
 | Cloud binding | `<snake_name> = ["aws", …]` in `catalog_clouds`, one per line, when not on every cloud | `check-catalog-clouds.sh`; refused at plan elsewhere |
+| Alert rules, if it produces metrics worth one | `oci/catalog/<kebab-name>/rules/`, ConfigMaps labelled `vmalert_rules: "1"`, applied by a `Kustomization` under the module's toggle; its namespace added to the alerting sidecar's list | `check-rules.sh` (`vmalert -dryRun`, in `pr-static.yaml`) |
 | The e2e proof | `oci/catalog/<kebab-name>/tests/e2e/chainsaw-test.yaml`, optional `values.yaml` | `check-catalog-clouds.sh`; `e2e.yaml` runs it |
 | The page | `docs/catalog/<kebab-name>.md`, from [`_template.md`](https://github.com/do-now-io/socle/blob/main/docs/catalog/_template.md) | rule 6 of [CONTRIBUTING](../contributing.md#the-rules); the site build |
 | The decisions | `docs/decisions/<kebab-name>.md`, from [`_template.md`](https://github.com/do-now-io/socle/blob/main/docs/decisions/_template.md); not published on the site | review |

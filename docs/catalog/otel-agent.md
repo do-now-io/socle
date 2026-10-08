@@ -73,6 +73,8 @@ kube = {
   `extraEnvs` `valueFrom`.
 - **On GKE Autopilot each agent is billed** by its requests, 50m CPU and
   128Mi, on every node.
+- **Its alert rule ships with it**: a node's filesystem under 10 % free. It
+  fires once [alerting](alerting.md) is on.
 - **Upgrades**: write the current component names (`otlp_http`,
   `k8s_attributes`) in `values`; a later chart stops rewriting the old ones.
 

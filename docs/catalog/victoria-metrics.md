@@ -88,6 +88,9 @@ kube = {
 - **`tofu plan` refuses** credentials in `values` (auth flags, literal
   credential env values, a `Secret` in `extraObjects`), a `retention` under a
   day, in months or with a fraction, and a `storage_size` not in `Gi` or `Ti`.
+- **Its alert rules ship with it**: the disk nearly full, the series guard
+  near its limit, series dropped. They fire once [alerting](alerting.md) is
+  on.
 - **Upgrades**: strategy `Recreate` stops the pod before the new one starts;
   the collectors retry within their queue.
 
@@ -102,7 +105,11 @@ standalone claim. In-cluster only, no authentication, at
 
 **What the socle sets**: `server.mode: deployment`, so the claim can be
 resized; `-opentelemetry.usePrometheusNaming`, so OTLP names read as
-upstream dashboards expect; `-storage.maxHourlySeries=100000`; requests 50m
+upstream dashboards expect; `-storage.maxHourlySeries=100000` with
+`-sortLabels`, without which the guard counts one series once per label
+order and drops fresh data within minutes (measured on floci, 2026-10-07);
+`-vmalert.proxyURL` when [alerting](alerting.md) is on, so Grafana lists the
+socle's rules; requests 50m
 CPU and 128Mi, no limit; `fullnameOverride: victoria-metrics`, which the
 collectors and Grafana rely on.
 

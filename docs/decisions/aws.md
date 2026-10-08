@@ -267,7 +267,7 @@ should upgrade first; this is the floor.
 
 ## AWS-16: The account keeps custody of the logs
 
-**accepted** · 2026-09-10 · [`opentofu/aws/cluster.tf`](../../opentofu/aws/cluster.tf), [`opentofu/aws/network.tf`](../../opentofu/aws/network.tf)
+**accepted**, its control-plane log types **superseded by [AWS-19](#aws-19-control-plane-logs-off-by-default-opt-in-per-type)** · 2026-09-10, superseded 2026-10-07 · [`opentofu/aws/cluster.tf`](../../opentofu/aws/cluster.tf), [`opentofu/aws/network.tf`](../../opentofu/aws/network.tf)
 
 **Decision.** The module creates the control-plane and flow-log groups
 itself, with `log_retention_days` (default 90) and one rotated
@@ -320,3 +320,24 @@ trust policy cannot be bounded: a compromised Crossplane could make an
 assumable role within the boundary. The applier needs `iam:CreatePolicy`.
 
 **Sources.** [Permissions boundaries](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_boundaries.html) · [crossplane module](../catalog/crossplane.md).
+
+## AWS-19: Control-plane logs off by default, opt-in per type
+
+**accepted** · 2026-10-07 · [`opentofu/aws/variables.tf`](../../opentofu/aws/variables.tf) (`cluster_log_types`), [`opentofu/aws/cluster.tf`](../../opentofu/aws/cluster.tf)
+
+**Decision.** `cluster_log_types` defaults to `[]`. The log group, its
+retention and its KMS key are still created
+([AWS-16](#aws-16-the-account-keeps-custody-of-the-logs)), so a client whose
+audit expects the API server's record turns on `audit` and `authenticator`
+with one line.
+
+**Context.** CloudWatch bills ingestion by the gigabyte, and the audit stream
+records every request to the API server: one controller writing in a loop
+(Crossplane's providers taking a ServiceAccount from one another, #80) made it
+about $40 a day on an idle cluster.
+
+**Consequences.** By default no record of who did what to the API server is
+kept; ISO 27001 A.8.15 and SOC 2 CC7 clients opt in. Trivy's AVD-AWS-0038 is
+ignored on the cluster, with this as its reason.
+
+**Sources.** [EKS control plane logs](https://docs.aws.amazon.com/eks/latest/userguide/control-plane-logs.html) · #80.

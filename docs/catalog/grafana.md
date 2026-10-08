@@ -70,6 +70,10 @@ kube = {
 - **Add a datasource under your own key**, such as
   `datasources: { "client.yaml": ... }`: Helm replaces lists, so writing
   `datasources.yaml` replaces the socle's.
+- **With [alerting](alerting.md) on, alerts and silences are in Grafana's
+  Alerting pages**, through an Alertmanager datasource. A rule you make in
+  Grafana's UI notifies no one and is lost when the pod restarts: the socle's
+  rules are the supported ones.
 - **The VictoriaLogs plugin is downloaded from grafana.com at start.**
   Without egress there, no logs datasource.
 - **`tofu plan` refuses passwords and client secrets in `values`.** Use
@@ -86,7 +90,8 @@ and the shared Gateways, `HTTPRoute/grafana`, which waits for its Gateway to
 be `Accepted`.
 
 **What the socle sets**: read-only datasources for VictoriaMetrics (the
-default), VictoriaLogs and VictoriaTraces, each only while its backend is on;
+default), VictoriaLogs and VictoriaTraces, each only while its backend is on,
+and Alertmanager while `alerting` is on;
 a dashboard sidecar reading ConfigMaps only;
 no persistence, no analytics; requests with no limits. Your `values` are
 merged over these.

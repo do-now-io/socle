@@ -27,7 +27,8 @@ module together with the bootstrap.
 | A NAT Gateway and private route table per AZ | default |
 | S3 gateway endpoint; `ecr.api`, `ecr.dkr`, `sts`, `ec2`, `logs` interface endpoints | enforced on a module VPC |
 | Standard support only | enforced |
-| Log groups owned by the module, 90 days, KMS; all five control-plane logs; VPC flow logs | default |
+| Log groups owned by the module, 90 days, KMS; VPC flow logs | default |
+| Control-plane logs off: CloudWatch bills them by the gigabyte. `cluster_log_types = ["audit", "authenticator"]` when your audit asks for the API server's record | default |
 | Two Spot Graviton bootstrap nodes, untainted, not autoscaled | default |
 | Bootstrap nodes on AL2023, IMDSv2 hop limit 1, encrypted gp3, private subnets | enforced |
 | Crossplane's role and permissions boundary, only when `crossplane` is set | default |

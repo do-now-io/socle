@@ -10,7 +10,7 @@ the Victoria family stores, Grafana reads. Same templates on all four clouds,
 no remote-write, no federation,
 and no cloud access: every backend stores on a volume.
 
-## Six modules
+## Seven modules
 
 One module per chart release:
 
@@ -22,6 +22,7 @@ One module per chart release:
 | [`victoria_logs`](../catalog/victoria-logs.md) | 1 pod and a PVC | on |
 | [`victoria_traces`](../catalog/victoria-traces.md) | 1 pod and a PVC | **off**: pre-GA, an upgrade may drop stored traces |
 | [`grafana`](../catalog/grafana.md) | 1 replica | on |
+| [`alerting`](../catalog/alerting.md) | vmalert and Alertmanager, 1 replica each | **off**: it needs where alerts go |
 
 ## What talks to what
 
@@ -33,6 +34,7 @@ Kubernetes API ◀──object state, events── gateway ├─▶ victoria_me
 kubelet, /var/log/pods ◀──── otel_agent ─────────┤
                                                  └─▶ victoria_traces  :10428 /insert/opentelemetry/v1/traces
 grafana ──▶ Prometheus, VictoriaLogs and Jaeger datasources, one per backend that is on
+alerting: vmalert ──rules──▶ victoria_metrics;  firing ──▶ Alertmanager ──▶ your receivers
 ```
 
 - **Every signal is OTLP over HTTP**, which all three backends ingest.
@@ -118,8 +120,8 @@ shipped by the module they describe, on OpenTelemetry names.
 
 ## What is not in the stack
 
-Alerting, anything central (remote-write, federation, multi-cluster
-Grafana), backups and high availability of the backends, profiles, SSO on
+Your own alert rules (#82), anything central (remote-write, federation,
+multi-cluster Grafana, one Alertmanager across clusters), backups and high availability of the backends, profiles, SSO on
 Grafana.
 
 ## Outside the cluster: the cloud's own signals

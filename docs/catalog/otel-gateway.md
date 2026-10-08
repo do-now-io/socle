@@ -70,6 +70,9 @@ kube = {
 - **`tofu plan` refuses** literal credentials in `values` (authenticators,
   exporter headers, `extraEnvs`, a `Secret` in `extraManifests`). Write
   `${env:NAME}`, with `NAME` set from a Secret by `extraEnvs` `valueFrom`.
+- **Its alert rules ship with it**: a pod crash-looping or `Pending`, a node
+  not ready, a Deployment missing replicas. They fire once
+  [alerting](alerting.md) is on.
 - **Two replicas**: `replicaCount = 2`; the chart then elects a leader for
   cluster metrics, so objects are not reported twice.
 
