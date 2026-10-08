@@ -106,24 +106,63 @@ and every option is documented in
 
 ## The catalog
 
-| Module | What it does | Default | Notes |
-| --- | --- | :---: | --- |
-| [`argocd`](docs/catalog/argocd.md) | GitOps for your applications. Flux runs the socle, and ArgoCD runs your apps | on | |
-| [`gateway_api`](docs/catalog/gateway-api.md) | Gateway API CRDs and the shared `public` and `private` Gateways | on | Built into GKE on GCP |
-| [`crossplane`](docs/catalog/crossplane.md) | Lets each module declare its own cloud IAM | off | Needed by `external_dns`, and by `keda` and `external_secrets` for their cloud access |
-| [`external_dns`](docs/catalog/external-dns.md) | Publishes routes into the cloud's DNS zone | off | Turned on for you on AWS once a certificate is set |
-| [`keda`](docs/catalog/keda.md) | Event-driven autoscaling, down to zero | off | |
-| [`kyverno`](docs/catalog/kyverno.md) | The Kyverno admission engine, with no policy | off | Its webhooks never see the socle's namespaces |
-| [`kyverno_policies`](docs/catalog/kyverno-policies.md) | Pod Security Standards, requests required, no `latest` tag, a registry allow-list, all in Audit; `enforce` makes a policy a native refusal | off | Needs `kyverno`; judges your applications, never the socle |
-| [`external_secrets`](docs/catalog/external-secrets.md) | Kubernetes Secrets read from the cloud's secret manager, kept in step when they rotate | off | On AWS with `crossplane`: its own read-only role on a name prefix, and the `secret-manager` store |
-| [`reloader`](docs/catalog/reloader.md) | Rolls a workload when a ConfigMap or Secret it reads changes | off | Opt-in per workload, by annotation |
-| [`victoria_metrics`](docs/catalog/victoria-metrics.md) | Metrics storage | on | [Monitoring stack](docs/monitoring.md) |
-| [`victoria_logs`](docs/catalog/victoria-logs.md) | Logs storage | on | 〃 |
-| [`victoria_traces`](docs/catalog/victoria-traces.md) | Traces storage | off | Pre-GA upstream |
-| [`otel_agent`](docs/catalog/otel-agent.md) | Node-level OpenTelemetry collector: kubelet metrics and container logs | on | 〃 |
-| [`otel_gateway`](docs/catalog/otel-gateway.md) | Cluster-level collector: object state, Prometheus scraping, OTLP | on | 〃 |
-| [`grafana`](docs/catalog/grafana.md) | One place to read every signal, with each module's dashboards loaded | on | 〃 |
-| `hello` | podinfo, a smoke test of the whole pipeline | on | |
+Each module is a Flux Operator `ResourceSet` you turn on or off under `kube`.
+The version is the upstream application's, pinned in the module.
+
+### Continuous delivery
+
+| Module | What it does | Version | Default | Clouds | Notes |
+| --- | --- | --- | :---: | --- | --- |
+| [`argocd`](docs/catalog/argocd.md) | GitOps for your applications. Flux runs the socle, and ArgoCD runs your apps | 3.5.3 | on | All | |
+
+### Monitoring
+
+The stack's design: [Monitoring](docs/monitoring.md).
+
+| Module | What it does | Version | Default | Clouds | Notes |
+| --- | --- | --- | :---: | --- | --- |
+| [`victoria_metrics`](docs/catalog/victoria-metrics.md) | Metrics storage | 1.153.0 | on | All | |
+| [`victoria_logs`](docs/catalog/victoria-logs.md) | Logs storage | 1.52.0 | on | All | |
+| [`victoria_traces`](docs/catalog/victoria-traces.md) | Traces storage | 0.11.0 | off | All | Pre-GA upstream |
+| [`otel_agent`](docs/catalog/otel-agent.md) | Node-level OpenTelemetry collector: kubelet metrics and container logs | 0.160.0 | on | All | |
+| [`otel_gateway`](docs/catalog/otel-gateway.md) | Cluster-level collector: object state, Prometheus scraping, OTLP | 0.160.0 | on | All | |
+| [`grafana`](docs/catalog/grafana.md) | One place to read every signal, with each module's dashboards loaded | 13.2.2 | on | All | |
+| [`alerting`](docs/catalog/alerting.md) | vmalert evaluates the socle's rules, and Alertmanager routes what fires to your receivers | 1.153.0 · 0.34.1 | off | All | Needs `victoria_metrics` |
+| [`metrics_server`](docs/catalog/metrics-server.md) | The resource metrics API behind `kubectl top` and CPU or memory autoscaling | 0.9.0 | on | AWS | GKE, AKS and Kapsule ship their own |
+
+### Security
+
+| Module | What it does | Version | Default | Clouds | Notes |
+| --- | --- | --- | :---: | --- | --- |
+| [`kyverno`](docs/catalog/kyverno.md) | The Kyverno admission engine, with no policy | 1.19.1 | off | All | Its webhooks never see the socle's namespaces |
+| [`kyverno_policies`](docs/catalog/kyverno-policies.md) | Pod Security Standards, requests required, no `latest` tag, a registry allow-list, all in Audit; `enforce` makes a policy a native refusal | 1.19.1 | off | All | Needs `kyverno`; judges your applications, never the socle |
+| [`external_secrets`](docs/catalog/external-secrets.md) | Kubernetes Secrets read from the cloud's secret manager, kept in step when they rotate | 2.11.0 | off | All | On AWS with `crossplane`: its own read-only role on a name prefix, and the `secret-manager` store |
+| [`reloader`](docs/catalog/reloader.md) | Rolls a workload when a ConfigMap or Secret it reads changes | 1.4.22 | off | All | Opt-in per workload, by annotation |
+
+### Networking and exposure
+
+| Module | What it does | Version | Default | Clouds | Notes |
+| --- | --- | --- | :---: | --- | --- |
+| [`gateway_api`](docs/catalog/gateway-api.md) | Gateway API CRDs and the shared `public` and `private` Gateways | 1.6.1 | on | AWS · Azure · Scaleway | Built into GKE on GCP |
+| [`external_dns`](docs/catalog/external-dns.md) | Publishes routes into the cloud's DNS zone | 0.22.0 | off | All | Turned on for you on AWS once a certificate is set |
+
+### Cloud resources
+
+| Module | What it does | Version | Default | Clouds | Notes |
+| --- | --- | --- | :---: | --- | --- |
+| [`crossplane`](docs/catalog/crossplane.md) | Lets each module declare its own cloud IAM | 2.4.2 | off | All | Needed by `external_dns` and `velero`, and by `keda` and `external_secrets` for their cloud access |
+
+### Autoscaling
+
+| Module | What it does | Version | Default | Clouds | Notes |
+| --- | --- | --- | :---: | --- | --- |
+| [`keda`](docs/catalog/keda.md) | Event-driven autoscaling, down to zero | 2.21.0 | off | All | |
+
+### Backup
+
+| Module | What it does | Version | Default | Clouds | Notes |
+| --- | --- | --- | :---: | --- | --- |
+| [`velero`](docs/catalog/velero.md) | Backup and restore of the applications' volumes and their objects, into the module's own bucket | 1.18.2 | off | AWS | Needs `crossplane` |
 
 Cilium and CoreDNS come before the catalog. On AWS and Azure the bootstrap
 module installs them ahead of Flux. GKE and Kapsule run their own:
