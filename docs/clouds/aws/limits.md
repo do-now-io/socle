@@ -7,8 +7,8 @@ sidebar:
 
 ## What no apply can finish
 
-- **Replacing the cluster** (`cluster_name`, `bootstrap_cluster_creator_admin_permissions`): apply `-target=module.foundations` first, then the full apply ([root README](../../../opentofu/clusters/aws/README.md)).
-- **Destroying with the API unreachable**: if the runner left `cluster_endpoint_public_access_cidrs`, run `tofu state rm module.socle` first.
+- **Replacing the cluster** (`cluster_name`, `bootstrap_cluster_creator_admin_permissions`): apply `-target=module.socle.module.foundations` first, then the full apply ([root README](../../../opentofu/clusters/aws/README.md)).
+- **Destroying with the API unreachable**: if the runner left `cluster_endpoint_public_access_cidrs`, run `tofu state rm module.socle.module.socle` first.
 - **The GuardDuty detector**: the account owner's.
 - **The Route 53 zone**: with `gateway_certificate`, the public zone must already exist; the module never creates it.
 

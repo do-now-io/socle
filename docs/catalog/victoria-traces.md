@@ -13,7 +13,7 @@ holds.
 
 Turn it on, knowing an upgrade may drop the traces stored so far:
 
-```hcl title="terraform.tfvars" kube-start="victoria_traces"
+```hcl kube-start="victoria_traces"
 kube = {
   victoria_traces = {
     enabled      = true
@@ -38,7 +38,7 @@ the pod `Running`.
 
 ### Every setting
 
-```hcl title="terraform.tfvars" kube-full="victoria_traces"
+```hcl kube-full="victoria_traces"
 kube = {
   victoria_traces = {
     enabled      = false  # off by default; off deletes the claim and its traces

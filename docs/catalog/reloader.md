@@ -13,7 +13,7 @@ never re-reads, or alone for ConfigMaps. **Off by default**, on every cloud.
 
 Turn it on; it then rolls only the workloads you annotate (see Good to know).
 
-```hcl title="terraform.tfvars" kube-start="reloader"
+```hcl kube-start="reloader"
 kube = {
   reloader = {
     enabled = true
@@ -33,7 +33,7 @@ Then `kubectl -n reloader get deployment reloader` shows it ready.
 
 ### Every setting
 
-```hcl title="terraform.tfvars" kube-full="reloader"
+```hcl kube-full="reloader"
 kube = {
   reloader = {
     enabled = false # off by default; it reads every ConfigMap and Secret of the cluster

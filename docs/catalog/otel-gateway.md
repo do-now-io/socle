@@ -16,7 +16,7 @@ are on. **On by default**, on every cloud.
 It is already on, with nothing to name. What you may set first is a second
 replica:
 
-```hcl title="terraform.tfvars" kube-start="otel_gateway"
+```hcl kube-start="otel_gateway"
 kube = {
   otel_gateway = {
     values = {
@@ -39,7 +39,7 @@ ready.
 
 ### Every setting
 
-```hcl title="terraform.tfvars" kube-full="otel_gateway"
+```hcl kube-full="otel_gateway"
 kube = {
   otel_gateway = {
     enabled = true # on by default; off removes the release and the dashboard

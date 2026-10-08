@@ -22,8 +22,7 @@ pulls, and upgrading the whole platform is a one-line change in Git.
 
 > [!WARNING]
 > **Pre-0.1.0. Socle is still being built, and nothing has been released.**
-> Every push to `main` publishes a signed alpha. The Flux artifact is public;
-> the OpenTofu modules package stays private until v1. See [Status](#status).
+> Every push to `main` publishes a signed alpha. See [Status](#status).
 
 ## Why Socle
 
@@ -47,7 +46,7 @@ pulls, and upgrading the whole platform is a one-line change in Git.
 
 ```mermaid
 flowchart LR
-  tfvars["your tfvars<br/>socle_version · &lt;cloud&gt; · kube"]
+  tfvars["your main.tf<br/>socle_version · &lt;cloud&gt; · kube"]
   subgraph tofu ["tofu apply — once"]
     foundations["Foundations<br/>network · cluster · identities"]
     bootstrap["Bootstrap<br/>Cilium · Flux Operator · inputs"]
@@ -71,36 +70,44 @@ How the parts fit, and why: [Architecture](https://do-now-io.github.io/socle/arc
 
 ## What you write
 
-You write one file per cluster. Under `kube`, list only the values that differ
-from the catalog defaults:
+You write one `main.tf` per cluster, calling the socle's root for your cloud.
+Under `kube`, list only the values that differ from the catalog defaults:
 
 ```hcl
-# clusters/prod.tfvars
-socle_version = "0.1.0"            # the only line an upgrade touches. x-release-please-version
-
-aws = {
-  region             = "eu-west-3"
-  cluster_name       = "acme-prod"
-  owner              = "platform"
-  environment        = "prod"
-  kubernetes_version = "1.34"
-  availability_zones = ["eu-west-3a", "eu-west-3b", "eu-west-3c"]
-  cluster_endpoint_public_access_cidrs = ["203.0.113.0/24"]
-  gateway_certificate = { domain = "acme.example" }
+# clusters/prod/main.tf (plus your state backend)
+locals {
+  socle_version = "0.0.0" # the only line an upgrade touches. x-release-please-version
 }
 
-kube = {
-  argocd          = { domain = "argocd.acme.example" }
-  victoria_traces = { enabled = true }
+module "socle" {
+  source = "oci://ghcr.io/do-now-io/socle/opentofu-modules//opentofu/clusters/aws?tag=${local.socle_version}"
+
+  socle_version = local.socle_version
+
+  aws = {
+    region             = "eu-west-3"
+    cluster_name       = "acme-prod"
+    owner              = "platform"
+    environment        = "prod"
+    kubernetes_version = "1.34"
+    availability_zones = ["eu-west-3a", "eu-west-3b", "eu-west-3c"]
+    cluster_endpoint_public_access_cidrs = ["203.0.113.0/24"]
+    gateway_certificate = { domain = "acme.example" }
+  }
+
+  kube = {
+    argocd          = { domain = "argocd.acme.example" }
+    victoria_traces = { enabled = true }
+  }
 }
 ```
 
 ```sh
-tofu init && tofu apply -var-file=prod.tfvars
+tofu init && tofu apply
 kubectl -n flux-system get resourceset    # socle-root and one per module
 ```
 
-The full walkthrough is in [opentofu/clusters/aws](opentofu/clusters/aws/README.md),
+The full walkthrough is the [AWS quickstart](docs/getting-started/aws.md),
 and every option is documented in
 [prod.tfvars.example](opentofu/clusters/aws/prod.tfvars.example).
 
@@ -190,10 +197,9 @@ Socle is **pre-0.1.0**, and no version has been released yet.
 - Every push to `main` publishes `<next>-alpha.N`, signed. To release, you
   merge the release-please PR, which re-tags that same alpha. Nothing is
   rebuilt.
-- The Flux artifact, `ghcr.io/do-now-io/socle/flux-modules`, is public: a
-  cluster pulls it with no credential. The OpenTofu modules package,
-  `ghcr.io/do-now-io/socle/opentofu-modules`, stays private until v1, so
-  `tofu init` against it needs a token until then.
+- Both packages are public: the cluster pulls the Flux artifact,
+  `ghcr.io/do-now-io/socle/flux-modules`, and `tofu init` the OpenTofu
+  modules, `ghcr.io/do-now-io/socle/opentofu-modules`, with no credential.
 
 ## Security
 

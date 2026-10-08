@@ -14,7 +14,7 @@ Gateways have a certificate and Crossplane may use `route53`.
 
 Turn it on with the zones it may write to (on aws, crossplane brings its role):
 
-```hcl title="terraform.tfvars" kube-start="external_dns"
+```hcl kube-start="external_dns"
 kube = {
   crossplane = { enabled = true } # aws: the module's own role
   external_dns = {
@@ -40,7 +40,7 @@ Then `kubectl -n external-dns logs deploy/external-dns` shows the records it wri
 
 ### Every setting
 
-```hcl title="terraform.tfvars" kube-full="external_dns"
+```hcl kube-full="external_dns"
 kube = {
   external_dns = {
     # On aws the root turns the module on, with the certificate's domain as its

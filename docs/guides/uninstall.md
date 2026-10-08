@@ -20,7 +20,7 @@ last: the roles it created for other modules stay otherwise.
 2. Destroy the bootstrap module:
 
    ```sh
-   tofu destroy -var-file=clusters/prod.tfvars -target=module.socle
+   tofu destroy -target=module.socle.module.socle
    ```
 
 `flux-system` is then left with no `ResourceSet`, `FluxInstance` or
@@ -49,7 +49,7 @@ suite).
 ## Everything
 
 ```sh
-tofu destroy -var-file=clusters/prod.tfvars
+tofu destroy
 ```
 
 The releases go before the cluster, which needs the API. If the runner can no
@@ -57,8 +57,8 @@ longer reach it (it left `cluster_endpoint_public_access_cidrs`, say), drop
 the releases from the state first:
 
 ```sh
-tofu state rm module.socle
-tofu destroy -var-file=clusters/prod.tfvars
+tofu state rm module.socle.module.socle
+tofu destroy
 ```
 
 ## What is left behind, by design

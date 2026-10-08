@@ -192,8 +192,6 @@ tofu init
 tofu apply -var-file=dev.tfvars
 ```
 
-While the registry is private, create the pull secret in `flux-system` first
-and set `artifact_pull_secret` ([private registry](../guides/private-registry.md)).
 The Flux Operator stays `Pending` until NAP brings a node it can run on,
 within `helm_timeout_seconds` (600).
 

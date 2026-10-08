@@ -95,6 +95,6 @@ https://github.com/do-now-io/socle/.github/workflows/publish-artifact.yaml@refs/
 
 ## Visibility
 
-`flux-modules` is public. `opentofu-modules` is private until v1: `tofu init`
-and `cosign verify` need a token
+Both packages are public: `tofu init`, `cosign verify` and the cluster pull
+with no credential. A private mirror is the one case that needs one
 ([Pull from a private registry](../guides/private-registry.md)).

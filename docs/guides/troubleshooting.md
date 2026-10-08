@@ -133,8 +133,10 @@ their tags.
 ### When one apply is not enough
 
 - **Replacing the cluster.** A ForceNew foundations change leaves the helm
-  provider unable to refresh. Fix: `tofu apply -target=module.foundations`,
-  then a full apply.
+  provider unable to refresh. Fix: apply the foundations alone first
+  (`-target=module.socle.module.foundations` with the AWS root), then a full
+  apply.
 - **Destroying with the API unreachable.** The releases need the API to go.
-  Fix: `tofu state rm module.socle` first
+  Fix: drop the bootstrap from the state first
+  (`tofu state rm module.socle.module.socle` with the AWS root)
   ([Uninstall](uninstall.md#everything)).

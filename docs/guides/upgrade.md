@@ -5,7 +5,7 @@ sidebar:
   order: 2
 ---
 
-An upgrade is one line in the tfvars and one apply. That line moves the
+An upgrade is one line in the cluster's `main.tf` and one apply. That line moves the
 OpenTofu modules, the Flux artifact and every version they pin
 ([Compatibility](../reference/compatibility.md)).
 
@@ -30,12 +30,16 @@ cosign verify ghcr.io/do-now-io/socle/opentofu-modules:<version> \
 ## 3. Bump and apply
 
 ```hcl
-socle_version = "0.0.0" # x-release-please-version
+locals {
+  socle_version = "0.0.0" # x-release-please-version
+}
 ```
+
+`tofu init` fetches the modules at the new tag:
 
 ```sh
 tofu init
-tofu apply -var-file=clusters/prod.tfvars
+tofu apply
 kubectl -n flux-system get ocirepository socle     # the new tag, SourceVerified
 kubectl -n flux-system get resourceset socle-root  # Ready
 ```
@@ -49,8 +53,8 @@ A ForceNew change of the foundations (listed in their README) leaves the
 helm provider unable to refresh. Apply the foundations first:
 
 ```sh
-tofu apply -var-file=clusters/prod.tfvars -target=module.foundations
-tofu apply -var-file=clusters/prod.tfvars
+tofu apply -target=module.socle.module.foundations
+tofu apply
 ```
 
 ## Test a build before it is released
@@ -65,7 +69,7 @@ refused.
   signature:
 
   ```hcl
-  socle_version = "0.0.0-feat-x.abc1234"
+  # local.socle_version = "0.0.0-feat-x.abc1234", and in the module block:
   cosign_identity = {
     issuer  = "^https://token\\.actions\\.githubusercontent\\.com$"
     subject = "^https://github\\.com/do-now-io/socle/\\.github/workflows/publish-artifact\\.yaml@refs/heads/feat/x$"

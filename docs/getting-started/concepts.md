@@ -6,7 +6,7 @@ sidebar:
 ---
 
 The socle is a GitOps distribution for EKS, GKE, AKS and Scaleway Kapsule.
-You describe a cluster in one tfvars file; `tofu apply` creates it and hands
+You describe a cluster in one OpenTofu file; `tofu apply` creates it and hands
 it to Flux, which installs and keeps converged the modules you chose.
 
 ## 1. Foundations: the cluster, created once by OpenTofu

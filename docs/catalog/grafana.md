@@ -14,7 +14,7 @@ default**, on every cloud. How the stack fits together:
 
 It is already on. Give it a host, on the private Gateway:
 
-```hcl title="terraform.tfvars" kube-start="grafana"
+```hcl kube-start="grafana"
 kube = {
   grafana = {
     domain  = "grafana.acme.example"
@@ -37,7 +37,7 @@ Then `kubectl -n grafana get httproute grafana` shows your host.
 
 ### Every setting
 
-```hcl title="terraform.tfvars" kube-full="grafana"
+```hcl kube-full="grafana"
 kube = {
   grafana = {
     enabled = true      # on by default

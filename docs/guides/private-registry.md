@@ -1,31 +1,31 @@
 ---
 title: Pull from a private registry
-description: Credentials for the private OpenTofu modules package, and a pull secret for Flux when the artifact comes from a private mirror.
+description: Pull the socle from your own private mirror — a registry credential for OpenTofu, a pull secret for Flux.
 sidebar:
   order: 3
 ---
 
-The Flux artifact is public: a default install needs nothing from this page.
-Two cases do:
+Both socle packages are public: a default install needs nothing from this
+page. It is for a socle served from your own private registry.
 
 | Case | Who needs a credential | How |
 | --- | --- | --- |
-| `tofu init` against `opentofu-modules`, private until v1 | the runner that applies | a docker login, or an OCI credential in the OpenTofu CLI configuration |
-| The Flux artifact from your own private mirror | the cluster | a pull secret named in `artifact_pull_secret` |
+| `tofu init` against your mirror of `opentofu-modules` | the runner that applies | a docker login, or an OCI credential in the OpenTofu CLI configuration |
+| The Flux artifact from your mirror | the cluster | a pull secret named in `artifact_pull_secret` |
 
 ## The OpenTofu modules package
 
-Until v1, `tofu init` and `cosign verify` need a GitHub token with
-`read:packages`. Log in before `init`:
+Copy it with its signature, then log in to your registry before `init` and
+point both module sources at it:
 
 ```sh
-printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io -u <github user> --password-stdin
+cosign copy ghcr.io/do-now-io/socle/opentofu-modules:<version> \
+  registry.acme.example/socle/opentofu-modules:<version>
+docker login registry.acme.example
 tofu init
 ```
 
-At v1 the package goes public and this step goes away.
-
-## A private mirror of the Flux artifact
+## The Flux artifact
 
 1. Copy the artifact with its signature, keeping the socle version as tag:
 

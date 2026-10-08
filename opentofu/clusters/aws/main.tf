@@ -1,14 +1,14 @@
 # The socle on AWS, in one apply: the cluster, then Flux and the catalog on it.
 #
-# In the repository the two sources are relative, so this root is what CI
-# applies. A client's copy points both at the published module, with the
-# version in the source:
+# CI applies it from the repository. A client calls it as a module from the
+# published package, whose relative sources resolve inside the same package:
 #
-#   source = "oci://ghcr.io/do-now-io/socle/opentofu-modules//opentofu/aws?tag=${var.socle_version}"
-#   source = "oci://ghcr.io/do-now-io/socle/opentofu-modules//opentofu/bootstrap?tag=${var.socle_version}"
+#   source = "oci://ghcr.io/do-now-io/socle/opentofu-modules//opentofu/clusters/aws?tag=${local.socle_version}"
 #
 # (the modules package, not the socle artifact: one OCI tag cannot carry both
-# shapes — docs/architecture/distribution.md)
+# shapes — docs/architecture/distribution.md). It configures its own
+# providers, so the calling module block takes no count, for_each or
+# depends_on.
 #
 # Two cases need more than one apply, both documented in README.md: replacing
 # the cluster, and destroying it when the runner cannot reach the API.

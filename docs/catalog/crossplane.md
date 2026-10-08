@@ -16,7 +16,7 @@ Set the foundations' `aws.crossplane` with the services your modules use
 (`crossplane = { allowed_services = ["route53", "secretsmanager"] }`), then
 turn the module on; the aws root wires `permissions_boundary` for you:
 
-```hcl title="terraform.tfvars" kube-start="crossplane"
+```hcl kube-start="crossplane"
 kube = {
   crossplane = {
     enabled = true
@@ -37,7 +37,7 @@ Then `kubectl get providers.pkg.crossplane.io` shows the four providers `Healthy
 
 ### Every setting
 
-```hcl title="terraform.tfvars" kube-full="crossplane"
+```hcl kube-full="crossplane"
 kube = {
   crossplane = {
     enabled = false # off by default; true installs the tooling

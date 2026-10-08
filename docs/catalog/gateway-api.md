@@ -15,7 +15,7 @@ aws, azure and scaleway (no Gateways on scaleway; gcp uses GKE's own).
 It is already on; on aws the Gateways also wait for the foundations'
 `aws.gateway_certificate`, on azure `https` for your `gateway-tls` Secret:
 
-```hcl title="terraform.tfvars" kube-start="gateway_api"
+```hcl kube-start="gateway_api"
 kube = {
   gateway_api = {
     gateways = true
@@ -37,7 +37,7 @@ The module has no chart, so no `values` and no `values_secret`. The CRDs are
 
 ### Every setting
 
-```hcl title="terraform.tfvars" kube-full="gateway_api"
+```hcl kube-full="gateway_api"
 kube = {
   gateway_api = {
     enabled  = true # on by default; false orphans the CRDs

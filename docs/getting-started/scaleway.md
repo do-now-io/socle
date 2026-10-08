@@ -149,7 +149,7 @@ module "socle" {
 }
 ```
 
-No Cilium and no CoreDNS here: Kapsule operates both, and the bootstrap refuses `cilium`. While the registry is private, create the pull secret in `flux-system` first and set `artifact_pull_secret` ([private registry](../guides/private-registry.md)).
+No Cilium and no CoreDNS here: Kapsule operates both, and the bootstrap refuses `cilium`.
 
 For External-DNS, first create its Secret with a key that may write the zone:
 

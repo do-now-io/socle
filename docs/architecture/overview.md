@@ -1,22 +1,22 @@
 ---
 title: Overview
-description: How OpenTofu, the bootstrap, Flux and the ResourceSets fit together, from one tfvars file to a converged cluster.
+description: How OpenTofu, the bootstrap, Flux and the ResourceSets fit together, from one OpenTofu file to a converged cluster.
 sidebar:
   order: 0
 ---
 
-The socle turns one tfvars file into a managed Kubernetes cluster running a
+The socle turns one OpenTofu file into a managed Kubernetes cluster running a
 chosen set of platform modules, and keeps it converged. In one apply,
 OpenTofu creates the cluster and hands it its inputs; Flux, through the Flux
 Operator, then pulls a signed artifact and renders the catalog from them.
 
 ```text
-tfvars ──▶ tofu apply ──▶ foundations: network, cluster, nodes, identities
-                     └──▶ bootstrap: [Cilium, CoreDNS, EKS add-ons], flux-operator,
-                                     flux-instance, envelope (inputs + socle-root)
-                                                    │
-ghcr.io/do-now-io/socle/flux-modules ──verified pull──▶ Flux ──▶ clusters/<cloud>
-                                                                 └▶ one ResourceSet per module
+main.tf ──▶ tofu apply ──▶ foundations: network, cluster, nodes, identities
+                      └──▶ bootstrap: [Cilium, CoreDNS, EKS add-ons], flux-operator,
+                                      flux-instance, envelope (inputs + socle-root)
+                                                     │
+ghcr.io/do-now-io/socle/flux-modules ───verified pull──▶ Flux ──▶ clusters/<cloud>
+                                                                  └▶ one ResourceSet per module
 ```
 
 ## The layers
@@ -25,7 +25,7 @@ ghcr.io/do-now-io/socle/flux-modules ──verified pull──▶ Flux ──▶
 | --- | --- | --- | --- |
 | Foundations | One module per cloud: network, cluster, the nodes the socle starts on, identities | [`opentofu/aws`](../../opentofu/aws/), `gcp`, `azure`, `scaleway` | OpenTofu |
 | Bootstrap | Cilium and CoreDNS where the cloud has none, the EKS add-ons, the Flux Operator and instance, the envelope of inputs | [`opentofu/bootstrap`](../../opentofu/bootstrap/) | OpenTofu, same apply |
-| Root | The one apply: calls both, configures the providers | [`opentofu/clusters/aws`](../../opentofu/clusters/aws/) (AWS only so far) | you, a copy never edited |
+| Root | The one apply: calls both, configures the providers | [`opentofu/clusters/aws`](../../opentofu/clusters/aws/) (AWS only so far) | the socle; your `main.tf` calls it |
 | Catalog | One `ResourceSet` per module, one overlay per cloud | [`oci/`](../../oci/) | Flux, from the signed artifact |
 
 ## The positions

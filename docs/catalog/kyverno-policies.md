@@ -16,7 +16,7 @@ nothing until you switch it to Enforce. **Off by default**, on every cloud.
 
 Turn it on with the kyverno engine it needs, and name your registries:
 
-```hcl title="terraform.tfvars" kube-start="kyverno_policies"
+```hcl kube-start="kyverno_policies"
 kube = {
   kyverno = { enabled = true }
   kyverno_policies = {
@@ -43,7 +43,7 @@ violates.
 
 ### Every setting
 
-```hcl title="terraform.tfvars" kube-full="kyverno_policies"
+```hcl kube-full="kyverno_policies"
 kube = {
   kyverno_policies = {
     enabled            = false      # off by default; needs kube.kyverno.enabled = true

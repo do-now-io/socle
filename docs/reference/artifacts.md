@@ -12,7 +12,7 @@ Why two, and how a release is cut: [Distribution](../architecture/distribution.m
 | Package | Media type | Contents | Visibility |
 | --- | --- | --- | --- |
 | `ghcr.io/do-now-io/socle/flux-modules` | Flux artifact (`tar+gzip`) | `oci/`, without any `tests/` folder | public |
-| `ghcr.io/do-now-io/socle/opentofu-modules` | `application/vnd.opentofu.modulepkg`, one `archive/zip` layer | `git archive` of the whole commit | private until v1 |
+| `ghcr.io/do-now-io/socle/opentofu-modules` | `application/vnd.opentofu.modulepkg`, one `archive/zip` layer | `git archive` of the whole commit | public |
 
 Annotations on both: `org.opencontainers.image.source`
 (`https://github.com/do-now-io/socle`), `org.opencontainers.image.revision`
@@ -92,6 +92,4 @@ cosign verify ghcr.io/do-now-io/socle/opentofu-modules:<version> \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-Swap in `flux-modules` for the Flux artifact. While `opentofu-modules` is
-private, log in first (`cosign login ghcr.io` or `docker login`, a token with
-`read:packages`).
+Swap in `flux-modules` for the Flux artifact. Both are public: no login.

@@ -90,9 +90,6 @@ terraform {
 - [ ] OpenTofu 1.10 or later (OCI module sources).
 - [ ] The AWS CLI: the helm provider gets its token from `aws eks get-token`.
 - [ ] `kubectl`.
-- [ ] A GHCR login with `read:packages` (`docker login ghcr.io`) while
-  `ghcr.io/do-now-io/socle/opentofu-modules` is private. The Flux package is
-  public ([distribution](../../architecture/distribution.md)).
 - [ ] `cosign`, to verify the modules package: OpenTofu does not verify OCI
   signatures.
 

@@ -13,7 +13,7 @@ every container's log, written to [victoria-metrics](victoria-metrics.md) and
 
 It is already on. Tolerate your nodes' taints so an agent runs on each:
 
-```hcl title="terraform.tfvars" kube-start="otel_agent"
+```hcl kube-start="otel_agent"
 kube = {
   otel_agent = {
     logs = true
@@ -38,7 +38,7 @@ pods ready as there are nodes.
 
 ### Every setting
 
-```hcl title="terraform.tfvars" kube-full="otel_agent"
+```hcl kube-full="otel_agent"
 kube = {
   otel_agent = {
     enabled = true # on by default; off removes the release and the dashboard

@@ -15,7 +15,7 @@ default**, on every cloud: an admission webhook is something you opt into.
 Turn the engine on, with [kyverno-policies](kyverno-policies.md) for the
 socle's policy set:
 
-```hcl title="terraform.tfvars" kube-start="kyverno"
+```hcl kube-start="kyverno"
 kube = {
   kyverno = {
     enabled = true
@@ -36,7 +36,7 @@ Then `kubectl -n kyverno get deploy` shows three admission replicas Available.
 
 ### Every setting
 
-```hcl title="terraform.tfvars" kube-full="kyverno"
+```hcl kube-full="kyverno"
 kube = {
   kyverno = {
     enabled = false # off by default; false uninstalls the engine and its CRDs

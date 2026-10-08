@@ -15,7 +15,7 @@ aws with crossplane on, the socle also gives it a read-only role and one store.
 On aws, add `secretsmanager` to `aws.crossplane.allowed_services`, then turn it
 on with crossplane and reloader; the role reads the secrets under `acme-prod/`:
 
-```hcl title="terraform.tfvars" kube-start="external_secrets"
+```hcl kube-start="external_secrets"
 kube = {
   crossplane = { enabled = true }
   external_secrets = {
@@ -39,7 +39,7 @@ Then `kubectl get clustersecretstore secret-manager` is `Valid`.
 
 ### Every setting
 
-```hcl title="terraform.tfvars" kube-full="external_secrets"
+```hcl kube-full="external_secrets"
 kube = {
   external_secrets = {
     enabled  = false         # off by default

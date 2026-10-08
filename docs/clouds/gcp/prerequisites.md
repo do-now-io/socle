@@ -164,8 +164,6 @@ terraform {
 - [ ] `kubectl`.
 - [ ] `cosign`, to verify the modules package: OpenTofu does not verify OCI
   signatures ([distribution](../../architecture/distribution.md)).
-- [ ] While the registry is private, a registry login and a Flux pull secret
-  ([private registry](../../guides/private-registry.md)).
 
 ## Quotas
 

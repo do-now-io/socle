@@ -13,7 +13,7 @@ the rest of the stack: [Observability](../architecture/observability.md).
 
 It is already on. Set how long samples are kept and how big their volume is:
 
-```hcl title="terraform.tfvars" kube-start="victoria_metrics"
+```hcl kube-start="victoria_metrics"
 kube = {
   victoria_metrics = {
     retention    = "30d"
@@ -37,7 +37,7 @@ the pod `Running`.
 
 ### Every setting
 
-```hcl title="terraform.tfvars" kube-full="victoria_metrics"
+```hcl kube-full="victoria_metrics"
 kube = {
   victoria_metrics = {
     enabled      = true   # on by default; off deletes the claim and its data

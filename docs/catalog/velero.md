@@ -19,7 +19,7 @@ labels. **Off by default**, aws only. To restore:
 Turn it on with the crossplane it needs, on foundations that list `s3` in
 `aws.crossplane.allowed_services`:
 
-```hcl title="terraform.tfvars" kube-start="velero"
+```hcl kube-start="velero"
 kube = {
   crossplane = { enabled = true }
   velero = {
@@ -43,7 +43,7 @@ Then `kubectl -n velero get backupstoragelocations` shows `default`
 
 ### Every setting
 
-```hcl title="terraform.tfvars" kube-full="velero"
+```hcl kube-full="velero"
 kube = {
   velero = {
     enabled = false # off by default; aws only, needs kube.crossplane.enabled = true

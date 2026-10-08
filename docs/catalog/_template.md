@@ -24,7 +24,7 @@ One sentence, then the block a client copies: the module on, and the two or
 three settings they set first. `kube-start` names the catalog.tf key; the
 build refuses an attribute the module does not have.
 
-```hcl title="terraform.tfvars" kube-start="<catalog key>"
+```hcl kube-start="<catalog key>"
 kube = {
   <catalog key> = {
     enabled = true
@@ -42,7 +42,7 @@ kube = {
 
 ## What you can set
 
-Under `kube.<module>` in your tfvars:
+Under `kube.<module>`:
 
 | Attribute | Default | What it does |
 | --- | --- | --- |
@@ -58,7 +58,7 @@ Every attribute, at its default, and how chart values and secrets go in.
 `kube-full` names the catalog.tf key; the build refuses a block that lists
 more or fewer attributes than catalog.tf. Attributes sit at four spaces.
 
-```hcl title="terraform.tfvars" kube-full="<catalog key>"
+```hcl kube-full="<catalog key>"
 kube = {
   <catalog key> = {
     enabled       = false            # what it does

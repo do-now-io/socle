@@ -18,7 +18,7 @@ every cloud; the operator's own role (`services`) is aws only.
 Turn it on; for aws queues, add their services to
 `aws.crossplane.allowed_services` and name them in `services`:
 
-```hcl title="terraform.tfvars" kube-start="keda"
+```hcl kube-start="keda"
 kube = {
   crossplane = { enabled = true }
   keda = {
@@ -41,7 +41,7 @@ Then `kubectl get apiservice v1beta1.external.metrics.k8s.io` is `Available`.
 
 ### Every setting
 
-```hcl title="terraform.tfvars" kube-full="keda"
+```hcl kube-full="keda"
 kube = {
   keda = {
     enabled  = false # off by default

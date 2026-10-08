@@ -17,9 +17,7 @@ From [GCP prerequisites](../clouds/gcp/prerequisites.md):
   `roles/compute.networkAdmin`, `roles/resourcemanager.projectIamAdmin`,
   `roles/pubsub.admin`, `roles/bigquery.admin`, and
   `roles/storage.objectAdmin` on the state bucket;
-- OpenTofu 1.10 or later, `gcloud`, `gke-gcloud-auth-plugin`, `kubectl`;
-- while the registry is private, a registry login and a Flux pull secret
-  ([private registry](../guides/private-registry.md)).
+- OpenTofu 1.10 or later, `gcloud`, `gke-gcloud-auth-plugin`, `kubectl`.
 
 ## Write your tfvars
 

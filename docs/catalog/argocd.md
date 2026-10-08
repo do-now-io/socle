@@ -13,7 +13,7 @@ cloud, with no application in it.
 
 It is already on. Give it a host, on the private Gateway:
 
-```hcl title="terraform.tfvars" kube-start="argocd"
+```hcl kube-start="argocd"
 kube = {
   argocd = {
     domain  = "argocd.acme.example"
@@ -38,7 +38,7 @@ Then `kubectl -n argocd get httproute argocd-server` shows your host.
 
 ### Every setting
 
-```hcl title="terraform.tfvars" kube-full="argocd"
+```hcl kube-full="argocd"
 kube = {
   argocd = {
     enabled       = true      # on by default

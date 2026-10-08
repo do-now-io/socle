@@ -13,16 +13,21 @@ tofu init
 tofu apply -var-file=prod.tfvars
 ```
 
-In a client's copy both sources point at the published modules package, the
-version taken from the tfvars, which OpenTofu resolves at `tofu init`
-(`tofu init -var-file=prod.tfvars`):
+A client calls this root as a module from the published package, with the
+variables below as its arguments; its relative sources resolve inside the
+same package:
 
 ```hcl
-source = "oci://ghcr.io/do-now-io/socle/opentofu-modules//opentofu/aws?tag=${var.socle_version}"
-source = "oci://ghcr.io/do-now-io/socle/opentofu-modules//opentofu/bootstrap?tag=${var.socle_version}"
+module "socle" {
+  source        = "oci://ghcr.io/do-now-io/socle/opentofu-modules//opentofu/clusters/aws?tag=${local.socle_version}"
+  socle_version = local.socle_version
+  aws           = { ... }
+  kube          = { ... }
+}
 ```
 
-Upgrading is then one line, `socle_version`
+It configures its own providers: the module block takes no `count`,
+`for_each` or `depends_on`. Upgrading is then one line, `socle_version`
 ([upgrade](../../../docs/guides/upgrade.md)). Prerequisites:
 [AWS prerequisites](../../../docs/clouds/aws/prerequisites.md).
 

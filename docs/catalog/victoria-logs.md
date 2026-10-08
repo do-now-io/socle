@@ -13,7 +13,7 @@ your applications' OTLP logs, read in [grafana](grafana.md) in LogsQL.
 
 It is already on. Set how long logs are kept and how big their volume is:
 
-```hcl title="terraform.tfvars" kube-start="victoria_logs"
+```hcl kube-start="victoria_logs"
 kube = {
   victoria_logs = {
     retention    = "14d"
@@ -37,7 +37,7 @@ pod `Running`.
 
 ### Every setting
 
-```hcl title="terraform.tfvars" kube-full="victoria_logs"
+```hcl kube-full="victoria_logs"
 kube = {
   victoria_logs = {
     enabled      = true   # on by default; off deletes the claim and its logs

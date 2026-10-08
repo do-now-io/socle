@@ -14,7 +14,7 @@ you trust the pipeline.
 
 It is already on. Change its message to see an input reach the cluster:
 
-```hcl title="terraform.tfvars" kube-start="hello"
+```hcl kube-start="hello"
 kube = {
   hello = {
     replicas = 2
@@ -38,7 +38,7 @@ flowing, not to be configured.
 
 ### Every setting
 
-```hcl title="terraform.tfvars" kube-full="hello"
+```hcl kube-full="hello"
 kube = {
   hello = {
     enabled  = true               # on by default; false once you trust the pipeline

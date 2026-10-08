@@ -46,7 +46,7 @@ Chart values go in `kube.keda.values`, secrets in `kube.keda.values_secret`
 ([Configure a cluster](configure.md#3-pass-chart-values)). Then plan:
 
 ```sh
-tofu plan -var-file=clusters/prod.tfvars
+tofu plan
 ```
 
 The plan shows one change, the `socle` release. It refuses a configuration
@@ -57,7 +57,7 @@ off aws.
 ## 4. Check that it converged
 
 ```sh
-tofu apply -var-file=clusters/prod.tfvars
+tofu apply
 kubectl -n flux-system get resourceset keda keda-workload   # Ready=True
 kubectl -n flux-system get resourceset socle-root           # Ready=True: everything converged
 kubectl -n keda get helmrelease                             # the chart, Ready

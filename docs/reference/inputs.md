@@ -5,7 +5,7 @@ sidebar:
   order: 0
 ---
 
-What a tfvars holds beyond `socle_version` and the cloud object. How to write
+What a cluster's configuration holds beyond `socle_version` and the cloud object. How to write
 it: [Configure a cluster](../guides/configure.md).
 
 ## kube
