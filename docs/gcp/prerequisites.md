@@ -81,6 +81,9 @@ Why the disk quota runs out first:
   two nodes. The CPU quota was the next limit the sandbox hit: 12 of 12 in
   use.
 
+What the catalog itself requests — about 2.3 vCPU, 4.2 GiB of memory and
+4.4 GiB of ephemeral storage, every module on — is in [sizing](sizing.md).
+
 Ask before the first apply, for the cluster's region. On a fresh project or
 billing account Google may refuse an automatic increase — measured: requests
 through the Cloud Quotas API for 500, 1000 and 2000 GB were refused ("cannot

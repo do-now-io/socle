@@ -24,6 +24,7 @@ the project needs before the first apply — APIs, roles, quotas — is in
 | Clusters per project | One socle cluster — principals name the project, not the cluster | [prerequisites](prerequisites.md) |
 | What bounds Crossplane | The roles it may grant, listed by the client | [crossplane](../catalog/crossplane.md) |
 | Quotas | Raised before the first apply — a fresh project fits two nodes | [prerequisites](prerequisites.md) |
+| Catalog requests | Every container states cpu, memory and disk — Autopilot reserves 500m / 2 GiB / 1 GiB otherwise | [sizing](sizing.md) |
 | CNI | Dataplane V2, enforced | [network-security](network-security.md) |
 | Self-managed Cilium | Refused — impossible on Autopilot | [network-security](network-security.md) |
 | Network policy | Plain Kubernetes NetworkPolicy | [network-security](network-security.md) |
