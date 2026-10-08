@@ -41,7 +41,7 @@ The socle's values, all in `argocd-socle-values`, and why:
 | --- | --- | --- |
 | `controller`, `server`, `repoServer`, `applicationSet` `.replicas` | 1 | A small cluster. `ha` changes it (below) |
 | `redis-ha.enabled` | false | Same |
-| `*.resources.requests` | controller 250m/256Mi, repoServer 100m/128Mi, server 50m/64Mi, applicationSet 50m/64Mi, redis 50m/32Mi | Scheduling is honest about what ArgoCD needs; no limits, because a memory limit OOM-kills the controller on a large estate and there is no client knob to raise it in v1 |
+| `*.resources.requests` | controller 250m/256Mi, repoServer 100m/128Mi, server 50m/64Mi, applicationSet 50m/64Mi, redis 50m/64Mi; ephemeral storage 64Mi each, 1Gi for the repo server ([sizing](../gcp/sizing.md)) | Scheduling is honest about what ArgoCD needs; no limits, because a memory limit OOM-kills the controller on a large estate and there is no client knob to raise it in v1 |
 | `server.service.type` | `ClusterIP` | Exposure is the Gateway's job (follow-up) |
 | `configs.params."server.insecure"` | true | The server speaks plain HTTP in-cluster; TLS terminates at the Gateway |
 | `configs.cm."admin.enabled"` | `admin_enabled` | The local account exists until SSO does |
@@ -141,13 +141,15 @@ ArgoCD's own declarative setup).
 
 ## Per cloud
 
-Nothing but requests, on GCP. GKE Autopilot gives a container that requests
-nothing 500m CPU and 2 GiB, so on gcp the socle sets requests on the three
-the chart leaves empty: the `redis-secret-init` install hook (50m / 64Mi,
-the Autopilot floor) and, with `ha`, each Redis's `sentinel` and
-`split-brain-fix` sidecars (10m / 32Mi).
+Nothing. Requests are set on every cloud, including on the containers the
+chart leaves empty — GKE Autopilot gives a container that requests nothing
+500m CPU, 2 GiB and 1 GiB of disk: the `redis-secret-init` install hook
+(50m / 64Mi, the Autopilot floor) and, with `ha`, each Redis's `sentinel` and
+`split-brain-fix` sidecars and the `config-init` init containers (10m /
+32Mi). Every container states its ephemeral storage too
+([docs/gcp/sizing.md](../gcp/sizing.md)).
 
-Otherwise nothing. The four `oci/clusters/<cloud>/kustomization.yaml` list
+The four `oci/clusters/<cloud>/kustomization.yaml` list
 the same template and carry no `argocd` patch. Two things differ per cloud,
 and neither is this module's: the Gateway implementation the HTTPRoute binds
 to (the gateway-api module), and the workload identity ArgoCD would use to

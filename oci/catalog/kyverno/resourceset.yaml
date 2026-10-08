@@ -84,11 +84,21 @@ spec:
           podAnnotations:
             prometheus.io/scrape: "true"
             prometheus.io/port: "8000"
+          # Disk stated on every container, or GKE Autopilot reserves 1 GiB
+          # each (docs/gcp/sizing.md): logs and a small sigstore cache. The
+          # chart's own limits on the init container and the hooks stay.
+          initContainer:
+            resources:
+              requests:
+                cpu: 10m
+                memory: 64Mi
+                ephemeral-storage: 32Mi
           container:
             resources:
               requests:
                 cpu: 100m
                 memory: 128Mi
+                ephemeral-storage: 64Mi
         backgroundController:
           replicas: 1
           podAnnotations:
@@ -98,6 +108,7 @@ spec:
             requests:
               cpu: 50m
               memory: 64Mi
+              ephemeral-storage: 64Mi
         # No cleanup controller: the socle ships no cleanup or deleting
         # policy, and it is the one controller that outlives the chart's
         # uninstall hook — measured on floci, it re-registered its webhook
@@ -106,6 +117,21 @@ spec:
         # TTL cleanup turns it on in values (docs/catalog/kyverno.md).
         cleanupController:
           enabled: false
+        # The upgrade and uninstall hooks: the chart's cpu and memory, kept,
+        # and disk.
+        crds:
+          migration:
+            podResources:
+              requests:
+                cpu: 10m
+                memory: 64Mi
+                ephemeral-storage: 32Mi
+        webhooksCleanup:
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+              ephemeral-storage: 32Mi
         reportsController:
           replicas: 1
           podAnnotations:
@@ -115,6 +141,7 @@ spec:
             requests:
               cpu: 50m
               memory: 64Mi
+              ephemeral-storage: 64Mi
         config:
           # Namespaces no webhook of Kyverno's ever sees: the control plane's
           # own and Flux's, so that no policy, however it is set, can stand

@@ -314,9 +314,12 @@ says:
 - **requests sized from the e2e** (§9), the chart's limits kept;
 - **the plugin as an init container**, pinned with the chart:
   `velero-plugin-for-aws` or `velero-plugin-for-gcp`, both `v1.14.4`;
-- **on gcp, requests on the CRD upgrade Job** (`upgradeJobResources`, 50m /
-  128Mi): Autopilot gives a container without requests 500m / 2Gi, and bills
-  what is requested.
+- **requests on the CRD upgrade Job** (`upgradeJobResources`, 50m / 128Mi)
+  and on the plugin's init container (10m / 32Mi), on every cloud: Autopilot
+  gives a container without requests 500m / 2Gi, and bills what is
+  requested. Every container states its ephemeral storage too: 512Mi for the
+  server, whose `emptyDir`s hold the plugin and Kopia's cache
+  ([docs/gcp/sizing.md](../gcp/sizing.md)).
 
 The volume policy and the `VolumeSnapshotClass` are objects of the
 ResourceSet, not chart values: they are part of the socle's contract with the

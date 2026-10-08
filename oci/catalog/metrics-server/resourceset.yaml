@@ -66,6 +66,15 @@ spec:
     data:
       values.yaml: |
         replicas: << if inputs.modules.metrics_server.ha >>2<< else >>1<< end >>
+        # The chart's own requests, stated with disk: a container that leaves
+        # one out is sized by the platform (GKE Autopilot reserves 1 GiB of
+        # disk for it, docs/gcp/sizing.md). Logs only: /tmp holds its
+        # self-signed certificate.
+        resources:
+          requests:
+            cpu: 100m
+            memory: 200Mi
+            ephemeral-storage: 64Mi
         # So it can follow CoreDNS if the bootstrap nodes are tainted once
         # Karpenter provisions the workload nodes.
         tolerations:

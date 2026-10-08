@@ -420,6 +420,14 @@ spec:
               - name: velero-plugin-for-<< $provider >>
                 image: docker.io/velero/velero-plugin-for-<< $provider >>:v1.14.4
                 imagePullPolicy: IfNotPresent
+                # It copies one binary into the plugins emptyDir, which the
+                # server's own request covers; asked nothing, Autopilot would
+                # reserve 500m / 2Gi for the pod's whole life.
+                resources:
+                  requests:
+                    cpu: 10m
+                    memory: 32Mi
+                    ephemeral-storage: 32Mi
                 volumeMounts:
                   - mountPath: /target
                     name: plugins
@@ -560,25 +568,33 @@ spec:
                 readOnlyRootFilesystem: true
                 capabilities:
                   drop: [ALL]
+            # Disk stated, or GKE Autopilot reserves 1 GiB a container
+            # (docs/gcp/sizing.md): the server's emptyDirs hold the plugin
+            # binary its init container copies (under 100 MiB), the Kopia
+            # cache and scratch space; 512Mi with room. The node-agent's
+            # Kopia cache grows with what it uploads: a request, no limit.
             resources:
               requests:
                 cpu: 50m
                 memory: 128Mi
+                ephemeral-storage: 512Mi
               limits:
                 memory: 512Mi
-            <<- if $gcp >>
-            # The CRD upgrade hook's Job: Autopilot gives a container without
-            # requests 500m / 2Gi, and bills what is requested.
+            # The CRD upgrade hook's Job: the chart asks nothing for it, and
+            # Autopilot gives a container without requests 500m / 2Gi, and
+            # bills what is requested.
             upgradeJobResources:
               requests:
                 cpu: 50m
                 memory: 128Mi
-            <<- else >>
+                ephemeral-storage: 32Mi
+            <<- if not $gcp >>
             nodeAgent:
               resources:
                 requests:
                   cpu: 50m
                   memory: 128Mi
+                  ephemeral-storage: 512Mi
                 limits:
                   memory: 1Gi
             <<- end >>

@@ -308,6 +308,7 @@ spec:
               requests:
                 cpu: 10m
                 memory: 64Mi
+                ephemeral-storage: 64Mi
               limits:
                 memory: 256Mi
             # Scraped by the otel_gateway module, which reads these annotations.
@@ -319,6 +320,7 @@ spec:
                 requests:
                   cpu: 10m
                   memory: 32Mi
+                  ephemeral-storage: 64Mi
                 limits:
                   memory: 128Mi
             certController:
@@ -326,6 +328,7 @@ spec:
                 requests:
                   cpu: 10m
                   memory: 32Mi
+                  ephemeral-storage: 64Mi
                 limits:
                   memory: 128Mi
       # The client's own chart values, as written in kube.external_secrets.values.

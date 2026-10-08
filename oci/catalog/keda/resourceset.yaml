@@ -293,14 +293,17 @@ spec:
                 requests:
                   cpu: 50m
                   memory: 128Mi
+                  ephemeral-storage: 64Mi
               metricServer:
                 requests:
                   cpu: 25m
                   memory: 64Mi
+                  ephemeral-storage: 64Mi
               webhooks:
                 requests:
                   cpu: 10m
                   memory: 32Mi
+                  ephemeral-storage: 64Mi
       # The client's own chart values, as written in kube.keda.values.
       # OpenTofu refuses secrets in there.
       - apiVersion: v1

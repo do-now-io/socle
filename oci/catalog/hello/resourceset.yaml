@@ -54,5 +54,13 @@ spec:
           name: podinfo-chart
         values:
           replicaCount: << inputs.modules.hello.replicas | int >>
+          # The chart's 1m / 16Mi is outside GKE Autopilot's CPU:memory
+          # ratio (1:1 to 1:6.5) and states no disk, for which Autopilot
+          # would reserve 1 GiB (docs/gcp/sizing.md).
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+              ephemeral-storage: 64Mi
           ui:
             message: << printf "%s — %s on %s" inputs.modules.hello.message inputs.cluster.name inputs.cloud | quote >>

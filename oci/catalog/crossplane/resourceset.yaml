@@ -83,19 +83,28 @@ spec:
             # Measured on k3s: idle with no provider, core 3m / 32Mi and RBAC
             # manager 2m / 12Mi; with the AWS provider's 71 CRDs loaded, the
             # core at 109Mi. The chart's own 100m / 256Mi each would reserve
-            # half a gigabyte before anything is declared.
+            # half a gigabyte before anything is declared. On the GKE sandbox
+            # (2026-10-07), with the GCP providers' CRDs: core 176Mi, RBAC
+            # manager 18Mi working set — the core's request is 192Mi since.
             # No limits, like every socle module: a memory limit turns a CRD
             # surge into an OOM loop, and a CPU limit throttles reconciliation.
+            # Disk stated too, or GKE Autopilot reserves 1 GiB a container
+            # (docs/gcp/sizing.md): the core's package cache is an emptyDir
+            # capped at 20Mi by the chart, its function cache stays empty (no
+            # function), and logs rotate at 5 × 10Mi on GKE. The init
+            # container takes the same resources.
             resourcesCrossplane:
               limits: null
               requests:
                 cpu: 50m
-                memory: 128Mi
+                memory: 192Mi
+                ephemeral-storage: 128Mi
             resourcesRBACManager:
               limits: null
               requests:
                 cpu: 10m
                 memory: 32Mi
+                ephemeral-storage: 64Mi
         ---
         # The client's own chart values, as he wrote them in
         # kube.crossplane.values. OpenTofu refuses secrets in there.
@@ -188,7 +197,8 @@ spec:
             fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
         ---
         # Requests from what was measured on k3s: 306Mi to 441Mi per provider
-        # once its CRDs are loaded.
+        # once its CRDs are loaded. Disk: logs and the provider's small
+        # Terraform workspaces under /tmp, one per managed resource.
         apiVersion: pkg.crossplane.io/v1beta1
         kind: DeploymentRuntimeConfig
         metadata:
@@ -208,6 +218,7 @@ spec:
                         requests:
                           cpu: 50m
                           memory: 320Mi
+                          ephemeral-storage: 256Mi
         ---
         # The family provider is a dependency of the other two; declared so
         # that its version is pinned here and not resolved by Crossplane.
@@ -289,13 +300,13 @@ spec:
             fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
         ---
         # Requests set on purpose: Autopilot gives a container without them
-        # 500m / 2Gi, and bills what is requested — four providers would
-        # reserve 8Gi. The memory is AWS's, measured on k3s (306Mi to 441Mi
-        # per provider once its CRDs are loaded), until the sandbox measures
-        # GCP's (docs/catalog/crossplane.md). 100m / 320Mi is 1 vCPU to
-        # 3.1Gi, inside Autopilot's CPU:memory ratio (1:1 to 1:6.5), and
-        # above its floor; a pod bursts past it on a cluster that supports
-        # bursting.
+        # 500m / 2Gi / 1Gi of disk, and bills what is requested — four
+        # providers would reserve 8Gi. Measured on the GKE sandbox: 165–222Mi
+        # working set per provider pod (docs/catalog/crossplane.md); 320Mi
+        # keeps AWS's headroom. 100m / 320Mi is 1 vCPU to 3.1Gi, inside
+        # Autopilot's CPU:memory ratio (1:1 to 1:6.5), and above its floor; a
+        # pod bursts past it on a cluster that supports bursting. Disk: logs
+        # and the provider's small Terraform workspaces under /tmp.
         apiVersion: pkg.crossplane.io/v1beta1
         kind: DeploymentRuntimeConfig
         metadata:
@@ -315,6 +326,7 @@ spec:
                         requests:
                           cpu: 100m
                           memory: 320Mi
+                          ephemeral-storage: 256Mi
         ---
         # The family provider, a dependency of the other three, declared so
         # that its version is pinned here, under the name Crossplane gives a
