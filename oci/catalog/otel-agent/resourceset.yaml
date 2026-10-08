@@ -39,6 +39,29 @@ spec:
       annotations:
         fluxcd.controlplane.io/reconcile: << if inputs.modules.otel_agent.enabled >>enabled<< else >>disabled<< end >>
     ---
+    # A DaemonSet pod is bound to its node: when that node is full — Autopilot's
+    # 32 pods, or its CPU and memory — it stays Pending for good, the
+    # ResourceSet never Ready. With a priority above every ordinary pod's 0 it
+    # preempts one instead, and the autoscaler reschedules that one elsewhere:
+    # Google's advice for node agents on Autopilot, and right on every cloud.
+    # Not system-node-critical: the system classes (2000000000 and up) are the
+    # cluster's own components', not a client-facing module's. And below
+    # 1000000000, the highest a custom class may take on GKE. Applied before the HelmRelease, in this same list, so it exists
+    # by the time helm-controller creates the DaemonSet.
+    apiVersion: scheduling.k8s.io/v1
+    kind: PriorityClass
+    metadata:
+      name: socle-node-agent
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.otel_agent.enabled >>enabled<< else >>disabled<< end >>
+    value: 1000000
+    preemptionPolicy: PreemptLowerPriority
+    globalDefault: false
+    description: >-
+      The socle's node agents (otel-agent): one pod per node that must run on
+      every node, so it preempts an ordinary pod rather than stay Pending on a
+      full one.
+    ---
     apiVersion: source.toolkit.fluxcd.io/v1
     kind: OCIRepository
     metadata:
@@ -77,6 +100,9 @@ spec:
         # A constant name for the DaemonSet and its ConfigMap, never a
         # chart-derived one.
         fullnameOverride: otel-agent
+        # The module's own PriorityClass, above: on a full node the agent
+        # preempts an ordinary pod instead of staying Pending.
+        priorityClassName: socle-node-agent
         # otelcol-k8s: the upstream distribution for Kubernetes, 74
         # components rather than contrib's 251. It has otlp_http but no
         # Prometheus remote-write, which is why every signal crosses as OTLP.
