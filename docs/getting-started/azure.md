@@ -95,7 +95,7 @@ and dashes, starting with a letter. `dev.tfvars`:
 
 ```hcl
 # The only line an upgrade touches.
-socle_version = "0.0.0" # x-release-please-version
+socle_version = "0.1.0" # x-release-please-version
 
 kubernetes_version = "1.36"
 

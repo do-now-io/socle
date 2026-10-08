@@ -110,7 +110,7 @@ No `cilium`, `cluster_network` or `schedulable_nodes`: GKE runs Dataplane V2
 and Autopilot provisions nodes. `terraform.tfvars`:
 
 ```hcl
-socle_version = "0.0.0" # x-release-please-version
+socle_version = "0.1.0" # x-release-please-version
 
 project_id   = "my-project-dev"
 region       = "europe-west1"

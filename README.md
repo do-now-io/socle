@@ -76,7 +76,7 @@ Under `kube`, list only the values that differ from the catalog defaults:
 ```hcl
 # clusters/prod/main.tf (plus your state backend)
 locals {
-  socle_version = "0.0.0" # the only line an upgrade touches. x-release-please-version
+  socle_version = "0.1.0" # the only line an upgrade touches. x-release-please-version
 }
 
 module "socle" {

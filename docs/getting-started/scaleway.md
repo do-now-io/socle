@@ -91,7 +91,7 @@ And `prod.tfvars`:
 
 ```hcl
 # The only line an upgrade touches.
-socle_version = "0.0.0" # x-release-please-version
+socle_version = "0.1.0" # x-release-please-version
 
 project_id                           = "22222222-2222-2222-2222-222222222222"
 cluster_endpoint_public_access_cidrs = ["203.0.113.0/24"]

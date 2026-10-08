@@ -31,7 +31,7 @@ cosign verify ghcr.io/do-now-io/socle/opentofu-modules:<version> \
 
 ```hcl
 locals {
-  socle_version = "0.0.0" # x-release-please-version
+  socle_version = "0.1.0" # x-release-please-version
 }
 ```
 
