@@ -61,7 +61,8 @@ spec:
                 name: socle-node-agent
               value: 1000000
               preemptionPolicy: PreemptLowerPriority
-              globalDefault: false
+              # The API server drops globalDefault when it is false.
+              (globalDefault || `false`): false
         - assert:
             resource:
               apiVersion: v1
