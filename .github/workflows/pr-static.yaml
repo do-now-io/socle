@@ -273,6 +273,17 @@ jobs:
           flux-operator build rset -f /tmp/envelope-root.yaml \
             --inputs-from-provider /tmp/envelope-inputs.yaml \
             > rendered/envelope-root-built.yaml
+      - name: Every container the catalog runs states its requests
+        if: steps.detect.outputs.found == 'true'
+        run: |
+          # Each HelmRelease of the render, templated at its pinned chart with
+          # the socle's values: a container with no cpu, memory or
+          # ephemeral-storage request fails here (docs/gcp/sizing.md).
+          export CHART_CACHE=/tmp/charts
+          for cloud in aws gcp; do
+            echo "==> ${cloud}"
+            .github/scripts/check-catalog-requests.sh "rendered/${cloud}" | tee -a requests.out
+          done
       - name: kubeconform the render (strict)
         if: steps.detect.outputs.found == 'true'
         run: |
@@ -320,6 +331,10 @@ jobs:
             echo "(\`flux-operator build rset\` + \`helm template\`, strict):"
             echo '```'
             tail -1 kubeconform-rendered.out
+            echo '```'
+            echo "Requests (aws, then gcp — every container of every chart, templated):"
+            echo '```'
+            cat requests.out
             echo '```'
             echo "Artifact templates (\`oci/catalog\`, \`oci/clusters\`, missing schemas ignored):"
             echo '```'
