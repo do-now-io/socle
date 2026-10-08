@@ -10,16 +10,19 @@
 #   <rendered-dir> holds one `flux-operator build rset` output per module
 #   (rendered/<cloud>/ in pr-static.yaml). Every HelmRelease found there —
 #   child ResourceSets' included — is rendered with `helm template` at its
-#   pinned chart version, with the values helm-controller would merge: its
-#   valuesFrom ConfigMaps in order (the socle's defaults, then the client's
-#   from the sample), then its inline values. A Crossplane
+#   pinned chart version, with the socle's values alone: its inline values
+#   and its valuesFrom ConfigMaps but the client's (`<module>-client-values`,
+#   and the values Secret he names, which is not in the render anyway). A
+#   client value merged in could mask a gap — the sample sets memory
+#   requests on several modules — and the socle's defaults are what a client
+#   who sets nothing gets, so they are what is checked. A Crossplane
 #   DeploymentRuntimeConfig counts as a pod template too. With a second
 #   argument, every container is written there as one TSV row (the sizing
 #   table of docs/gcp/sizing.md is built from it).
 #
-# A values Secret named by the client is not in the render: the check reads
-# the socle's own defaults, which is what it guards. CHART_CACHE, when set,
-# keeps the pulled charts between runs (one per cloud in CI).
+# A chart that cannot be pulled fails the check with helm's own message,
+# after three attempts. CHART_CACHE, when set, keeps the pulled charts
+# between runs (pr-static.yaml caches it across workflow runs).
 set -euo pipefail
 rendered="${1:?usage: $0 <rendered-dir> [report.tsv]}"
 report="${2:-}"
@@ -65,8 +68,8 @@ for path in sorted(glob.glob(f"{work}/json/*.json")):
             chart = (src["spec"]["url"], c["chart"], c["version"])
         files = []
         for j, ref in enumerate(spec.get("valuesFrom", [])):
-            if ref["kind"] != "ConfigMap":
-                continue  # the client's Secret: not in the render
+            if ref["kind"] != "ConfigMap" or ref["name"].endswith("-client-values"):
+                continue  # the client's: the socle's defaults are checked alone
             cm = find("ConfigMap", ns, ref["name"])
             if cm is None:
                 sys.exit(f"{module}: {ns}/{ref['name']} not in the render")
@@ -83,13 +86,27 @@ for path in sorted(glob.glob(f"{work}/json/*.json")):
 PY
 
 # 2. Render: pull each chart once, template it with those values.
+pull() { # <dest> <helm pull args...>: three attempts, helm's error kept
+  local dest="$1" err n
+  shift
+  for n in 1 2 3; do
+    if err="$(helm pull "$@" --untar --untardir "${dest}" 2>&1 > /dev/null < /dev/null)"; then
+      return 0
+    fi
+    rm -rf "${dest}"
+    echo "helm pull $* (attempt ${n}/3): ${err}" >&2
+    [ "${n}" = 3 ] || sleep $((n * 5))
+  done
+  echo "::error::cannot pull $*: ${err}"
+  exit 1
+}
 while IFS=$'\t' read -r module release ns url chart version values; do
   dest="${charts}/$(printf '%s' "${url}${chart}${version}" | tr -c 'a-zA-Z0-9.' _)"
   if [ ! -d "${dest}" ]; then
     if [[ "${url}" == oci://* ]]; then
-      helm pull "${url}" --version "${version}" --untar --untardir "${dest}" > /dev/null 2>&1
+      pull "${dest}" "${url}" --version "${version}"
     else
-      helm pull "${chart}" --repo "${url}" --version "${version}" --untar --untardir "${dest}" > /dev/null 2>&1
+      pull "${dest}" "${chart}" --repo "${url}" --version "${version}"
     fi
   fi
   args=()

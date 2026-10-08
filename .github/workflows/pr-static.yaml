@@ -204,6 +204,20 @@ jobs:
           curl -sL "${url}" -o /usr/local/bin/yq
           chmod +x /usr/local/bin/yq
           yq --version
+      - name: Install helm
+        if: steps.detect.outputs.found == 'true'
+        env:
+          HELM_VERSION: 4.1.0
+          HELM_SHA256: 8e7ae5cb890c56f53713bffec38e41cd8e7e4619ebe56f8b31cd383bfb3dbb83
+        run: |
+          # Pinned rather than the runner image's helm, which moves with the
+          # image: the requests guard templates every chart of the catalog
+          # with it, and the envelope is rendered by it.
+          asset="helm-v${HELM_VERSION}-linux-amd64.tar.gz"
+          curl -sfL "https://get.helm.sh/${asset}" -o "/tmp/${asset}"
+          echo "${HELM_SHA256}  /tmp/${asset}" | sha256sum -c -
+          tar xzf "/tmp/${asset}" -C /usr/local/bin --strip-components=1 linux-amd64/helm
+          helm version
       - name: Fetch the GCP provider's CRD schemas
         if: steps.detect.outputs.found == 'true'
         env:
@@ -273,16 +287,33 @@ jobs:
           flux-operator build rset -f /tmp/envelope-root.yaml \
             --inputs-from-provider /tmp/envelope-inputs.yaml \
             > rendered/envelope-root-built.yaml
+      - name: Cache the catalog's charts
+        if: steps.detect.outputs.found == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /tmp/charts
+          # The pinned chart versions all live in the modules' ResourceSets.
+          key: catalog-charts-${{ hashFiles('oci/catalog/*/resourceset.yaml') }}
       - name: Every container the catalog runs states its requests
         if: steps.detect.outputs.found == 'true'
         run: |
           # Each HelmRelease of the render, templated at its pinned chart with
           # the socle's values: a container with no cpu, memory or
           # ephemeral-storage request fails here (docs/gcp/sizing.md).
+          # A third render, aws with every `ha` input on (argocd's Redis HA
+          # and replicas, metrics-server's), checks the containers only HA
+          # brings; it is not kubeconform'd, the two clouds' renders are.
           export CHART_CACHE=/tmp/charts
-          for cloud in aws gcp; do
-            echo "==> ${cloud}"
-            .github/scripts/check-catalog-requests.sh "rendered/${cloud}" | tee -a requests.out
+          yq '(.. | select(tag == "!!map" and has("ha")) | .ha) = true' \
+            oci/.ci/inputs-sample.yaml > /tmp/inputs-sample-ha.yaml
+          mkdir -p rendered-ha/aws
+          for rs in oci/catalog/*/resourceset.yaml; do
+            flux-operator build rset -f "${rs}" --inputs-from /tmp/inputs-sample-ha.yaml \
+              > "rendered-ha/aws/$(basename "$(dirname "${rs}")").yaml"
+          done
+          for render in rendered/aws rendered/gcp rendered-ha/aws; do
+            echo "==> ${render}"
+            .github/scripts/check-catalog-requests.sh "${render}" | tee -a requests.out
           done
       - name: kubeconform the render (strict)
         if: steps.detect.outputs.found == 'true'
@@ -332,7 +363,7 @@ jobs:
             echo '```'
             tail -1 kubeconform-rendered.out
             echo '```'
-            echo "Requests (aws, then gcp — every container of every chart, templated):"
+            echo "Requests (aws, gcp, then aws with ha — every container of every chart, templated):"
             echo '```'
             cat requests.out
             echo '```'
