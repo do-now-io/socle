@@ -44,16 +44,19 @@ system's own OIDC provider, assuming an IAM role) from CI.
 
 An S3 bucket for remote state, with versioning on, created before the
 first `tofu init`. OpenTofu locks natively against S3 through
-conditional writes — no separate DynamoDB table needed. The module ships
+conditional writes — no separate DynamoDB table needed — but only when
+the backend sets `use_lockfile = true`: without it, nothing is locked
+and two concurrent applies can corrupt the state. The module ships
 no backend block; state lives in your own account, so declare it in your
 root configuration:
 
 ```hcl
 terraform {
   backend "s3" {
-    bucket = "my-account-tofu-state"
-    key    = "socle/aws/<cluster-name>"
-    region = "eu-west-3"
+    bucket       = "my-account-tofu-state"
+    key          = "socle/aws/<cluster-name>"
+    region       = "eu-west-3"
+    use_lockfile = true
   }
 }
 ```
@@ -177,5 +180,5 @@ aws s3api put-bucket-lifecycle-configuration --bucket "$STATE_BUCKET" --lifecycl
 Then point the backend at the state bucket and initialise:
 
 ```sh
-tofu init -backend-config="bucket=$STATE_BUCKET" -backend-config="key=socle/aws/<cluster-name>" -backend-config="region=$REGION"
+tofu init -backend-config="bucket=$STATE_BUCKET" -backend-config="key=socle/aws/<cluster-name>" -backend-config="region=$REGION" -backend-config="use_lockfile=true"
 ```
