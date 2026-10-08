@@ -7,7 +7,7 @@
     accountId: "123456789012"
   socle:
     url: oci://x/y
-    version: 0.0.0 # x-release-please-version
+    version: 0.1.0 # x-release-please-version
   modules:
     gateway_api:
       enabled: true
