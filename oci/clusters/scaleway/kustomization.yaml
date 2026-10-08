@@ -18,6 +18,7 @@ resources:
   - ../../catalog/grafana/resourceset.yaml
   - ../../catalog/victoria-logs/resourceset.yaml
   - ../../catalog/victoria-traces/resourceset.yaml
+  - ../../catalog/alerting/resourceset.yaml
   - ../../catalog/keda/resourceset.yaml
   - ../../catalog/kyverno/resourceset.yaml
   - ../../catalog/kyverno-policies/resourceset.yaml

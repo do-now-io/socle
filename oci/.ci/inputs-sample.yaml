@@ -95,6 +95,30 @@
       storage_size: 10Gi
       values: {}
       values_secret: ""
+    alerting:
+      enabled: true
+      watchdog: true
+      receivers:
+        - name: team
+          slack_configs:
+            - api_url_file: /etc/alertmanager/secrets/slack-url
+              channel: "#alerts"
+        - name: on-call
+          pagerduty_configs:
+            - routing_key_file: /etc/alertmanager/secrets/pagerduty-key
+      route:
+        receiver: team
+        group_by: [alertname, k8s_namespace_name]
+        routes:
+          - receiver: on-call
+            matchers: ['severity="critical"']
+      receivers_secret: alerting-keys
+      values:
+        server:
+          resources:
+            requests:
+              memory: 96Mi
+      values_secret: alerting-values
     keda:
       enabled: true
       services: [sqs, cloudwatch]

@@ -573,6 +573,124 @@ variable "kube" {
     error_message = "kube.victoria_traces.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
   }
 
+  # --- alerting — docs/catalog/alerting.md -----------------------------------
+  # Each rule reads var.kube with the catalog default as the fallback, as the
+  # rest of this block does. "On" below means kube.alerting.enabled = true.
+  # Never tolist() on receivers or routes: two receivers of different kinds
+  # (Slack, PagerDuty) are a tuple tolist() cannot convert, and under try()
+  # that failure would read as an empty list and let everything through.
+
+  # vmalert evaluates every rule against VictoriaMetrics: without it no alert
+  # can ever fire, and a silent alerting stack reads as "all is well".
+  validation {
+    condition     = !try(var.kube.alerting.enabled == true, false) || try(var.kube.victoria_metrics.enabled == true, true)
+    error_message = "kube.alerting needs kube.victoria_metrics.enabled = true: vmalert evaluates its rules against VictoriaMetrics, so without it no alert can ever fire."
+  }
+
+  # On, alerts must go somewhere: a receiver of the client's, named by the
+  # default route. The chart's own default, devnull, drops everything, and
+  # watchdog is the socle's; neither may be the client's.
+  validation {
+    condition = !try(var.kube.alerting.enabled == true, false) || try(
+      length(var.kube.alerting.receivers) > 0
+      && alltrue([for r in var.kube.alerting.receivers : can(regex("^[A-Za-z0-9_.-]+$", r.name))])
+      && contains([for r in var.kube.alerting.receivers : r.name], var.kube.alerting.route.receiver),
+      false
+    )
+    error_message = "kube.alerting on needs where alerts go: at least one receiver in receivers, each with a name, and route.receiver naming one of them (Alertmanager's routing tree, docs/catalog/alerting.md)."
+  }
+
+  validation {
+    condition     = alltrue([for r in try(var.kube.alerting.receivers, []) : !contains(["watchdog", "devnull"], try(r.name, ""))])
+    error_message = "kube.alerting.receivers: watchdog is the socle's receiver, and devnull is the chart's, which drops every alert; name yours otherwise."
+  }
+
+  # A sub-route naming a receiver that does not exist stops Alertmanager from
+  # loading its configuration at all. Checked two levels down, where routing
+  # trees live in practice.
+  validation {
+    condition = alltrue(flatten([
+      for r in concat(
+        try(var.kube.alerting.route.routes, []),
+        flatten([for c in try(var.kube.alerting.route.routes, []) : try(c.routes, [])])
+      ) : !can(r.receiver) || contains(concat(["watchdog"], [for x in try(var.kube.alerting.receivers, []) : try(x.name, "")]), try(r.receiver, ""))
+    ]))
+    error_message = "kube.alerting.route: a sub-route names a receiver that is not in receivers. Alertmanager refuses its whole configuration over it."
+  }
+
+  # The watchdog's URL is a key: it lives in receivers_secret, never in the
+  # plan. On with the watchdog, that Secret must be named — or the watchdog
+  # turned off in the open.
+  validation {
+    condition     = !try(var.kube.alerting.enabled == true, false) || try(var.kube.alerting.watchdog == false, false) || try(var.kube.alerting.receivers_secret, "") != ""
+    error_message = "kube.alerting on with the watchdog needs receivers_secret: a Secret you create in the alerting namespace, whose watchdog-url key is your dead man's switch (Healthchecks.io, your on-call platform's heartbeat). Or set watchdog = false, knowing nothing will tell you when alerting itself is down."
+  }
+
+  # Everything in the plan lands in the OpenTofu state and in a ConfigMap on
+  # the cluster. A receiver's key — a Slack webhook URL, a PagerDuty routing
+  # key, a password — goes in receivers_secret and is read through its
+  # *_file twin, which Alertmanager has for every one of them.
+  validation {
+    condition = alltrue(flatten([
+      for r in try(var.kube.alerting.receivers, []) : [
+        for k in try(keys(r), []) : [
+          for c in try(r[k], []) : (
+            length(setintersection(try(keys(c), []), local.alerting_literal_keys)) == 0
+            && !can(c.http_config.basic_auth.password)
+            && !can(c.http_config.authorization.credentials)
+            && !can(c.http_config.oauth2.client_secret)
+            && !can(c.http_config.bearer_token)
+            && !can(c.sigv4.secret_key)
+          )
+        ] if endswith(k, "_configs")
+      ]
+    ]))
+    error_message = "kube.alerting.receivers must not carry keys in clear: ${join(", ", local.alerting_literal_keys)}, and an http_config password, credentials, client_secret or bearer_token, are refused. Put the key in receivers_secret and use the *_file twin: api_url_file, routing_key_file, url_file… pointing under /etc/alertmanager/secrets/."
+  }
+
+  # values tunes the chart, minus three things. Rules: v1 ships the socle's
+  # only, checked in CI, and vmalert refuses its whole configuration over one
+  # bad file. Alertmanager's configuration: rendered from receivers, route
+  # and the watchdog, which a list in values would silently replace. And the
+  # chart's Alertmanager turned off: the watchdog and the receivers' checks go
+  # with it, and a client's own Alertmanager is not offered in v1.
+  validation {
+    condition = !can(keys(var.kube.alerting.values)) || (
+      length(try(var.kube.alerting.values.server.config.alerts.groups, [])) == 0
+      && !can(var.kube.alerting.values.server.extraArgs.rule)
+      && try(var.kube.alerting.values.server.configMap, "") == ""
+      && !can(var.kube.alerting.values.alertmanager.config)
+      && try(var.kube.alerting.values.alertmanager.configMap, "") == ""
+      && try(var.kube.alerting.values.alertmanager.enabled, true) != false
+    )
+    error_message = "kube.alerting.values must not set rules (server.config.alerts, server.extraArgs.rule, server.configMap), Alertmanager's configuration (alertmanager.config, alertmanager.configMap) or alertmanager.enabled = false. Rules are the socle's in v1; where alerts go is receivers and route."
+  }
+
+  # And no secret material in values: the chart takes credentials for its
+  # datasource, remote write and read, and notifier inline.
+  validation {
+    condition = !can(keys(var.kube.alerting.values)) || (
+      !anytrue(try([for o in var.kube.alerting.values.extraObjects : try(o.kind == "Secret", false)], []))
+      && !anytrue(flatten([
+        for e in ["datasource", "remoteWrite", "remoteRead", "notifier"] : [
+          can(var.kube.alerting.values.server[e].basicAuth.password),
+          can(var.kube.alerting.values.server[e].bearerToken),
+        ]
+      ]))
+    )
+    error_message = "kube.alerting.values must not carry secrets: a basicAuth.password or bearerToken under server.datasource, remoteWrite, remoteRead or notifier, and a Secret in extraObjects, are refused. Put them in kube.alerting.values_secret."
+  }
+
+  validation {
+    condition     = !can(var.kube.alerting.receivers_secret) || try(var.kube.alerting.receivers_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.alerting.receivers_secret)), true)
+    error_message = "kube.alerting.receivers_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
+  }
+
+  validation {
+    condition     = !can(var.kube.alerting.values_secret) || try(var.kube.alerting.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.alerting.values_secret)), true)
+    error_message = "kube.alerting.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
+  }
+
   # --- keda — docs/catalog/keda.md -------------------------------------------
   # services is the list of AWS services KEDA's own role may read. Each entry
   # is one the module knows how to scope to the scaler's exact read calls;

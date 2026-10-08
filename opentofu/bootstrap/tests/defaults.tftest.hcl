@@ -103,6 +103,10 @@ run "defaults_are_the_recommended_position" {
     error_message = "victoria_traces must default to OFF (pre-GA, docs/monitoring.md §10 question 7), 7 days on a 10Gi claim when turned on."
   }
   assert {
+    condition     = output.inputs.modules.alerting.enabled == false && output.inputs.modules.alerting.watchdog == true && length(output.inputs.modules.alerting.receivers) == 0 && output.inputs.modules.alerting.receivers_secret == ""
+    error_message = "alerting must default to OFF (it needs where alerts go, which only the client knows), the watchdog on when it is turned on."
+  }
+  assert {
     condition     = output.inputs.modules.kyverno.enabled == false && output.inputs.modules.kyverno_policies.enabled == false
     error_message = "kyverno and kyverno_policies must default to OFF: an admission webhook is opted into (docs/catalog/kyverno.md)."
   }
@@ -1175,5 +1179,61 @@ run "metrics_server_values_flow_through_untouched_and_honest_kubelet_flags_are_a
   assert {
     condition     = output.inputs.modules.metrics_server.values_secret == "metrics-server-values"
     error_message = "the name of the client's values Secret must flow to the inputs."
+  }
+}
+
+run "alerting_turns_on_with_receivers_a_route_and_the_watchdog" {
+  command = plan
+  variables {
+    kube = {
+      alerting = {
+        enabled          = true
+        receivers_secret = "alerting-keys"
+        receivers = [
+          { name = "team", slack_configs = [{ api_url_file = "/etc/alertmanager/secrets/slack-url", channel = "#alerts" }] },
+          { name = "on-call", pagerduty_configs = [{ routing_key_file = "/etc/alertmanager/secrets/pagerduty-key" }] },
+        ]
+        route  = { receiver = "team", routes = [{ receiver = "on-call", matchers = ["severity=\"critical\""] }] }
+        values = { server = { resources = { requests = { memory = "96Mi" } } } }
+      }
+    }
+  }
+
+  assert {
+    condition     = output.inputs.modules.alerting.enabled && output.inputs.modules.alerting.watchdog && output.inputs.modules.alerting.receivers_secret == "alerting-keys"
+    error_message = "enabled, the watchdog's default and receivers_secret must reach the inputs."
+  }
+  assert {
+    condition     = length(output.inputs.modules.alerting.receivers) == 2 && output.inputs.modules.alerting.receivers[0].slack_configs[0].api_url_file == "/etc/alertmanager/secrets/slack-url"
+    error_message = "the receivers must reach the inputs as written, their *_file keys included."
+  }
+  assert {
+    condition     = output.inputs.modules.alerting.route.receiver == "team" && output.inputs.modules.alerting.route.routes[0].receiver == "on-call"
+    error_message = "the routing tree must reach the inputs as written."
+  }
+  assert {
+    condition     = output.inputs.modules.alerting.values.server.resources.requests.memory == "96Mi"
+    error_message = "the client's chart values must reach the inputs as written."
+  }
+}
+
+# The watchdog turned off in the open: no Secret is needed when no receiver
+# reads a key from one.
+run "alerting_turns_on_without_the_watchdog_and_without_a_secret" {
+  command = plan
+  variables {
+    kube = {
+      alerting = {
+        enabled   = true
+        watchdog  = false
+        receivers = [{ name = "team", webhook_configs = [{ url_file = "/etc/alertmanager/secrets/team-url" }] }]
+        route     = { receiver = "team" }
+      }
+    }
+  }
+
+  assert {
+    condition     = output.inputs.modules.alerting.enabled && output.inputs.modules.alerting.watchdog == false && output.inputs.modules.alerting.receivers_secret == ""
+    error_message = "watchdog = false must reach the inputs, with no Secret named."
   }
 }

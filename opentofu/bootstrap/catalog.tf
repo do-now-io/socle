@@ -199,6 +199,25 @@ locals {
       values        = {}
       values_secret = ""
     }
+    # Alerting for the monitoring stack (docs/catalog/alerting.md): vmalert
+    # evaluates the socle's rules against victoria_metrics, which it needs,
+    # and Alertmanager routes what fires. v1 ships the socle's rules only; a
+    # client writes none. OFF by default: on, it needs where alerts go, which
+    # only the client knows — receivers and route, as Alertmanager writes
+    # them, keys only as *_file paths under /etc/alertmanager/secrets/, where
+    # receivers_secret (a Secret the client creates in alerting) is mounted —
+    # and, unless watchdog = false, a dead man's switch whose URL is that
+    # Secret's watchdog-url key. values and values_secret as every module;
+    # rules and Alertmanager's config are refused there.
+    alerting = {
+      enabled          = false
+      watchdog         = true
+      receivers        = []
+      route            = {}
+      receivers_secret = ""
+      values           = {}
+      values_secret    = ""
+    }
     # KEDA: event-driven autoscaling — a ScaledObject scales a Deployment on a
     # queue's depth, a cron window or a PromQL query, and down to zero. Off
     # by default: KEDA does nothing until a client writes a ScaledObject.
@@ -342,6 +361,14 @@ locals {
   # keda template scopes to its exact read calls (oci/catalog/keda/
   # resourceset.yaml). Adding one is a statement there and a word here.
   keda_services = ["sqs", "cloudwatch", "kinesis", "dynamodb"]
+  # The keys an Alertmanager receiver takes in clear, each with a *_file twin
+  # that reads it from a file: kube.alerting.receivers refuses these, so no
+  # webhook URL, token or password lands in the state (docs/catalog/alerting.md).
+  alerting_literal_keys = [
+    "api_url", "api_key", "app_token", "routing_key", "service_key", "auth_password",
+    "auth_secret", "url", "webhook_url", "token", "token_id", "bot_token", "user_key",
+    "api_secret",
+  ]
   # The policies kyverno_policies renders, by what turns them on: what
   # kube.kyverno_policies.enforce may name. The chart's lists are those of
   # kyverno-policies 3.9.1 (templates/baseline, templates/restricted); the

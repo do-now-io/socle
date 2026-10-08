@@ -1,0 +1,63 @@
+# The alerting module's own rules: the watchdog, and the health of the
+# alerting path itself. vmalert's and Alertmanager's metrics reach
+# VictoriaMetrics through otel_gateway, which scrapes their annotated pods;
+# with otel_gateway off, the three health rules have nothing to read.
+# Checked in CI with vmalert -dryRun (.github/scripts/check-rules.sh).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alerting-rules
+  labels:
+    # The rules sidecar picks up every ConfigMap carrying it, in the socle's
+    # module namespaces.
+    vmalert_rules: "1"
+data:
+  alerting.yaml: |
+    groups:
+      - name: socle-alerting
+        rules:
+          # Always firing. Alertmanager sends it to the dead man's switch
+          # outside the cluster every few minutes; when that stops, the
+          # switch raises the alarm. Never silence it.
+          - alert: Watchdog
+            expr: vector(1)
+            labels:
+              severity: none
+            annotations:
+              summary: >-
+                Always firing, so the dead man's switch outside the cluster
+                hears that alerting is alive. Never silence it.
+          # One rule file vmalert cannot parse freezes every rule change,
+          # the socle's included (docs/catalog/alerting.md, measured).
+          - alert: AlertingRulesNotReloaded
+            expr: vmalert_config_last_reload_successful == 0
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                vmalert could not reload its rule files. It keeps its previous
+                rules and takes no change until the bad file is fixed; its log
+                names it.
+          # Errors without a break for 10 minutes: VictoriaMetrics restarting
+          # on an upgrade fails every rule for a minute, which must not page
+          # (measured: five alerts at once otherwise). A rule broken for good
+          # fails at every evaluation and fires. VictoriaMetrics down for long
+          # stops the Watchdog, which the switch outside hears.
+          - alert: AlertingRuleFails
+            expr: increase(vmalert_alerting_rules_errors_total[5m]) > 0
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: The rule {{ $labels.alertname }} ({{ $labels.file }}) fails at evaluation, so it can never fire.
+          # The same shape: a receiver's blip, retried, is not an alert.
+          - alert: AlertmanagerNotificationsFailing
+            expr: increase(alertmanager_notifications_failed_total[5m]) > 0
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                Alertmanager fails to deliver through {{ $labels.integration }}.
+                Check the receiver's key in receivers_secret.

@@ -68,6 +68,7 @@ spec:
                     (containers[0].args || `[]`):
                       (contains(@, '--retentionPeriod=15d')): true
                       (contains(@, '--opentelemetry.usePrometheusNaming')): true
+                      (contains(@, '--sortLabels')): true
               status:
                 (conditions[?type == 'Available'] || `[]`):
                   - status: 'True'

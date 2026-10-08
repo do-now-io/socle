@@ -98,6 +98,13 @@ spec:
             # A string, as every numeric flag should be: Helm renders a
             # number from a million up as 1e+06, which the flag refuses.
             storage.maxHourlySeries: "100000"
+            # The guard counts a series by its labels in the order they
+            # arrive, and what the collectors send over OTLP varies that
+            # order: one series counted many times filled it within minutes
+            # and fresh data was dropped (measured,
+            # docs/catalog/victoria-metrics.md). Sorted first, a series counts
+            # once.
+            sortLabels: true
           # Scraped by the otel_gateway module, which reads these annotations.
           podAnnotations:
             prometheus.io/scrape: "true"

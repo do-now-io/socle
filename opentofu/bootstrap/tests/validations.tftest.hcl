@@ -1211,3 +1211,130 @@ run "kube_refuses_metrics_server_on_scaleway" {
   }
   expect_failures = [var.kube]
 }
+
+run "kube_refuses_alerting_watchdog_that_is_not_a_bool" {
+  command = plan
+  variables { kube = { alerting = { watchdog = "yes" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_alerting_receivers_that_are_not_a_list" {
+  command = plan
+  variables { kube = { alerting = { receivers = { team = {} } } } }
+  expect_failures = [var.kube]
+}
+
+# vmalert evaluates every rule against VictoriaMetrics: without it, nothing can fire.
+run "kube_refuses_alerting_without_victoria_metrics" {
+  command = plan
+  variables { kube = { alerting = { enabled = true, receivers_secret = "alerting-keys", receivers = [{ name = "team", webhook_configs = [{ url_file = "/etc/alertmanager/secrets/team-url" }] }], route = { receiver = "team" } }, victoria_metrics = { enabled = false } } }
+  expect_failures = [var.kube]
+}
+
+# On, alerts must go somewhere the client named.
+run "kube_refuses_alerting_on_without_a_receiver" {
+  command = plan
+  variables { kube = { alerting = { enabled = true, receivers_secret = "alerting-keys" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_alerting_a_route_to_a_receiver_that_does_not_exist" {
+  command = plan
+  variables { kube = { alerting = { enabled = true, receivers_secret = "alerting-keys", receivers = [{ name = "team", webhook_configs = [{ url_file = "/etc/alertmanager/secrets/team-url" }] }], route = { receiver = "on-call" } } } }
+  expect_failures = [var.kube]
+}
+
+# The chart's default receiver drops every alert.
+run "kube_refuses_alerting_a_receiver_named_devnull" {
+  command = plan
+  variables { kube = { alerting = { enabled = true, receivers_secret = "alerting-keys", receivers = [{ name = "devnull" }], route = { receiver = "devnull" } } } }
+  expect_failures = [var.kube]
+}
+
+# Alertmanager refuses its whole configuration over a route to a receiver it does not have.
+run "kube_refuses_alerting_a_sub_route_to_an_unknown_receiver" {
+  command = plan
+  variables { kube = { alerting = { enabled = true, receivers_secret = "alerting-keys", receivers = [{ name = "team", webhook_configs = [{ url_file = "/etc/alertmanager/secrets/team-url" }] }], route = { receiver = "team", routes = [{ receiver = "on-call", matchers = ["severity=\"critical\""] }] } } } }
+  expect_failures = [var.kube]
+}
+
+# The watchdog's URL is a key: it is read from receivers_secret, which must be named.
+run "kube_refuses_alerting_on_without_receivers_secret_for_the_watchdog" {
+  command = plan
+  variables { kube = { alerting = { enabled = true, receivers = [{ name = "team", webhook_configs = [{ url_file = "/etc/alertmanager/secrets/team-url" }] }], route = { receiver = "team" } } } }
+  expect_failures = [var.kube]
+}
+
+# A Slack webhook URL is a key: whoever holds it posts in the channel.
+run "kube_refuses_alerting_a_slack_api_url_in_clear" {
+  command = plan
+  variables { kube = { alerting = { receivers = [{ name = "team", slack_configs = [{ api_url = "https://hooks.slack.com/services/T0/B0/x" }] }] } } }
+  expect_failures = [var.kube]
+}
+
+# Receivers of different kinds are a tuple, not a list: the key in clear in
+# the second one must still be found.
+run "kube_refuses_alerting_a_key_in_clear_beside_a_receiver_of_another_kind" {
+  command = plan
+  variables {
+    kube = {
+      alerting = {
+        receivers = [
+          { name = "team", slack_configs = [{ api_url_file = "/etc/alertmanager/secrets/slack-url", channel = "#alerts" }] },
+          { name = "on-call", pagerduty_configs = [{ routing_key = "R0123456789" }] },
+        ]
+      }
+    }
+  }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_alerting_an_http_config_password_in_clear" {
+  command = plan
+  variables { kube = { alerting = { receivers = [{ name = "team", webhook_configs = [{ url_file = "/x", http_config = { basic_auth = { username = "a", password = "b" } } }] }] } } }
+  expect_failures = [var.kube]
+}
+
+# v1 ships the socle's rules only, checked in CI.
+run "kube_refuses_alerting_rules_in_values" {
+  command = plan
+  variables { kube = { alerting = { values = { server = { config = { alerts = { groups = [{ name = "mine", rules = [] }] } } } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_alerting_a_rule_path_in_values" {
+  command = plan
+  variables { kube = { alerting = { values = { server = { extraArgs = { rule = ["/etc/mine/*.yaml"] } } } } } }
+  expect_failures = [var.kube]
+}
+
+# Rendered from receivers, route and the watchdog; values would replace its lists.
+run "kube_refuses_alerting_alertmanager_config_in_values" {
+  command = plan
+  variables { kube = { alerting = { values = { alertmanager = { config = { route = { receiver = "x" } } } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_alerting_alertmanager_turned_off" {
+  command = plan
+  variables { kube = { alerting = { values = { alertmanager = { enabled = false } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_alerting_a_datasource_password_in_values" {
+  command = plan
+  variables { kube = { alerting = { values = { server = { datasource = { basicAuth = { password = "x" } } } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_alerting_receivers_secret_that_is_not_a_secret_name" {
+  command = plan
+  variables { kube = { alerting = { receivers_secret = "Alerting_Keys" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_alerting_values_secret_that_is_not_a_secret_name" {
+  command = plan
+  variables { kube = { alerting = { values_secret = "Alerting_Values" } } }
+  expect_failures = [var.kube]
+}
