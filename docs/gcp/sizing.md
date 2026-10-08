@@ -116,6 +116,10 @@ today), which the server starts at runtime: they ask the server's
 ConfigMap ([velero](../catalog/velero.md)), and no render shows them.
 With `ha`, ArgoCD adds three Redis pods with their sentinel, split-brain and
 HAProxy containers — every one with its requests.
+Nor is [alerting](../catalog/alerting.md), which came after the measure: its
+vmalert pod (with its rules sidecar) and Alertmanager request 40m / 208Mi /
+192Mi together, measured on floci, and reserve 100m / 212Mi / 192Mi under
+the pod minimum. Its disk figure is chosen.
 
 ## On AWS
 
