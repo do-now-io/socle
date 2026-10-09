@@ -1,4 +1,5 @@
-# The smallest deployable socle foundation on AWS: a region, a name, who
+# The smallest socle foundation on AWS (it converges only with the
+# bootstrap: see README.md): a region, a name, who
 # owns it, the AZs to spread across, and the handful of variables the
 # module deliberately leaves with no default. Everything else is the
 # module's recommended position.

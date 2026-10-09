@@ -1,0 +1,51 @@
+---
+# The documentation site's pull request check: the strict build of the PR's
+# docs/ and site/. A broken link or anchor, a page outside the navigation or
+# an include that does not resolve fails it. Read-only, no secret, forks
+# included. Publishing, previews included, is pages.yaml's job: it runs when
+# this one completes, with main's workflow code, never the PR's.
+name: Docs
+
+on:
+  pull_request:
+    # `closed` builds nothing; it lets pages.yaml drop the PR's preview.
+    types: [opened, synchronize, reopened, closed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# `shell: bash` runs every step with -o pipefail: a failure on the left of a
+# pipe (`| tee`, `| python3`) fails the step instead of vanishing behind the
+# right-hand command's exit code. The unspecified default, `bash -e`, does not.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: Build the site (strict)
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - name: Build
+        working-directory: site
+        env:
+          SOCLE_CHANNEL: pr
+          SOCLE_PR: ${{ github.event.pull_request.number }}
+          SOCLE_REF: ${{ github.event.pull_request.head.sha }}
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+          echo "### Docs ✅ strict build: $(find dist -name index.html | wc -l | tr -d ' ') pages" >> "$GITHUB_STEP_SUMMARY"

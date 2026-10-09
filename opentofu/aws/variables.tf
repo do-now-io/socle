@@ -32,7 +32,7 @@ variable "additional_tags" {
   nullable    = false
 }
 
-# --- Network — docs/aws/eks-network-security.md ---
+# --- Network — docs/decisions/aws.md, AWS-06 to AWS-12 ---
 
 # IPv6 is absent by decision, not by omission: Socle's Cilium-as-VPC-CNI
 # stack is untested and unsupported for it today (Cilium's ENI IPv6 IPAM
@@ -144,14 +144,13 @@ variable "cluster_endpoint_public_access_cidrs" {
   }
 }
 
-# GuardDuty EKS Protection (catalog option per the research doc — Audit
-# Log Monitoring and Runtime Monitoring, either enabled alone) has no
-# variable here: GuardDuty is a single detector per account per region,
+# GuardDuty EKS Protection has no variable here (docs/decisions/aws.md,
+# AWS-14): GuardDuty is a single detector per account per region,
 # not per cluster. A client with several clusters in one AWS account would
 # have two separate applies of this module fight over the same detector
 # and its features. Out of this module's scope — an account-level
-# prerequisite, documented alongside the state bucket and IAM roles, not
-# something this module toggles.
+# prerequisite (docs/clouds/aws/prerequisites.md), not something this
+# module toggles.
 
 variable "secrets_encryption_enabled" {
   description = "Envelope-encrypt Kubernetes Secrets via KMS. On by default: essentially free (~$1/month per key, negligible per-request cost), and standard on Kubernetes 1.28+ already."
@@ -166,19 +165,18 @@ variable "secrets_encryption_kms_key_arn" {
   default     = null
 }
 
-# Gateway endpoints (S3, DynamoDB) and Interface endpoints (ECR, STS, EC2,
-# CloudWatch Logs) have no toggle: the doc calls the former "always on"
-# (strictly free) and the latter "standard" (isolation for load-bearing
-# STS/EC2 traffic — Pod Identity, Karpenter — not a cost optimisation).
-# Both are created unconditionally in network.tf.
+# The S3 gateway endpoint and the interface endpoints (ECR, STS, EC2,
+# CloudWatch Logs) have no toggle: the former is free, the latter isolate
+# load-bearing STS/EC2 traffic (Pod Identity, Cilium's ENI IPAM) rather than
+# save money. Both are created in network.tf on a VPC this module creates.
 
 # Security groups for pods is not applicable, by construction: it is a VPC
 # CNI (ENI trunking) feature, and Socle does not run VPC CNI. Cilium already
 # covers the same ground in eBPF. Nothing to configure, nothing to refuse.
 
-# Exposure (Gateway API, ALB vs NLB) has no variable here: the AWS Load
-# Balancer Controller is a factory component delivered through the socle
-# OCI artifact, like Karpenter and Cilium — not provisioned by this module.
+# Exposure has no variable here beyond gateway_certificate: the socle's
+# Gateways are Cilium's, behind NLBs EKS's in-tree service controller creates
+# (docs/decisions/gateway-api.md, GATEWAY-API-02).
 
 variable "cluster_log_types" {
   description = <<-EOT
@@ -215,7 +213,7 @@ variable "log_retention_days" {
   }
 }
 
-# --- Add-ons and identity — docs/aws/eks-managed-scope.md ---
+# --- Add-ons and identity — docs/decisions/aws.md, AWS-02 and AWS-03 ---
 
 # No add-on variable here at all. VPC CNI and kube-proxy are refused outright
 # — Cilium replaces both, and the cluster is created without them. EBS CSI,
@@ -223,7 +221,7 @@ variable "log_retention_days" {
 # bootstrap module installs them once compute exists, at versions it pins
 # (opentofu/bootstrap/eks_addons.tf). This module's nodes are NotReady until Cilium runs, so an
 # add-on installed here would have nowhere to run — see cluster.tf. CoreDNS is installed by the
-# bootstrap module, by Helm, right after Cilium (docs/catalog/cilium.md).
+# bootstrap module, by Helm, right after Cilium (docs/architecture/cilium-before-flux.md).
 
 variable "kubernetes_version" {
   description = <<-EOT
@@ -258,20 +256,6 @@ variable "force_update_version" {
   default     = false
   nullable    = false
 }
-
-# Pod Identity is the only workload-identity mechanism this module would use —
-# IRSA is absent, not toggled off: AWS's own recommendation, and its EC2-only
-# restriction matches Socle's EC2-only scope exactly. No association is created
-# here all the same, because every one of them would name a service account
-# that does not exist yet. The OIDC issuer URL is still exposed as an output
-# (checklist requirement) even though nothing here consumes it.
-
-# Pod Identity is the only workload-identity mechanism this module would use —
-# IRSA is absent, not toggled off: AWS's own recommendation, and its EC2-only
-# restriction matches Socle's EC2-only scope exactly. No association is created
-# here all the same, because every one of them would name a service account
-# that does not exist yet. The OIDC issuer URL is still exposed as an output
-# (checklist requirement) even though nothing here consumes it.
 
 # --- Bootstrap nodes ------------------------------------------------------------
 # The one node group this module creates — nodes.tf. Karpenter, installed

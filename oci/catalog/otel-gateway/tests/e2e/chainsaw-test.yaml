@@ -8,8 +8,8 @@
 #            hello module) to the gateway's Service, read back enriched by
 #            k8s_attributes with its sender's workload. Neither the API
 #            server's service proxy nor a port-forward can carry OTLP to the
-#            receivers (measured, docs/catalog/otel-gateway.md): podinfo's own
-#            curl does. Then every metric of the workloads dashboard.
+#            receivers (measured: a 415 from the proxy; a port-forward dials
+#            localhost, the receivers bind the pod IP): podinfo's own curl does. Then every metric of the workloads dashboard.
 #   module   a client request beats the socle's; off garbage-collects the
 #            release, the dashboards Kustomization and its ConfigMap; on
 #            brings them back.
@@ -166,7 +166,7 @@ spec:
             namespace: flux-system
             selector: app=helm-controller
             tail: 40
-    # The order of valuesFrom, proven whole (docs/flux-catalog.md §6): the
+    # The order of valuesFrom, proven whole (docs/architecture/flux-catalog.md): the
     # socle's document, then kube.otel_gateway.values, then the Secret the client
     # names in values_secret — created by him in the module's namespace, never
     # read by OpenTofu, merged last. 320Mi in values and 336Mi in the Secret:

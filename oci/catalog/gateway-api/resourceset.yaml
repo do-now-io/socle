@@ -1,6 +1,7 @@
 # The gateway_api module: the Gateway API standard CRDs on every cloud whose
 # provider does not own them, and on the clouds where the socle runs Cilium,
-# Cilium's Gateway API turned on. docs/catalog/cilium.md §4.
+# Cilium's Gateway API turned on. docs/catalog/gateway-api.md,
+# docs/decisions/gateway-api.md.
 #
 # Nothing is vendored. The CRDs come from upstream, kubernetes-sigs/
 # gateway-api, pinned by commit: the release tag's commit is content-

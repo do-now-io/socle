@@ -6,7 +6,7 @@
 # FluxInstance with no sync block, and an envelope of two literal objects — a
 # ResourceSetInputProvider carrying the client's config and a ResourceSet
 # carrying the root source with its cosign verification. Helm is the applier,
-# never the templater: docs/flux-catalog.md §3.
+# never the templater: docs/architecture/flux-catalog.md#what-opentofu-deposits.
 #
 # On aws and azure two more releases precede the operator — Cilium and (aws)
 # CoreDNS — because those clusters are created with no CNI and Flux cannot
@@ -34,7 +34,7 @@ locals {
     scaleway = "kubernetes"
   }[var.cloud]
 
-  # docs/catalog/cilium.md §4. A shared alias is not possible: GKE serves
+  # docs/catalog/gateway-api.md. A shared alias is not possible: GKE serves
   # only its own GatewayClasses, so the name is the cloud's.
   gateway_class_name = {
     aws      = local.cilium_installed && local.cilium.gateway_api ? "cilium" : ""

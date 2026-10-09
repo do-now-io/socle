@@ -1,4 +1,4 @@
-# EKS-managed add-ons — docs/aws/eks-managed-scope.md §1.
+# EKS-managed add-ons — docs/decisions/aws.md#aws-02-vpc-cni-and-kube-proxy-refused-aws-only-add-ons-stay-eks-add-ons.
 #
 # The Pod Identity Agent, EBS CSI and EFS CSI stay EKS-managed add-ons: AWS
 # packages them, the socle pins them and triggers every upgrade. They cannot

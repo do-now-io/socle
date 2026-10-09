@@ -154,7 +154,8 @@ jobs:
   #
   # OpenTofu does NOT verify OCI signatures, where Flux does on every
   # reconciliation. The signature only counts because the consumer runs cosign
-  # verify before init — docs/distribution.md carries that command.
+  # verify before init — docs/reference/artifacts.md#verify-a-signature carries
+  # that command.
   publish-modules:
     name: Push and sign the repository as a module package
     runs-on: ubuntu-24.04

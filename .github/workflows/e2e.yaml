@@ -250,7 +250,7 @@ jobs:
       CLOUD: ${{ matrix.cloud }}
       CLUSTER: socle-e2e-catalog
       # The folder names the ResourceSet; the catalog key is the same in
-      # snake_case (docs/flux-catalog.md §2, §6).
+      # snake_case (docs/reference/inputs.md#kube).
       MODULE: ${{ matrix.module }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

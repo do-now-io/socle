@@ -1,0 +1,246 @@
+---
+// The catalog as bricks: one per module, its mark, category, one line, its
+// default and where it runs, filterable by category. Read at build time
+// from the repository (src/catalog.mjs). Used by the landing page and by
+// docs/catalog/index.mdx. `not-content` keeps Starlight's Markdown styles
+// off it.
+import { modules } from '../catalog.mjs';
+import argo from '../logos/argo.svg?raw';
+import crossplane from '../logos/crossplane.svg?raw';
+import grafana from '../logos/grafana.svg?raw';
+import keda from '../logos/keda.svg?raw';
+import kubernetes from '../logos/kubernetes.svg?raw';
+import kyverno from '../logos/kyverno.svg?raw';
+import opentelemetry from '../logos/opentelemetry.svg?raw';
+import victoriametrics from '../logos/victoriametrics.svg?raw';
+
+interface Props {
+  /** compact: narrower bricks, for the documentation's content column. */
+  compact?: boolean;
+}
+const { compact = false } = Astro.props;
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+// Modules with no logo of their own get a monogram.
+const marks: Record<string, string> = {
+  argocd: argo,
+  'gateway-api': kubernetes,
+  crossplane,
+  kyverno,
+  'kyverno-policies': kyverno,
+  keda,
+  'otel-agent': opentelemetry,
+  'otel-gateway': opentelemetry,
+  'victoria-metrics': victoriametrics,
+  'victoria-logs': victoriametrics,
+  'victoria-traces': victoriametrics,
+  // vmalert is VictoriaMetrics'; metrics-server is a kubernetes-sigs project.
+  alerting: victoriametrics,
+  'metrics-server': kubernetes,
+  grafana,
+};
+const monogram: Record<string, string> = { 'external-dns': 'DNS', 'external-secrets': 'ES', reloader: 'R', velero: 'V', hello: 'H' };
+const categories = ['gitops', 'networking', 'security', 'secrets', 'autoscaling', 'observability', 'backup', 'platform'];
+const bricks = [...modules].sort(
+  (a, b) => categories.indexOf(a.category) - categories.indexOf(b.category) || a.page.localeCompare(b.page),
+);
+const where = (clouds: string[] | null) =>
+  clouds === null ? 'Every cloud' : clouds.length === 1 ? `${clouds[0]} only` : clouds.join(', ');
+const needs = (requires: { module: string; clouds: string[] | null }[]) =>
+  requires.map((r) => `needs ${r.module.replace(/_/g, '-')}${r.clouds ? ` on ${r.clouds.join(', ')}` : ''}`).join('; ');
+---
+
+<div class:list={['not-content catalog-bricks', { compact }]}>
+  <div class="filters" role="group" aria-label="Show one category" hidden>
+    <button type="button" aria-pressed="true" data-category="">All</button>
+    {
+      categories
+        .filter((c) => modules.some((m) => m.category === c))
+        .map((c) => (
+          <button type="button" aria-pressed="false" data-category={c}>
+            {c}
+          </button>
+        ))
+    }
+  </div>
+  <ul class="bricks">
+    {
+      bricks.map((m) => (
+        <li data-category={m.category}>
+          <a href={`${base}/catalog/${m.page}/`}>
+            <span class="brick-head">
+              {marks[m.page] ? (
+                <span class="mark-tile" aria-hidden="true" set:html={marks[m.page]} />
+              ) : (
+                <span class="mark-tile monogram" data-long={monogram[m.page].length > 2 ? '' : undefined} aria-hidden="true">
+                  {monogram[m.page]}
+                </span>
+              )}
+              <span class="state" data-on={m.enabled ? '' : undefined}>
+                {m.enabled ? 'on by default' : 'off by default'}
+              </span>
+            </span>
+            <span class="brick-name">{m.page}</span>
+            <span class="brick-category">{m.category}</span>
+            <span class="brick-desc">{m.description}</span>
+            <span class="brick-clouds">
+              {where(m.clouds)}
+              {m.requires.length > 0 && <span class="needs"> · {needs(m.requires)}</span>}
+            </span>
+          </a>
+        </li>
+      ))
+    }
+  </ul>
+</div>
+
+<script>
+  // The category filter. Without script every brick shows, and the
+  // buttons stay hidden.
+  const group = document.querySelector<HTMLElement>('.catalog-bricks .filters');
+  const bricks = document.querySelectorAll<HTMLElement>('.catalog-bricks .bricks li');
+  if (group) {
+    group.hidden = false;
+    group.addEventListener('click', (event) => {
+      const button = (event.target as HTMLElement).closest('button');
+      if (!button) return;
+      const category = button.dataset.category ?? '';
+      for (const b of group.querySelectorAll('button')) b.setAttribute('aria-pressed', String(b === button));
+      for (const brick of bricks) brick.hidden = category !== '' && brick.dataset.category !== category;
+    });
+  }
+</script>
+
+<style>
+.catalog-bricks {
+  display: grid;
+  gap: 1.5rem;
+}
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.filters button {
+  padding: 0.45rem 0.85rem;
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
+  background: var(--stone-raised);
+  color: var(--basalt);
+  font: 600 0.875rem/1 var(--font-body);
+  cursor: pointer;
+}
+.filters button[aria-pressed='true'] {
+  background: var(--pine);
+  border-color: var(--pine);
+  color: #f5fff7;
+}
+
+/* The bricks: one module each, laid in courses. Same build as the cloud
+   cards above: a raised face standing on a heavy bottom edge. */
+.bricks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15.5rem, 1fr));
+}
+.compact .bricks {
+  grid-template-columns: repeat(auto-fill, minmax(12.5rem, 1fr));
+  gap: 0.75rem;
+}
+.bricks a {
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto auto auto 1fr auto;
+  gap: 0.2rem;
+  padding: 1rem 1.1rem 0.9rem;
+  background: var(--stone-raised);
+  border: 1px solid var(--hairline);
+  border-bottom: 6px solid var(--basalt);
+  border-radius: 3px;
+  color: var(--basalt);
+  text-decoration: none;
+}
+.bricks a:hover {
+  border-bottom-color: var(--accent);
+}
+.brick-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 0.6rem;
+}
+.mark-tile {
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0.45rem;
+  border-radius: 3px;
+  background: var(--pine);
+  color: #f5fff7;
+}
+.mark-tile :global(svg) {
+  width: 100%;
+  height: 100%;
+}
+.monogram {
+  font: 850 0.95rem/1 var(--font-display);
+  font-stretch: 118%;
+  color: var(--lime);
+}
+.monogram[data-long] {
+  font-size: 0.7rem;
+  letter-spacing: -0.02em;
+}
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--basalt-muted);
+}
+.state::before {
+  content: '';
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  border: 1.5px solid var(--basalt-muted);
+}
+.state[data-on]::before {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.state[data-on] {
+  color: var(--accent);
+}
+.brick-name {
+  font: 800 1.2rem/1.15 var(--font-display);
+  font-stretch: 112%;
+  letter-spacing: -0.01em;
+}
+.brick-category {
+  font-size: 0.8125rem;
+  color: var(--accent);
+}
+.brick-desc {
+  margin-top: 0.35rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--basalt-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.brick-clouds {
+  margin-top: 0.6rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--hairline);
+  font-size: 0.75rem;
+  color: var(--basalt-muted);
+}
+.needs {
+  color: var(--basalt);
+}
+</style>

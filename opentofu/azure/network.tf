@@ -1,4 +1,4 @@
-# Network — docs/azure/network-security.md.
+# Network — docs/decisions/azure.md, AZURE-13.
 #
 # One VNet, one node-only subnet. Azure subnets aren't AZ-scoped at all —
 # zone placement happens on the node pool itself (see cluster.tf), not on

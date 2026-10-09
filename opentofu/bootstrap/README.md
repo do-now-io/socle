@@ -1,10 +1,19 @@
 # Socle bootstrap — Flux, and the inputs the catalog renders from
 
-One module for four clouds. `helm` installs everything that runs in the
-cluster — `flux-operator`, a `FluxInstance`, and two literal objects: the
-client's inputs and the root source; on aws, `aws` adds the EKS-managed
-add-ons and their roles. After that OpenTofu owns those three releases and nothing
-else: the operator renders the catalog from the inputs, Flux converges it.
+One module for four clouds. It installs everything that runs in the cluster
+before Flux can, then Flux, then the client's configuration, in this order:
+
+1. on `aws` and `azure`, Cilium (the foundations create a cluster with no
+   CNI), and on `aws` CoreDNS;
+2. on `aws`, the EKS-managed add-ons and their roles: the Pod Identity Agent,
+   the CSI snapshot controller, EBS CSI and, on request, EFS CSI;
+3. `flux-operator` and a `FluxInstance` with no `sync` block;
+4. the envelope: two literal objects, the client's inputs (a
+   `ResourceSetInputProvider`) and the root source (a `ResourceSet`).
+
+`helm` applies the releases and `aws` the add-ons. After that the operator
+renders the catalog from the inputs and Flux converges it; OpenTofu owns
+these releases and nothing else.
 
 ```hcl
 module "socle" {
@@ -21,7 +30,8 @@ module "socle" {
 }
 ```
 
-The design, and the measurements behind it: [docs/flux-catalog.md](../../docs/flux-catalog.md).
+How it works and why: [The Flux catalog](../../docs/architecture/flux-catalog.md)
+and [Cilium before Flux](../../docs/architecture/cilium-before-flux.md).
 
 ## Where it runs
 
@@ -29,156 +39,21 @@ In the same root as the foundations module, in one apply — see
 `opentofu/clusters/<cloud>/`. It configures no provider itself; the root passes
 the foundations module's `helm_kubernetes` output to the `helm` provider, and
 on aws its own `aws` provider serves both modules. Elsewhere `aws` has no
-resource here and is never configured.
+resource here and is never configured. The root also passes
+`cluster_network` and, on aws, `schedulable_nodes` and
+`gateway_certificate_arn` from the foundations' outputs.
 
-## The catalog schema
+## What the client sets
 
-`kube` is `{ <module> = { <attribute> = <value> } }`. Only what differs from a
-default needs writing; an unknown module or attribute, or a value of the wrong
-type, is an error at plan, with the allowed list in the message.
-
-| Module | Attribute | Default | Meaning |
-| --- | --- | --- | --- |
-| `gateway_api` | `enabled` | `true` | Gateway API standard CRDs from upstream, pinned by commit, and Cilium's `cilium` class on aws and azure. Offered on aws, azure and scaleway; GKE owns its own. Disabling orphans the CRDs |
-| `gateway_api` | `gateways` | `true` | The shared Gateways `gateway-system/public` (internet-facing) and `private` (internal), HTTPS on 443, on aws and azure — on aws once the foundations issued `gateway_certificate`, with no port 80 yet; on azure HTTP on 80 redirects to HTTPS ([design note](../../docs/catalog/gateway-api.md)) |
-| `crossplane` | `enabled` | `false` | Deploy Crossplane and, per cloud, its IAM providers — the tooling through which each catalog module declares its own cloud role ([design note](../../docs/catalog/crossplane.md)). Turning it off leaves the CRDs and orphans every module role still declared |
-| `crossplane` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan |
-| `crossplane` | `values_secret` | `""` | Name of a Secret in `crossplane-system` with a `values.yaml` key, created by the client, merged last |
-| `crossplane` | `permissions_boundary` | `""` | AWS: the boundary every module's role carries. The client root wires it from the foundations' `crossplane_permissions_boundary_arn` |
-| `external_dns` | `enabled` | `false` | Publish DNS records for Services, Ingresses and HTTPRoutes into the cloud's zone — needs `domain_filters`; on AWS with `crossplane` on it declares its own IAM role, elsewhere the client brings a credential ([design note](../../docs/catalog/external-dns.md)) |
-| `external_dns` | `domain_filters` | `[]` | Zones it may write to, as DNS names; required when enabled |
-| `external_dns` | `policy` | `"upsert-only"` | `upsert-only` never deletes a record; `sync` also deletes what it owns |
-| `external_dns` | `txt_owner_id` | the cluster name | Owner written into the TXT registry, so two clusters never fight over a zone |
-| `external_dns` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan |
-| `external_dns` | `values_secret` | `""` | Name of a Secret in `external-dns` with a `values.yaml` key, created by the client, merged last |
-| `argocd` | `enabled` | `true` | Deploy ArgoCD, the client's GitOps layer ([design note](../../docs/catalog/argocd.md)) |
-| `argocd` | `admin_enabled` | `true` | Keep the local `admin` account; `false` once SSO exists |
-| `argocd` | `domain` | `""` | Host ArgoCD is served at (`configs.cm.url` and the HTTPRoute); empty means no URL and no route |
-| `argocd` | `gateway` | `"private"` | Shared Gateway its HTTPRoute attaches to: `private`, `public`, or `""` for none |
-| `argocd` | `ha` | `false` | The chart's HA layout: Redis HA, two replicas of server, repo-server and applicationset |
-| `argocd` | `values` | `{}` | The client's own chart values (accounts, RBAC, repositories, SSO connectors, exclusions), merged over the socle's defaults, client wins. Secrets refused at plan |
-| `argocd` | `values_secret` | `""` | Name of a Secret in `argocd` with a `values.yaml` key, created by the client, merged last — where the private keys and client secrets go |
-| `victoria_metrics` | `enabled` | `true` | Deploy VictoriaMetrics single-node, the monitoring stack's metrics storage: OTLP in, PromQL out, no cloud access ([design note](../../docs/catalog/victoria-metrics.md), [stack](../../docs/monitoring.md)) |
-| `victoria_metrics` | `retention` | `"15d"` | How long samples are kept: whole hours, days, weeks or years, at least a day |
-| `victoria_metrics` | `storage_size` | `"20Gi"` | Size of the claim on the cluster's default StorageClass, in `Gi` or `Ti`; `""` means no claim, an `emptyDir` — what a socle EKS needs until the EBS CSI driver exists |
-| `victoria_metrics` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan; numeric flags written as strings |
-| `victoria_metrics` | `values_secret` | `""` | Name of a Secret in `victoria-metrics` with a `values.yaml` key, created by the client, merged last |
-| `otel_agent` | `enabled` | `true` | Deploy the OpenTelemetry Collector as a DaemonSet: kubelet metrics for every node, pod and container, to `victoria_metrics` when it is on, and the nodes and pods dashboard ([design note](../../docs/catalog/otel-agent.md)) |
-| `otel_agent` | `logs` | `true` | Container logs from `/var/log/pods` (read-only hostPath, root without capabilities) to `victoria_logs` while it is on; `false` keeps the agent to metrics |
-| `otel_agent` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Literal credentials refused at plan; `${env:NAME}` read from a Secret is fine |
-| `otel_agent` | `values_secret` | `""` | Name of a Secret in `otel-agent` with a `values.yaml` key, created by the client, merged last |
-| `otel_gateway` | `enabled` | `true` | Deploy the OpenTelemetry Collector as a one-replica Deployment: Kubernetes object state, the Prometheus endpoints of pods annotated `prometheus.io/scrape`, and the applications' OTLP on `otel-gateway.otel-gateway.svc:4317/4318`, to `victoria_metrics`; ships the workloads dashboard ([design note](../../docs/catalog/otel-gateway.md)) |
-| `otel_gateway` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Literal credentials refused at plan; `${env:NAME}` read from a Secret is fine |
-| `otel_gateway` | `values_secret` | `""` | Name of a Secret in `otel-gateway` with a `values.yaml` key, created by the client, merged last |
-| `grafana` | `enabled` | `true` | Deploy Grafana: a read-only datasource for each monitoring backend that is on, and every dashboard a module ships ([design note](../../docs/catalog/grafana.md)) |
-| `grafana` | `domain` | `""` | Host Grafana is served at (`grafana.ini` `server.root_url`, later the HTTPRoute); empty means none |
-| `grafana` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan: admin password, secret key, OAuth client secrets, literal datasource secrets |
-| `grafana` | `values_secret` | `""` | Name of a Secret in `grafana` with a `values.yaml` key, created by the client, merged last |
-| `victoria_logs` | `enabled` | `true` | Deploy VictoriaLogs single-node, the monitoring stack's logs storage: container logs, Kubernetes events and OTLP logs in, LogsQL out, no cloud access ([design note](../../docs/catalog/victoria-logs.md)) |
-| `victoria_logs` | `retention` | `"7d"` | How long logs are kept: whole hours, days, weeks or years, at least a day |
-| `victoria_logs` | `storage_size` | `"20Gi"` | Size of the claim on the default StorageClass; `""` means an `emptyDir`, as `victoria_metrics` |
-| `victoria_logs` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan |
-| `victoria_logs` | `values_secret` | `""` | Name of a Secret in `victoria-logs` with a `values.yaml` key, created by the client, merged last |
-| `victoria_traces` | `enabled` | `false` | Deploy VictoriaTraces single-node, the applications' OTLP traces through `otel_gateway`, a Jaeger datasource in Grafana. **Off**: pre-GA, an upgrade may drop stored traces ([design note](../../docs/catalog/victoria-traces.md)) |
-| `victoria_traces` | `retention` | `"7d"` | How long traces are kept: whole hours, days, weeks or years, at least a day |
-| `victoria_traces` | `storage_size` | `"10Gi"` | Size of the claim on the default StorageClass; `""` means an `emptyDir` |
-| `victoria_traces` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan |
-| `victoria_traces` | `values_secret` | `""` | Name of a Secret in `victoria-traces` with a `values.yaml` key, created by the client, merged last |
-| `alerting` | `enabled` | `false` | Deploy vmalert and Alertmanager: the socle's rules on `victoria_metrics`, which it needs, routed to the client's receivers. **Off**: it needs where alerts go ([design note](../../docs/catalog/alerting.md)) |
-| `alerting` | `watchdog` | `true` | Route an always-firing alert to the dead man's switch whose URL is the `watchdog-url` key of `receivers_secret` |
-| `alerting` | `receivers` | `[]` | Alertmanager receivers as Alertmanager writes them; keys only through `*_file` fields, under `/etc/alertmanager/secrets/` |
-| `alerting` | `route` | `{}` | Alertmanager's routing tree; `route.receiver` names one of `receivers` |
-| `alerting` | `receivers_secret` | `""` | Name of a Secret in `alerting`, created by the client, holding the receivers' keys and the watchdog's URL, mounted as files |
-| `alerting` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Rules, Alertmanager's config and secrets refused at plan |
-| `alerting` | `values_secret` | `""` | Name of a Secret in `alerting` with a `values.yaml` key, created by the client, merged last |
-| `kyverno` | `enabled` | `false` | Deploy the Kyverno engine: admission (three replicas, a PodDisruptionBudget), background and reports controllers, no policy; its webhooks never see `kube-system`, `flux-system` or the socle's own namespaces. **Off**: an admission webhook is opted into ([design note](../../docs/catalog/kyverno.md)) |
-| `kyverno` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Registry credentials (`imagePullSecrets`) and literal credential env refused at plan |
-| `kyverno` | `values_secret` | `""` | Name of a Secret in `kyverno` with a `values.yaml` key, created by the client, merged last |
-| `kyverno_policies` | `enabled` | `false` | Deploy the socle's policy set on `kyverno` (required): the Pod Security Standards as CEL policies, requests required, no `latest` tag, every policy in Audit, applied to the client's applications only, never to the socle's namespaces ([design note](../../docs/catalog/kyverno-policies.md)) |
-| `kyverno_policies` | `profile` | `"baseline"` | `baseline`, or `restricted` for baseline plus the six restricted policies |
-| `kyverno_policies` | `enforce` | `[]` | Policies switched to Enforce, each compiled into a native ValidatingAdmissionPolicy the API server applies with Kyverno up or down; only names this configuration renders |
-| `kyverno_policies` | `allowed_registries` | `[]` | Registries images may come from (`ghcr.io`, `registry.k8s.io`, `ghcr.io/acme`); empty means no registry policy |
-| `kyverno_policies` | `values` | `{}` | The client's own `kyverno-policies` chart values, merged over the socle's, client wins; a list he sets replaces the socle's whole |
-| `kyverno_policies` | `values_secret` | `""` | Name of a Secret in `kyverno-policies` with a `values.yaml` key, created by the client, merged last |
-| `keda` | `enabled` | `false` | Deploy KEDA, event-driven autoscaling: a `ScaledObject` scales a Deployment on a queue's depth, a cron window or a PromQL query, and down to zero ([design note](../../docs/catalog/keda.md)). Off: it does nothing until a `ScaledObject` exists |
-| `keda` | `services` | `[]` | AWS services KEDA's own role may **read**, from `sqs`, `cloudwatch`, `kinesis`, `dynamodb`: one read-only statement per service named, declared through Crossplane, no role when empty. Needs `crossplane` on and the same services in the foundations' `aws.crossplane.allowed_services`; aws only for now |
-| `keda` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan |
-| `keda` | `values_secret` | `""` | Name of a Secret in `keda` with a `values.yaml` key, created by the client, merged last |
-| `metrics_server` | `enabled` | `true` | Serve the `metrics.k8s.io` API that `kubectl top` and every HPA on CPU or memory read. Offered on aws only; the other clouds ship their own ([design note](../../docs/catalog/metrics-server.md)) |
-| `metrics_server` | `ha` | `false` | Two replicas spread across nodes, with a disruption budget |
-| `metrics_server` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. `--kubelet-insecure-tls` refused at plan |
-| `metrics_server` | `values_secret` | `""` | Name of a Secret in `metrics-server` with a `values.yaml` key, created by the client, merged last |
-| `external_secrets` | `enabled` | `false` | Deploy External Secrets Operator: an `ExternalSecret` becomes a `Secret` read from the cloud's secret manager, kept in step when it rotates ([design note](../../docs/catalog/external-secrets.md)). Pair it with `reloader` |
-| `external_secrets` | `prefixes` | `[<cluster_name>]` | On AWS with `crossplane` on: the module's own **read-only** role reads `secret:<prefix>/*` in the cluster's region for each prefix, and the `ClusterSecretStore` `secret-manager` is created on it. Needs `secretsmanager` in the foundations' `aws.crossplane.allowed_services`. `[]`: no role, no store |
-| `external_secrets` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan |
-| `external_secrets` | `values_secret` | `""` | Name of a Secret in `external-secrets` with a `values.yaml` key, created by the client, merged last |
-| `external_secrets` | `enabled` | `false` | Deploy External Secrets Operator: an `ExternalSecret` becomes a `Secret` read from the cloud's secret manager, kept in step when it rotates ([design note](../../docs/catalog/external-secrets.md)). Pair it with `reloader` |
-| `external_secrets` | `prefixes` | `[<cluster_name>]` | On AWS with `crossplane` on: the module's own **read-only** role reads `secret:<prefix>/*` in the cluster's region for each prefix, and the `ClusterSecretStore` `secret-manager` is created on it. Needs `secretsmanager` in the foundations' `aws.crossplane.allowed_services`. `[]`: no role, no store |
-| `external_secrets` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan |
-| `external_secrets` | `values_secret` | `""` | Name of a Secret in `external-secrets` with a `values.yaml` key, created by the client, merged last |
-| `reloader` | `enabled` | `false` | Deploy Stakater Reloader: a workload annotated `reloader.stakater.com/auto: "true"` is rolled when a ConfigMap or Secret it reads changes ([design note](../../docs/catalog/reloader.md)). **Off**: it reads every ConfigMap and Secret of the cluster |
-| `reloader` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets and `reloader.autoReloadAll` refused at plan |
-| `reloader` | `values_secret` | `""` | Name of a Secret in `reloader` with a `values.yaml` key, created by the client, merged last |
-| `velero` | `enabled` | `false` | Deploy Velero: backup and restore of the applications that opt in, by two labels, into the module's own bucket. **aws only**; needs `kube.crossplane.enabled` and `s3` in the foundations' allowlist ([design note](../../docs/catalog/velero.md)) |
-| `velero` | `policies` | seven pairs | `[{ frequency, retention, schedule }]`, one `Schedule` each, selecting `socle.do-now.io/backup-frequency` and `socle.do-now.io/backup-retention`; retention in hours or days, a five-field cron. Default: hourly 24h and 48h, daily 7d and 30d, weekly 30d and 90d, monthly 90d |
-| `velero` | `node_agent` | `eks_addons.efs_csi` | The node-agent DaemonSet (privileged), which backs EFS volumes up by file system. Off, the namespace stays `restricted` |
-| `velero` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan: name a Secret through `credentials.existingSecret` |
-| `velero` | `values_secret` | `""` | Name of a Secret in `velero` with a `values.yaml` key, created by the client, merged last |
-| `hello` | `enabled` | `true` | Deploy podinfo as a proof the pipeline works |
-| `hello` | `replicas` | `1` | Replicas of the podinfo Deployment |
-| `hello` | `message` | `"hello from socle"` | Message podinfo serves |
-
-The schema lives in `catalog.tf`; the templates in `oci/catalog/<module>/`;
-each `oci/clusters/<cloud>/kustomization.yaml` lists the modules that cloud
-offers, and `catalog_clouds` in `catalog.tf` names the clouds a module is bound
-to (absent = every cloud). All of it changes in the same release, and CI
-(`.github/scripts/check-catalog-clouds.sh`) fails when the overlays and the
-schema disagree.
-
-## Cilium, before Flux
-
-On `aws` and `azure` the foundations create a cluster with no CNI, and
-nothing without `hostNetwork`, Flux included, starts until one runs. This
-module therefore installs Cilium, and on `aws` CoreDNS, before
-`flux-operator`. On `gcp` and `scaleway` the cloud operates Cilium and none of
-this exists. The Gateway API CRDs are not installed here: the catalog's
-`gateway_api` module brings them from upstream once Flux runs. The root
-passes `cluster_network` from the foundations' outputs:
-
-```hcl
-cilium  = { hubble = true }           # optional: enabled, hubble, gateway_api, values
-coredns = { values = { replicaCount = 3 } }         # aws: any CoreDNS chart value
-cluster_network = {
-  api_endpoint = module.foundations.cluster_endpoint
-  service_cidr = module.foundations.service_cidr   # aws
-  # pod_cidr   = module.foundations.pod_cidr       # azure
-}
-```
-
-`values` takes any chart value and is merged after the socle's, so the
-client wins. Private keys are refused there, because they would land in the
-state: name a Secret through the chart's `existingSecret` fields instead. The
-templates see what was decided as `inputs.cilium.{installed, gatewayApi,
-hubble}`. The design and what was measured are in
-[docs/catalog/cilium.md](../../docs/catalog/cilium.md).
-
-## EKS add-ons, once the nodes run
-
-On `aws` the Pod Identity Agent, EBS CSI and EFS CSI stay EKS-managed
-add-ons ([managed scope](../../docs/aws/eks-managed-scope.md)), and this
-module creates them — the foundations provision nothing that needs a pod.
-The Pod Identity Agent comes after Cilium and before `flux-operator`: every
-catalog module that talks to AWS, Crossplane first, gets its credentials from
-it, and without it they hang without an error (#48). The two drivers come
-after CoreDNS, each with its own role bound through the add-on's
-`pod_identity_association`, outside `/socle/<cluster>/`.
-
-```hcl
-eks_addons = { efs_csi = true }   # optional: pod_identity_agent (true), ebs_csi (true), efs_csi (false)
-```
-
-Versions are pinned in `eks_addons.tf` and move with the socle release. The
-drivers need the agent; turning it off with either on is refused at plan.
+- `kube`: the catalog modules and their values,
+  `{ <module> = { <attribute> = <value> } }`, typed `any` and validated
+  against `catalog.tf` at plan. The schema, module by module:
+  [Inputs](../../docs/reference/inputs.md#the-catalog-schema).
+- `cilium`, `coredns`, `eks_addons`: what precedes Flux, on the clouds where
+  this module installs it:
+  [Inputs](../../docs/reference/inputs.md#cilium-coredns-and-the-eks-add-ons).
+- `socle_version`, `cosign_identity`, `artifact_url`, `artifact_pull_secret`:
+  where the artifact comes from and whose signature it must carry.
 
 ## What is decided for you
 
@@ -190,12 +65,14 @@ drivers need the agent; turning it off with either on is refused at plan.
 | Version | `socle_version` defaults to this module's own; one tag bump moves everything |
 | Signature | cosign keyless, verified by Flux on every reconciliation, cannot be disabled |
 | Default identity | the release workflow on `main` — a branch build needs an explicit override |
-| Source kind | OCI only |
+| Source kind | OCI for the socle's composition; third-party CRDs from an upstream pinned by commit |
 | Namespace | `flux-system`, fixed |
-| CNI on aws and azure | Cilium 1.20.2, pinned here: ENI IPAM on aws, BYOCNI overlay on azure, kube-proxy replacement on both |
+| CNI on aws and azure | Cilium, pinned in `cilium.tf`: ENI IPAM on aws, BYOCNI overlay on azure, kube-proxy replacement on both |
 | DNS on aws | CoreDNS by Helm after Cilium; the EKS add-on cannot exist before a CNI |
 | Identity on aws | the Pod Identity Agent add-on, before Flux, pinned; IRSA absent |
-| Storage on aws | EBS CSI add-on on by default, EFS CSI on request, each with its own Pod Identity role |
+| Storage on aws | EBS CSI and the snapshot controller on by default, EFS CSI on request, each driver with its own Pod Identity role |
+
+The decisions, with their reasons: [Socle decisions](../../docs/decisions/socle.md).
 
 ## Reading the result
 
@@ -212,10 +89,14 @@ apply proves the objects were deposited, not that they converged. The root
 ## Testing
 
 `tofu test` covers the interface — one failing case per validation, and the
-defaults and normalisation with mocked helm and aws providers. Convergence is proven
-by `publish-artifact.yaml`'s `e2e-aws-root` and `e2e-aws-catalog` jobs, which
-apply on floci against the artifact the same commit published; the
-integration legs plan only.
+defaults and normalisation with mocked helm and aws providers — in
+`pr-static.yaml`. Convergence is proven by `e2e.yaml`, on floci's k3s,
+against the artifact the same push published: the real AWS root applied
+once, and this module on a bare fixture root, `.github/e2e/aws/`, once per
+catalog module, each job ending in `tofu destroy`. Both set
+`cilium.enabled = false` and leave the EKS add-ons off: floci runs its own
+CNI and has no add-on API. See
+[CONTRIBUTING, Testing](../../CONTRIBUTING.md#testing).
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
@@ -269,7 +150,7 @@ No modules.
 | <a name="input_gateway_certificate_arn"></a> [gateway\_certificate\_arn](#input\_gateway\_certificate\_arn) | On aws, the ACM certificate the shared Gateways' load balancers terminate<br/>TLS with — the foundations' gateway\_certificate\_arn output, never the<br/>client's. Null or empty on aws means no shared Gateway, and no route<br/>attached to one. Unknown at plan on the apply that issues it, which is<br/>why nothing validates it here. Ignored elsewhere. | `string` | `null` | no |
 | <a name="input_helm_timeout_seconds"></a> [helm\_timeout\_seconds](#input\_helm\_timeout\_seconds) | How long to wait for each release to become ready. The instance release is the slow one: its health check waits for the operator to converge the controllers. | `number` | `600` | no |
 | <a name="input_instance_size"></a> [instance\_size](#input\_instance\_size) | Resource profile the operator applies to the controllers. Empty is the operator's own default; small, medium and large scale requests and limits together. | `string` | `""` | no |
-| <a name="input_kube"></a> [kube](#input\_kube) | The catalog modules this cluster enables and their values, as<br/>`{ <module> = { <attribute> = <value> } }`. List only what differs from<br/>the catalog's defaults; an absent module is at its default. Module names<br/>are snake\_case. Typed `any` on purpose: a map(any) refuses two modules with<br/>different attributes, and an object type silently drops a misspelt<br/>attribute — the validations below are what makes a typo an error at plan.<br/>The schema is catalog.tf; the README lists it module by module. | `any` | `{}` | no |
+| <a name="input_kube"></a> [kube](#input\_kube) | The catalog modules this cluster enables and their values, as<br/>`{ <module> = { <attribute> = <value> } }`. List only what differs from<br/>the catalog's defaults; an absent module is at its default. Module names<br/>are snake\_case. Typed `any` on purpose: a map(any) refuses two modules with<br/>different attributes, and an object type silently drops a misspelt<br/>attribute — the validations below are what makes a typo an error at plan.<br/>The schema is catalog.tf; docs/reference/inputs.md lists it module by module. | `any` | `{}` | no |
 | <a name="input_network_policy"></a> [network\_policy](#input\_network\_policy) | Let the operator install network policies isolating the Flux namespace. On by default; Cilium enforces them on every cloud we ship. | `bool` | `true` | no |
 | <a name="input_operator_version"></a> [operator\_version](#input\_operator\_version) | Chart version of flux-operator, which is also the operator's own version. Pinned exactly: the operator is pre-1.0 and its minors are not a stable contract. | `string` | `"0.60.0"` | no |
 | <a name="input_region"></a> [region](#input\_region) | Region the cluster runs in, exposed to the catalog as inputs.cluster.region. Regional cloud APIs need it — on AWS the Pod Identity associations the crossplane module creates. Empty when the caller does not know it; a module that needs it says so. | `string` | `""` | no |

@@ -5,7 +5,7 @@
 #            (`Running 'install' action with timeout of 10m0s`, issue #61):
 #            every `catch` here prints what the next failure needs.
 #   module   values precedence through a patch of the ResourceSetInputProvider
-#            (docs/flux-catalog.md §6: the client wins where the two meet, on a
+#            (docs/decisions/socle.md#socle-06-the-clients-values-win: the client wins where the two meet, on a
 #            key the socle itself sets — a key it leaves unset proves nothing),
 #            then off (garbage-collected) and back on.
 apiVersion: chainsaw.kyverno.io/v1alpha1
@@ -95,7 +95,7 @@ spec:
 ---
 # floci only: no shared Gateway (no Cilium), so kube.argocd.gateway keeps its
 # default and the socle renders no HTTPRoute — the argocd-route ResourceSet
-# is absent (docs/catalog/argocd.md, "Exposure through Gateway API"). The
+# is absent (docs/decisions/argocd.md, ARGOCD-02). The
 # sandbox (M4) proves the route.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
@@ -224,7 +224,7 @@ spec:
             namespace: flux-system
             selector: app=helm-controller
             tail: 80
-    # The order of valuesFrom, proven whole (docs/flux-catalog.md §6): the
+    # The order of valuesFrom, proven whole (docs/decisions/socle.md#socle-06-the-clients-values-win): the
     # socle's document, then kube.argocd.values, then the Secret the client
     # names in values_secret — created by him in the module's namespace, never
     # read by OpenTofu, merged last. 160Mi in values and 176Mi in the Secret:

@@ -1,5 +1,5 @@
 # The nodes and pods dashboard, shipped by the otel_agent module because it
-# reads that module's metrics (docs/monitoring.md §5). Written on the names
+# reads that module's metrics (docs/decisions/socle.md, SOCLE-03). Written on the names
 # VictoriaMetrics stores kubeletstats under -opentelemetry.usePrometheusNaming;
 # the e2e parses this JSON and asserts that every metric an expression names
 # has series in VictoriaMetrics. Edit it in place and keep it valid JSON.

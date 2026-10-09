@@ -4,8 +4,8 @@
 # A module that needs a cloud service declares its own managed resources
 # (on AWS an IAM Role and a PodIdentityAssociation) in its own ResourceSet,
 # for each cloud it runs on; adding such a module never touches this one.
-# The contract those resources follow, the ordering chain and the
-# measurements: docs/catalog/crossplane.md.
+# The contract those resources follow and the ordering chain:
+# docs/architecture/module-iam.md; the module: docs/catalog/crossplane.md.
 #
 # Three steps, applied and health-checked in order by the operator:
 # 1. core — Crossplane and its RBAC manager, the official chart. From

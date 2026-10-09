@@ -1,0 +1,70 @@
+/* The socle tokens, mapped onto Starlight's custom properties. The accent is
+   the socle green (tokens.css), dark #3fae73 / light #0b6b3a. Starlight
+   names its scale from the dark theme: --sl-color-white is the text,
+   --sl-color-black the ground, in both themes. */
+@import './tokens.css';
+
+:root {
+  --sl-font: var(--font-body);
+  --sl-font-mono: var(--font-mono);
+  --sl-color-accent-low: #143322;
+  --sl-color-accent: #3fae73;
+  --sl-color-accent-high: #b9f0cf;
+  /* Note asides are Starlight's blue: the accent instead, one green only. */
+  --sl-color-blue-low: #143322;
+  --sl-color-blue: #3fae73;
+  --sl-color-blue-high: #b9f0cf;
+  --sl-color-white: #e6e8e3;
+  --sl-color-gray-1: #d5d9d3;
+  --sl-color-gray-2: #b4bab5;
+  --sl-color-gray-3: #8a929a;
+  --sl-color-gray-4: #535b63;
+  --sl-color-gray-5: #343a40;
+  --sl-color-gray-6: #1c2025;
+  --sl-color-black: #111417;
+}
+
+:root[data-theme='light'] {
+  --sl-color-accent-low: #e6f5c9;
+  --sl-color-accent: #0b6b3a;
+  --sl-color-accent-high: #004f28;
+  --sl-color-blue-low: #e6f5c9;
+  --sl-color-blue: #0b6b3a;
+  --sl-color-blue-high: #004f28;
+  --sl-color-white: #1b2026;
+  --sl-color-gray-1: #22272c;
+  --sl-color-gray-2: #353c43;
+  --sl-color-gray-3: #535b63;
+  --sl-color-gray-4: #7d857f;
+  --sl-color-gray-5: #cbd0c8;
+  --sl-color-gray-6: #e4e7e0;
+  --sl-color-gray-7: #eef0eb;
+  --sl-color-black: #f2f3ef;
+}
+
+/* Headings in the display face, wide and heavy, as on the landing page. */
+.sl-markdown-content :is(h1, h2, h3),
+h1#_top {
+  font-family: var(--font-display);
+  font-stretch: 112%;
+  letter-spacing: -0.01em;
+}
+h1#_top {
+  font-weight: 850;
+  font-stretch: 118%;
+}
+.sl-markdown-content h2 {
+  font-weight: 800;
+}
+
+/* The banner: a strip of the ground colour with an ochre rule, not a block
+   of accent — it says "unreleased", it does not shout. */
+.sl-banner {
+  background: var(--stone-sunk);
+  color: var(--basalt);
+  border-bottom: 2px solid var(--ochre);
+  font-size: var(--sl-text-sm);
+}
+.sl-banner a {
+  color: var(--accent);
+}

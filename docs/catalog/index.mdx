@@ -1,0 +1,54 @@
+---
+title: Catalog
+description: The nineteen catalog modules, what each gives you, whether it is on by default, the clouds it runs on, and how kube turns them on.
+sidebar:
+  label: Overview
+  order: 0
+---
+
+import CatalogBricks from '@site/components/CatalogBricks.astro';
+import DependencyGraph from '@site/components/DependencyGraph.astro';
+
+The catalog is what Flux installs on a socle cluster, one module at a time,
+from your `kube` block. Some are on by default; the others wait for you.
+
+<CatalogBricks compact />
+
+
+- **The foot of each brick** is the clouds the module is offered on;
+  elsewhere `tofu plan` refuses it. CI proves every module on AWS only.
+- **Observability** is seven modules:
+  [how they fit](../architecture/observability.md).
+- **Cilium, CoreDNS and the EKS add-ons** are not modules: they run
+  [before Flux](../architecture/cilium-before-flux.md).
+
+## How modules depend on each other
+
+Turning a module on never turns another on. Some need another one on, some
+only wait for it, some plug into it when it is there. Select a module:
+
+<DependencyGraph />
+
+## How kube turns them on
+
+List only what differs from the defaults; a module you leave out is on or
+off as its brick says.
+
+```hcl
+kube = {
+  argocd     = { domain = "argocd.acme.example" }   # on by default: change an attribute
+  kyverno    = { enabled = true }                   # off by default: turn it on
+  hello      = { enabled = false }                  # on by default: turn it off
+}
+```
+
+- **Names are `snake_case`**; pages and namespaces use `kebab-case`.
+- **`values`** takes any chart value, yours winning; **`values_secret`**
+  names a Secret for what must stay out of the OpenTofu state.
+- **A typo, a wrong type, or a module not offered on your cloud** fails at
+  plan, with the allowed list.
+- **Turning a module off** removes what it installed; CRDs that hold your
+  objects stay.
+
+Steps: [Enable a module](../guides/enable-a-module.md). Whole schema:
+[Inputs](../reference/inputs.md#the-catalog-schema).

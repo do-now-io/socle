@@ -211,7 +211,7 @@ spec:
             namespace: flux-system
             selector: app=helm-controller
             tail: 40
-    # The order of valuesFrom, proven whole (docs/flux-catalog.md §6): the
+    # The order of valuesFrom, proven whole (docs/decisions/socle.md#socle-06-the-clients-values-win): the
     # socle's document, then kube.grafana.values, then the Secret the client
     # names in values_secret — created by him in the module's namespace, never
     # read by OpenTofu, merged last. 320Mi in values and 336Mi in the Secret:

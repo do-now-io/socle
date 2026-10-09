@@ -1,11 +1,11 @@
 # The keda module: event-driven autoscaling. A ScaledObject scales a
 # Deployment on a queue's depth, a cron window, a PromQL query — and down to
-# zero. docs/catalog/keda.md holds the design; the rules of
-# docs/flux-catalog.md §6 apply: inputsFrom the one provider, the reconcile
+# zero. docs/catalog/keda.md is the module's page; the rules of
+# docs/reference/catalog-module-standard.md apply: inputsFrom the one provider, the reconcile
 # toggle on EACH resource, values tested never presence.
 #
 # Values, in the order helm-controller merges them, later winning
-# (docs/flux-catalog.md §6): keda-socle-values, the socle's defaults below;
+# (docs/decisions/socle.md#socle-06-the-clients-values-win): keda-socle-values, the socle's defaults below;
 # keda-client-values, kube.keda.values; then the client's Secret when they
 # name one. No inline `values:` on the HelmRelease — helm-controller merges
 # it last, so it would beat the client on every key.
@@ -19,12 +19,12 @@
 # statement per named service, the exact calls each scaler makes (measured
 # in the scalers' source, docs/catalog/keda.md), nothing for a service not
 # named, no role when the list is empty. Never `*`. The role is declared
-# here as Crossplane managed resources (docs/catalog/crossplane.md §3), on
+# here as Crossplane managed resources (docs/architecture/module-iam.md), on
 # AWS with Crossplane on; the foundations never create it.
 #
 # Two layers, so that the operator pod is admitted only after its AWS access
 # exists — EKS Pod Identity injects the credentials at pod admission, a pod
-# admitted before its association never gets them (docs/catalog/external-dns.md):
+# admitted before its association never gets them (docs/architecture/module-iam.md):
 # - this ResourceSet: the Namespace and, when a service is named, the
 #   module's own IAM Role and the Pod Identity association binding it to
 #   keda/keda-operator;
@@ -84,7 +84,7 @@ spec:
         pod-security.kubernetes.io/enforce: restricted
     << if and (eq inputs.cloud "aws") inputs.modules.crossplane.enabled inputs.modules.keda.services >>
     ---
-    # The module's own AWS access, docs/catalog/crossplane.md §3. Under
+    # The module's own AWS access, docs/architecture/module-iam.md. Under
     # /socle/<cluster>/ and carrying Crossplane's boundary when the root wired
     # one: Crossplane's own policy refuses any other role. Inline policy only.
     #

@@ -1,119 +1,96 @@
-# Catalog module `victoria_traces` — the third signal, off by default
+---
+title: victoria-traces
+description: "Traces storage, off by default until VictoriaTraces is GA: single-node, Jaeger API in Grafana."
+category: observability
+---
 
-The sixth and last module of the monitoring stack (#43, design in
-[`docs/monitoring.md`](../monitoring.md)): VictoriaTraces single-node, for the
-applications' traces. **It is off by default.** VictoriaTraces is still
-pre-GA: its roadmap lists "finalize the data structure and commit to backward
-compatibility" before GA, so an upgrade may drop stored traces
-(`docs/monitoring.md` §10, question 7). A client turning it on accepts that.
+VictoriaTraces single-node stores your applications' traces, read in
+[grafana](grafana.md) through the Jaeger API. **Off by default**, on every
+cloud: VictoriaTraces is not yet GA, and an upgrade may drop the traces it
+holds.
 
-Like [`victoria_logs`](victoria-logs.md), it carries its wiring into the
-modules that exist, under a test on `inputs.modules.victoria_traces.enabled`:
+## Getting started
 
-- a traces pipeline in [`otel_gateway`](otel-gateway.md);
-- a Jaeger datasource in [`grafana`](grafana.md).
+Turn it on, knowing an upgrade may drop the traces stored so far:
 
-Nothing in [`otel_agent`](otel-agent.md): traces come from applications, not
-from nodes.
-
-| Question | Position |
-| --- | --- |
-| What | The official `victoria-traces-single` chart, `oci://ghcr.io/victoriametrics/helm-charts/victoria-traces-single:0.1.11` (VictoriaTraces v0.11.0), one `HelmRelease` in namespace `victoria-traces` |
-| Default | **Off** |
-| Shape | `server.mode: deployment`, a standalone PVC, strategy `Recreate`: the victoria_metrics reason |
-| Storage | 10Gi on the default StorageClass, `""` for an `emptyDir`; the EKS caveat of victoria_metrics applies |
-| Retention | 7 days |
-| Ingest | OTLP/HTTP at `/insert/opentelemetry/v1/traces` on `:10428`, protobuf only, which is what the gateway's `otlp_http` exporter sends. Applications speak to the gateway, never to this |
-| Query | The Jaeger query API under `/select/jaeger` |
-| Exposure | Headless `ClusterIP`, `victoria-traces.victoria-traces.svc:10428` |
-| Cloud access | None |
-| Client surface | `enabled`, `retention`, `storage_size`, `values`, `values_secret` |
-
-## What is installed
-
-When enabled, the victoria_logs objects under the `victoria-traces` names:
-`Namespace`, `OCIRepository` pinned at 0.1.11, `victoria-traces-socle-values`
-and `-client-values` (labelled `reconcile.fluxcd.io/watch`), and a
-`HelmRelease` with no `spec.values`. The socle's values are:
-
-- `fullnameOverride: victoria-traces` and `mode: deployment`;
-- `retentionPeriod` from `retention`;
-- persistence from `storage_size`;
-- the `prometheus.io/*` annotations on `:10428`;
-- requests of 50m / 128Mi.
-
-When disabled — the default — the operator applies nothing.
-
-## What it brings to the other modules
-
-- **`otel_gateway`**: a `traces` pipeline, `otlp` → `k8s_attributes` →
-  `memory_limiter` → `batch` → `otlp_http/victoria-traces`. The applications'
-  traces get their sender's workload as the metrics and logs do.
-- **`grafana`**: a read-only `VictoriaTraces` datasource, uid
-  `victoria-traces`, of the **built-in Jaeger type**, at
-  `…:10428/select/jaeger`. There is nothing to download.
-
-## What the client may set — `kube.victoria_traces`
-
-| Attribute | Default | Type | Meaning |
-| --- | --- | --- | --- |
-| `enabled` | `false` | bool | On deploys it and wires the gateway and Grafana; off removes all three, traces included |
-| `retention` | `"7d"` | string | Whole hours, days, weeks or years, at least a day |
-| `storage_size` | `"10Gi"` | string | `Gi` or `Ti`; `""` for an `emptyDir` |
-| `values` | `{}` | object | Any `victoria-traces-single` value, the client's winning; the victoria_metrics secret refusals |
-| `values_secret` | `""` | string | A Secret in `victoria-traces` with a `values.yaml` key, merged last |
-
-```hcl
+```hcl kube-start="victoria_traces"
 kube = {
-  victoria_traces = { enabled = true }   # on EKS today: storage_size = "" as well
+  victoria_traces = {
+    enabled      = true
+    retention    = "3d"
+    storage_size = "20Gi"
+  }
 }
 ```
 
-## Measured
+Then `kubectl -n victoria-traces get pvc,pods` shows the claim `Bound` and
+the pod `Running`.
 
-**Render and merge, locally** (`flux-operator build rset`, `helm template`,
-`victoria_traces` on and off). With it on:
+## Settings
 
-- the gateway has a `traces` pipeline `otlp` → `otlp_http/victoria-traces`;
-- Grafana has three datasources, VictoriaTraces as `jaeger` on
-  `/select/jaeger`;
-- the chart renders a `Deployment` with `--retentionPeriod=7d`, a 10Gi claim
-  and a Service on 10428.
-
-With it off, there is no `traces` pipeline, two datasources, and the operator
-generates no object.
-
-`tofu test`: 5 refusal cases and 1 positive for this module, default off
-asserted.
-
-**e2e** (floci k3s, `ubuntu-latest` runner) — run
-<https://github.com/do-now-io/socle/actions/runs/36695409779>, tag
-`0.0.0-feat-catalog-victoria-traces.9590ad5`, both jobs green on the first
-run:
-
-| Job | Step | Measured |
+| Attribute | Default | |
 | --- | --- | --- |
-| both | the default path | `resourceset/victoria-traces` Ready, no namespace, no traces exporter in the gateway |
-| `e2e-aws-catalog` | turned on | Ready on a `Bound` claim after **26 s**; the gateway exports traces and Grafana provisions the Jaeger datasource |
-| `e2e-aws-catalog` | one OTLP/JSON span posted by podinfo to the gateway | its trace found by id through `/select/jaeger/api/traces/<id>` after **24 s**; `/api/services` lists `socle-e2e` |
-| `e2e-aws-catalog` | `kubectl top` | VictoriaTraces **2m CPU, 10Mi** with one trace |
-| `e2e-aws-catalog` | turned off | HelmRelease NotFound, no traces pipeline, no Jaeger datasource |
+| `enabled` | `false` | Turns the module, the gateway's traces pipeline and Grafana's datasource on or off. Off deletes the stored traces. |
+| `retention` | `"7d"` | How long traces are kept, in hours, days, weeks or years; at least a day. |
+| `storage_size` | `"10Gi"` | The claim's size, in `Gi` or `Ti`. `""`: an `emptyDir`, lost when the pod moves. |
+| `values` | `{}` | Any [`victoria-traces-single` chart](https://github.com/VictoriaMetrics/helm-charts/tree/master/charts/victoria-traces-single) value; yours win. |
+| `values_secret` | `""` | A Secret in `victoria-traces` with a `values.yaml` key, for what must stay out of the OpenTofu state. |
 
-**e2e, through Chainsaw** (`tests/e2e/chainsaw-test.yaml`, since the e2e moved
-into the modules — `docs/flux-catalog.md` §8). The table above is the bash phase
-this module shipped with; the same proof now runs on every push in the `root`
-job (`health`) and the module's own job (`health`, then `module`): `victoria-traces-health` asserts the disabled shape and no traces pipeline in the gateway; `victoria-traces-module` turns it on (Bound claim, the gateway's `otlp_http/victoria-traces` exporter, Grafana's Jaeger datasource), posts one span through podinfo and finds it by trace id through the Jaeger API (`vt.sh`), then turns it off.
+### Every setting
 
-The checks live in `.github/scripts/e2e/victoria-traces.sh` (`on`, `off`).
-Jobs: `e2e-aws-root` 4m34s, `e2e-aws-catalog` 16m31s. The catalog job now
-carries the whole stack, Crossplane's step included.
+```hcl kube-full="victoria_traces"
+kube = {
+  victoria_traces = {
+    enabled      = false  # off by default; off deletes the claim and its traces
+    retention    = "7d"   # how long traces are kept, at least a day
+    storage_size = "10Gi" # the claim; "" keeps the traces in an emptyDir
 
-## Open questions for the coordinator
+    # Any value of the victoria-traces-single chart 0.1.11; yours win over the socle's.
+    values = {
+      server = {
+        resources = { limits = { memory = "1Gi" } }
+      }
+    }
 
-1. **When to turn it on by default.** At VictoriaTraces GA, with a storage
-   format upstream commits to. The switch is one default in `catalog.tf` and
-   the e2e's default-path assertion.
-2. **Sampling.** None: every span an application sends is kept. A tail- or
-   probability-sampling processor is a client's `kube.otel_gateway.values`
-   away. A socle default belongs with GA, and with a real application's
-   volume to size it.
+    # A Secret you create in victoria-traces, whose values.yaml key holds chart
+    # values that must not reach the OpenTofu state; merged last.
+    values_secret = "victoria-traces-values"
+  }
+}
+```
+
+## Good to know
+
+- **Send traces to [otel-gateway](otel-gateway.md)**,
+  `otel-gateway.otel-gateway.svc:4317` or `:4318`, never here.
+- **Every span is kept**: there is no sampling. A sampling processor goes in
+  `kube.otel_gateway.values`.
+- **On aws, set a default StorageClass or `storage_size = ""`**: EKS has
+  none, and the claim stays `Pending`. See
+  [victoria-metrics](victoria-metrics.md#good-to-know).
+- **`tofu plan` refuses** what it refuses for victoria-metrics: credentials
+  in `values`, a `retention` under a day, a `storage_size` not in `Gi` or
+  `Ti`. `storage_size` grows where the class allows it, never shrinks.
+- **Upgrades**: until VictoriaTraces is GA, a chart upgrade may change the
+  storage format and drop the stored traces.
+
+<details>
+<summary>Under the hood</summary>
+
+**Installed**: chart `victoria-traces-single` 0.1.11 (VictoriaTraces
+v0.11.0) from `oci://ghcr.io/victoriametrics/helm-charts`, in the
+`victoria-traces` namespace: a Deployment with strategy `Recreate` and a
+standalone claim, in-cluster only at
+`victoria-traces.victoria-traces.svc:10428`.
+
+**What the socle sets**: `server.mode: deployment`, `retentionPeriod` and
+persistence from the attributes, requests 50m CPU and 128Mi, and
+`fullnameOverride: victoria-traces`. Turned on, it adds a traces pipeline to
+otel-gateway and a Jaeger datasource to Grafana.
+
+**Cloud access**: none; the traces are on the claim.
+
+**Measured** on floci k3s, 2026-09-30: Ready in 26 s; a span posted to the
+gateway found by its trace id 24 s later.
+
+</details>

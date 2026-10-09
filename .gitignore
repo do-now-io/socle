@@ -29,3 +29,8 @@ override.tf.json
 # Live root configurations pointed at a real account. Backend blocks, tfvars
 # and anything else that belongs to one environment stay out of the module.
 /live/
+
+# The documentation site's dependencies and build output (site/).
+/site/node_modules/
+/site/dist/
+/site/.astro/

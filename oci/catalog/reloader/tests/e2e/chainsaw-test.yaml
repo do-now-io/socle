@@ -313,7 +313,7 @@ spec:
         - podLogs:
             namespace: reloader
             tail: 40
-    # The order of valuesFrom, proven whole (docs/flux-catalog.md §6): the
+    # The order of valuesFrom, proven whole (docs/architecture/flux-catalog.md): the
     # socle's 64Mi request, 80Mi in kube.reloader.values, 96Mi in the Secret
     # the client names in values_secret — merged last; both cleared, 64Mi.
     - name: kube.reloader.values_secret is merged last, over values and the socle
@@ -445,7 +445,7 @@ spec:
       try:
         # The release must be idle before the module goes: helm-controller
         # honours a deletion only once the running action returns, and the
-        # values step above has just driven an upgrade (docs/flux-catalog.md §8).
+        # values step above has just driven an upgrade (docs/architecture/flux-catalog.md).
         - assert:
             resource:
               apiVersion: helm.toolkit.fluxcd.io/v2

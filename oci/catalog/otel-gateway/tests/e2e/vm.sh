@@ -57,8 +57,9 @@ print("scrape targets: " + " ".join("%s/%s=%s" % (m["metric"].get("k8s_namespace
 }
 # post_otlp_metric <name> <value>: one gauge point, a minute old so an instant
 # query sees it past -search.latencyOffset, as OTLP/JSON to the gateway, from
-# podinfo's own curl (the hello module): neither the API server's service
-# proxy nor a port-forward can carry it (docs/catalog/otel-gateway.md).
+# podinfo's own curl (the hello module): the API server's service proxy
+# sends a content type the OTLP receiver refuses (415), and a port-forward
+# dials the pod's localhost while the chart binds the receivers to the pod IP.
 post_otlp_metric() {
   payload="$(printf '{"resourceMetrics":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"socle-e2e"}}]},"scopeMetrics":[{"metrics":[{"name":"%s","gauge":{"dataPoints":[{"asDouble":%s,"timeUnixNano":"%s"}]}}]}]}]}' \
     "$1" "$2" "$(( ($(date +%s) - 60) * 1000000000 ))")"

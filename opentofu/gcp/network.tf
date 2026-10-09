@@ -1,4 +1,4 @@
-# Reference network — docs/gcp/network-security.md.
+# Reference network — docs/decisions/gcp.md, GCP-09 and GCP-10.
 #
 # Custom-mode VPC, one subnetwork per cluster, one secondary range for Pods,
 # no Services range (GKE manages its own on Autopilot 1.27 and later), a

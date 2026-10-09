@@ -1,4 +1,4 @@
-# The crossplane module's proof (docs/catalog/crossplane.md §7). Off by
+# The crossplane module's proof (docs/catalog/crossplane.md). Off by
 # default, so `health` proves only the disabled shape; the `module` phase
 # turns it on with one client value, proves what a module declares for its
 # AWS access against floci's IAM, and turns it off again.
@@ -71,10 +71,11 @@ spec:
     delete: 3m
   steps:
     # Core, the AWS providers and the ProviderConfig converge; the client's
-    # 48Mi beats the socle's 32Mi (valuesFrom order, docs/flux-catalog.md
-    # §6), and the socle's `limits: null` removed the chart's limits.
+    # 48Mi beats the socle's 32Mi (valuesFrom order,
+    # docs/decisions/socle.md#socle-06-the-clients-values-win), and the
+    # socle's `limits: null` removed the chart's limits.
     - name: enabled = true with one client value converges core, providers and ProviderConfig
-      # 99 s cold (docs/catalog/crossplane.md §7); ~5 min when the providers
+      # 99 s cold (docs/catalog/crossplane.md); ~5 min when the providers
       # re-adopt CRDs a previous install left behind.
       timeouts:
         assert: 8m
@@ -351,8 +352,8 @@ spec:
                 skip_metadata_api_check: true
                 skip_region_validation: true
                 skip_requesting_account_id: true
-    # Exactly what a module's AWS overlay renders (docs/catalog/crossplane.md
-    # §3): its Role under /socle/<cluster>/, trusted by Pod Identity, with its
+    # Exactly what a module's AWS overlay renders
+    # (docs/architecture/module-iam.md): its Role under /socle/<cluster>/, trusted by Pod Identity, with its
     # own inline policy (no boundary: this fixture root has no foundations),
     # then the association with its ServiceAccount. Crossplane reports the
     # role's ARN back: no `aws` CLI needed for the proof.
@@ -438,7 +439,7 @@ spec:
             namespace: crossplane-system
             selector: pkg.crossplane.io/provider=provider-aws-iam
             tail: 40
-    # The order of valuesFrom, proven whole (docs/flux-catalog.md §6): the
+    # The order of valuesFrom, proven whole (docs/decisions/socle.md#socle-06-the-clients-values-win): the
     # socle's document, then kube.crossplane.values, then the Secret the client
     # names in values_secret — created by him in the module's namespace, never
     # read by OpenTofu, merged last. 48Mi in values and 56Mi in the Secret:
@@ -590,7 +591,7 @@ spec:
               kind: Namespace
               name: e2e-probe
     # Off: the release and the namespace go. Left behind by design
-    # (docs/catalog/crossplane.md §7): the CRDs and the crossplane-no-usages
+    # (docs/catalog/crossplane.md): the CRDs and the crossplane-no-usages
     # webhook configuration.
     - name: enabled = false garbage-collects the module
       try:

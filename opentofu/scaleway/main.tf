@@ -6,7 +6,7 @@
 # the observability stack, application infrastructure — arrives through the
 # socle OCI artifact and Crossplane.
 #
-# Every default here traces back to a research document under docs/scaleway/.
+# Every default here traces back to a decision in docs/decisions/scaleway.md.
 # Resources live in network.tf, cluster.tf, iam.tf and observability.tf.
 
 locals {
@@ -31,7 +31,7 @@ locals {
 
   # Production gets a dedicated control plane and everything else does not:
   # the mutualized offer is free but carries no SLA, no audit log and a 55 MB
-  # etcd ceiling — docs/scaleway/kapsule-capabilities.md. The derivation is the
+  # etcd ceiling — docs/decisions/scaleway.md, SCALEWAY-02. The derivation is the
   # recommended position; control_plane_type overrides it.
   control_plane_type = coalesce(
     var.control_plane_type,
@@ -40,12 +40,12 @@ locals {
 
   # One Public Gateway per zone the pools actually span. The gateway is a
   # zoned resource with no HA of its own, so a single one turns a zone outage
-  # into a cluster-wide egress outage — docs/scaleway/kapsule-capabilities.md.
+  # into a cluster-wide egress outage — docs/decisions/scaleway.md, SCALEWAY-06.
   gateway_zones = toset(var.availability_zones)
 
   # The egress addresses of those gateways. Under full isolation this is the
   # only source address a node can present, which is what makes an IP-bound
-  # IAM condition possible at all — docs/scaleway/managed-scope.md.
+  # IAM condition possible at all — docs/decisions/scaleway.md, SCALEWAY-08.
   gateway_egress_cidrs = [
     for z in var.availability_zones :
     "${scaleway_vpc_public_gateway_ip.socle[z].address}/32"

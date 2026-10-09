@@ -1,6 +1,6 @@
 # The grafana module: Grafana from the grafana-community chart, the monitoring
 # stack's one place to read — a datasource for each backend that is on, and
-# every dashboard a module ships. Design: docs/monitoring.md §5; this module:
+# every dashboard a module ships. Design: docs/architecture/observability.md; this module:
 # docs/catalog/grafana.md.
 #
 # resourcesTemplate rather than resources: the datasources depend on which
@@ -11,7 +11,7 @@
 #
 # Values: no spec.values on the HelmRelease. The socle's defaults are a
 # ConfigMap listed first in valuesFrom, the client's second, his Secret last —
-# later wins, so the client overrides any socle default (docs/flux-catalog.md §6).
+# later wins, so the client overrides any socle default (docs/decisions/socle.md#socle-06-the-clients-values-win).
 #
 # Grafana names no module: a dashboard ships with the module whose metrics it
 # reads, as a ConfigMap labelled grafana_dashboard, and the sidecar picks it up.
@@ -108,7 +108,7 @@ spec:
             reporting_enabled: false
           << if inputs.modules.grafana.domain >>
           # The host Grafana is served at, for its redirects and links; the
-          # HTTPRoute that serves it there is the Gateway API follow-up.
+          # HTTPRoute below, grafana-route, serves it there.
           server:
             domain: << inputs.modules.grafana.domain | quote >>
             root_url: << printf "https://%s" inputs.modules.grafana.domain | quote >>
@@ -176,7 +176,7 @@ spec:
         # The VictoriaLogs datasource plugin, pinned, signed by Grafana, and
         # downloaded from grafana.com when the pod starts
         # (GF_PLUGINS_PREINSTALL_SYNC): a cluster with no egress to it gets
-        # Grafana without its logs (docs/monitoring.md §10, question 4).
+        # Grafana without its logs (docs/decisions/grafana.md, GRAFANA-02).
         plugins:
           - victoriametrics-logs-datasource@0.32.0
         << end >>
