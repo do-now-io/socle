@@ -249,6 +249,32 @@ jobs:
             done
           done
           find schemas -name '*.json' -path '*gcp*' | sort
+      - name: Fetch external-secrets' CRD schemas
+        if: steps.detect.outputs.found == 'true'
+        env:
+          # The appVersion of the chart the external_secrets module pins.
+          EXTERNAL_SECRETS_VERSION: v2.11.0
+        run: |
+          # The datree catalog's ClusterSecretStore, regenerated on 2026-10-08
+          # (datreeio/CRDs-catalog#988), no longer compiles in kubeconform:
+          # "could not find schema". So the schema comes from the operator's
+          # own CRD, at the version the module installs, closed as the GCP
+          # provider's are above.
+          base="https://raw.githubusercontent.com/external-secrets/external-secrets/${EXTERNAL_SECRETS_VERSION}/config/crds/bases"
+          curl -sfL "${base}/external-secrets.io_clustersecretstores.yaml" -o /tmp/crd.yaml
+          group="$(yq '.spec.group' /tmp/crd.yaml)"
+          kind="$(yq '.spec.names.kind | downcase' /tmp/crd.yaml)"
+          mkdir -p "schemas/${group}"
+          for version in $(yq '.spec.versions[].name' /tmp/crd.yaml); do
+            version="${version}" yq -o=json '
+              .spec.versions[] | select(.name == strenv(version)) | .schema.openAPIV3Schema
+              | (.. | select(tag == "!!map" and .type == "object" and has("properties")
+                  and (has("additionalProperties") | not)
+                  and (has("x-kubernetes-preserve-unknown-fields") | not)))
+                |= . + {"additionalProperties": false}' /tmp/crd.yaml \
+              > "schemas/${group}/${kind}_${version}.json"
+          done
+          find schemas -name '*.json' -path '*external-secrets*' | sort
       - name: Render the catalog and the bootstrap envelope
         if: steps.detect.outputs.found == 'true'
         run: |
