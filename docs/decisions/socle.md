@@ -491,8 +491,8 @@ in the same reconciliation.
 **Context.** EKS marks no StorageClass default since 1.30, so a classless
 claim stays `Pending` there.
 
-**Consequences.** On a socle EKS the client sets `storage_size = ""` until a
-default class exists, and loses data when the pod moves.
+**Consequences.** The bootstrap marks a default class on EKS, `gp3`
+([#95](https://github.com/do-now-io/socle/issues/95)).
 
 **Sources.** [Observability](../architecture/observability.md#where-the-data-lives).
 

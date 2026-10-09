@@ -54,13 +54,6 @@ module "socle" {
     # The public IP of the machine that applies, and your admins'.
     cluster_endpoint_public_access_cidrs = ["203.0.113.10/32"]
   }
-
-  kube = {
-    # No default StorageClass on EKS: keep the monitoring data in an emptyDir
-    # until you create one (see Limits).
-    victoria_metrics = { storage_size = "" }
-    victoria_logs    = { storage_size = "" }
-  }
 }
 
 output "cluster_name" {

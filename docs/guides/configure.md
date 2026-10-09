@@ -55,10 +55,8 @@ module "socle" {
   }
 
   kube = {
-    argocd           = { domain = "argocd.acme.example" }
-    victoria_metrics = { storage_size = "" }
-    victoria_logs    = { storage_size = "" }
-    kyverno          = { enabled = true }
+    argocd  = { domain = "argocd.acme.example" }
+    kyverno = { enabled = true }
   }
 }
 ```
@@ -68,10 +66,6 @@ module "socle" {
 | `socle_version` | A released version, never `latest` or `main`; the only line an [upgrade](upgrade.md) touches, source included. |
 | `aws` | The foundations' variables. Keys without a default, `kubernetes_version` among them, are required. Every option: [`prod.tfvars.example`](../../opentofu/clusters/aws/prod.tfvars.example), written as tfvars; the same keys go in the module block. |
 | `kube` | Only what differs from the catalog's defaults, in `snake_case`. Defaults: [Inputs](../reference/inputs.md#the-catalog-schema); modules: [catalog](../catalog/index.mdx). |
-
-On AWS, keep `storage_size = ""` on the Victoria backends until the cluster
-has a default StorageClass: EKS marks none, and their claims would stay
-`Pending` ([Observability](../architecture/observability.md#where-the-data-lives)).
 
 ## 3. Pass chart values
 

@@ -65,9 +65,6 @@ kube = {
   `otel-gateway.otel-gateway.svc:4317` or `:4318`, never here.
 - **Every span is kept**: there is no sampling. A sampling processor goes in
   `kube.otel_gateway.values`.
-- **On aws, set a default StorageClass or `storage_size = ""`**: EKS has
-  none, and the claim stays `Pending`. See
-  [victoria-metrics](victoria-metrics.md#good-to-know).
 - **`tofu plan` refuses** what it refuses for victoria-metrics: credentials
   in `values`, a `retention` under a day, a `storage_size` not in `Gi` or
   `Ti`. `storage_size` grows where the class allows it, never shrinks.

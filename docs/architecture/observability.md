@@ -78,9 +78,6 @@ Both are attributes, `retention` and `storage_size`
 ([Inputs](../reference/inputs.md)). The claim uses the cluster's default
 StorageClass.
 
-- **On EKS, set `storage_size = ""`** until a StorageClass is marked
-  default: EKS marks none, and the claim would stay `Pending`. The backend
-  then keeps its data in an `emptyDir`, lost when the pod moves.
 - **A volume can grow** where the class allows expansion; shrinking is
   refused.
 
@@ -113,7 +110,7 @@ shipped by the module they describe, on OpenTelemetry names.
 
 | Cloud | What differs |
 | --- | --- |
-| AWS | no default StorageClass: `storage_size = ""` until one exists |
+| AWS | the bootstrap marks `gp3` (EBS, encrypted) default |
 | GCP | the agent DaemonSet is billed per Pod request on Autopilot |
 | Azure | `/var/log/pods` is a `hostPath`, forbidden once Deployment Safeguards apply: `otel_agent.logs = false` until then. `opentofu/azure` still enables Managed Prometheus and Container Insights |
 | Scaleway | nothing; Cockpit keeps Scaleway's own data |

@@ -61,24 +61,6 @@ kube = {
 
 ## Good to know
 
-- **On aws, the claim stays `Pending`**: the socle installs the EBS CSI
-  driver but EKS marks no StorageClass as default. Set `storage_size = ""`,
-  or create a default class (a claim already `Pending` then binds):
-
-  ```yaml
-  apiVersion: storage.k8s.io/v1
-  kind: StorageClass
-  metadata:
-    name: gp3
-    annotations:
-      storageclass.kubernetes.io/is-default-class: "true"
-  provisioner: ebs.csi.aws.com
-  volumeBindingMode: WaitForFirstConsumer
-  allowVolumeExpansion: true
-  parameters:
-    type: gp3
-  ```
-
 - **`storage_size` grows, never shrinks**, and only where the StorageClass
   allows expansion. To or from `""` replaces the volume: the data is lost.
 - **Write numeric flags in `values` as strings**: Helm renders a million as

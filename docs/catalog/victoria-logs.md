@@ -60,9 +60,6 @@ kube = {
 
 ## Good to know
 
-- **On aws, set a default StorageClass or `storage_size = ""`**: EKS has
-  none, and the claim stays `Pending`. See
-  [victoria-metrics](victoria-metrics.md#good-to-know).
 - **Turning it on feeds it**: [otel-agent](otel-agent.md) ships container
   logs (unless `kube.otel_agent.logs = false`), [otel-gateway](otel-gateway.md)
   events and your OTLP logs, and Grafana gets a VictoriaLogs datasource.
