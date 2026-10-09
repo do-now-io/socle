@@ -343,7 +343,7 @@ run "scaleway_is_a_plain_kubernetes_cluster_for_the_operator" {
     error_message = "Kapsule operates Cilium: the socle must install nothing on scaleway, and the templates must be told so."
   }
   assert {
-    condition     = length(aws_eks_addon.pod_identity_agent) == 0 && length(aws_eks_addon.ebs_csi) == 0 && length(aws_eks_addon.efs_csi) == 0 && length(aws_iam_role.ebs_csi) == 0
+    condition     = length(aws_eks_addon.pod_identity_agent) == 0 && length(aws_eks_addon.ebs_csi) == 0 && length(aws_eks_addon.efs_csi) == 0 && length(aws_iam_role.ebs_csi) == 0 && length(helm_release.storage_class) == 0
     error_message = "EKS add-ons exist only on aws: nothing of eks_addons.tf may be planned elsewhere, whatever its defaults."
   }
 }
@@ -760,8 +760,12 @@ run "the_ebs_csi_controller_runs_as_its_own_role_through_pod_identity" {
     error_message = "the EBS CSI controller's identity must be bound through the add-on's own pod_identity_association, on the controller's ServiceAccount."
   }
   assert {
-    condition     = aws_iam_role_policy_attachment.ebs_csi[0].policy_arn == "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
-    error_message = "the EBS CSI role must carry AWS's managed driver policy, and nothing else."
+    condition     = aws_iam_role_policy_attachment.ebs_csi[0].policy_arn == "arn:aws:iam::aws:policy/AmazonEBSCSIDriverEKSClusterScopedPolicy"
+    error_message = "the EBS CSI role must carry AWS's cluster-scoped driver policy."
+  }
+  assert {
+    condition     = aws_iam_role.ebs_csi[0].permissions_boundary == "arn:aws:iam::aws:policy/AmazonEBSCSIDriverEKSClusterScopedPolicy"
+    error_message = "the EBS CSI role must be bounded by that same policy."
   }
   assert {
     condition     = aws_iam_role.ebs_csi[0].name == "socle-test-ebs-csi" && aws_iam_role.ebs_csi[0].path == "/"
@@ -770,6 +774,39 @@ run "the_ebs_csi_controller_runs_as_its_own_role_through_pod_identity" {
   assert {
     condition     = jsondecode(aws_iam_role.ebs_csi[0].assume_role_policy).Statement[0].Principal.Service == "pods.eks.amazonaws.com" && contains(jsondecode(aws_iam_role.ebs_csi[0].assume_role_policy).Statement[0].Action, "sts:TagSession")
     error_message = "the EBS CSI role must be trusted by EKS Pod Identity, not IRSA."
+  }
+}
+
+run "ebs_csi_brings_an_encrypted_gp3_default_storage_class" {
+  command = plan
+
+  assert {
+    condition = yamldecode(helm_release.storage_class[0].values[0]).storageClass == {
+      apiVersion = "storage.k8s.io/v1"
+      kind       = "StorageClass"
+      metadata = {
+        name        = "gp3"
+        annotations = { "storageclass.kubernetes.io/is-default-class" = "true" }
+      }
+      provisioner          = "ebs.csi.aws.com"
+      parameters           = { type = "gp3", encrypted = "true" }
+      volumeBindingMode    = "WaitForFirstConsumer"
+      allowVolumeExpansion = true
+      reclaimPolicy        = "Delete"
+    }
+    error_message = "EBS CSI must come with the default class: encrypted gp3, WaitForFirstConsumer, growable."
+  }
+}
+
+run "no_storage_class_without_the_ebs_driver" {
+  command = plan
+  variables {
+    eks_addons = { ebs_csi = false }
+  }
+
+  assert {
+    condition     = length(helm_release.storage_class) == 0
+    error_message = "without the driver there is no class."
   }
 }
 
