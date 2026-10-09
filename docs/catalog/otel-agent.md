@@ -32,16 +32,20 @@ logs join it with `victoria_logs`. The module contract is
 > non-root user. What and why: [victoria-logs.md](victoria-logs.md).
 
 One `ResourceSet` (`oci/catalog/otel-agent/resourceset.yaml`),
-`resourcesTemplate`, six objects, each carrying the per-resource reconcile
+`resourcesTemplate`, seven objects, each carrying the per-resource reconcile
 toggle on `inputs.modules.otel_agent.enabled`:
 
 1. `Namespace/otel-agent`.
-2. `OCIRepository/opentelemetry-collector-chart` — the chart pinned exactly.
-3. `ConfigMap/otel-agent-socle-values` — the socle's own chart values.
-4. `ConfigMap/otel-agent-client-values` — `kube.otel_agent.values`.
-5. `HelmRelease/otel-agent` — no `spec.values`; `valuesFrom` = socle, client,
+2. `PriorityClass/socle-node-agent` — cluster-scoped, value `1000000`,
+   `preemptionPolicy: PreemptLowerPriority`, `globalDefault: false`; the
+   agent's (below, *Priority*). In the same apply as the `HelmRelease`, so it
+   exists before helm-controller creates the DaemonSet.
+3. `OCIRepository/opentelemetry-collector-chart` — the chart pinned exactly.
+4. `ConfigMap/otel-agent-socle-values` — the socle's own chart values.
+5. `ConfigMap/otel-agent-client-values` — `kube.otel_agent.values`.
+6. `HelmRelease/otel-agent` — no `spec.values`; `valuesFrom` = socle, client,
    the client's Secret when named (`optional: true`).
-6. `Kustomization/otel-agent-dashboards` in `flux-system` — applies
+7. `Kustomization/otel-agent-dashboards` in `flux-system` — applies
    `oci/catalog/otel-agent/dashboards/` from the socle artifact itself into
    `otel-agent`, pruned with the module. The same shape as gateway-api's
    `cilium/` folder: the dashboard stays a file of its own, not a string inside
@@ -62,6 +66,7 @@ The socle's values, and why:
 | Value | Setting | Why |
 | --- | --- | --- |
 | `mode` | `daemonset` | One pod per node, for what only a node can see |
+| `priorityClassName` | `socle-node-agent` | The module's own class: on a full node the agent preempts an ordinary pod instead of staying Pending (below) |
 | `image.repository`, `command.name` | `…/opentelemetry-collector-k8s`, `otelcol-k8s` | The chart refuses to render without an image (and without a `mode`); this is the Kubernetes distribution (above) |
 | `presets.kubeletMetrics` | on | The `kubeletstats` receiver, its RBAC (`nodes/stats`) and `K8S_NODE_IP` |
 | `presets.kubernetesAttributes` | on | The `k8s_attributes` processor, filtered to this node, and its RBAC |
@@ -74,6 +79,41 @@ The socle's values, and why:
 
 The component names are the new ones (`otlp_http`, `k8s_attributes`): the chart
 rewrites the deprecated ones for this release and warns, and will stop.
+
+### Priority
+
+A DaemonSet pod is bound to its node. When that node is full it cannot go
+elsewhere: it stays `Pending` for good, and the `ResourceSet` never gets
+`Ready`. Measured on a GKE Autopilot sandbox (full catalog, two nodes): one
+node reached Autopilot's 32-pod limit and its agent pod sat on
+`Too many pods`. Without a priority above the pods already there, the
+scheduler has nothing to preempt.
+
+So the module ships `PriorityClass/socle-node-agent` and sets the chart's
+`priorityClassName` to it, on every cloud — a node agent should never be
+starved anywhere. On a full node the agent preempts a lower-priority pod (every
+ordinary pod is at `0`), which its controller and the autoscaler place
+elsewhere. That is Google's advice for DaemonSets on Autopilot: "set a higher
+PriorityClass on DaemonSets than regular Pods", which "lets GKE evict
+lower-priority Pods to accommodate DaemonSet pods" (the Autopilot DaemonSet
+page this quotes, `kubernetes-engine/docs/how-to/autopilot-daemonsets`, now
+returns 404; its text survives in third-party copies).
+
+The value, `1000000`:
+
+- far below `system-cluster-critical` (2000000000) and `system-node-critical`
+  (2000001000). Those are the cluster's own components'; a client-facing
+  module does not borrow them;
+- below `1000000000`, the highest a custom `PriorityClass` may take on GKE
+  ([cluster autoscaler, *Pod eviction order during
+  scale-down*](https://docs.cloud.google.com/kubernetes-engine/docs/concepts/cluster-autoscaler)).
+  Under that line the agent drains with the other pods on scale-down, as it
+  should: it has nothing to flush that the next node's agent will not read;
+- `globalDefault: false`: it applies to the agent alone, never to a pod that
+  names no class.
+
+The client may set his own `priorityClassName` in `kube.otel_agent.values`;
+the class stays, unused.
 
 ## What the client may set — `kube.otel_agent`
 
@@ -152,12 +192,12 @@ build, not a client's screen.
 
 ## Per cloud
 
-Nothing in the template. Around it:
+In the template, GCP's logs path only (below). Around it:
 
 | Cloud | Note |
 | --- | --- |
 | AWS | Kubelet serving certificates self-signed — hence `insecure_skip_verify` |
-| GCP | On Autopilot, a DaemonSet is billed per Pod request on every node: the 50m / 128Mi requests are the per-node price |
+| GCP | On Autopilot, a DaemonSet is billed per Pod request on every node: the 50m / 128Mi requests are the per-node price. A node at Autopilot's 32-pod limit left the agent `Pending` until it had a priority (*Priority*, above). With logs on, the chart's `logsCollection` preset is off on gcp: it always mounts `/var/lib/docker/containers` as well, and Autopilot admits no `hostPath` but `/var/log` read-only. The template mounts `/var/log/pods` read-only itself and writes the preset's `file_log` receiver out word for word (the collector's rendered config is identical to the preset's). `kubeletstats` stays: it reads `/stats/summary` on port 10250 with `nodes/stats`, not the `nodes/proxy` Autopilot withholds — to confirm on the sandbox |
 | Azure | Nothing until logs: the metrics path needs no `hostPath`, so Baseline Pod Security does not apply to this PR (`docs/monitoring.md` §10, question 1, is about logs) |
 | Scaleway | Nothing |
 
@@ -175,7 +215,7 @@ Nothing in the template. Around it:
 ## Measured
 
 **Render** (`flux-operator build rset` 0.60.0, `oci/.ci/inputs-sample.yaml`):
-six objects; the HelmRelease has no `spec.values`, `valuesFrom` = socle,
+six objects (seven since the `PriorityClass`); the HelmRelease has no `spec.values`, `valuesFrom` = socle,
 client, Secret.
 
 **Merge, locally** — `helm template` of the pinned chart with the rendered
@@ -220,7 +260,7 @@ written. Defaults asserted.
 **e2e, through Chainsaw** (`tests/e2e/chainsaw-test.yaml`, since the e2e moved
 into the modules — `docs/flux-catalog.md` §8). The table above is the bash phase
 this module shipped with; the same proof now runs on every push in the `root`
-job (`health`) and the module's own job (`health`, then `module`): `otel-agent-health` asserts the DaemonSet rolled out, `k8s_pod_cpu_usage` in VictoriaMetrics and every metric of the nodes and pods dashboard with series (`vm.sh` beside it); `otel-agent-module` patches the memory request (160Mi over the socle's 128Mi, cpu and limit kept), `logs = false` (non-root, no hostPath, no logs exporter) and back, then off (release, dashboards Kustomization and dashboard gone) and on.
+job (`health`) and the module's own job (`health`, then `module`): `otel-agent-health` asserts the DaemonSet rolled out with every agent pod under `socle-node-agent` (priority `1000000`), `k8s_pod_cpu_usage` in VictoriaMetrics and every metric of the nodes and pods dashboard with series (`vm.sh` beside it); `otel-agent-module` patches the memory request (160Mi over the socle's 128Mi, cpu and limit kept), `logs = false` (non-root, no hostPath, no logs exporter) and back, then off (release, dashboards Kustomization, dashboard and `PriorityClass` gone) and on.
 
 What VictoriaMetrics stores from kubeletstats, as printed by the run — the
 dashboard's names are among them: `container_cpu_time_seconds_total`,

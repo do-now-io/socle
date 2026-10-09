@@ -14,13 +14,18 @@
 # prove is the negative, in a Test of its own (`platform: floci`): shared is
 # false, and the template renders no Gateway — the child ResourceSet and
 # gateway-system are absent. The sandbox (M4) runs the positive.
+#
+# The CRD tests are `cloud: aws`, not `any`: on gcp the module installs no
+# CRD — GKE owns them — and `gateway-api-gke` proves that side instead.
+# azure and scaleway, which install the CRDs too, need tests of their own
+# labelled for them once they get an e2e root (a label holds one cloud).
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
   name: gateway-api-health
   labels:
     phase: health
-    cloud: any
+    cloud: aws
     platform: any
 spec:
   description: The Gateway API standard CRDs are established from the pinned upstream commit.
@@ -191,7 +196,7 @@ metadata:
   name: gateway-api-module
   labels:
     phase: module
-    cloud: any
+    cloud: aws
     platform: any
 spec:
   description: Off removes the Flux objects and orphans the CRDs; on adopts them again.
@@ -333,7 +338,7 @@ metadata:
   name: gateway-api-destroyed
   labels:
     phase: destroyed
-    cloud: any
+    cloud: aws
     platform: any
 spec:
   description: The Gateway API standard CRDs survive the socle's uninstall.
@@ -360,3 +365,189 @@ spec:
               status:
                 (conditions[?type == 'Established'] || `[]`):
                   - status: 'True'
+---
+# The GCP proof, run by hand against the sandbox's GKE Autopilot (no GKE in
+# CI). GKE owns Gateway API there: the module fetches no CRD and runs no
+# Cilium step, and the two Gateways sit on GKE's classes with TLS from the
+# foundations' Certificate Manager certificates. The sandbox's root sets
+# gcp.gateway_certificate, so inputs.gateway.shared is true.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: gateway-api-gke
+  labels:
+    phase: health
+    cloud: gcp
+    platform: gke
+spec:
+  description: On GKE, no CRD is the socle's; the shared Gateways are GKE's, programmed with Certificate Manager TLS.
+  timeouts:
+    # A Google load balancer is programmed minutes after its Gateway is
+    # accepted: forwarding rules, proxies, URL maps and, for `private`, the
+    # regional proxy pool.
+    assert: 15m
+    error: 1m
+  steps:
+    - name: the module installs no CRD on gcp, and GKE's are established
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: gateway-api
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - error:
+            resource:
+              apiVersion: source.toolkit.fluxcd.io/v1
+              kind: GitRepository
+              metadata:
+                name: gateway-api
+                namespace: flux-system
+        - error:
+            resource:
+              apiVersion: kustomize.toolkit.fluxcd.io/v1
+              kind: Kustomization
+              metadata:
+                name: gateway-api-crds
+                namespace: flux-system
+        - error:
+            resource:
+              apiVersion: kustomize.toolkit.fluxcd.io/v1
+              kind: Kustomization
+              metadata:
+                name: gateway-api-cilium
+                namespace: flux-system
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: gateways.gateway.networking.k8s.io
+              status:
+                (conditions[?type == 'Established'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: httproutes.gateway.networking.k8s.io
+              status:
+                (conditions[?type == 'Established'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: gateway.networking.k8s.io/v1
+              kind: GatewayClass
+              metadata:
+                name: gke-l7-global-external-managed
+              status:
+                (conditions[?type == 'Accepted'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: gateway.networking.k8s.io/v1
+              kind: GatewayClass
+              metadata:
+                name: gke-l7-rilb
+              status:
+                (conditions[?type == 'Accepted'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: gateway-api
+        - podLogs:
+            namespace: flux-system
+            selector: app.kubernetes.io/name=flux-operator
+            tail: 40
+    - name: the shared Gateways are programmed on GKE's classes, TLS from Certificate Manager
+      # The names the foundations gave the certificates, as the bootstrap
+      # module handed them to the templates.
+      bindings:
+        - name: gateway
+          value: >-
+            (x_k8s_get($client, 'fluxcd.controlplane.io/v1', 'ResourceSetInputProvider',
+            'flux-system', 'socle').spec.defaultValues.gateway)
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: gateway-api-gateways
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: gateway.networking.k8s.io/v1
+              kind: Gateway
+              metadata:
+                name: public
+                namespace: gateway-system
+                annotations:
+                  networking.gke.io/certmap: ($gateway.certificateMap)
+              spec:
+                gatewayClassName: ($gateway.className)
+              status:
+                (conditions[?type == 'Programmed'] || `[]`):
+                  - status: 'True'
+                (length(addresses || `[]`) > `0`): true
+                (listeners[?name == 'https'] || `[]`):
+                  - (conditions[?type == 'Programmed'] || `[]`):
+                      - status: 'True'
+        - assert:
+            resource:
+              apiVersion: gateway.networking.k8s.io/v1
+              kind: Gateway
+              metadata:
+                name: private
+                namespace: gateway-system
+              spec:
+                gatewayClassName: gke-l7-rilb
+                (listeners[?name == 'https'] || `[]`):
+                  - tls:
+                      mode: Terminate
+                      options:
+                        networking.gke.io/cert-manager-certs: ($gateway.regionalCertificate)
+              status:
+                (conditions[?type == 'Programmed'] || `[]`):
+                  - status: 'True'
+                (length(addresses || `[]`) > `0`): true
+                (listeners[?name == 'https'] || `[]`):
+                  - (conditions[?type == 'Programmed'] || `[]`):
+                      - status: 'True'
+        # The redirect is accepted on both Gateways' `http` listeners.
+        - assert:
+            resource:
+              apiVersion: gateway.networking.k8s.io/v1
+              kind: HTTPRoute
+              metadata:
+                name: https-redirect
+                namespace: gateway-system
+              status:
+                (parents[?parentRef.name == 'public'] || `[]`):
+                  - (conditions[?type == 'Accepted'] || `[]`):
+                      - status: 'True'
+                (parents[?parentRef.name == 'private'] || `[]`):
+                  - (conditions[?type == 'Accepted'] || `[]`):
+                      - status: 'True'
+      catch:
+        - describe:
+            apiVersion: gateway.networking.k8s.io/v1
+            kind: Gateway
+            namespace: gateway-system
+        - describe:
+            apiVersion: gateway.networking.k8s.io/v1
+            kind: HTTPRoute
+            namespace: gateway-system
+        - events:
+            namespace: gateway-system

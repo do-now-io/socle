@@ -12,8 +12,9 @@ read it.
 | What | The official chart, `oci://ghcr.io/external-secrets/charts/external-secrets:2.11.0` (ESO v2.11.0), one `HelmRelease` in namespace `external-secrets` |
 | Default | **Off** |
 | Cloud access, aws | With `crossplane` on and a prefix: the module's own **read-only** IAM role, `GetSecretValue` and `DescribeSecret` on `secret:<prefix>/*` in the cluster's region, Pod Identity on `external-secrets/external-secrets` |
-| Store | One `ClusterSecretStore`, `secret-manager`, on that role, aws only. Per-namespace `SecretStore`s and other backends are the client's |
-| Prefixes | `[<cluster name>]` by default, a list; `[]` means no role and no store |
+| Cloud access, gcp | With `crossplane` on and a prefix: `roles/secretmanager.secretAccessor` (**read-only**: `versions.access`, plus `projects.get`/`list`, which the condition voids) for the principal of `external-secrets/external-secrets`, one project-level binding per prefix under the condition `resource.name.startsWith('projects/<number>/secrets/<prefix>_')` — secrets named `<prefix>_<name>`; no Google service account |
+| Store | One `ClusterSecretStore`, `secret-manager`, on that access, aws and gcp. Per-namespace `SecretStore`s and other backends are the client's |
+| Prefixes | `[<cluster name>]` by default, a list; `[]` means no access and no store |
 | Other clouds, or Crossplane off | The operator alone; the client brings his stores |
 | CRDs | Kept on uninstall (`helm.sh/resource-policy: keep`) |
 | Write access | None: `PushSecret` and `ClusterPushSecret` are not reconciled |
@@ -27,19 +28,23 @@ When enabled, three layers, each applied once what it needs exists:
 1. **The `external-secrets` ResourceSet**, `dependsOn` the `crossplane` one:
    the `Namespace`, labelled `pod-security.kubernetes.io/enforce: restricted`,
    and on aws with Crossplane on and a prefix, the `Role` and the
-   `PodIdentityAssociation` of `docs/catalog/crossplane.md` §3.
+   `PodIdentityAssociation` of `docs/catalog/crossplane.md` §3; on gcp, one
+   `ProjectIAMMember` per prefix (below).
 2. **`external-secrets-workload`**, a child ResourceSet `dependsOn` the Role
    and the association being Ready (an explicit `readyExpr`: a managed
    resource not yet created has no `Ready` condition, which kstatus reads as
-   healthy — measured by external-dns). It holds the `OCIRepository`,
-   `external-secrets-socle-values`, `external-secrets-client-values` and the
-   `HelmRelease`, with no `spec.values` (`docs/flux-catalog.md` §6). EKS Pod
-   Identity injects credentials at admission only: a controller pod admitted
-   before its association never gets them.
+   healthy — measured by external-dns) — on gcp, each `ProjectIAMMember`. It
+   holds the `OCIRepository`, `external-secrets-socle-values`,
+   `external-secrets-client-values` and the `HelmRelease`, with no
+   `spec.values` (`docs/flux-catalog.md` §6). EKS Pod Identity injects
+   credentials at admission only: a controller pod admitted before its
+   association never gets them. GCP injects nothing — the pod asks the
+   metadata server — but a controller started before its binding would fail
+   its first reads, so it waits all the same.
 3. **`external-secrets-store`**, a child ResourceSet `dependsOn` the
    `HelmRelease` being Ready, holding the `ClusterSecretStore`: its CRD is one
    the chart installs, and ESO's validating webhook must answer for it to
-   apply. Only where the role exists.
+   apply. Only where the access exists, aws or gcp.
 
 The socle's values: `fullnameOverride: external-secrets`; the CRDs installed
 and annotated `helm.sh/resource-policy: keep`; the ServiceAccount
@@ -65,6 +70,29 @@ The role's policy, for `prefixes = ["acme-prod", "shared/platform"]` in
 The account is `*` because the account id is not among the inputs; a role
 can only ever act in the account it lives in, so nothing is widened.
 
+On gcp, for `prefixes = ["acme-prod", "shared-platform"]` in project
+`acme-prod-4821` (number `123456789012`), two bindings, each a
+`cloudplatform.gcp.m.upbound.io/v1beta1` `ProjectIAMMember` in namespace
+`external-secrets`:
+
+```yaml
+# external-secrets-acme-prod; the other is external-secrets-shared-platform
+spec:
+  forProvider:
+    project: acme-prod-4821
+    role: roles/secretmanager.secretAccessor
+    member: principal://iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/acme-prod-4821.svc.id.goog/subject/ns/external-secrets/sa/external-secrets
+    condition:
+      title: socle-<cluster>-acme-prod
+      expression: resource.name.startsWith('projects/123456789012/secrets/acme-prod_')
+```
+
+A binding is named `external-secrets-<prefix>`; a prefix with capitals, a
+trailing `-` or over 40 characters is lowered, cut to 37 characters and
+suffixed with eight characters of its SHA-1, so that two prefixes never
+share a name. The store is `provider.gcpsm.projectID: <project id>`, no
+`auth` block, no `location`.
+
 ## How a client uses it
 
 ```hcl
@@ -76,6 +104,19 @@ kube = {
   reloader         = { enabled = true }
 }
 ```
+
+```hcl
+# opentofu/clusters/gcp, in the client's tfvars
+gcp  = { crossplane = { allowed_roles = ["roles/secretmanager.secretAccessor"] } }
+kube = {
+  crossplane       = { enabled = true }
+  external_secrets = { enabled = true }   # secrets named acme-prod_…, the cluster's name
+  reloader         = { enabled = true }
+}
+```
+
+On gcp, `remoteRef.key` is the secret's name, `acme-prod_shop-db` say:
+Secret Manager names have no `/`, so `_` separates the prefix from the rest.
 
 ```yaml
 apiVersion: external-secrets.io/v1
@@ -94,19 +135,21 @@ spec:
 
 ## Decisions
 
-**The socle creates the store, on aws only.** A store bound to the module's
-role is the natural default: the role exists for it, and a client who turns
-the module on with Crossplane expects to write an `ExternalSecret` and
-nothing else. It is a `ClusterSecretStore` so that every namespace may use it.
-Elsewhere — gcp, azure, scaleway, or aws with Crossplane off — the socle has
-no identity to bind a store to, so it installs the operator and the client
-writes his stores, as KEDA does for its triggers. Each of those clouds gains
-its role and its store with its Crossplane provider.
+**The socle creates the store, on aws and gcp.** A store bound to the
+module's access is the natural default: the access exists for it, and a
+client who turns the module on with Crossplane expects to write an
+`ExternalSecret` and nothing else. It is a `ClusterSecretStore` so that every
+namespace may use it. Elsewhere — azure, scaleway, or any cloud with
+Crossplane off — the socle has no identity to bind a store to, so it installs
+the operator and the client writes his stores, as KEDA does for its triggers.
+Each of those clouds gains its access and its store with its Crossplane
+provider.
 
 **The prefix, not the store, is the boundary.** A `ClusterSecretStore` can be
 fenced to some namespaces (`spec.conditions`), but that fence is cosmetic
 here: a namespaced `SecretStore` with no `auth` block falls back to the
-controller's own credential chain — the same Pod Identity role — so anyone
+controller's own credential chain — the same Pod Identity role, the same
+GCP principal — so anyone
 allowed to create a `SecretStore` in any namespace reads whatever the role
 reads. The chart also aggregates ESO's kinds into the `edit` and `admin`
 ClusterRoles. What really bounds the module is therefore IAM: the role reads
@@ -120,14 +163,48 @@ isolation turns off the socle's store (`prefixes = []`) and gives each team a
 
 **Prefixes, several.** A list, because a platform's shared secrets
 (`shared/platform/*`) rarely live under one cluster's name. The default is
-the cluster name, so two clusters in one account never read each other's
-secrets unless the client says so. Each entry is validated at plan as a
-Secrets Manager name path with no wildcard and no leading or trailing `/`.
+the cluster name, so two clusters in one AWS account never read each
+other's secrets unless the client says so. Each entry is validated at plan
+as a Secrets Manager name path with no wildcard and no leading or trailing
+`/`. On gcp a prefix is `[A-Za-z0-9-]` — no `_`, which is the separator: the
+module reads `<prefix>_*`, as AWS reads `<prefix>/*`, so `prod_` never
+matches `prod-eu_db`. Two clusters in one GCP project, however, share the
+controller's principal (the pool is the project's, the subject
+`ns/external-secrets/sa/external-secrets` the same): each reads what either
+cluster's bindings allow. One socle cluster per GCP project is the supported
+topology.
+
+**On gcp, a condition on the project, one binding per prefix.** A
+`SecretIAMMember` binds one secret, never a prefix, so the role is granted on
+the project under an IAM condition on `resource.name`. Secret Manager
+presents a secret as `projects/<number>/secrets/<name>` and a version as
+`projects/<number>/secrets/<name>/versions/<version>` — the project's
+**number**, whatever ESO sends (it sends the id) — so one `startsWith` on
+the secret's path holds for the secret and every version of it. One binding
+per prefix rather than one condition ORing them: a binding's condition is
+replaced, never updated, so with one binding adding a prefix would take the
+module's whole access away and back. Crossplane may grant it only when the
+client lists `roles/secretmanager.secretAccessor` in
+`gcp.crossplane.allowed_roles`; without it, IAM refuses the binding, it never
+turns Ready, and the operator is withheld — visibly, never a silent grant.
+Only global secrets: the condition names no `locations/`, and the store sets
+no `location`.
+
+**On gcp, `_` ends the prefix.** Secret Manager names are `[A-Za-z0-9_-]`,
+without the `/` that ends an AWS prefix: a bare `startsWith` on `acme-prod`
+would also read `acme-prod2-db` and `acme-production-…`. So the condition
+names `<prefix>_`, prefixes refuse `_` at plan, and a secret the module may
+read is named `<prefix>_<name>` — `acme-prod_shop-db`.
 
 **Read-only, two calls.** `GetSecretValue` and `DescribeSecret` are what a
 `remoteRef` needs. `ListSecrets` and `BatchGetSecretValue` take no resource
 scope — granting them lists every secret name of the account — so they are
-left out, and with them `dataFrom.find`. No `kms:Decrypt`: a secret encrypted
+left out, and with them `dataFrom.find`. On gcp the same holds:
+`secretAccessor` is `versions.access`, and `resourcemanager.projects.get`
+and `list`, which the condition voids (a project's name never starts with a
+secret's path) — no `secrets.list`, no `secrets.get`, so neither
+`dataFrom.find` nor `metadataPolicy: Fetch`, nor
+`secretVersionSelectionPolicy: LatestOrFetch` (it lists versions). No `kms:Decrypt`: a secret encrypted
 with the account's `aws/secretsmanager` key needs none; one on a customer key
 needs that key's policy to name the role, which is the key owner's decision.
 
@@ -172,11 +249,31 @@ a value rotated, the Deployment rolled — and a secret outside the prefix
 refused with `AccessDenied`. The seam steps carry floci's names and are
 deleted the day floci serves Pod Identity (expected in its next stable).
 
+On gcp, `external-secrets-module-gcp` (`cloud: gcp`, `platform: gke`), run by
+hand against the sandbox's GKE Autopilot (floci-gcp has no Workload
+Identity), reads the module as the sandbox's root turned it on and never
+turns it off:
+
+- the `ProjectIAMMember` `external-secrets-<cluster>` Ready and Synced, its
+  role `secretAccessor`, its member the controller's principal, its
+  condition on `projects/<number>/secrets/<cluster>_`;
+- the workload Ready, the controller running as `external-secrets`, the
+  socle's store Ready on `gcpsm` with no `auth` block;
+- an `ExternalSecret` on `<cluster>_e2e-app` (seeded by hand, value `first`)
+  turned into a `Secret` holding `first` — the store turns Ready without
+  calling GCP, so this read is the proof of the principal;
+- an `ExternalSecret` on `e2e-outside-<cluster>` (seeded too) refused with
+  `PermissionDenied`, and no `Secret`.
+
+The run passes `cluster`, `project_id` and `project_number`. The rotation and
+Reloader's roll are ESO's and Reloader's, not the cloud's: proven on floci,
+not repeated.
+
 ## What was measured
 
 | | Result |
 | --- | --- |
-| Render (`flux-operator build rset`, `oci/.ci/inputs-sample.yaml`) | aws with Crossplane: Namespace, Role, PodIdentityAssociation, the two child ResourceSets; Crossplane off, `prefixes = []` or gcp: Namespace and the workload only; kubeconform strict: valid, the nested `ClusterSecretStore` too |
+| Render (`flux-operator build rset`, `oci/.ci/inputs-sample.yaml`) | aws with Crossplane: Namespace, Role, PodIdentityAssociation, the two child ResourceSets; gcp with Crossplane (`oci/.ci/inputs-sample-gcp.yaml`): Namespace, one ProjectIAMMember per prefix, the two child ResourceSets; Crossplane off or `prefixes = []`: Namespace and the workload only; kubeconform strict against provider-upjet-gcp v3.0.0 and ESO v2.11.0 CRDs: valid, the nested `ClusterSecretStore` too |
 | Chart render with the socle's values | 25 CRDs, each `helm.sh/resource-policy: keep`; controller args `--enable-push-secret-reconciler=false --enable-cluster-push-secret-reconciler=false`; three pods non-root, read-only, `ALL` dropped, `RuntimeDefault` |
 | ESO source, v2.11.0 | `AWS_SECRETSMANAGER_ENDPOINT` overrides the endpoint (`providers/v1/aws/secretsmanager/resolver.go`); a store validates by retrieving credentials only, so static keys suffice on floci |
 | `tofu test` | the default, four passes, eight refusals |

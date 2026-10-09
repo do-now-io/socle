@@ -192,16 +192,110 @@ jobs:
             kind="$(basename "${f}" -fluxcd-v1.json)"
             cp "${f}" "schemas/fluxcd.controlplane.io/${kind}_v1.json"
           done
+      - name: Install yq
+        if: steps.detect.outputs.found == 'true'
+        env:
+          YQ_VERSION: 4.47.2
+        run: |
+          # Pinned rather than the runner image's yq, which moves with the image:
+          # the schema conversion and the child-resource extraction below rely
+          # on its expression syntax.
+          url="https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64"
+          curl -sL "${url}" -o /usr/local/bin/yq
+          chmod +x /usr/local/bin/yq
+          yq --version
+      - name: Install helm
+        if: steps.detect.outputs.found == 'true'
+        env:
+          HELM_VERSION: 4.1.0
+          HELM_SHA256: 8e7ae5cb890c56f53713bffec38e41cd8e7e4619ebe56f8b31cd383bfb3dbb83
+        run: |
+          # Pinned rather than the runner image's helm, which moves with the
+          # image: the requests guard templates every chart of the catalog
+          # with it, and the envelope is rendered by it.
+          asset="helm-v${HELM_VERSION}-linux-amd64.tar.gz"
+          curl -sfL "https://get.helm.sh/${asset}" -o "/tmp/${asset}"
+          echo "${HELM_SHA256}  /tmp/${asset}" | sha256sum -c -
+          tar xzf "/tmp/${asset}" -C /usr/local/bin --strip-components=1 linux-amd64/helm
+          helm version
+      - name: Fetch the GCP provider's CRD schemas
+        if: steps.detect.outputs.found == 'true'
+        env:
+          PROVIDER_GCP_VERSION: v3.0.0
+        run: |
+          # The datree catalog has no namespaced (.m) provider-upjet-gcp kinds,
+          # so the ones the gcp render holds come from the provider's own CRDs,
+          # at the version the crossplane module installs. Every object that
+          # lists its properties is closed (additionalProperties: false), as
+          # datree closes its own: -strict then refuses a misspelt field.
+          # Same layout as the operator's schemas above.
+          base="https://raw.githubusercontent.com/crossplane-contrib/provider-upjet-gcp/${PROVIDER_GCP_VERSION}/package/crds"
+          for crd in gcp.m.upbound.io_clusterproviderconfigs \
+            cloudplatform.gcp.m.upbound.io_projectiammembers \
+            storage.gcp.m.upbound.io_buckets \
+            storage.gcp.m.upbound.io_bucketiammembers; do
+            curl -sfL "${base}/${crd}.yaml" -o /tmp/crd.yaml
+            group="$(yq '.spec.group' /tmp/crd.yaml)"
+            kind="$(yq '.spec.names.kind | downcase' /tmp/crd.yaml)"
+            mkdir -p "schemas/${group}"
+            for version in $(yq '.spec.versions[].name' /tmp/crd.yaml); do
+              version="${version}" yq -o=json '
+                .spec.versions[] | select(.name == strenv(version)) | .schema.openAPIV3Schema
+                | (.. | select(tag == "!!map" and .type == "object" and has("properties")
+                    and (has("additionalProperties") | not)
+                    and (has("x-kubernetes-preserve-unknown-fields") | not)))
+                  |= . + {"additionalProperties": false}' /tmp/crd.yaml \
+                > "schemas/${group}/${kind}_${version}.json"
+            done
+          done
+          find schemas -name '*.json' -path '*gcp*' | sort
+      - name: Fetch external-secrets' CRD schemas
+        if: steps.detect.outputs.found == 'true'
+        env:
+          # The appVersion of the chart the external_secrets module pins.
+          EXTERNAL_SECRETS_VERSION: v2.11.0
+        run: |
+          # The datree catalog's ClusterSecretStore, regenerated on 2026-10-08
+          # (datreeio/CRDs-catalog#988), no longer compiles in kubeconform:
+          # "could not find schema". So the schema comes from the operator's
+          # own CRD, at the version the module installs, closed as the GCP
+          # provider's are above.
+          base="https://raw.githubusercontent.com/external-secrets/external-secrets/${EXTERNAL_SECRETS_VERSION}/config/crds/bases"
+          curl -sfL "${base}/external-secrets.io_clustersecretstores.yaml" -o /tmp/crd.yaml
+          group="$(yq '.spec.group' /tmp/crd.yaml)"
+          kind="$(yq '.spec.names.kind | downcase' /tmp/crd.yaml)"
+          mkdir -p "schemas/${group}"
+          for version in $(yq '.spec.versions[].name' /tmp/crd.yaml); do
+            version="${version}" yq -o=json '
+              .spec.versions[] | select(.name == strenv(version)) | .schema.openAPIV3Schema
+              | (.. | select(tag == "!!map" and .type == "object" and has("properties")
+                  and (has("additionalProperties") | not)
+                  and (has("x-kubernetes-preserve-unknown-fields") | not)))
+                |= . + {"additionalProperties": false}' /tmp/crd.yaml \
+              > "schemas/${group}/${kind}_${version}.json"
+          done
+          find schemas -name '*.json' -path '*external-secrets*' | sort
       - name: Render the catalog and the bootstrap envelope
         if: steps.detect.outputs.found == 'true'
         run: |
           mkdir -p rendered
-          # One ResourceSet per catalog module, rendered with the committed
-          # sample inputs — the same shape OpenTofu deposits at bootstrap.
-          for rs in oci/catalog/*/resourceset.yaml; do
-            module="$(basename "$(dirname "${rs}")")"
-            flux-operator build rset -f "${rs}" --inputs-from oci/.ci/inputs-sample.yaml \
-              > "rendered/${module}.yaml"
+          # One ResourceSet per catalog module, rendered once per cloud with
+          # that cloud's committed sample inputs — the same shape OpenTofu
+          # deposits at bootstrap — into rendered/<cloud>/. The child
+          # ResourceSets' resources (routes, stores, provider configs) are
+          # pulled out to nested/ so kubeconform reads them as objects too.
+          for cloud in aws gcp; do
+            inputs=oci/.ci/inputs-sample.yaml
+            [ "${cloud}" = aws ] || inputs="oci/.ci/inputs-sample-${cloud}.yaml"
+            mkdir -p "rendered/${cloud}/nested"
+            for rs in oci/catalog/*/resourceset.yaml; do
+              module="$(basename "$(dirname "${rs}")")"
+              flux-operator build rset -f "${rs}" --inputs-from "${inputs}" \
+                > "rendered/${cloud}/${module}.yaml"
+              nested="$(yq 'select(.kind == "ResourceSet") | .spec.resources[] | split_doc' \
+                "rendered/${cloud}/${module}.yaml")"
+              [ -z "${nested}" ] || echo "${nested}" > "rendered/${cloud}/nested/${module}.yaml"
+            done
           done
           # The bootstrap envelope Helm deposits: the literal templates (the
           # << >> operator syntax stays as text — Helm never touches it) ...
@@ -219,6 +313,34 @@ jobs:
           flux-operator build rset -f /tmp/envelope-root.yaml \
             --inputs-from-provider /tmp/envelope-inputs.yaml \
             > rendered/envelope-root-built.yaml
+      - name: Cache the catalog's charts
+        if: steps.detect.outputs.found == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /tmp/charts
+          # The pinned chart versions all live in the modules' ResourceSets.
+          key: catalog-charts-${{ hashFiles('oci/catalog/*/resourceset.yaml') }}
+      - name: Every container the catalog runs states its requests
+        if: steps.detect.outputs.found == 'true'
+        run: |
+          # Each HelmRelease of the render, templated at its pinned chart with
+          # the socle's values: a container with no cpu, memory or
+          # ephemeral-storage request fails here (docs/gcp/sizing.md).
+          # A third render, aws with every `ha` input on (argocd's Redis HA
+          # and replicas, metrics-server's), checks the containers only HA
+          # brings; it is not kubeconform'd, the two clouds' renders are.
+          export CHART_CACHE=/tmp/charts
+          yq '(.. | select(tag == "!!map" and has("ha")) | .ha) = true' \
+            oci/.ci/inputs-sample.yaml > /tmp/inputs-sample-ha.yaml
+          mkdir -p rendered-ha/aws
+          for rs in oci/catalog/*/resourceset.yaml; do
+            flux-operator build rset -f "${rs}" --inputs-from /tmp/inputs-sample-ha.yaml \
+              > "rendered-ha/aws/$(basename "$(dirname "${rs}")").yaml"
+          done
+          for render in rendered/aws rendered/gcp rendered-ha/aws; do
+            echo "==> ${render}"
+            .github/scripts/check-catalog-requests.sh "${render}" | tee -a requests.out
+          done
       - name: kubeconform the render (strict)
         if: steps.detect.outputs.found == 'true'
         run: |
@@ -262,9 +384,14 @@ jobs:
         run: |
           {
             echo "### kubeconform ✅"
-            echo "Rendered (\`flux-operator build rset\` + \`helm template\`, strict):"
+            echo "Rendered for aws and gcp, child ResourceSets' resources included"
+            echo "(\`flux-operator build rset\` + \`helm template\`, strict):"
             echo '```'
             tail -1 kubeconform-rendered.out
+            echo '```'
+            echo "Requests (aws, gcp, then aws with ha — every container of every chart, templated):"
+            echo '```'
+            cat requests.out
             echo '```'
             echo "Artifact templates (\`oci/catalog\`, \`oci/clusters\`, missing schemas ignored):"
             echo '```'
@@ -294,6 +421,8 @@ jobs:
       - name: Trivy misconfiguration scan (SARIF)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          # Pinned above the action's default (v0.70.0), whose GKE adapter panics on a grouped root's null labels.
+          version: v0.75.0
           scan-type: config
           scan-ref: .
           # Ignores for YAML manifests, which take no inline #trivy:ignore.
@@ -310,6 +439,7 @@ jobs:
         if: env.CAN_UPLOAD != 'true'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          version: v0.75.0
           scan-type: config
           scan-ref: .
           trivyignores: .trivyignore.yaml
@@ -319,6 +449,7 @@ jobs:
       - name: Trivy secret scan (always gates — a leaked secret is never a finding to triage)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          version: v0.75.0
           scan-type: fs
           scan-ref: .
           scanners: secret

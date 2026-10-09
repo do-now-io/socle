@@ -20,7 +20,7 @@ module itself follows [`victoria_metrics`](victoria-metrics.md) line for line.
 | Where | Every cloud, the same template, no cloud patch |
 | Default | **On** |
 | Shape | One pod, `server.mode: deployment`, strategy `Recreate`, a standalone PVC — victoria_metrics' reason: a `volumeClaimTemplate` cannot be resized by Helm |
-| Storage | 20Gi on the default StorageClass; `storage_size = ""` for an `emptyDir`. **A socle EKS has no StorageClass today**, as for victoria_metrics |
+| Storage | 20Gi on the default StorageClass; `storage_size = ""` for an `emptyDir`, with a 2Gi ephemeral-storage request. **A socle EKS has no StorageClass today**, as for victoria_metrics |
 | Retention | 7 days. The chart defaults to one month, over the binary's own 7 |
 | Ingest | OTLP over HTTP at `/insert/opentelemetry/v1/logs` |
 | Exposure | Headless `ClusterIP`, `victoria-logs.victoria-logs.svc:9428`, no auth, in-cluster only |
@@ -39,7 +39,11 @@ and `ConfigMap/victoria-logs-client-values` (both labelled
 - `server.retentionPeriod` from `retention`;
 - persistence from `storage_size`;
 - the `prometheus.io/*` pod annotations, so the gateway scrapes it;
-- requests of 50m / 128Mi.
+- requests of 50m / 128Mi, and an ephemeral-storage request that follows
+  `storage_size`: 64Mi with a claim, **2Gi** without — the `emptyDir`
+  counts against it, and GKE Autopilot makes it the limit (a pod past it is
+  evicted, its data lost; on EKS it is first evicted under DiskPressure).
+  Raise it in `values` to keep more.
 
 The chart's optional Vector subchart stays off: OpenTelemetry is the
 collection layer.
@@ -52,7 +56,10 @@ collection layer.
   from the end of each existing file and from the first line of each new
   one, the agent's own logs excluded, **no checkpoints**;
 - the chart's read-only `hostPath` mounts of `/var/log/pods` and
-  `/var/lib/docker/containers`;
+  `/var/lib/docker/containers` — on GCP, `/var/log/pods` alone, since GKE
+  Autopilot admits no `hostPath` outside `/var/log`: the preset is off there
+  and the template carries its receiver and its one mount
+  ([otel-agent.md](otel-agent.md#per-cloud));
 - an exporter `otlp_http/victoria-logs` and a `logs` pipeline, `file_log` →
   `k8s_attributes` → `memory_limiter` → `batch` → VictoriaLogs;
 - **`runAsUser: 0`, with every capability dropped**, no privilege

@@ -12,6 +12,11 @@
 #            no policy excludes; the socle's own namespaces are out of scope,
 #            and the test proves it in hello: a privileged pod admitted there
 #            in Enforce, and no failure reported in any socle namespace.
+#            The module test is floci's (`platform: floci`): GKE Autopilot
+#            refuses a privileged pod itself, before Kyverno, so
+#            `kyverno-policies-module-gke` runs the same steps on a read-only
+#            /var/log hostPath, which Autopilot admits and disallow-host-path
+#            reports.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -59,7 +64,7 @@ metadata:
   labels:
     phase: module
     cloud: any
-    platform: any
+    platform: floci
 spec:
   description: >-
     Audit reports, Enforce refuses, Kyverno down neither blocks Flux nor lets
@@ -781,6 +786,822 @@ spec:
               kind: ValidatingAdmissionPolicy
               metadata:
                 name: vpol-disallow-privileged-containers
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: kyverno-policies
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: kyverno
+                namespace: kyverno
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (length(conditions[?type == 'Reconciling'] || `[]`)): 0
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    kyverno:
+                      enabled: false
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: kyverno
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: kyverno-policies
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (length(inventory.entries || `[]`)): 0
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: kyverno-policies
+        - podLogs:
+            namespace: flux-system
+            selector: app.kubernetes.io/name=flux-operator
+            tail: 40
+---
+# GKE Autopilot: the same proof, on a violation Autopilot admits. Its own
+# admission (GKE Warden) refuses a privileged pod before Kyverno sees it
+# (`denied by autogke-disallow-privilege`, measured on the sandbox), so the
+# violating pod here mounts the node's /var/log read-only — the one hostPath
+# Autopilot allows, and baseline's disallow-host-path reports it. Enforce
+# switches that policy; every other step is the floci test's.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: kyverno-policies-module-gke
+  labels:
+    phase: module
+    cloud: gcp
+    platform: gke
+spec:
+  description: >-
+    On Autopilot, with a read-only /var/log hostPath for the violation: Audit
+    reports, Enforce refuses, Kyverno down neither blocks Flux nor lets an
+    Enforce violation through; the attributes and the client's values reach
+    the policies; off removes them.
+  timeouts:
+    assert: 5m
+    error: 5m
+  steps:
+    - name: kyverno and kyverno_policies on, the baseline set converges in Audit
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    kyverno:
+                      enabled: true
+                    kyverno_policies:
+                      enabled: true
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: kyverno-policies
+                namespace: kyverno-policies
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        # The chart's baseline profile and the socle's two unconditional
+        # policies, each in Audit, its webhook in Ignore, the control plane,
+        # Flux and Kyverno excluded by name, the socle's namespaces by label,
+        # the pod-controller autogen off.
+        - assert:
+            resource:
+              apiVersion: policies.kyverno.io/v1beta1
+              kind: ValidatingPolicy
+              metadata:
+                name: disallow-privileged-containers
+              spec:
+                validationActions: [Audit]
+                failurePolicy: Ignore
+                autogen:
+                  podControllers:
+                    controllers: [none]
+                matchConstraints:
+                  namespaceSelector:
+                    matchExpressions:
+                      - key: resourceset.fluxcd.controlplane.io/namespace
+                        operator: NotIn
+                        values: [flux-system]
+                (matchConditions[?name == 'exclude-namespaces'] || `[]`):
+                  - (contains(expression, 'flux-system')): true
+                    (contains(expression, 'kube-system')): true
+              status:
+                (conditionStatus.conditions[?type == 'WebhookConfigured'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: policies.kyverno.io/v1beta1
+              kind: ValidatingPolicy
+              metadata:
+                name: require-requests
+              spec:
+                validationActions: [Audit]
+        - assert:
+            resource:
+              apiVersion: policies.kyverno.io/v1beta1
+              kind: ValidatingPolicy
+              metadata:
+                name: disallow-latest-tag
+              spec:
+                validationActions: [Audit]
+        # No allow-list named, no registry policy; baseline, no restricted one.
+        - error:
+            resource:
+              apiVersion: policies.kyverno.io/v1beta1
+              kind: ValidatingPolicy
+              metadata:
+                name: restrict-image-registries
+        - error:
+            resource:
+              apiVersion: policies.kyverno.io/v1beta1
+              kind: ValidatingPolicy
+              metadata:
+                name: require-run-as-nonroot
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: kyverno-policies
+            name: kyverno-policies
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: kyverno
+            name: kyverno
+        - events:
+            namespace: kyverno
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 40
+    - name: in Audit, a pod mounting the node's /var/log is admitted and reported
+      try:
+        - create:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                name: hostpath-audit
+              spec:
+                # uid 65535, the image's own user; runAsNonRoot left unset, so
+                # restricted's require-run-as-nonroot reports it below.
+                securityContext:
+                  runAsUser: 65535
+                  runAsGroup: 65535
+                containers:
+                  - name: pause
+                    image: registry.k8s.io/pause:3.10
+                    resources:
+                      requests:
+                        cpu: 10m
+                        memory: 16Mi
+                    volumeMounts:
+                      - name: var-log
+                        mountPath: /var/log
+                        readOnly: true
+                volumes:
+                  - name: var-log
+                    hostPath:
+                      path: /var/log
+        - assert:
+            resource:
+              apiVersion: wgpolicyk8s.io/v1alpha2
+              kind: PolicyReport
+              metadata:
+                namespace: ($namespace)
+              scope:
+                kind: Pod
+                name: hostpath-audit
+              (length(results[?policy == 'disallow-host-path' && result == 'fail'] || `[]`) > `0`): true
+      catch:
+        - describe:
+            apiVersion: v1
+            kind: Pod
+            namespace: ($namespace)
+            name: hostpath-audit
+        - get:
+            apiVersion: wgpolicyk8s.io/v1alpha2
+            kind: PolicyReport
+            namespace: ($namespace)
+        - podLogs:
+            namespace: kyverno
+            selector: app.kubernetes.io/component=reports-controller
+            tail: 40
+    # enforce: the policy is switched to Deny and compiled into a native
+    # ValidatingAdmissionPolicy and its binding, owned by the policy.
+    - name: kube.kyverno_policies.enforce refuses a hostPath pod, through a native ValidatingAdmissionPolicy
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    kyverno_policies:
+                      enforce: [disallow-host-path]
+        - assert:
+            resource:
+              apiVersion: policies.kyverno.io/v1beta1
+              kind: ValidatingPolicy
+              metadata:
+                name: disallow-host-path
+              spec:
+                validationActions: [Deny]
+                autogen:
+                  validatingAdmissionPolicy:
+                    enabled: true
+              status:
+                generated: true
+        - assert:
+            resource:
+              apiVersion: admissionregistration.k8s.io/v1
+              kind: ValidatingAdmissionPolicyBinding
+              metadata:
+                name: vpol-disallow-host-path-binding
+              spec:
+                policyName: vpol-disallow-host-path
+                validationActions: [Deny]
+        # Compiled, then ten seconds for the API server's informer, before
+        # the refusal is asserted: the floci test's reason, the same wait.
+        - assert:
+            resource:
+              apiVersion: admissionregistration.k8s.io/v1
+              kind: ValidatingAdmissionPolicy
+              metadata:
+                name: vpol-disallow-host-path
+              (status.observedGeneration == metadata.generation): true
+        - sleep:
+            duration: 10s
+        - create:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                name: hostpath-enforce
+              spec:
+                containers:
+                  - name: pause
+                    image: registry.k8s.io/pause:3.10
+                    resources:
+                      requests:
+                        cpu: 10m
+                        memory: 16Mi
+                    volumeMounts:
+                      - name: var-log
+                        mountPath: /var/log
+                        readOnly: true
+                volumes:
+                  - name: var-log
+                    hostPath:
+                      path: /var/log
+            expect:
+              - check:
+                  ($error != null): true
+                  (contains($error, 'disallow-host-path')): true
+        # The same pod in a namespace the socle renders — hello's — is out of
+        # scope: admitted, Enforce or not. Kyverno judges applications, not
+        # the socle's own components.
+        - create:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                name: hostpath-socle
+                namespace: hello
+              spec:
+                containers:
+                  - name: pause
+                    image: registry.k8s.io/pause:3.10
+                    resources:
+                      requests:
+                        cpu: 10m
+                        memory: 16Mi
+                    volumeMounts:
+                      - name: var-log
+                        mountPath: /var/log
+                        readOnly: true
+                volumes:
+                  - name: var-log
+                    hostPath:
+                      path: /var/log
+      catch:
+        - describe:
+            apiVersion: policies.kyverno.io/v1beta1
+            kind: ValidatingPolicy
+            name: disallow-host-path
+        - get:
+            apiVersion: admissionregistration.k8s.io/v1
+            kind: ValidatingAdmissionPolicy
+        - podLogs:
+            namespace: kyverno
+            selector: app.kubernetes.io/component=admission-controller
+            tail: 40
+    # The failure the issue fears: an admission webhook down blocks every
+    # apply. Kyverno's admission scaled to zero (helm-controller corrects no
+    # drift, so it stays there until the step puts it back): Flux applies a
+    # change to another module and its pods are admitted; the Enforce policy
+    # still refuses, natively; an Audit-only violation is admitted.
+    - name: with Kyverno's admission down, Flux still reconciles and the Enforce policy still refuses
+      try:
+        - patch:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: kyverno-admission-controller
+                namespace: kyverno
+              spec:
+                replicas: 0
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: kyverno
+                labels:
+                  app.kubernetes.io/component: admission-controller
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    hello:
+                      replicas: 2
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: podinfo
+                namespace: hello
+              spec:
+                replicas: 2
+              status:
+                readyReplicas: 2
+        - create:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                name: hostpath-down
+              spec:
+                containers:
+                  - name: pause
+                    image: registry.k8s.io/pause:3.10
+                    resources:
+                      requests:
+                        cpu: 10m
+                        memory: 16Mi
+                    volumeMounts:
+                      - name: var-log
+                        mountPath: /var/log
+                        readOnly: true
+                volumes:
+                  - name: var-log
+                    hostPath:
+                      path: /var/log
+            expect:
+              - check:
+                  ($error != null): true
+                  (contains($error, 'ValidatingAdmissionPolicy')): true
+        # No requests: require-requests is Audit, its webhook Ignore, the
+        # webhook has no server — admitted.
+        - create:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                name: no-requests-down
+              spec:
+                containers:
+                  - name: pause
+                    image: registry.k8s.io/pause:3.10
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: hello
+            name: podinfo
+        - events:
+            namespace: hello
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 40
+    # Chainsaw's finally takes no patch: the admission comes back in a step
+    # of its own, and podinfo with it.
+    - name: Kyverno's admission and podinfo are back as they were
+      try:
+        - patch:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: kyverno-admission-controller
+                namespace: kyverno
+              spec:
+                replicas: 3
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    hello:
+                      replicas: 1
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: kyverno-admission-controller
+                namespace: kyverno
+              status:
+                readyReplicas: 3
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: podinfo
+                namespace: hello
+              spec:
+                replicas: 1
+      catch:
+        - events:
+            namespace: kyverno
+    - name: kube.kyverno_policies.allowed_registries renders the allow-list, and a pod from elsewhere is reported
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    kyverno_policies:
+                      allowed_registries: [registry.k8s.io]
+        - assert:
+            resource:
+              apiVersion: policies.kyverno.io/v1beta1
+              kind: ValidatingPolicy
+              metadata:
+                name: restrict-image-registries
+              spec:
+                validationActions: [Audit]
+                (variables[?name == 'allowed'] || `[]`):
+                  - (contains(expression, 'registry.k8s.io/')): true
+        # A Docker Hub short name is docker.io's: not allowed, reported.
+        - create:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                name: elsewhere
+              spec:
+                # sleep as PID 1 ignores SIGTERM: without this, Chainsaw's
+                # cleanup waits the default 30 s grace and times out.
+                terminationGracePeriodSeconds: 0
+                containers:
+                  - name: busybox
+                    image: busybox:1.37
+                    command: [sleep, '3600']
+                    resources:
+                      requests:
+                        cpu: 10m
+                        memory: 16Mi
+        - assert:
+            resource:
+              apiVersion: wgpolicyk8s.io/v1alpha2
+              kind: PolicyReport
+              metadata:
+                namespace: ($namespace)
+              scope:
+                kind: Pod
+                name: elsewhere
+              (length(results[?policy == 'restrict-image-registries' && result == 'fail'] || `[]`) > `0`): true
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    kyverno_policies:
+                      allowed_registries: []
+        - error:
+            resource:
+              apiVersion: policies.kyverno.io/v1beta1
+              kind: ValidatingPolicy
+              metadata:
+                name: restrict-image-registries
+      catch:
+        - describe:
+            apiVersion: policies.kyverno.io/v1beta1
+            kind: ValidatingPolicy
+            name: restrict-image-registries
+        - get:
+            apiVersion: wgpolicyk8s.io/v1alpha2
+            kind: PolicyReport
+            namespace: ($namespace)
+    # restricted: the chart's six restricted policies on top of baseline.
+    - name: kube.kyverno_policies.profile = restricted adds the restricted policies
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    kyverno_policies:
+                      profile: restricted
+        - assert:
+            resource:
+              apiVersion: policies.kyverno.io/v1beta1
+              kind: ValidatingPolicy
+              metadata:
+                name: require-run-as-nonroot
+              spec:
+                validationActions: [Audit]
+        - assert:
+            resource:
+              apiVersion: policies.kyverno.io/v1beta1
+              kind: ValidatingPolicy
+              metadata:
+                name: restrict-seccomp-strict
+        # The background scan judges what already runs. hostpath-audit,
+        # created in the Audit step, sets no runAsNonRoot: a restricted
+        # failure on its report can only come from that scan — the proof it
+        # ran. The socle's pods went through the same pass: no namespace the
+        # socle renders carries a failure (the floci test's list).
+        - assert:
+            timeout: 3m
+            resource:
+              apiVersion: wgpolicyk8s.io/v1alpha2
+              kind: PolicyReport
+              metadata:
+                namespace: ($namespace)
+              scope:
+                kind: Pod
+                name: hostpath-audit
+              (length(results[?policy == 'require-run-as-nonroot' && result == 'fail'] || `[]`) > `0`): true
+        - error:
+            resource:
+              apiVersion: wgpolicyk8s.io/v1alpha2
+              kind: PolicyReport
+              metadata:
+                namespace: hello
+              (length(results[?result == 'fail'] || `[]`) > `0`): true
+        - error:
+            resource:
+              apiVersion: wgpolicyk8s.io/v1alpha2
+              kind: PolicyReport
+              metadata:
+                namespace: otel-agent
+              (length(results[?result == 'fail'] || `[]`) > `0`): true
+        - error:
+            resource:
+              apiVersion: wgpolicyk8s.io/v1alpha2
+              kind: PolicyReport
+              metadata:
+                namespace: otel-gateway
+              (length(results[?result == 'fail'] || `[]`) > `0`): true
+        - error:
+            resource:
+              apiVersion: wgpolicyk8s.io/v1alpha2
+              kind: PolicyReport
+              metadata:
+                namespace: victoria-metrics
+              (length(results[?result == 'fail'] || `[]`) > `0`): true
+        - error:
+            resource:
+              apiVersion: wgpolicyk8s.io/v1alpha2
+              kind: PolicyReport
+              metadata:
+                namespace: victoria-logs
+              (length(results[?result == 'fail'] || `[]`) > `0`): true
+        - error:
+            resource:
+              apiVersion: wgpolicyk8s.io/v1alpha2
+              kind: PolicyReport
+              metadata:
+                namespace: argocd
+              (length(results[?result == 'fail'] || `[]`) > `0`): true
+        - error:
+            resource:
+              apiVersion: wgpolicyk8s.io/v1alpha2
+              kind: PolicyReport
+              metadata:
+                namespace: grafana
+              (length(results[?result == 'fail'] || `[]`) > `0`): true
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    kyverno_policies:
+                      profile: baseline
+        - error:
+            resource:
+              apiVersion: policies.kyverno.io/v1beta1
+              kind: ValidatingPolicy
+              metadata:
+                name: require-run-as-nonroot
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: kyverno-policies
+            name: kyverno-policies
+    # The order of valuesFrom, proven whole (docs/flux-catalog.md §6), on the
+    # severity annotation the socle sets to medium: high in values, low in the
+    # Secret; the live policy carries the Secret's; both cleared, the socle's.
+    - name: kube.kyverno_policies.values_secret is merged last, over values and the socle
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: kyverno-policies-e2e-values
+                namespace: kyverno-policies
+                labels:
+                  reconcile.fluxcd.io/watch: Enabled
+              stringData:
+                values.yaml: |
+                  podSecuritySeverity: low
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    kyverno_policies:
+                      values_secret: kyverno-policies-e2e-values
+                      values:
+                        podSecuritySeverity: high
+        - assert:
+            resource:
+              apiVersion: policies.kyverno.io/v1beta1
+              kind: ValidatingPolicy
+              metadata:
+                name: disallow-privileged-containers
+                annotations:
+                  policies.kyverno.io/severity: low
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    kyverno_policies:
+                      values_secret: ''
+                      values:
+                        podSecuritySeverity: null
+        - assert:
+            resource:
+              apiVersion: policies.kyverno.io/v1beta1
+              kind: ValidatingPolicy
+              metadata:
+                name: disallow-privileged-containers
+                annotations:
+                  policies.kyverno.io/severity: medium
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Secret
+              name: kyverno-policies-e2e-values
+              namespace: kyverno-policies
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: kyverno-policies
+            name: kyverno-policies
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 40
+    # Off, the policies first — the order a client follows, since OpenTofu
+    # refuses kyverno_policies without kyverno — then the engine. The native
+    # policy goes with the ValidatingPolicy that owns it. The last patch
+    # leaves the inputs at the catalog defaults.
+    - name: enabled = false garbage-collects the policies and their native twins, then the engine
+      try:
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: kyverno-policies
+                namespace: kyverno-policies
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'Released'] || `[]`):
+                  - status: 'True'
+                (length(conditions[?type == 'Reconciling'] || `[]`)): 0
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    kyverno_policies:
+                      enabled: false
+                      enforce: []
+        - error:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: kyverno-policies
+                namespace: kyverno-policies
+        - error:
+            resource:
+              apiVersion: policies.kyverno.io/v1beta1
+              kind: ValidatingPolicy
+              metadata:
+                name: disallow-host-path
+        - error:
+            resource:
+              apiVersion: admissionregistration.k8s.io/v1
+              kind: ValidatingAdmissionPolicy
+              metadata:
+                name: vpol-disallow-host-path
         - error:
             resource:
               apiVersion: v1

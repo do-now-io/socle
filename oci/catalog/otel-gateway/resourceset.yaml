@@ -231,6 +231,7 @@ spec:
           requests:
             cpu: 100m
             memory: 128Mi
+            ephemeral-storage: 64Mi
           # A limit, as otel_agent and for the same reason: GOMEMLIMIT and the
           # memory_limiter read it. Larger: this one replica carries the whole
           # cluster's object state, every scrape and every application's OTLP.

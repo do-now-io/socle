@@ -102,7 +102,8 @@ kubectl -n flux-system get resourceset    # socle-root and one per module
 
 The full walkthrough is in [opentofu/clusters/aws](opentofu/clusters/aws/README.md),
 and every option is documented in
-[prod.tfvars.example](opentofu/clusters/aws/prod.tfvars.example).
+[prod.tfvars.example](opentofu/clusters/aws/prod.tfvars.example). On Google
+Cloud, the same in [opentofu/clusters/gcp](opentofu/clusters/gcp/README.md).
 
 ## The catalog
 
@@ -136,15 +137,15 @@ The stack's design: [Monitoring](docs/monitoring.md).
 | --- | --- | --- | :---: | --- | --- |
 | [`kyverno`](docs/catalog/kyverno.md) | The Kyverno admission engine, with no policy | 1.19.1 | off | All | Its webhooks never see the socle's namespaces |
 | [`kyverno_policies`](docs/catalog/kyverno-policies.md) | Pod Security Standards, requests required, no `latest` tag, a registry allow-list, all in Audit; `enforce` makes a policy a native refusal | 1.19.1 | off | All | Needs `kyverno`; judges your applications, never the socle |
-| [`external_secrets`](docs/catalog/external-secrets.md) | Kubernetes Secrets read from the cloud's secret manager, kept in step when they rotate | 2.11.0 | off | All | On AWS with `crossplane`: its own read-only role on a name prefix, and the `secret-manager` store |
+| [`external_secrets`](docs/catalog/external-secrets.md) | Kubernetes Secrets read from the cloud's secret manager, kept in step when they rotate | 2.11.0 | off | All | With `crossplane`: read-only access on a secret-name prefix — its own role on AWS, a conditional binding on GCP — and the `secret-manager` store |
 | [`reloader`](docs/catalog/reloader.md) | Rolls a workload when a ConfigMap or Secret it reads changes | 1.4.22 | off | All | Opt-in per workload, by annotation |
 
 ### Networking and exposure
 
 | Module | What it does | Version | Default | Clouds | Notes |
 | --- | --- | --- | :---: | --- | --- |
-| [`gateway_api`](docs/catalog/gateway-api.md) | Gateway API CRDs and the shared `public` and `private` Gateways | 1.6.1 | on | AWS · Azure · Scaleway | Built into GKE on GCP |
-| [`external_dns`](docs/catalog/external-dns.md) | Publishes routes into the cloud's DNS zone | 0.22.0 | off | All | Turned on for you on AWS once a certificate is set |
+| [`gateway_api`](docs/catalog/gateway-api.md) | Gateway API CRDs and the shared `public` and `private` Gateways | 1.6.1 | on | All | On GCP the CRDs are GKE's, the Gateways Google's load balancers |
+| [`external_dns`](docs/catalog/external-dns.md) | Publishes routes into the cloud's DNS zone | 0.22.0 | off | All | Turned on for you on AWS and GCP once a certificate is set |
 
 ### Cloud resources
 
@@ -162,7 +163,7 @@ The stack's design: [Monitoring](docs/monitoring.md).
 
 | Module | What it does | Version | Default | Clouds | Notes |
 | --- | --- | --- | :---: | --- | --- |
-| [`velero`](docs/catalog/velero.md) | Backup and restore of the applications' volumes and their objects, into the module's own bucket | 1.18.2 | off | AWS | Needs `crossplane` |
+| [`velero`](docs/catalog/velero.md) | Backup and restore of the applications' volumes and their objects, into the module's own bucket | 1.18.2 | off | AWS · GCP | Needs `crossplane` |
 
 Cilium and CoreDNS come before the catalog. On AWS and Azure the bootstrap
 module installs them ahead of Flux. GKE and Kapsule run their own:
@@ -173,7 +174,7 @@ module installs them ahead of Flux. GKE and Kapsule run their own:
 | Cloud | Foundations | One-apply root | Docs |
 | --- | :---: | :---: | --- |
 | AWS · EKS | ✅ | ✅ [`clusters/aws`](opentofu/clusters/aws) | [docs/aws](docs/aws/README.md) |
-| GCP · GKE | ✅ | ⏳ | [docs/gcp](docs/gcp/README.md) |
+| GCP · GKE | ✅ | ✅ [`clusters/gcp`](opentofu/clusters/gcp) | [docs/gcp](docs/gcp/README.md) |
 | Azure · AKS | ✅ | ⏳ | [docs/azure](docs/azure/prerequisites.md) |
 | Scaleway · Kapsule | ✅ | ⏳ | [docs/scaleway](docs/scaleway/README.md) |
 
@@ -182,7 +183,14 @@ module installs them ahead of Flux. GKE and Kapsule run their own:
 Socle is **pre-0.1.0**, and no version has been released yet.
 
 - The foundations modules exist for all four clouds. The single-apply root
-  exists for AWS only, so far.
+  exists for AWS and GCP, so far.
+- On GCP every catalog module that runs on AWS runs too, metrics-server
+  aside (GKE runs its own), each cloud-backed one with its own access
+  through Crossplane and no Google service account.
+  Its proof is a GKE Autopilot sandbox, by hand: floci-gcp has no Cloud DNS
+  and no Workload Identity, so CI renders and plans GCP but runs no GKE e2e.
+  One socle cluster per GCP project, and a fresh project needs its quotas
+  raised first ([prerequisites](docs/gcp/prerequisites.md#quotas)).
 - Every catalog module ships its own [Chainsaw](https://kyverno.github.io/chainsaw/)
   suite. CI runs these suites on floci,
   an AWS emulator with k3s, with one job per module and cloud. Each job applies
@@ -199,7 +207,7 @@ Socle is **pre-0.1.0**, and no version has been released yet.
 opentofu/
 ├── aws/  gcp/  azure/  scaleway/   # foundations, one module per cloud
 ├── bootstrap/                      # Cilium, Flux Operator, inputs, catalog schema
-└── clusters/aws/                   # the root a client copies: one apply
+└── clusters/aws/  gcp/             # the root a client copies: one apply
 oci/
 ├── catalog/<module>/               # one ResourceSet + its e2e suite
 └── clusters/<cloud>/               # which modules each cloud offers

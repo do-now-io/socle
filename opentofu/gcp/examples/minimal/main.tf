@@ -32,4 +32,11 @@ module "socle" {
     end_time   = "2026-01-03T14:00:00Z"
     recurrence = "FREQ=WEEKLY;BYDAY=SA"
   }
+
+  # Crossplane's identity, for the catalog modules that reach Google Cloud:
+  # the roles it may grant their principals, nothing else. Add
+  # gateway_certificate once a Cloud DNS zone is there to authorise it.
+  crossplane = {
+    allowed_roles = ["roles/secretmanager.secretAccessor", "roles/monitoring.viewer", "roles/storage.objectAdmin"]
+  }
 }

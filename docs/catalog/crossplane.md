@@ -15,14 +15,16 @@ permissions boundary.
 
 This pull request is the first working instance, on AWS only: the module, the
 foundations' Crossplane identity, and an e2e that turns a module-shaped role
-into a real IAM role on floci. The GCP, Azure and Scaleway branches, and the
-external-dns migration, are each meant to be a small PR written from this note.
+into a real IAM role on floci. The GCP branch followed with the GCP parity
+work: its foundations grants are in §2, its module contract in §3. The Azure
+and Scaleway branches, and the external-dns migration, are each meant to be a
+small PR written from this note.
 
 | Question | Position |
 | --- | --- |
-| What a module declares | Its own managed resources, per cloud: on AWS an `iam.aws.m.upbound.io` `Role` and an `eks.aws.m.upbound.io` `PodIdentityAssociation` — the contract in §3 |
-| What `crossplane` installs | Core; on AWS `provider-{family-aws,aws-iam,aws-eks,aws-s3}` v2.8.1 and `ClusterProviderConfig default` on Pod Identity. No XRD, no Composition, nothing per module. The family is declared as `crossplane-contrib-provider-family-aws`, the name Crossplane gives a dependency it resolves itself: any other name lets it install the family twice, and the duplicate lock entry keeps every provider unhealthy |
-| What the foundations still owe | Crossplane's identity, and the **permissions boundary** every module role must carry: an allowlist of services the client writes, empty by default — `opentofu/aws` variable `crossplane` |
+| What a module declares | Its own managed resources, per cloud: on AWS an `iam.aws.m.upbound.io` `Role` and an `eks.aws.m.upbound.io` `PodIdentityAssociation`; on GCP bindings of its own ServiceAccount's principal (`ProjectIAMMember`, `BucketIAMMember`), no Google service account — the contracts in §3 |
+| What `crossplane` installs | Core; on AWS `provider-{family-aws,aws-iam,aws-eks,aws-s3}` v2.8.1 and `ClusterProviderConfig default` on Pod Identity; on GCP `provider-{family-gcp,gcp-cloudplatform,gcp-storage,gcp-secretmanager}` v3.0.0 and `ClusterProviderConfig default` on `InjectedIdentity` — no Cloud DNS provider, external-dns is bound on the project (§2). No XRD, no Composition, nothing per module. The family is declared as `crossplane-contrib-provider-family-aws`, the name Crossplane gives a dependency it resolves itself: any other name lets it install the family twice, and the duplicate lock entry keeps every provider unhealthy |
+| What the foundations still owe | Crossplane's identity, and what bounds it. On AWS the **permissions boundary** every module role must carry: an allowlist of services the client writes, empty by default. On GCP the **roles it may grant**, an allowlist the client writes, through an IAM condition. Variable `crossplane` in `opentofu/aws` and `opentofu/gcp` |
 | How a module waits | Its `ResourceSet` `dependsOn` the `crossplane` ResourceSet and uses `steps`: its role first, health-checked Ready, then its workload |
 | Crossplane off | The module takes a pre-made identity by name (`kube.<module>.identity`); neither → refused at plan |
 | Default | `enabled = false` — argued in §6 |
@@ -87,7 +89,7 @@ Why each link sits where it does:
   credentials until it is recreated. That rules out "let the pod fail until
   the role appears" (it would self-heal on GKE and AKS, not here) — §4.
 
-## 2. What the foundations still owe — `opentofu/aws`
+## 2. What the foundations still owe — `opentofu/aws`, `opentofu/gcp`
 
 ```hcl
 # opentofu/clusters/aws, in the client's tfvars
@@ -146,19 +148,128 @@ of the account; the module's review, not the foundations, keeps it to the
 zones it needs. `opentofu/aws/tests/defaults.tftest.hcl` asserts each of these
 properties on the planned documents.
 
+### On GCP — `opentofu/gcp`
+
+```hcl
+# opentofu/clusters/gcp, in the client's tfvars
+gcp = {
+  …
+  crossplane = {
+    allowed_roles = ["roles/secretmanager.secretAccessor", "roles/monitoring.viewer", "roles/storage.objectAdmin"]
+  }
+}
+kube = {
+  crossplane = { enabled = true }   # the DNS records role is wired by the root
+}
+```
+
+**No Google service account.** Crossplane's identity is its providers'
+Kubernetes ServiceAccount as a Workload Identity Federation principal,
+`principal://iam.googleapis.com/projects/<number>/locations/global/workloadIdentityPools/<project>.svc.id.goog/subject/ns/crossplane-system/sa/provider-gcp`,
+and every module's is its own the same way ([managed-scope](../gcp/managed-scope.md#identity)).
+The `ClusterProviderConfig default` says `credentials.source:
+InjectedIdentity`: the provider hands Terraform no credential and takes
+Application Default Credentials from GKE's metadata server — the pod's own
+principal. There is nothing to rotate and nothing to leak.
+
+GCP has no permissions boundary. What bounds Crossplane is **which roles it
+may grant**, read by IAM on the request: the condition
+`api.getAttribute('iam.googleapis.com/modifiedGrantsByRole', []).hasOnly([…])`
+holds only when every binding the request adds or removes is for a listed
+role ([Google's limited IAM admin](https://cloud.google.com/iam/docs/setting-limits-on-granting-roles)).
+The list is `crossplane.allowed_roles` plus the socle's DNS records role.
+Everything is created only when `crossplane` is set; `null`, the default,
+creates nothing.
+
+| Need | Grant to Crossplane's principal | Bound |
+| --- | --- | --- |
+| A module's project-level roles (external-secrets, keda, the DNS records role for external-dns) | `roles/resourcemanager.projectIamAdmin` | condition `modifiedGrantsByRole.hasOnly(allowed_roles + DNS records role)`. Project IAM Admin is not in the list, so Crossplane can never lift its own condition |
+| A module's bucket (velero) | custom role `socleCrossplaneBuckets_<cluster>`: `storage.buckets.{create,get,update,getIamPolicy,setIamPolicy}` — **no delete, no object permission, no list** | condition `resource.name.startsWith('projects/_/buckets/<cluster>-')` and the same `hasOnly` |
+| What external-dns writes | custom role `socleDnsRecords_<cluster>`: `dns.managedZones.{get,list}`, `dns.changes.{create,get,list}`, `dns.resourceRecordSets.{create,delete,get,list,update}` — Crossplane does not hold it, it may grant it, on the project | always part of the list. Every zone of the project, bounded in software by external-dns's `--domain-filter`: nothing in IAM narrows it to a zone (below) |
+
+| Object | What it is |
+| --- | --- |
+| variable `crossplane` | `object({ allowed_roles = optional(list(string), []) })`, default `null` |
+| output `crossplane_principal` | the principal above, for the record; `null` without `crossplane` |
+| output `dns_records_role` | wired by the root into `kube.crossplane.dns_records_role` (a value the client writes wins); built from the role's ID, so known on the first plan |
+| outputs `project_id`, `project_number` | half of every module's principal each; wired by the root into `cluster.projectId` and `cluster.projectNumber` |
+
+**Crossplane holds nothing of Cloud DNS — measured on the sandbox project
+(2026-10-07).** The first design bound Crossplane on each zone external-dns
+writes, with a custom role carrying `dns.managedZones.{getIamPolicy,setIamPolicy}`,
+for Crossplane to bind external-dns there in turn. The sandbox apply refused
+it: the `ManagedZoneIAMMember` failed with `Error retrieving IAM policy for dns
+managedzone …: 403`. A probe with a temporary service account settled why: on
+a Cloud DNS managed zone, `getIamPolicy` and `setIamPolicy` granted **at zone
+level** — by a custom role, and even by `roles/dns.admin` — are never honoured
+(403 for over four minutes), while record operations granted at the same zone
+level (record sets listed, changes created and deleted) work. A zone's IAM
+needs a project-level grant, and IAM conditions do not apply to Cloud DNS, so
+nothing would bound such a grant to one zone. Crossplane therefore gets no DNS
+capability at all; external-dns gets the records role above on the project,
+through Crossplane's ordinary `hasOnly` grant. What it may write is every zone
+of the project, and what it does write is bounded by its `--domain-filter` —
+a software bound, which is why one socle cluster per project (below) is the
+rule and not a convenience.
+
+**Why the foundations create these custom roles.** The doctrine is that
+OpenTofu never creates a role for a module ([flux-catalog §6](../flux-catalog.md)).
+On GCP a custom role is a project object Crossplane cannot make: it is denied
+`iam.roles.create` (no `roles/iam.*` may be allowed), and it must be, since a
+role it wrote could carry any permission. So the socle's custom roles —
+Crossplane's bucket role and the DNS records role — are created by the
+foundations; only Crossplane ever grants one to a module, under `hasOnly`.
+The module still declares its own binding; the foundations only define what
+the role means.
+
+**What `allowed_roles` refuses, at plan.** `roles/owner`, `roles/editor`,
+`roles/viewer`, any `roles/iam.*` and `roles/resourcemanager.*`: Crossplane
+could grant itself the project. Every **predefined admin or owner role** too
+(`roles/storage.admin`, `roles/compute.instanceAdmin.v1`,
+`roles/bigquery.dataOwner`, `roles/storage.legacyBucketOwner`, …, any ID
+ending in `admin`, `Admin`, `owner` or `Owner`): such a role carries
+`setIamPolicy` on its service's resources, and Crossplane could grant one to itself, unconditioned, and step
+outside the bound on every resource of that service. One exception,
+`roles/storage.objectAdmin`, which Velero needs: its only IAM-granting
+permission writes object ACLs, which a bucket with uniform bucket-level
+access does not have — and the velero module's bucket enforces it. A custom
+role carrying `setIamPolicy` is the one thing the plan cannot see; it stays
+the reviewer's job. And **at most nine roles**: Google accepts ten values in
+`hasOnly()`, and the DNS records role is always the tenth.
+
+**Names.** Custom role IDs take letters, digits, underscores and dots, up to
+64 characters: the cluster's name joins them with `-` turned into `_`, which
+is why the prefixes stay short (`socleCrossplaneBuckets_`, `socleDnsRecords_`).
+Custom roles are soft-deleted by Google: a destroy followed by an apply within
+the retention window finds the ID taken, and the provider undeletes the role
+rather than failing.
+
+**Blast radius, argued.** The condition names roles, not members: a
+compromised Crossplane could grant an allowed role to any principal. As on
+AWS, the list is the answer — such a grant is worth exactly the allowed
+roles, never an identity, the project, or a role that grants roles. Inside
+those roles, which secret or which bucket a module reaches is the module's
+own binding, reviewed with it (§3). The bucket prefix, like AWS's, is not
+exclusive between clusters: `socle` reaches the buckets of a `socle-prod` in
+the same project — which the topology rules out anyway.
+
+**One socle cluster per project.** A principal names the project, the
+namespace and the ServiceAccount, never the cluster: two socle clusters in
+one project are the same principal for every module, and the grants
+Crossplane makes for one serve the other. It is the supported topology;
+each environment gets its own project.
+
+**Measured on the sandbox project (2026-10-07)**, beyond what Google
+documents: under the Project IAM Admin condition, granting an allowed role
+succeeded and granting `roles/owner` was denied; under the bucket condition,
+creating a bucket inside the `<cluster>-` prefix succeeded and outside it was
+denied — `resource.name` bounds `storage.buckets.create`, which Google
+describes as a project permission — and granting `roles/storage.objectAdmin`
+on a bucket to a module's principal succeeded where `roles/storage.admin`
+was denied.
+
 What the other clouds will owe, one `crossplane` variable each:
 
-- **GCP.** The pool exists (Autopilot; outputs `workload_identity_pool`,
-  `workload_identity_principal_prefix`). Crossplane's principal
-  `…/ns/crossplane-system/sa/provider-gcp` gets the right to set IAM policy on
-  resources only — never the project's own policy, the GCP equivalent of an
-  unbounded role — restricted by an IAM condition to the roles the client
-  allows (`api.getAttribute('iam.googleapis.com/modifiedGrantsByRole', [])
-  .hasOnly([...])`: GCP's boundary). A module then binds its own principal
-  (`…/ns/external-dns/sa/external-dns`) on its own resources: no Google
-  service account. `ProviderConfig`: `credentials.source: InjectedIdentity`.
-  Caveat from the output's description: two clusters in one project share the
-  principal.
 - **Azure.** `opentofu/azure` already enables workload identity and the OIDC
   issuer. Crossplane gets a user-assigned identity federated to
   `system:serviceaccount:crossplane-system:provider-azure`, Managed Identity
@@ -178,7 +289,7 @@ What the other clouds will owe, one `crossplane` variable each:
   transiting `kube` — most likely a Secret the client creates from the
   sensitive output, like `artifact_pull_secret`.
 
-## 3. What a module declares — the AWS contract
+## 3. What a module declares — the AWS and GCP contracts
 
 A module that needs AWS access renders, in its own ResourceSet, under
 `<< if eq inputs.cloud "aws" >>`:
@@ -238,6 +349,66 @@ contract above keeps them uniform. Where the lines live: in the module's own
 template, one branch per cloud in its `access` step — the module's IAM stays
 next to the module, and a cloud without a branch simply has no role.
 
+### The GCP contract
+
+A module that needs GCP access renders, in its own ResourceSet, under
+`<< $gcpAccess := and (eq inputs.cloud "gcp") inputs.modules.crossplane.enabled >>`
+(the name every module uses; AWS keeps `$access`), **bindings, not
+identities**: the principal already exists, it is the module's own
+ServiceAccount.
+
+```yaml
+<< $principal := printf
+     "principal://iam.googleapis.com/projects/%s/locations/global/workloadIdentityPools/%s.svc.id.goog/subject/ns/%s/sa/%s"
+     inputs.cluster.projectNumber inputs.cluster.projectId "keda" "keda-operator" ->>
+apiVersion: cloudplatform.gcp.m.upbound.io/v1beta1
+kind: ProjectIAMMember
+metadata:
+  name: keda-operator
+  namespace: keda
+  annotations:
+    fluxcd.controlplane.io/reconcile: << if inputs.modules.keda.enabled >>enabled<< else >>disabled<< end >>
+spec:
+  forProvider:
+    project: << inputs.cluster.projectId | quote >>
+    role: roles/monitoring.viewer                  # must be in gcp.crossplane.allowed_roles
+    member: << $principal | quote >>
+```
+
+| Module | Managed resources | Scope |
+| --- | --- | --- |
+| external-dns | `ProjectIAMMember` `inputs.modules.crossplane.dns_records_role`, the foundations' `socleDnsRecords_<cluster>` | the project's zones; `--domain-filter` bounds what it writes — Cloud DNS honours no zone-level IAM grant and no condition |
+| external-secrets | `ProjectIAMMember` `roles/secretmanager.secretAccessor`, one per prefix | IAM condition `resource.name.startsWith('projects/<number>/secrets/<prefix>_')` |
+| keda | `ProjectIAMMember` `roles/monitoring.viewer` | the project's metrics, read-only |
+| velero | `Bucket` `<cluster>-velero-<number>` and `BucketIAMMember` `roles/storage.objectAdmin` | the bucket |
+
+The rules:
+
+- **No Google service account**, no `iam.gke.io/gcp-service-account`
+  annotation: the member is the principal above, built from
+  `inputs.cluster.projectNumber` and `inputs.cluster.projectId` — the number
+  in the path, the ID in the pool.
+- **Only roles the client allows**: a binding for any other is refused by
+  IAM through Crossplane's own condition, and the managed resource never
+  turns `Ready`. A module's documentation names the role its client must add
+  to `gcp.crossplane.allowed_roles`.
+- **A role leaves the list after the module.** Removing a role from
+  `gcp.crossplane.allowed_roles` while a module still holds it leaves that
+  binding in the project: the `hasOnly` bound forbids Crossplane the revoke.
+  Turn the module off first, then remove the role.
+- **The module scopes resources itself**, on the resource (a bucket)
+  or by an IAM condition on the binding (external-secrets' secret prefix),
+  because the role list scopes only roles.
+- **A bucket is under `<cluster>-`**, with uniform bucket-level access and
+  `managementPolicies` without `Delete` — the only buckets Crossplane may
+  create, and it can delete none.
+- The `ClusterProviderConfig default` is implied, as on AWS.
+- **The workload waits on each binding's `Ready`**, through a child
+  ResourceSet's `dependsOn` with `readyExpr`, as on AWS: a managed resource
+  not yet created carries no `Ready` condition, which a step's health check
+  reads as healthy. On GKE a pod started first would recover once the
+  binding lands (§1); the order keeps its first start clean.
+
 ### Buckets a module owns
 
 A module that keeps state in object storage owns its bucket as it owns its
@@ -262,6 +433,18 @@ for one module:
   have no `deletionPolicy` in Crossplane v2.
 - **The module's role** reaches its bucket's objects only, and the client
   allows `s3` in `aws.crossplane.allowed_services`.
+
+On GCP the same capability is `provider-gcp-storage` and the custom role
+`socleCrossplaneBuckets_<cluster>` of §2, bounded by
+`projects/_/buckets/<cluster>-`: create, read and update a bucket and its IAM
+policy, no delete and no object permission. Crossplane can never delete the
+bucket, but `storage.buckets.update` still changes its lifecycle rules and
+its uniform bucket-level access — as the AWS statement still writes
+lifecycle. The bucket is
+`<cluster>-<module>-<project number>`, with uniform bucket-level access —
+which is what keeps `roles/storage.objectAdmin`'s object ACLs out of play —
+and its binding is a `BucketIAMMember` for the module's principal, under the
+same role list.
 
 This is the one change a module that keeps data in a bucket needs in the
 foundations: generic, bounded by the cluster's prefix, and with nothing that
@@ -311,21 +494,23 @@ foundations' Crossplane identity is itself opt-in (`aws.crossplane = null`),
 so an on-by-default Crossplane would run providers that cannot authenticate;
 and on AWS it costs ~1.1 GB of memory idle, ~2 GB just after install (§7). "A module needing cloud access
 implies Crossplane" is enforced as a **plan-time error** in that module, not
-as a hidden default. The root adds a `check` that warns when
-`kube.crossplane.enabled` is set without `aws.crossplane`. Revisit when a
+as a hidden default. Each root adds a `check` that warns when
+`kube.crossplane.enabled` is set without `aws.crossplane` (`gcp.crossplane`
+on GCP). Revisit when a
 module that needs cloud access defaults on — that PR flips both defaults.
 
 ## 7. What was measured, and what floci cannot prove
 
 | | Result |
 | --- | --- |
-| Render (`flux-operator build rset`, `oci/.ci/inputs-sample.yaml`) | aws: 10 objects in three steps; gcp: the 5 of `core`, the other steps empty; `enabled = false`: none |
+| Render (`flux-operator build rset`, `oci/.ci/inputs-sample.yaml` and `inputs-sample-gcp.yaml`) | aws: 10 objects in three steps when first measured, 12 since `provider-aws-s3`; gcp: 13 — the 5 of `core`, the ServiceAccount, the `DeploymentRuntimeConfig`, five providers, the `crossplane-provider-config` child; `enabled = false`: none |
 | kubeconform strict | rendered and raw, `fluxcd.controlplane.io` kinds against flux-operator v0.60.0's own schemas (the datree catalog's `ResourceSet` predates `spec.steps`; `pr-static.yaml` now fetches `crd-schemas.tar.gz` from the release it already installs) |
 | Flux on floci's k3s, local | `crossplane` ResourceSet Ready 99 s cold; the client's `resourcesRBACManager.requests.memory = 48Mi` beats the socle's 32Mi on the live Deployment; the chart's limits gone |
 | Role → IAM, local | Ready in 3–6 s; `aws iam get-role` shows `/socle/<cluster>/`, the Pod Identity trust and the inline policy; deleted → gone from IAM in 1–2 s |
 | Off, local | namespace gone in 18 s. **Left behind**: 21 Crossplane CRDs, 71 provider CRDs, the `crossplane-no-usages` webhook configuration (it matches only objects labelled `crossplane.io/in-use`, which then cannot be deleted by hand) |
 | Back on, local | ~5 min: the providers re-adopt their leftover CRDs slowly (3.5 min to Healthy, against 89 s cold) |
-| Memory with the AWS providers | core 109–138Mi, RBAC manager 17–21Mi, `provider-family-aws` 306–401Mi, `provider-aws-iam` 323–441Mi, `provider-aws-eks` 327–374Mi — ~1.1 GB. Requests: core 50m/128Mi, RBAC manager 10m/32Mi, providers 50m/320Mi each (one `DeploymentRuntimeConfig`), no limits |
+| Memory with the GCP providers | Measured on the GKE sandbox (2026-10-07): core 176Mi, RBAC manager 18Mi, 165–222 MiB working set per provider pod, against the 320Mi request (the AWS one, CPU 100m), set on purpose: Autopilot gives a container without requests 500m / 2Gi and bills it — five providers would reserve 10Gi. No limit is set by Autopilot on this cluster, and no pod restarted |
+| Memory with the AWS providers | core 109–138Mi, RBAC manager 17–21Mi, `provider-family-aws` 306–401Mi, `provider-aws-iam` 323–441Mi, `provider-aws-eks` 327–374Mi — ~1.1 GB. Requests: core 50m/128Mi (192Mi since the GKE sandbox measured it at 176Mi), RBAC manager 10m/32Mi, providers 50m/320Mi each (one `DeploymentRuntimeConfig`), no limits; every container states its ephemeral storage too ([sizing](../gcp/sizing.md)) |
 | e2e, CI (`e2e-aws-catalog`, step "Crossplane turns on, turns a module's Role into an IAM role, turns off"; [run 35903123437](https://github.com/do-now-io/socle/actions/runs/35903123437)) | `crossplane` Ready **58 s** after the apply returned; the client's 48Mi on the live Deployment, no limits; module-shaped Role → IAM role under `/socle/socle-e2e-catalog/` in **62 s**, gone 32 s after its deletion; association `Synced=False` as expected; off → HelmRelease gone. Memory right after install: core 148Mi, providers 550–662Mi each (~2 GB, settling towards the local ~1.1 GB). **Job: 6m24s**, up from 3m35s |
 
 Local measurements were taken on an earlier revision that also installed two

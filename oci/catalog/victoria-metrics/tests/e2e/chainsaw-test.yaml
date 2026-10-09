@@ -202,7 +202,7 @@ spec:
     # socle's document, then kube.victoria_metrics.values, then the Secret the client
     # names in values_secret — created by him in the module's namespace, never
     # read by OpenTofu, merged last. 160Mi in values and 176Mi in the Secret:
-    # the live object carries the Secret's; both cleared, the socle's 128Mi.
+    # the live object carries the Secret's; both cleared, the socle's 192Mi.
     - name: kube.victoria_metrics.values_secret is merged last, over values and the socle
       try:
         - apply:
@@ -279,7 +279,7 @@ spec:
                   spec:
                     (containers[0].resources || `{}`):
                       requests:
-                        memory: 128Mi
+                        memory: 192Mi
               status:
                 (conditions[?type == 'Available'] || `[]`):
                   - status: 'True'

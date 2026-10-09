@@ -39,6 +39,18 @@ measured:
    client writes, neither Flux nor a socle component ever waits on Kyverno.
    A client whose own ResourceSets live in `flux-system` would see their
    namespaces excluded too: his belong elsewhere, or in his ArgoCD.
+   On GCP the selector also names the namespaces which GKE runs:
+   `kube-node-lease`, `gke-managed-system`, `gke-managed-cim`,
+   `gke-managed-filestorecsi`, `gke-managed-networking-dra-driver`,
+   `gke-managed-parallelstorecsi`, `gke-managed-volumepopulator`,
+   `gke-gmp-system`, `gmp-system`, `gmp-public`. GKE keeps mutating webhooks
+   out of its managed namespaces by rewriting their configuration; excluding
+   them ourselves leaves it nothing to rewrite and Kyverno nothing to rewrite
+   back. A selector matches no prefix, so each is named: the list is what
+   `kubectl get ns` showed on a 1.35 Autopilot cluster of the sandbox
+   (2026-10-07), plus `gke-managed-cim` and `gmp-system`, which GKE
+   documents. A namespace a later GKE version adds is not excluded until it
+   joins the list.
 2. **Audit goes through Kyverno, and fails open.** The policies' webhooks are
    registered with `failurePolicy: Ignore`. Kyverno down admits. Nothing to
    refuse is lost, since an Audit policy refuses nothing.

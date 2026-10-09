@@ -40,7 +40,11 @@ and `-client-values` (labelled `reconcile.fluxcd.io/watch`), and a
 - `retentionPeriod` from `retention`;
 - persistence from `storage_size`;
 - the `prometheus.io/*` annotations on `:10428`;
-- requests of 50m / 128Mi.
+- requests of 50m / 128Mi, and an ephemeral-storage request that follows
+  `storage_size`: 64Mi with a claim, **2Gi** without — the `emptyDir`
+  counts against it, and GKE Autopilot makes it the limit (a pod past it is
+  evicted, its data lost; on EKS it is first evicted under DiskPressure).
+  Raise it in `values` to keep more.
 
 When disabled — the default — the operator applies nothing.
 

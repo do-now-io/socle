@@ -183,8 +183,8 @@ declaration would be a no-op). A root that groups its inputs in an object
 OpenTofu keeps that null — the child module's default is *not* applied —
 unless the variable itself declares `nullable = false` (measured, 1.12.6).
 That is what lets the root stay bare passthrough with no copy of the
-modules' defaults. `gcp`, `azure` and `scaleway` get the same declaration
-when their roots are written — pending.
+modules' defaults. `gcp` carries the same declaration since its root was
+written; `azure` and `scaleway` get it with theirs — pending.
 
 ### Interface
 
@@ -252,7 +252,8 @@ provider "helm" { kubernetes = module.foundations.helm_kubernetes }
 ```
 
 The object is `{ host, cluster_ca_certificate, exec = { api_version, command,
-args } }`. **No token, no kubeconfig**: the exec plugin gets a short-lived
+args } }`, without `cluster_ca_certificate` on GCP (below). **No token, no
+kubeconfig**: the exec plugin gets a short-lived
 token at call time from the runner's ambient credentials, exactly as the
 cloud provider does. A raw kubeconfig would put a credential in the state,
 which three of the four modules refuse by design, and the helm provider does
@@ -261,7 +262,7 @@ not accept a kubeconfig string anyway.
 | Cloud | `exec` | Note |
 | --- | --- | --- |
 | AWS | `aws eks get-token --cluster-name …` | measured on floci |
-| GCP | `gke-gcloud-auth-plugin` | host is the DNS endpoint |
+| GCP | `gke-gcloud-auth-plugin` | host is the DNS endpoint, verified by the system trust store: no `cluster_ca_certificate`. The endpoint serves a Google Trust Services certificate, not one the cluster CA signed; with the CA pinned, helm failed `x509: certificate signed by unknown authority` (measured on the sandbox, 2026-10-07) |
 | Azure | `kubelogin get-token --login azurecli --server-id 6dae42f8-4368-4678-94ff-3960e28e3630` | *to verify* — only authenticates a cluster with Entra ID auth enabled (`azure_active_directory_role_based_access_control`), which `opentofu/azure` does not configure yet; enabling it is a pending decision for `docs/azure` — until then this is the shape a root will consume, not a working login |
 | Scaleway | a `sh -c` exec emitting an `ExecCredential` from `SCW_SECRET_KEY` | built: minted at call time, no token in state |
 
@@ -389,6 +390,15 @@ Rules for a module template, all measured:
   have to carry and a client would have to wire through his tfvars, and each
   new module would add four more. That is unlivable, and it is the reason
   Crossplane is in the socle at all.
+
+  One exception, and it is a definition, not a grant: **on GCP the
+  foundations create the socle's custom roles** (`opentofu/gcp`: Crossplane's
+  bucket role, and the DNS records role external-dns is bound to). A custom
+  role is a project object Crossplane cannot make — it is denied
+  `iam.roles.create`, as it must be, since a role it wrote could carry any
+  permission. Only Crossplane ever grants such a role to a module, from that
+  module's own ResourceSet, under its `hasOnly` condition
+  ([crossplane.md §2](catalog/crossplane.md#on-gcp--opentofugcp)).
 
   The rule this enforces is an invariance: **a foundations module never
   changes because of the catalog.** `opentofu/aws` describes a cluster, and it
@@ -613,8 +623,9 @@ bootstrap module's validations (one failing case per block, plus the
 normalisation and the value-kind check), a check that `VERSION` and every
 `local.socle_version` agree, and two `kubeconform` passes. (a) The
 renders are kubeconformed **strictly**: `flux-operator build rset` of every
-`oci/catalog/*/resourceset.yaml` with `oci/.ci/inputs-sample.yaml`, and
-`helm template` of `opentofu/bootstrap/manifests` with
+`oci/catalog/*/resourceset.yaml` for each cloud the catalog runs on — aws
+with `oci/.ci/inputs-sample.yaml`, gcp with `oci/.ci/inputs-sample-gcp.yaml`
+— and `helm template` of `opentofu/bootstrap/manifests` with
 `oci/.ci/envelope-values.yaml` (its root `ResourceSet` also built, with
 `--inputs-from-provider`). (b) The raw templates under `oci/catalog` and
 `oci/clusters` are also kubeconformed, still with `-strict`, but with
@@ -765,7 +776,7 @@ the `flux-instance` chart is the follow-up if the apply itself must fail.
 
 ## 10. Out of scope for v1
 
-Real catalog modules (cert-manager, external-dns, monitoring); the GCP, Azure
+Real catalog modules (cert-manager, external-dns, monitoring); the Azure
 and Scaleway roots; the health check Job; multi-instance modules; a mirror
 registry per client.
 

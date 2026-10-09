@@ -15,10 +15,10 @@ Karpenter (#53) the nodes follow. Issue #60; the module contract is
 | Question | Position |
 | --- | --- |
 | Chart | Official `keda` 2.21.0 (app 2.21.0), from `https://kedacore.github.io/charts`. **No OCI chart exists upstream** — `ghcr.io/kedacore/charts/keda` answers 403 to an anonymous pull (measured 2026-09-30) — so an HTTPS `HelmRepository`, pinned exactly |
-| Where | Every cloud, the same template. Only the cloud-access block is AWS-specific |
+| Where | Every cloud, the same template. Only the cloud-access block is per cloud: AWS and GCP |
 | Default | **Off.** KEDA does nothing until a client writes a `ScaledObject`, and it costs three pods and an API service |
-| Cloud access | **None by default.** `kube.keda.services` names the AWS services KEDA's **own** role may *read* — `sqs`, `cloudwatch`, `kinesis`, `dynamodb` — and the module declares that role through Crossplane with **one read-only statement per service named**, nothing for the rest, no role at all when the list is empty (§2) |
-| Identity model | The operator's own role, bound by EKS Pod Identity to `keda/keda-operator`. Per-workload roles (`identityOwner: workload`, `roleArn`) are **not possible under the socle's boundary** — argued in §2 |
+| Cloud access | **None by default.** `kube.keda.services` names the services of the cluster's cloud KEDA's **own** identity may *read*. On AWS — `sqs`, `cloudwatch`, `kinesis`, `dynamodb` — the module declares that role through Crossplane with **one read-only statement per service named**, nothing for the rest, no role at all when the list is empty (§2). On GCP — `pubsub` only — one `roles/monitoring.viewer` binding at project level on the operator's principal (§2, *On GCP*) |
+| Identity model | The operator's own identity: on AWS its role, bound by EKS Pod Identity to `keda/keda-operator`; on GCP the Workload Identity principal `…/subject/ns/keda/sa/keda-operator` itself, **no Google service account**. Per-workload roles (`identityOwner: workload`, `roleArn`) are **not possible under the socle's boundary** on AWS — argued in §2 |
 | External metrics API | KEDA registers `v1beta1.external.metrics.k8s.io`; nothing else in the catalog does (metrics-server is `metrics.k8s.io`). Asserted Available in the e2e |
 | Admission webhooks | Kept, `failurePolicy: Ignore` — the chart's default, stated (§4) |
 | CRDs | Installed by the chart, **kept on uninstall**: turning the module off never deletes a client's `ScaledObject` (§4) |
@@ -38,9 +38,12 @@ carries its own cloud access
      holds (checked on the rendered chart).
   2. On AWS, with Crossplane on **and at least one service named**: the IAM
      `Role/keda-operator` and the `PodIdentityAssociation/keda-operator`,
-     [crossplane.md](crossplane.md) §3's contract (§2 below).
+     [crossplane.md](crossplane.md) §3's contract (§2 below). On GCP, with
+     Crossplane on and `pubsub` named: the `ProjectIAMMember/keda-operator`
+     (§2, *On GCP*).
   3. The child ResourceSet `keda-workload`, which `dependsOn` the Role and the
-     association with `readyExpr` on `Ready=True` when they are rendered —
+     association — on GCP the `ProjectIAMMember` — with `readyExpr` on
+     `Ready=True` when they are rendered —
      the explicit expression external-dns measured as necessary, since a
      managed resource not yet created carries no `Ready` condition and
      kstatus reads that as healthy.
@@ -178,6 +181,147 @@ module handles:
 - **Back to `[]`**: the Role and the association are garbage-collected, the
   annotation empties, the operator rolls without credentials.
 
+### On GCP — `pubsub`, one Cloud Monitoring read on the operator's principal
+
+On GCP the list may name **`pubsub` only**; OpenTofu refuses every other name
+at plan, AWS's included. It turns into one Crossplane managed resource, under
+`and (eq inputs.cloud "gcp") inputs.modules.crossplane.enabled (has "pubsub" inputs.modules.keda.services)`:
+
+| Object | What it is |
+| --- | --- |
+| `cloudplatform.gcp.m.upbound.io/v1beta1` `ProjectIAMMember` `keda/keda-operator` | `project` = `inputs.cluster.projectId`, `role: roles/monitoring.viewer`, `member: principal://iam.googleapis.com/projects/<project number>/locations/global/workloadIdentityPools/<project id>.svc.id.goog/subject/ns/keda/sa/keda-operator` |
+
+**Why Monitoring and not Pub/Sub.** KEDA's `gcp-pubsub` scaler never calls
+the Pub/Sub API: it asks Cloud Monitoring for the subscription's
+`pubsub.googleapis.com/subscription/num_undelivered_messages` (the default
+mode; `oldest_unacked_message_age` and the topic metrics the same way), with an
+MQL `QueryTimeSeries` — `GetMetricsAndActivity` in
+`pkg/scalers/gcp_pubsub_scaler.go` and `QueryMetrics` in
+`pkg/scalers/gcp/gcp_stackdriver_client.go`, v2.21.0. So the operator needs
+`monitoring.timeSeries.list`, and `roles/monitoring.viewer` is the narrowest
+predefined role that holds it; `roles/pubsub.viewer`, which #68 first listed,
+would grant nothing the scaler uses. The socle cannot mint a narrower custom
+role for a module: Crossplane's principal may grant only the roles the client
+lists ([crossplane.md](crossplane.md) §2). Project level, `Resource "*"`'s
+counterpart: the subscriptions are named in the client's `ScaledObject`s,
+which the socle does not read. The width is **every metric of the project and
+the monitoring configuration, read-only — never a message**. The same binding
+serves `gcp-stackdriver`, `gcp-cloudtasks` and the `prometheus` scaler on
+Cloud Monitoring's PromQL endpoint, which read the same API; `pubsub` is the
+name the client writes because it is the reason he writes it.
+
+**No Google service account.** With `podIdentity.provider: gcp`, KEDA builds
+its Monitoring clients with no option at all — `monitoring.NewMetricClient(ctx)`
+and `NewQueryClient(ctx)` in `NewStackDriverClientPodIdentity`, and
+`google.DefaultTokenSource` in `pkg/scalers/gcp/gcp_common.go` for the
+Prometheus path — which is Application Default Credentials, answered on GKE
+by the metadata server with a token for the pod's own Kubernetes
+ServiceAccount: the principal above, bound directly. The project id comes from
+the same metadata server. The chart's `podIdentity.gcp.enabled` is therefore
+left **off**: it annotates the ServiceAccount with
+`iam.gke.io/gcp-service-account`, which would make the operator impersonate a
+Google service account the binding does not name.
+
+**The client allows the role.** Crossplane's own grant on the project is
+bounded by `gcp.crossplane.allowed_roles` (`hasOnly`, [crossplane.md](crossplane.md) §2):
+`roles/monitoring.viewer` must be in that list, in the same tfvars as
+`kube.keda.services`. If it is not, the binding stays `Synced=False` with the
+IAM refusal on its condition, the child ResourceSet waits, and `socle-root`
+stays not Ready — the AWS boundary's behaviour, nothing half-deployed. The
+plan cannot check it, for the same reason as on AWS.
+
+```hcl
+gcp = {
+  crossplane = { allowed_roles = ["roles/monitoring.viewer"] }
+}
+kube = {
+  crossplane = { enabled = true }
+  keda       = { enabled = true, services = ["pubsub"] }
+}
+```
+
+**When the list changes.** GKE hands the operator a token at each call, not
+at admission, so a pod started before its binding reads as soon as IAM has
+propagated it (seconds to minutes) — no roll needed. The ordering and the
+`socle.do-now.io/cloud-access` annotation are kept anyway, the same chain as
+on AWS: the chart waits for the binding on first enable, and adding or
+removing `pubsub` rolls the operator. Back to `[]`, Crossplane removes the
+binding.
+
+**Two clusters in one project share the principal.** The Workload Identity
+pool is the project's, so `…/ns/keda/sa/keda-operator` is the same principal
+on both, and both clusters declare the same binding. Turning `pubsub` off on
+one — or destroying it — removes the binding for the other too, until its
+Crossplane writes it back at the next reconcile.
+
+#### What a client writes
+
+A `TriggerAuthentication` with no secret, and a `ScaledObject` that names it:
+
+```yaml
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: operator-principal
+  namespace: orders
+spec:
+  podIdentity:
+    provider: gcp           # the operator's own principal, the binding above
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: orders-worker
+  namespace: orders
+spec:
+  scaleTargetRef:
+    name: orders-worker
+  minReplicaCount: 0
+  maxReplicaCount: 20
+  triggers:
+    - type: gcp-pubsub
+      authenticationRef:
+        name: operator-principal
+      metadata:
+        subscriptionName: orders-worker   # or projects/<id>/subscriptions/<name>
+        mode: SubscriptionSize            # num_undelivered_messages
+        value: "50"                       # messages per replica
+        activationValue: "0"
+```
+
+KEDA has deprecated its MQL-based GCP scalers in favour of the `prometheus`
+scaler on Cloud Monitoring's PromQL endpoint
+([KEDA blog, 2025-09-15](https://keda.sh/blog/2025-09-15-gcp-deprecations)),
+while keeping them as long as Google serves MQL. The same
+`TriggerAuthentication` and the same binding serve that form:
+
+```yaml
+    - type: prometheus
+      authenticationRef:
+        name: operator-principal
+      metadata:
+        serverAddress: https://monitoring.googleapis.com/v1/projects/<project id>/location/global/prometheus
+        query: 'max({"__name__"="pubsub.googleapis.com/subscription/num_undelivered_messages","monitored_resource"="pubsub_subscription","subscription_id"="orders-worker"})'
+        threshold: "50"
+```
+
+**The workload's own access is the client's, not the socle's.** The binding
+above lets KEDA *count* the messages; the Deployment it scales must still
+*pull* them, as its own principal —
+`principal://…/subject/ns/orders/sa/orders-worker` — with
+`roles/pubsub.subscriber` on its subscription. That binding belongs to the
+client's application, with the subscription, in the client's own
+Terraform or Crossplane, never in `kube.keda`: the socle's list grants the
+operator a read of metrics, and nothing on any client resource.
+
+```hcl
+resource "google_pubsub_subscription_iam_member" "orders_worker" {
+  subscription = google_pubsub_subscription.orders_worker.name
+  role         = "roles/pubsub.subscriber"
+  member       = "principal://iam.googleapis.com/projects/${data.google_project.this.number}/locations/global/workloadIdentityPools/${data.google_project.this.project_id}.svc.id.goog/subject/ns/orders/sa/orders-worker"
+}
+```
+
 ### What `services` is not
 
 `services` is **not** the list of sources KEDA watches. Every scaler works
@@ -188,12 +332,13 @@ referencing a Secret in the client's namespace, which the module never
 touches. `services` is only a shortcut on top of that: *let Crossplane mint
 the operator's own role from a list of names, so no credential is needed at
 all*. The list is always **the services of the cluster's cloud**: a role on
-AWS cannot read Pub/Sub, so `["sqs", "pubsub"]` is refused, as is `rds`.
+AWS cannot read Pub/Sub, so `["sqs", "pubsub"]` is refused, as is `rds`; on
+GCP `["sqs"]` is refused the same way.
 
 | The source is… | How KEDA reaches it |
 | --- | --- |
-| An API of the cluster's cloud, with a Crossplane provider (aws today) | `services`: the operator's own role, no credential anywhere |
-| An API of the cluster's cloud, no Crossplane provider yet (gcp, azure) | The client binds an identity he made through `values` (`podIdentity.gcp`, `podIdentity.azureWorkload`); `services` is refused until the branch lands |
+| An API of the cluster's cloud, with a Crossplane provider (aws, gcp) | `services`: the operator's own identity, no credential anywhere |
+| An API of the cluster's cloud, no Crossplane provider yet (azure) | The client binds an identity he made through `values` (`podIdentity.azureWorkload`); `services` is refused until the branch lands |
 | An API of another cloud, Scaleway Messaging, or not a cloud API at all (Kafka, RabbitMQ, Redis, Postgres) | A `TriggerAuthentication` referencing the client's Secret — what the e2e does on floci |
 | Prometheus, cron | Nothing to grant |
 
@@ -202,17 +347,30 @@ RDS, the usual question: there is no RDS scaler. A table's depth is the
 (connections, CPU) is the `aws-cloudwatch` scaler on the `AWS/RDS` namespace,
 which `services = ["cloudwatch"]` grants to the operator's role.
 
+### An unavailable metrics apiserver blocks namespace deletion
+
+KEDA registers `external.metrics.k8s.io` as an aggregated API, served by
+`keda-operator-metrics-apiserver`. While that Deployment cannot run, the
+group goes stale and the namespace controller's discovery fails for the whole
+cluster, not for `keda` alone. Measured on the GKE sandbox (2026-10-07): with
+the metrics apiserver Pending, `external.metrics.k8s.io` went stale and a
+terminating namespace hung on "Discovery failed". Keep the metrics apiserver
+schedulable (capacity, no failing admission) before tearing anything down.
+
 ### Crossplane off, or another cloud
 
 With Crossplane off the list must be empty — refused at plan otherwise, with
 both ways out named. A client who made the operator's identity outside the
 socle (on AWS: a role and a Pod Identity association for `keda/keda-operator`)
 just leaves the list empty; the module renders no role and the pod picks the
-association up. On GKE and AKS the chart's own switches do the binding
-through `values`: `podIdentity.gcp.enabled` with `gcpIAMServiceAccount`,
-`podIdentity.azureWorkload.enabled` with `clientId` and `tenantId`. Those
-clouds get a `services` branch when their Crossplane provider lands
-([crossplane.md](crossplane.md) §2), and `services` is refused on them until
+association up. On GKE the same holds with no `values` at all: a client who
+binds `roles/monitoring.viewer` to `…/ns/keda/sa/keda-operator` himself
+leaves the list empty, and the operator reads with its own principal (or he
+sets `podIdentity.gcp.enabled` with `gcpIAMServiceAccount` to use a Google
+service account he made). On AKS the chart's own switch does the binding
+through `values`: `podIdentity.azureWorkload.enabled` with `clientId` and
+`tenantId`. Azure gets a `services` branch when its Crossplane provider lands
+([crossplane.md](crossplane.md) §2), and `services` is refused there until
 then rather than silently ignored.
 
 ## 3. What the client may set — `kube.keda`
@@ -220,7 +378,7 @@ then rather than silently ignored.
 | Attribute | Default | Rule, checked at plan |
 | --- | --- | --- |
 | `enabled` | `false` | bool |
-| `services` | `[]` | A list drawn from `sqs`, `cloudwatch`, `kinesis`, `dynamodb`. Non-empty needs `kube.crossplane.enabled`, `cloud = aws` and a non-empty `region` (the association is regional) |
+| `services` | `[]` | On aws, a list drawn from `sqs`, `cloudwatch`, `kinesis`, `dynamodb`; on gcp, `pubsub` only. Non-empty needs `kube.crossplane.enabled`, `cloud` aws or gcp, and on aws a non-empty `region` (the association is regional) |
 | `values` | `{}` | Free-form chart values, secrets refused (below) |
 | `values_secret` | `""` | A Secret name in `keda` with a `values.yaml` key, merged last, never read by OpenTofu |
 
@@ -250,7 +408,8 @@ Both land in `values_secret` instead — or, better, in a Secret a
 Each is a default in `keda-socle-values`; `values` can still override it.
 
 - **`serviceAccount.operator.name: keda-operator`** — the subject of the
-  Pod Identity association, named so the binding is visible in one place.
+  Pod Identity association on AWS and of the principal on GCP, named so the
+  binding is visible in one place.
 - **`crds.install: true`, `crds.additionalAnnotations: helm.sh/resource-policy:
   keep`.** The chart ships its CRDs as templates, so Helm would delete them at
   uninstall — and every `ScaledObject` with them, while the operator that
@@ -309,10 +468,19 @@ current replica count; after, the object is inert.
 - **Render.** `flux-operator build rset` with `oci/.ci/inputs-sample.yaml`
   (aws, Crossplane on, `services: [sqs, cloudwatch]`): `Namespace`, `Role`,
   `PodIdentityAssociation`, the child `ResourceSet` — 4 objects, `kubeconform
-  -strict` valid. With `services: []`, or on gcp: `Namespace` and the child
+  -strict` valid. With `services: []`: `Namespace` and the child
   only, no `dependsOn`, the annotation `""`. With all four services: the
   policy of §2, valid JSON. The raw template passes `kubeconform -strict`
   too.
+- **Render on gcp** (2026-10-07), the gcp sample with `services: [pubsub]`
+  and Crossplane on: `Namespace`, `ProjectIAMMember` (`roles/monitoring.viewer`,
+  the principal of `ns/keda/sa/keda-operator` in project `sandbox-2bace`,
+  number `320449067541`), the child `ResourceSet` with its one `dependsOn` —
+  3 objects, `kubeconform -strict` valid against the `ProjectIAMMember` CRD of
+  provider-upjet-gcp v3.0.0 (`package/crds/cloudplatform.gcp.m.upbound.io_projectiammembers.yaml`).
+  With `services: []`, or Crossplane off: `Namespace` and the child only, no
+  `dependsOn`, the annotation `""`. The AWS renders (the sample, `[]`, all
+  four services) are byte-identical before and after the gcp branch.
 - **The chart's own schema.** The socle's document and a client override
   (`resources.operator.requests.memory: 160Mi`), merged in that order, pass
   `helm template` of chart 2.21.0, whose `values.schema.json` refuses an
@@ -320,7 +488,7 @@ current replica count; after, the object is inert.
   request, the socle's cpu request, the annotation, and the security context
   restricted needs.
 - **`tofu test`.** The bootstrap's runs pass; each of the six validations
-  has a failing case (`rds`, `*`, no Crossplane, gcp, empty region, a
+  has a failing case (`rds`, `*`, no Crossplane, `sqs` on gcp, empty region, a
   credential in `operator.env`, a Secret in `extraObjects`, a non-list, a
   non-object, a bad Secret name), and four passing runs cover the defaults,
   the services flowing through, on-without-services planning with no
@@ -354,6 +522,20 @@ the Role read from `status.atProvider` under `/socle/<cluster>/` with the one
 `sqs:GetQueueAttributes` statement and none of the other services, the
 association `Synced=False` and the workload withheld (the two floci seams, steps
 of their own), off deleting the IAM role.
+
+**e2e on GKE** (`keda-module-gcp`, `cloud: gcp`, `platform: gke`), run
+against the sandbox with the module as its tfvars leave it: the
+`ProjectIAMMember` Synced and Ready with the role and the principal of
+`ns/keda/sa/keda-operator` in the binding's own project; `keda-workload`
+depending on it and Ready; the operator's ServiceAccount carrying **no**
+`iam.gke.io/gcp-service-account`; the annotation `pubsub`; the three
+Deployments and the external metrics API Available. Then the functional
+proof: a `ScaledObject` on `gcp-pubsub` through a `TriggerAuthentication`
+with `podIdentity.provider: gcp`, on a subscription that does not exist and
+`valueIfNull: "0"`, takes a Deployment from one to **zero**. KEDA never
+scales on a scaler error, so zero is reached only through a query Cloud
+Monitoring authorised for the operator's principal — no script, no Pub/Sub
+resource to create. Figures land here with the sandbox run.
 
 ### What floci proves, and what needs a real account
 
@@ -390,8 +572,11 @@ credentials, is the sandbox EKS apply — issue #60's *next step 2*.
   service). The natural v2 of `services`: `services = { sqs = ["arn:…"] }`,
   or a sibling attribute. The action scoping ships first because it is what
   a client asks for and what the boundary mirrors.
-- **`services` on gcp, azure, scaleway** — each waits for its Crossplane
+- **`services` on azure, scaleway** — each waits for its Crossplane
   provider; the chart's own workload-identity switches serve meanwhile.
+  `cloudtasks` and `monitoring` on gcp, which #68 listed, are not separate
+  names: the `pubsub` binding already grants the Cloud Monitoring read those
+  scalers make (§2, *On GCP*).
 - **`ScaledJob`s, `ClusterTriggerAuthentication`s** — the client's objects;
   the module installs the CRDs and nothing more.
 - **An operator role assuming workload roles** — refused by the boundary,

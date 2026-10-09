@@ -24,6 +24,9 @@
 # Not provable on floci: the association reaching EKS, the pod getting the
 # role's credentials, IAM enforcing the policy and the boundary, EBS CSI
 # snapshots — the sandbox's (docs/catalog/velero.md §9).
+#
+# On gcp, velero-module-gcp at the end of this file: run by hand on the
+# sandbox's GKE, the module as the sandbox's root turned it on.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -1497,3 +1500,478 @@ spec:
             namespace: flux-system
             selector: app=helm-controller
             tail: 40
+---
+# The GCP proof, run by hand against the sandbox's GKE Autopilot (no GKE in
+# CI). The sandbox's root turns Crossplane and the module on, with
+# roles/storage.objectAdmin in gcp.crossplane.allowed_roles: this test reads
+# the module as it stands and never turns it off, as crossplane-module-gcp.
+# Pass the cluster's name, `--set cluster=<name>`: the bucket is named after
+# it and the project number, which the test does not know.
+#
+# What floci never proved on AWS, proven here: the bucket created by
+# Crossplane under the cluster's prefix with uniform access, the binding to
+# velero-server's own principal, the server reaching the bucket on Workload
+# Identity Federation with no key and no Google service account, a
+# Persistent Disk snapshot taken by GKE's CSI driver, and the data back
+# after the namespace is deleted. No script: the restored pod reports what
+# it found in its volume through an init container's termination message.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: velero-module-gcp
+  labels:
+    phase: module
+    cloud: gcp
+    platform: gke
+spec:
+  description: >-
+    On, the module's bucket and its binding through Crossplane, the server on
+    the bucket with its own principal, then a backup by PD snapshot and a
+    restore with the data.
+  timeouts:
+    # Autopilot provisions a node for pods that do not fit, minutes before
+    # one starts; a snapshot and a disk from it take minutes too.
+    assert: 10m
+    error: 3m
+    delete: 5m
+  steps:
+    - name: the bucket is under the cluster's prefix, uniform access, versioned, never deleted
+      try:
+        - assert:
+            resource:
+              apiVersion: storage.gcp.m.upbound.io/v1beta2
+              kind: Bucket
+              metadata:
+                name: velero
+                namespace: velero
+                annotations:
+                  (starts_with("crossplane.io/external-name", join('', [$values.cluster, '-velero-']))): true
+              spec:
+                (contains(managementPolicies, 'Delete')): false
+                (contains(managementPolicies, '*')): false
+                forProvider:
+                  uniformBucketLevelAccess: true
+                  publicAccessPrevention: enforced
+                  versioning:
+                    enabled: true
+              status:
+                # What GCS reports, not only what was asked.
+                atProvider:
+                  uniformBucketLevelAccess: true
+                  publicAccessPrevention: enforced
+                  versioning:
+                    enabled: true
+                  # Matched as a tree, not compared in a filter: atProvider
+                  # carries the integer 30, which a JMESPath `30` literal
+                  # (a float) never equals; the tree compares numbers by
+                  # value. The one rule the module writes.
+                  (lifecycleRule[?action.type == 'Delete'] || `[]`):
+                    - condition:
+                        daysSinceNoncurrentTime: 30
+                        withState: ARCHIVED
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'Synced'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: storage.gcp.m.upbound.io/v1beta2
+            kind: Bucket
+            namespace: velero
+        - podLogs:
+            namespace: crossplane-system
+            selector: pkg.crossplane.io/provider=provider-gcp-storage
+            tail: 40
+    # The binding Crossplane may write only with roles/storage.objectAdmin
+    # in allowed_roles; the member is the pod's own principal, no Google
+    # service account between.
+    - name: velero-server's principal is bound to roles/storage.objectAdmin on that bucket
+      try:
+        - assert:
+            resource:
+              apiVersion: storage.gcp.m.upbound.io/v1beta1
+              kind: BucketIAMMember
+              metadata:
+                name: velero-server
+                namespace: velero
+              spec:
+                forProvider:
+                  role: roles/storage.objectAdmin
+                  (starts_with(bucket, join('', [$values.cluster, '-velero-']))): true
+                  (starts_with(member, 'principal://iam.googleapis.com/projects/')): true
+                  (ends_with(member, '.svc.id.goog/subject/ns/velero/sa/velero-server')): true
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'Synced'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: storage.gcp.m.upbound.io/v1beta1
+            kind: BucketIAMMember
+            namespace: velero
+        - podLogs:
+            namespace: crossplane-system
+            selector: pkg.crossplane.io/provider=provider-gcp-storage
+            tail: 40
+    - name: the server reaches the bucket on its own principal, no node-agent, the PD class
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: velero-workload
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: velero
+                labels:
+                  pod-security.kubernetes.io/enforce: restricted
+        # No annotation, no key: the ServiceAccount is the principal.
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ServiceAccount
+              metadata:
+                name: velero-server
+                namespace: velero
+                (contains(keys(annotations || `{}`), 'iam.gke.io/gcp-service-account')): false
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: velero
+                namespace: velero
+              spec:
+                template:
+                  spec:
+                    serviceAccountName: velero-server
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        # Available: the plugin started on the metadata server's
+        # credentials, with the serviceAccount placeholder it requires, and
+        # listed the bucket.
+        - assert:
+            resource:
+              apiVersion: velero.io/v1
+              kind: BackupStorageLocation
+              metadata:
+                name: default
+                namespace: velero
+              spec:
+                provider: gcp
+                objectStorage:
+                  (starts_with(bucket, join('', [$values.cluster, '-velero-']))): true
+                config:
+                  serviceAccount: no-google-service-account
+              status:
+                phase: Available
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: node-agent
+                namespace: velero
+        - assert:
+            resource:
+              apiVersion: snapshot.storage.k8s.io/v1
+              kind: VolumeSnapshotClass
+              metadata:
+                name: velero-pd
+                labels:
+                  velero.io/csi-volumesnapshot-class: 'true'
+              driver: pd.csi.storage.gke.io
+              deletionPolicy: Retain
+      catch:
+        - describe:
+            apiVersion: velero.io/v1
+            kind: BackupStorageLocation
+            namespace: velero
+        - describe:
+            apiVersion: v1
+            kind: Pod
+            namespace: velero
+        - podLogs:
+            namespace: velero
+            selector: app.kubernetes.io/name=velero
+            tail: 80
+    # The check init container writes the proof into an empty volume, or
+    # reports what the volume already holds: through its termination
+    # message, which the pod's status carries — no exec, no script.
+    - name: a labelled application writes a file into its Persistent Disk
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: e2e-velero
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: PersistentVolumeClaim
+              metadata:
+                name: data
+                namespace: e2e-velero
+                labels:
+                  socle.do-now.io/backup-frequency: daily
+                  socle.do-now.io/backup-retention: 7d
+              spec:
+                accessModes: [ReadWriteOnce]
+                # Autopilot's class on pd.csi.storage.gke.io, the driver the
+                # volume policy snapshots.
+                storageClassName: standard-rwo
+                resources:
+                  requests:
+                    storage: 10Gi
+        - apply:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: app
+                namespace: e2e-velero
+                labels:
+                  socle.do-now.io/backup-frequency: daily
+                  socle.do-now.io/backup-retention: 7d
+              spec:
+                replicas: 1
+                strategy:
+                  type: Recreate
+                selector:
+                  matchLabels:
+                    app: e2e-velero
+                template:
+                  metadata:
+                    labels:
+                      app: e2e-velero
+                      socle.do-now.io/backup-frequency: daily
+                      socle.do-now.io/backup-retention: 7d
+                  spec:
+                    securityContext:
+                      runAsNonRoot: true
+                      runAsUser: 65532
+                      runAsGroup: 65532
+                      fsGroup: 65532
+                      seccompProfile:
+                        type: RuntimeDefault
+                    initContainers:
+                      - name: check
+                        image: docker.io/library/busybox:1.37
+                        command:
+                          - sh
+                          - -c
+                          - >-
+                            if [ -s /data/proof ]; then cat /data/proof > /dev/termination-log;
+                            else printf '%s' "$PROOF" > /data/proof; printf written > /dev/termination-log; fi
+                        env:
+                          - name: PROOF
+                            value: ($values.proof)
+                        resources:
+                          requests:
+                            cpu: 50m
+                            memory: 64Mi
+                        securityContext:
+                          allowPrivilegeEscalation: false
+                          readOnlyRootFilesystem: true
+                          capabilities:
+                            drop: [ALL]
+                        volumeMounts:
+                          - name: data
+                            mountPath: /data
+                    containers:
+                      - name: app
+                        image: docker.io/library/busybox:1.37
+                        command: [sleep, '86400']
+                        resources:
+                          requests:
+                            cpu: 50m
+                            memory: 64Mi
+                        securityContext:
+                          allowPrivilegeEscalation: false
+                          readOnlyRootFilesystem: true
+                          capabilities:
+                            drop: [ALL]
+                        volumeMounts:
+                          - name: data
+                            mountPath: /data
+                    volumes:
+                      - name: data
+                        persistentVolumeClaim:
+                          claimName: data
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: app
+                namespace: e2e-velero
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: e2e-velero
+                labels:
+                  app: e2e-velero
+              status:
+                (initContainerStatuses[?name == 'check'].state.terminated.message | [0]): written
+      catch:
+        - describe:
+            apiVersion: v1
+            kind: Pod
+            namespace: e2e-velero
+        - describe:
+            apiVersion: v1
+            kind: PersistentVolumeClaim
+            namespace: e2e-velero
+    # A Backup from the daily-7d template, taken now, with one change: a TTL
+    # of an hour, so that Velero itself deletes the backup and its PD
+    # snapshot once the test is over.
+    - name: a backup of the daily-7d pair completes, the volume by PD CSI snapshot
+      try:
+        - apply:
+            resource:
+              apiVersion: velero.io/v1
+              kind: Backup
+              metadata:
+                name: e2e-backup
+                namespace: velero
+              spec:
+                ttl: 1h0m0s
+                includedNamespaces: ['*']
+                storageLocation: default
+                labelSelector:
+                  matchLabels:
+                    socle.do-now.io/backup-frequency: daily
+                    socle.do-now.io/backup-retention: 7d
+                resourcePolicy:
+                  kind: configmap
+                  name: velero-volume-policy
+        - assert:
+            resource:
+              apiVersion: velero.io/v1
+              kind: Backup
+              metadata:
+                name: e2e-backup
+                namespace: velero
+              status:
+                phase: Completed
+                csiVolumeSnapshotsCompleted: 1
+      catch:
+        - describe:
+            apiVersion: velero.io/v1
+            kind: Backup
+            namespace: velero
+            name: e2e-backup
+        - describe:
+            apiVersion: snapshot.storage.k8s.io/v1
+            kind: VolumeSnapshot
+            namespace: e2e-velero
+        - podLogs:
+            namespace: velero
+            selector: app.kubernetes.io/name=velero
+            tail: 80
+    # §7, scenario 1, without Argo CD: the namespace deleted, the restore, a
+    # new disk from the snapshot, and the check container finding the proof
+    # there instead of writing it.
+    - name: the namespace deleted and restored, the file read back from the new disk
+      timeouts:
+        error: 5m
+      try:
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Namespace
+              name: e2e-velero
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: e2e-velero
+        - apply:
+            resource:
+              apiVersion: velero.io/v1
+              kind: Restore
+              metadata:
+                name: e2e-restore
+                namespace: velero
+              spec:
+                backupName: e2e-backup
+                includedNamespaces: [e2e-velero]
+        - assert:
+            resource:
+              apiVersion: velero.io/v1
+              kind: Restore
+              metadata:
+                name: e2e-restore
+                namespace: velero
+              status:
+                phase: Completed
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: app
+                namespace: e2e-velero
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: e2e-velero
+                labels:
+                  app: e2e-velero
+              status:
+                (initContainerStatuses[?name == 'check'].state.terminated.message | [0]): ($values.proof)
+        # §7, last step: the Restore deleted once checked, while the server
+        # runs — its finalizer is the server's to release.
+        - delete:
+            ref:
+              apiVersion: velero.io/v1
+              kind: Restore
+              name: e2e-restore
+              namespace: velero
+        - error:
+            resource:
+              apiVersion: velero.io/v1
+              kind: Restore
+              metadata:
+                name: e2e-restore
+                namespace: velero
+      catch:
+        - describe:
+            apiVersion: velero.io/v1
+            kind: Restore
+            namespace: velero
+            name: e2e-restore
+        - describe:
+            apiVersion: v1
+            kind: PersistentVolumeClaim
+            namespace: e2e-velero
+        - describe:
+            apiVersion: v1
+            kind: Pod
+            namespace: e2e-velero
+        - podLogs:
+            namespace: velero
+            selector: app.kubernetes.io/name=velero
+            tail: 80

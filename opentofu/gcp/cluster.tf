@@ -20,9 +20,17 @@
 # Google owns the nodes. There is no node_config to put one in.
 #
 # All three are argued in docs/gcp/network-security.md and docs/gcp/cluster-mode.md.
+# GCP-0059 (private nodes) fires only when this module is scanned through a
+# root that passes enable_private_nodes as an explicit null
+# (opentofu/clusters/gcp groups its inputs in an object, so an omitted key
+# arrives as null). The variable is nullable = false with the hardened
+# default, so OpenTofu makes the nodes private; Trivy evaluates the null
+# literally and does not model nullable. The ignore lines must stay
+# contiguous and directly above the resource, or Trivy drops them.
 #trivy:ignore:AVD-GCP-0061
 #trivy:ignore:AVD-GCP-0056
 #trivy:ignore:AVD-GCP-0050
+#trivy:ignore:AVD-GCP-0059
 resource "google_container_cluster" "socle" {
   project  = var.project_id
   name     = var.cluster_name

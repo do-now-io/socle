@@ -162,6 +162,7 @@ spec:
                 requests:
                   cpu: 10m
                   memory: 96Mi
+                  ephemeral-storage: 64Mi
           # So otel_gateway scrapes vmalert's own metrics, which the
           # module's health rules read.
           podAnnotations:
@@ -173,6 +174,7 @@ spec:
             requests:
               cpu: 20m
               memory: 64Mi
+              ephemeral-storage: 64Mi
         alertmanager:
           # The chart then points vmalert at it by itself.
           enabled: true
@@ -184,6 +186,7 @@ spec:
             requests:
               cpu: 10m
               memory: 48Mi
+              ephemeral-storage: 64Mi
           << if inputs.modules.alerting.receivers_secret >>
           # The client's keys, as files the receivers' *_file fields read.
           # Not optional: a missing Secret keeps Alertmanager from starting,

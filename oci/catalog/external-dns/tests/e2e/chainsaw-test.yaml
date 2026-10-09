@@ -22,6 +22,9 @@
 # Not provable on floci: the association reaching EKS, the pod getting the
 # role's credentials, IAM enforcing the policy and the boundary — the
 # sandbox's (docs/catalog/external-dns.md).
+#
+# On gcp, the module's own access and a record in Cloud DNS are proven by
+# hand on the sandbox's GKE: external-dns-module-gcp, last in this file.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -955,3 +958,253 @@ spec:
             namespace: flux-system
             selector: app.kubernetes.io/name=flux-operator
             tail: 40
+---
+# The GCP proof, run by hand against the sandbox's GKE Autopilot (no GKE in
+# CI: floci-gcp serves neither Workload Identity nor Cloud DNS). As the
+# crossplane module's GCP test does, it reads the module as the sandbox's root
+# sets it and turns nothing off: kube.external_dns on with a domain filter,
+# Crossplane on with its identity in the foundations, and that filter's zone
+# a public zone of the project. Every name it needs — project, domain — is
+# read from the socle's ResourceSetInputProvider, so nothing here names the
+# sandbox.
+#
+# What it proves: the one binding, on the project, is the module's own
+# principal with the foundations' DNS records role, Crossplane made it in GCP
+# (no zone-level IAM: never honoured, docs/catalog/external-dns.md), the
+# workload waited for it, and a name reaches Cloud DNS and the internet. A
+# resolver outside the cluster is the witness, in a Job the test asserts
+# Complete: `host` exits non-zero until the CNAME resolves.
+# What it leaves: under upsert-only the record outlives its Service (one
+# CNAME and its TXT per run, named after the run's namespace); with
+# policy = "sync" on the sandbox, external-dns removes both.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: external-dns-module-gcp
+  labels:
+    phase: module
+    cloud: gcp
+    platform: gke
+spec:
+  description: >-
+    The module's IAM member on its project, the DNS records role bound to
+    its own principal; the workload on Cloud DNS after it; a name resolvable
+    from the internet.
+  timeouts:
+    # Autopilot provisions a node for a pod that does not fit, minutes before
+    # the workload can turn Ready.
+    assert: 10m
+    error: 3m
+  bindings:
+    - name: inputs
+      value: (x_k8s_get($client, 'fluxcd.controlplane.io/v1', 'ResourceSetInputProvider', 'flux-system', 'socle').spec.defaultValues)
+    - name: project
+      value: ($inputs.cluster.projectId)
+    - name: principal
+      value: >-
+        (join('', ['principal://iam.googleapis.com/projects/', $inputs.cluster.projectNumber,
+        '/locations/global/workloadIdentityPools/', $project, '.svc.id.goog/subject/ns/external-dns/sa/external-dns']))
+    - name: domain
+      value: ($inputs.modules.external_dns.domain_filters[0])
+    - name: hostname
+      value: (join('.', [$namespace, $domain]))
+  steps:
+    - name: the IAM member is Ready, the module's own principal on the project
+      try:
+        # The Namespace is in the ResourceSet's inventory: a template that
+        # drops it (a merged document, a broken block) makes Flux prune the
+        # namespace and everything in it. Inventory id: <namespace>_<name>_<group>_<kind>.
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: external-dns
+                namespace: flux-system
+              status:
+                (inventory.entries[?id == '_external-dns__Namespace'] || `[]`):
+                  - id: _external-dns__Namespace
+        - assert:
+            resource:
+              apiVersion: cloudplatform.gcp.m.upbound.io/v1beta1
+              kind: ProjectIAMMember
+              metadata:
+                name: external-dns
+                namespace: external-dns
+              spec:
+                forProvider:
+                  project: ($project)
+                  role: ($inputs.modules.crossplane.dns_records_role)
+                  member: ($principal)
+              status:
+                atProvider:
+                  role: ($inputs.modules.crossplane.dns_records_role)
+                  member: ($principal)
+                (conditions[?type == 'Synced'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        # The project's member, waited on, and nothing else.
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: external-dns-workload
+                namespace: flux-system
+              spec:
+                (length(dependsOn)): 1
+                (dependsOn[0].kind): ProjectIAMMember
+                (dependsOn[0].name): external-dns
+      catch:
+        - describe:
+            apiVersion: cloudplatform.gcp.m.upbound.io/v1beta1
+            kind: ProjectIAMMember
+            namespace: external-dns
+        - podLogs:
+            namespace: crossplane-system
+            selector: pkg.crossplane.io/provider=provider-gcp-cloudplatform
+            tail: 40
+    # No Google service account between the pod and Cloud DNS: the
+    # ServiceAccount is the principal the member names, with no
+    # iam.gke.io/gcp-service-account annotation to swap it for another.
+    - name: the workload runs on Cloud DNS in the cluster's project, as its own ServiceAccount
+      try:
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: external-dns
+                namespace: external-dns
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ServiceAccount
+              metadata:
+                name: external-dns
+                namespace: external-dns
+                (contains(keys(annotations || `{}`), 'iam.gke.io/gcp-service-account')): false
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: external-dns
+                namespace: external-dns
+              spec:
+                template:
+                  spec:
+                    serviceAccountName: external-dns
+                    (containers[?name == 'external-dns'] || `[]`):
+                      - (contains(args || `[]`, '--provider=google')): true
+                        (contains(args || `[]`, join('', ['--google-project=', $project]))): true
+                        (contains(args || `[]`, '--google-zone-visibility=public')): true
+                        (contains(args || `[]`, join('', ['--domain-filter=', $domain]))): true
+                        (contains(args || `[]`, '--registry=txt')): true
+                        (contains(args || `[]`, '--txt-prefix=socle-')): true
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: external-dns
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: external-dns-workload
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: external-dns
+            name: external-dns
+        - events:
+            namespace: external-dns
+        - podLogs:
+            namespace: external-dns
+            tail: 40
+    # An ExternalName Service becomes a CNAME, the shape every non-AWS cloud
+    # gives a hostname (and the reason for the socle- TXT prefix). The name
+    # is the run's namespace, so a record an earlier run left under
+    # upsert-only cannot pass for this one. The wait before the lookup keeps
+    # the resolver from caching an NXDOMAIN for the zone's negative TTL
+    # (five minutes on Cloud DNS's default SOA). 45 s is enough only because
+    # the socle sets triggerLoopOnEvent: the new Service starts a loop at
+    # once, instead of waiting for the next one-minute interval. A Job that
+    # still fails is retried with backoff.
+    #
+    # The limit: `host -t CNAME` exits 0 once the name resolves, whatever
+    # the CNAME points to. It proves the record exists under a name only
+    # this run could have written, not that its target is
+    # backend.example.org.
+    - name: a Service's name becomes a CNAME in Cloud DNS, resolvable from the internet
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Service
+              metadata:
+                name: legacy
+                annotations:
+                  external-dns.kubernetes.io/hostname: ($hostname)
+              spec:
+                type: ExternalName
+                externalName: backend.example.org
+        - sleep:
+            duration: 45s
+        - apply:
+            resource:
+              apiVersion: batch/v1
+              kind: Job
+              metadata:
+                name: resolve
+              spec:
+                backoffLimit: 8
+                template:
+                  spec:
+                    restartPolicy: Never
+                    containers:
+                      - name: host
+                        image: registry.k8s.io/e2e-test-images/jessie-dnsutils:1.7
+                        command:
+                          - host
+                          - -t
+                          - CNAME
+                          - ($hostname)
+                          - 8.8.8.8
+                        resources:
+                          requests:
+                            cpu: 50m
+                            memory: 64Mi
+        - assert:
+            resource:
+              apiVersion: batch/v1
+              kind: Job
+              metadata:
+                name: resolve
+              status:
+                (conditions[?type == 'Complete'] || `[]`):
+                  - status: 'True'
+      catch:
+        - podLogs:
+            namespace: external-dns
+            tail: 60
+        - podLogs:
+            selector: job-name=resolve
+            tail: 20
+        - describe:
+            apiVersion: batch/v1
+            kind: Job
+            name: resolve

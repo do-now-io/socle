@@ -1,7 +1,9 @@
 # Google Cloud — prerequisites
 
 What must exist on your Google Cloud account before `tofu apply` can run the
-socle foundations module. The module creates none of it.
+socle — the foundations module alone, or the whole root
+[`opentofu/clusters/gcp`](../../opentofu/clusters/gcp/README.md). Neither
+creates any of it.
 
 Each item can be done by hand in the Cloud Console — nothing is provided for
 that path — or from the command line. The commands for every item are
@@ -13,17 +15,32 @@ apply itself needs are listed in
 
 - A Google Cloud project, ID matching `^[a-z][a-z0-9-]{4,28}[a-z0-9]$`.
 - A billing account linked to that project.
-- Org policies that permit private GKE nodes, Cloud NAT and service account
-  creation in the project.
+- Org policies that permit private GKE nodes and Cloud NAT in the project.
+  No service account is created: every workload, Crossplane included, is a
+  Workload Identity Federation principal of its own
+  ([managed-scope](managed-scope.md#identity)).
+- One socle cluster per project. A workload's principal names the project and
+  its Kubernetes namespace and ServiceAccount, never the cluster: two socle
+  clusters in one project would be the same principal for every module, and
+  what Crossplane grants one would serve the other.
 
 ## APIs enabled on the project
 
 | API | Needed for |
 | --- | --- |
-| `cloudresourcemanager.googleapis.com` | project IAM bindings |
+| `cloudresourcemanager.googleapis.com` | project IAM bindings — the apply's, and those Crossplane makes for modules |
 | `serviceusage.googleapis.com` | enabling the others |
-| `compute.googleapis.com` | VPC, subnetworks, router, Cloud NAT |
+| `compute.googleapis.com` | VPC, subnetworks, router, Cloud NAT, the Gateways' load balancers |
 | `container.googleapis.com` | the Autopilot cluster |
+| `iam.googleapis.com` | Crossplane's bucket role and the DNS records role |
+| `sts.googleapis.com` | every workload's federated token: the exchange of a pod's Kubernetes token for a Google one |
+| `iamcredentials.googleapis.com` | a CI identity impersonating the service account that runs OpenTofu |
+| `logging.googleapis.com` | GKE's system and workload logs (`logging_components`) |
+| `monitoring.googleapis.com` | GKE's system metrics; what KEDA's GCP scalers read |
+| `dns.googleapis.com` | the certificate's DNS authorizations, external-dns |
+| `certificatemanager.googleapis.com` | the shared Gateways' Google-managed certificates (`gateway_certificate`) |
+| `storage.googleapis.com` | the state bucket, and the buckets modules own (Velero's) |
+| `secretmanager.googleapis.com` | the external-secrets module |
 | `pubsub.googleapis.com` | only when `enable_upgrade_notifications` is true (default) |
 | `bigquery.googleapis.com` | only when `billing_export_dataset_id` is set |
 
@@ -33,11 +50,46 @@ apply itself needs are listed in
 | --- | --- |
 | `roles/serviceusage.serviceUsageAdmin` | enable the APIs above |
 | `roles/compute.networkAdmin` | network, subnetworks, router, NAT |
-| `roles/container.admin` | the cluster |
-| `roles/resourcemanager.projectIamAdmin` | project-level role bindings |
+| `roles/container.admin` | the cluster, and the bootstrap's Helm releases on it |
+| `roles/resourcemanager.projectIamAdmin` | project-level role bindings, Crossplane's included: its own conditional grant of Project IAM Admin and of the bucket role |
+| `roles/iam.roleAdmin` | Crossplane's bucket role and the DNS records role external-dns is granted — only when `crossplane` is set |
+| `roles/dns.admin` | the certificate's authorization records — only when `gateway_certificate` is set |
+| `roles/certificatemanager.editor` | only when `gateway_certificate` is set |
 | `roles/storage.admin` | creating the state bucket — one-time; the apply principal itself needs only object access on that bucket |
 | `roles/pubsub.admin` | only with upgrade notifications |
 | `roles/bigquery.admin` | only with the billing export dataset |
+
+## Quotas
+
+What a fresh project is given is not enough for the socle. Measured on the
+sandbox, a project created in October 2026 on a new billing account:
+
+| Quota | Fresh project | Ask for |
+| --- | --- | --- |
+| `CPUS_ALL_REGIONS` (global) | 12 | ~32 |
+| `SSD_TOTAL_GB` (the cluster's region) — Persistent Disk SSD | 250 GB | ~1000 GB |
+
+Why the disk quota runs out first:
+
+- Every Autopilot node boots on a 100 GB `pd-balanced` disk, and Autopilot
+  accepts no other boot disk type. `pd-balanced` counts against
+  `SSD_TOTAL_GB`, not against the standard disk quota.
+- Persistent volumes on the default StorageClass, `standard-rwo`, are
+  `pd-balanced` too: VictoriaMetrics' and VictoriaLogs' 20 GiB claims draw on
+  the same 250 GB.
+- 250 GB is two nodes and a few claims, and the full socle needs more than
+  two nodes. The CPU quota was the next limit the sandbox hit: 12 of 12 in
+  use.
+
+What the catalog itself requests — about 2.3 vCPU, 4.2 GiB of memory and
+4.4 GiB of ephemeral storage, every module on — is in [sizing](sizing.md).
+
+Ask before the first apply, for the cluster's region. On a fresh project or
+billing account Google may refuse an automatic increase — measured: requests
+through the Cloud Quotas API for 500, 1000 and 2000 GB were refused ("cannot
+grant at this moment"), and the request for 32 vCPU went to review. Then it
+takes a request in the Console (IAM & Admin → Quotas & System Limits), or a
+paid billing account. The values in force: [By command line](#by-command-line).
 
 ## Credentials
 
@@ -64,6 +116,8 @@ terraform {
 
 - OpenTofu 1.10 or later.
 - `gcloud` CLI, authenticated.
+- `gke-gcloud-auth-plugin`, for the whole root: the helm provider gets its
+  token through it.
 
 ## Good practices
 
@@ -72,7 +126,8 @@ Per resource, what to do beyond simply creating it.
 ### Project
 
 - One project per cluster and per environment. A shared project makes the
-  blast radius of an IAM mistake the whole estate.
+  blast radius of an IAM mistake the whole estate, and two socle clusters in
+  one project share every module's principal ([Account](#account)).
 - Under an organisation or folder, so org policies and audit sinks are
   inherited rather than reinvented.
 - Never delete a project that has held a cluster before its state is
@@ -89,7 +144,8 @@ Per resource, what to do beyond simply creating it.
 
 - Enable only what the configuration uses: drop `pubsub` when
   `enable_upgrade_notifications` is false, `bigquery` when no export dataset
-  is set.
+  is set, `secretmanager` without the external-secrets module,
+  `certificatemanager` without `gateway_certificate`.
 - Never disable an API a resource still depends on — the resource is deleted
   or orphaned, and the next plan cannot read it.
 
@@ -171,6 +227,15 @@ gcloud services enable \
   serviceusage.googleapis.com \
   compute.googleapis.com \
   container.googleapis.com \
+  iam.googleapis.com \
+  sts.googleapis.com \
+  iamcredentials.googleapis.com \
+  logging.googleapis.com \
+  monitoring.googleapis.com \
+  dns.googleapis.com \
+  certificatemanager.googleapis.com \
+  storage.googleapis.com \
+  secretmanager.googleapis.com \
   pubsub.googleapis.com \
   bigquery.googleapis.com \
   --project="$PROJECT_ID"
@@ -184,6 +249,9 @@ for ROLE in \
   roles/compute.networkAdmin \
   roles/container.admin \
   roles/resourcemanager.projectIamAdmin \
+  roles/iam.roleAdmin \
+  roles/dns.admin \
+  roles/certificatemanager.editor \
   roles/storage.admin \
   roles/pubsub.admin \
   roles/bigquery.admin
@@ -191,6 +259,15 @@ do
   gcloud projects add-iam-policy-binding "$PROJECT_ID" \
     --member="$PRINCIPAL" --role="$ROLE" --condition=None
 done
+```
+
+Quotas in force — the global CPU count, then the region's SSD and CPU:
+
+```sh
+gcloud compute project-info describe --project="$PROJECT_ID" --format=json \
+  | jq '.quotas[] | select(.metric == "CPUS_ALL_REGIONS")'
+gcloud compute regions describe "$REGION" --project="$PROJECT_ID" --format=json \
+  | jq '.quotas[] | select(.metric == "SSD_TOTAL_GB" or .metric == "CPUS")'
 ```
 
 Credentials:

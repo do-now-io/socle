@@ -59,6 +59,14 @@ run "defaults_are_the_recommended_position" {
     error_message = "crossplane must default to off with no client values and no boundary: no module claims cloud access yet, and the boundary is wired by the root from the foundations."
   }
   assert {
+    condition     = output.inputs.modules.crossplane.dns_records_role == "" && !contains(keys(output.inputs.modules.crossplane), "dns_zones")
+    error_message = "crossplane's gcp attribute must be present and empty off gcp: the templates test values, never presence. No zone list: Crossplane holds nothing of Cloud DNS."
+  }
+  assert {
+    condition     = output.inputs.cluster.projectId == "" && output.inputs.cluster.projectNumber == ""
+    error_message = "off gcp there is no project: both keys present and empty."
+  }
+  assert {
     condition     = output.inputs.modules.external_dns.enabled == false && output.inputs.modules.external_dns.policy == "upsert-only"
     error_message = "external_dns must be off by default — it needs a zone — and upsert-only when enabled: it never deletes a record unless asked."
   }
@@ -420,6 +428,7 @@ run "gcp_operates_its_own_cilium" {
   variables {
     cloud           = "gcp"
     cluster_network = null
+    project         = { id = "sandbox-2bace", number = "123456789012" }
   }
 
   assert {
@@ -546,6 +555,7 @@ run "gcp_targets_gkes_managed_gateway_class" {
   variables {
     cloud           = "gcp"
     cluster_network = null
+    project         = { id = "sandbox-2bace", number = "123456789012" }
   }
 
   assert {
@@ -814,6 +824,10 @@ run "every_eks_addon_can_be_turned_off" {
 run "no_shared_gateway_on_aws_without_a_certificate" {
   command = plan
 
+  assert {
+    condition     = output.inputs.gateway.certificateMap == "" && output.inputs.gateway.regionalCertificate == ""
+    error_message = "gcp's certificates must be present and empty off gcp."
+  }
   assert {
     condition     = output.inputs.gateway.shared == false && output.inputs.gateway.certificateArn == ""
     error_message = "on aws TLS terminates at the load balancer: without the foundations' certificate no Gateway may be created, never one serving clear text."
@@ -1105,7 +1119,7 @@ run "the_cluster_account_and_the_snapshot_controller_reach_the_inputs_on_aws" {
 run "no_account_and_no_snapshots_off_aws" {
   command = plan
   variables {
-    cloud           = "gcp"
+    cloud           = "scaleway"
     cluster_network = null
   }
 
@@ -1179,6 +1193,195 @@ run "metrics_server_values_flow_through_untouched_and_honest_kubelet_flags_are_a
   assert {
     condition     = output.inputs.modules.metrics_server.values_secret == "metrics-server-values"
     error_message = "the name of the client's values Secret must flow to the inputs."
+  }
+}
+
+# --- gcp — docs/superpowers/specs/2026-10-07-gcp-parity-design.md §2 ---
+
+run "gcp_carries_its_project_into_the_inputs" {
+  command = plan
+  variables {
+    cloud           = "gcp"
+    cluster_network = null
+    project         = { id = "sandbox-2bace", number = "123456789012" }
+    region          = "europe-west1"
+  }
+
+  assert {
+    condition     = output.inputs.cluster.projectId == "sandbox-2bace" && output.inputs.cluster.projectNumber == "123456789012"
+    error_message = "on gcp both reach the templates: a Workload Identity principal names the project number and the pool named after the project id."
+  }
+  assert {
+    condition     = output.inputs.cluster.accountId == "" && output.inputs.cluster.region == "europe-west1"
+    error_message = "on gcp there is no AWS account, and the region reaches the templates as on aws."
+  }
+}
+
+run "gcp_offers_shared_gateways_with_a_certificate_map" {
+  command = plan
+  variables {
+    cloud                        = "gcp"
+    cluster_network              = null
+    project                      = { id = "sandbox-2bace", number = "123456789012" }
+    gateway_certificate_map      = "socle-test-gateway"
+    gateway_regional_certificate = "socle-test-gateway-private"
+  }
+
+  assert {
+    condition     = output.inputs.modules.gateway_api.enabled && output.inputs.gateway.shared == true && output.inputs.gateway.className == "gke-l7-global-external-managed"
+    error_message = "with the foundations' certificate map, GKE's class serves the shared Gateways: ArgoCD and Grafana get their routes."
+  }
+  assert {
+    condition     = output.inputs.gateway.certificateMap == "socle-test-gateway" && output.inputs.gateway.regionalCertificate == "socle-test-gateway-private" && output.inputs.gateway.certificateArn == ""
+    error_message = "both certificates must reach the templates untouched: the public Gateway names the map, the private one the regional certificate."
+  }
+}
+
+run "no_shared_gateway_on_gcp_without_a_certificate_map" {
+  command = plan
+  variables {
+    cloud           = "gcp"
+    cluster_network = null
+    project         = { id = "sandbox-2bace", number = "123456789012" }
+  }
+
+  assert {
+    condition     = output.inputs.gateway.shared == false && output.inputs.gateway.certificateMap == ""
+    error_message = "on gcp TLS terminates at Google's load balancer: without the foundations' certificate map no Gateway may be created, never one serving clear text."
+  }
+}
+
+run "no_shared_gateway_on_gcp_without_the_regional_certificate" {
+  command = plan
+  variables {
+    cloud                   = "gcp"
+    cluster_network         = null
+    project                 = { id = "sandbox-2bace", number = "123456789012" }
+    gateway_certificate_map = "socle-test-gateway"
+  }
+
+  assert {
+    condition     = output.inputs.gateway.shared == false && output.inputs.gateway.certificateMap == "socle-test-gateway" && output.inputs.gateway.regionalCertificate == ""
+    error_message = "the private Gateway's listener needs the regional certificate: with the map alone no shared Gateway may be created."
+  }
+}
+
+run "gcp_has_snapshots" {
+  command = plan
+  variables {
+    cloud           = "gcp"
+    cluster_network = null
+    project         = { id = "sandbox-2bace", number = "123456789012" }
+  }
+
+  assert {
+    condition     = output.inputs.storage.snapshots == true && length(aws_eks_addon.snapshot_controller) == 0
+    error_message = "GKE manages the PD CSI driver and its snapshot CRDs: the templates are told snapshots exist, and no EKS add-on is created."
+  }
+  assert {
+    condition     = output.inputs.modules.velero.node_agent == false
+    error_message = "Autopilot forbids the node-agent's hostPath: on gcp it defaults to off."
+  }
+}
+
+run "gcp_takes_its_crossplane_dns_records_role" {
+  command = plan
+  variables {
+    cloud           = "gcp"
+    cluster_network = null
+    project         = { id = "sandbox-2bace", number = "123456789012" }
+    kube = {
+      crossplane = {
+        enabled          = true
+        dns_records_role = "projects/sandbox-2bace/roles/socleDnsRecords_socle_test"
+      }
+    }
+  }
+
+  assert {
+    condition     = output.inputs.modules.crossplane.dns_records_role == "projects/sandbox-2bace/roles/socleDnsRecords_socle_test" && output.inputs.modules.crossplane.permissions_boundary == ""
+    error_message = "the custom role the gcp root wires from the foundations must reach the inputs as written."
+  }
+}
+
+run "keda_on_gcp_reads_pubsub_through_crossplane" {
+  command = plan
+  variables {
+    cloud           = "gcp"
+    cluster_network = null
+    project         = { id = "sandbox-2bace", number = "123456789012" }
+    kube = {
+      crossplane = { enabled = true }
+      keda       = { enabled = true, services = ["pubsub"] }
+    }
+  }
+
+  assert {
+    condition     = output.inputs.modules.keda.services == ["pubsub"]
+    error_message = "pubsub is gcp's KEDA service: its scaler reads Cloud Monitoring, and it needs no region."
+  }
+}
+
+run "external_secrets_on_gcp_takes_secret_name_prefixes" {
+  command = plan
+  variables {
+    cloud           = "gcp"
+    cluster_network = null
+    project         = { id = "sandbox-2bace", number = "123456789012" }
+    kube = {
+      crossplane       = { enabled = true }
+      external_secrets = { enabled = true, prefixes = ["socle-test", "my-app"] }
+    }
+  }
+
+  assert {
+    condition     = output.inputs.modules.external_secrets.prefixes == ["socle-test", "my-app"]
+    error_message = "a Secret Manager name prefix must reach the inputs as written."
+  }
+}
+
+# A gcp root has no AWS account to give the aws provider, yet OpenTofu
+# configures every provider the configuration names, even one whose every
+# resource has count = 0. The gcp root therefore declares the stub below, and
+# this run proves a gcp plan never calls AWS through it: every endpoint the
+# module could reach is unreachable, so a single call would fail the plan.
+provider "aws" {
+  alias                       = "gcp_root_stub"
+  region                      = "us-east-1"
+  access_key                  = "unused"
+  secret_key                  = "unused"
+  skip_credentials_validation = true
+  skip_requesting_account_id  = true
+  skip_metadata_api_check     = true
+  skip_region_validation      = true
+  max_retries                 = 0
+  endpoints {
+    eks = "http://127.0.0.1:1"
+    iam = "http://127.0.0.1:1"
+    sts = "http://127.0.0.1:1"
+  }
+}
+
+run "gcp_plans_without_an_aws_provider_call" {
+  command = plan
+  providers = {
+    helm = helm
+    aws  = aws.gcp_root_stub
+  }
+  variables {
+    cloud           = "gcp"
+    cluster_network = null
+    project         = { id = "sandbox-2bace", number = "123456789012" }
+    kube = {
+      crossplane = { enabled = true }
+      velero     = { enabled = true }
+    }
+    region = "europe-west1"
+  }
+
+  assert {
+    condition     = output.inputs.cluster.accountId == "" && output.inputs.cluster.projectId == "sandbox-2bace"
+    error_message = "a gcp plan reads no AWS account."
   }
 }
 

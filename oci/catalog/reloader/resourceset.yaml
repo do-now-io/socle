@@ -99,6 +99,7 @@ spec:
               requests:
                 cpu: 10m
                 memory: 64Mi
+                ephemeral-storage: 64Mi
               limits:
                 memory: 256Mi
             # Scraped by the otel_gateway module, which reads these annotations.

@@ -9,7 +9,8 @@
 # Scope: the client's applications. Every namespace the socle renders is out
 # of every policy — the operator labels each with the namespace of the
 # ResourceSet that rendered it, flux-system for the socle's — and so are
-# kube-system, flux-system and kyverno, by name.
+# kube-system, flux-system and kyverno, by name, and on gcp GKE's own
+# namespaces (gke-*, gmp-*, kube-node-lease).
 #
 # Every policy is in Audit: a violation is admitted and reported. A policy the
 # client names in kube.kyverno_policies.enforce is switched to Deny AND
@@ -102,7 +103,18 @@ spec:
         # name: the control plane, Flux, and Kyverno itself. The socle's own
         # namespaces go by label (the postRenderers patch below).
         vpolExclude:
-          excludeNamespaces: [kube-system, flux-system, kyverno]
+          <<- if eq inputs.cloud "gcp" >>
+          # On gcp, GKE's own namespaces too: GKE keeps mutating
+          # webhooks out of them, but not a native
+          # ValidatingAdmissionPolicy — an Enforce policy would judge, and
+          # could refuse, the pods GKE runs there.
+          <<- end >>
+          excludeNamespaces: [kube-system, flux-system, kyverno
+            <<- if eq inputs.cloud "gcp" >>, kube-node-lease, gke-managed-system, gke-managed-cim
+            <<- ", gke-managed-filestorecsi, gke-managed-networking-dra-driver" >>
+            <<- ", gke-managed-parallelstorecsi, gke-managed-volumepopulator" >>
+            <<- ", gke-gmp-system, gmp-system, gmp-public" >>
+            <<- end >>]
         customPolicies:
           - |
             apiVersion: policies.kyverno.io/v1beta1

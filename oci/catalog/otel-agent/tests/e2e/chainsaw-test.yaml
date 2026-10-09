@@ -1,6 +1,7 @@
 # The otel_agent module's proof (docs/catalog/otel-agent.md): the node-level
 # collector, on by default. Selected by label:
-#   health   the ResourceSet Ready, the DaemonSet rolled out on every node, a
+#   health   the ResourceSet Ready, the DaemonSet rolled out on every node,
+#            every agent pod under the module's PriorityClass, a
 #            kubelet metric queryable in VictoriaMetrics by its stored name,
 #            and every metric the nodes and pods dashboard reads present there
 #            (vm.sh): the dashboard is written on the names VictoriaMetrics
@@ -8,7 +9,8 @@
 #   module   a client request beats the socle's on the live DaemonSet, the
 #            socle's siblings kept; logs = false takes the agent back to
 #            non-root with no hostPath; off garbage-collects the release, the
-#            dashboards Kustomization and its ConfigMap; on brings them back.
+#            dashboards Kustomization, its ConfigMap and the PriorityClass; on
+#            brings them back, the pods under the class.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -23,9 +25,10 @@ spec:
     dashboard reads, are in VictoriaMetrics.
   timeouts:
     assert: 5m
+    error: 5m
     exec: 5m
   steps:
-    - name: the ResourceSet is Ready, the DaemonSet rolled out, the dashboard shipped
+    - name: the ResourceSet is Ready, the DaemonSet rolled out at its priority, the dashboard shipped
       try:
         - assert:
             resource:
@@ -46,6 +49,44 @@ spec:
                 namespace: otel-agent
               status:
                 (desiredNumberScheduled > `0` && numberReady == desiredNumberScheduled): true
+        # The agent preempts its way onto a full node: its pods run under the
+        # module's own PriorityClass, and the priority admission resolved from
+        # it (1000000) proves the class existed when they were created. The
+        # assert finds one such pod; the error, that none runs without it.
+        - assert:
+            resource:
+              apiVersion: scheduling.k8s.io/v1
+              kind: PriorityClass
+              metadata:
+                name: socle-node-agent
+              value: 1000000
+              preemptionPolicy: PreemptLowerPriority
+              # The API server drops globalDefault when it is false.
+              (globalDefault || `false`): false
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: otel-agent
+                labels:
+                  app.kubernetes.io/instance: otel-agent
+                  component: agent-collector
+              spec:
+                priorityClassName: socle-node-agent
+                priority: 1000000
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: otel-agent
+                labels:
+                  app.kubernetes.io/instance: otel-agent
+                  component: agent-collector
+              spec:
+                # to_number: the API's integer never equals a JMESPath literal.
+                (priorityClassName != 'socle-node-agent' || to_number(priority) != `1000000`): true
         - assert:
             resource:
               apiVersion: v1
@@ -388,6 +429,14 @@ spec:
               kind: Namespace
               metadata:
                 name: otel-agent
+        # Cluster-scoped, so the namespace does not take it along: the
+        # module's own garbage collection does.
+        - error:
+            resource:
+              apiVersion: scheduling.k8s.io/v1
+              kind: PriorityClass
+              metadata:
+                name: socle-node-agent
       catch:
         - describe:
             apiVersion: fluxcd.controlplane.io/v1
@@ -430,6 +479,20 @@ spec:
                 namespace: otel-agent
               status:
                 (desiredNumberScheduled > `0` && numberReady == desiredNumberScheduled): true
+        # The class back first, then the pods under it: created in the same
+        # apply as the release, before helm-controller made the DaemonSet.
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: otel-agent
+                labels:
+                  app.kubernetes.io/instance: otel-agent
+                  component: agent-collector
+              spec:
+                # to_number: the API's integer never equals a JMESPath literal.
+                (priorityClassName != 'socle-node-agent' || to_number(priority) != `1000000`): true
         - assert:
             resource:
               apiVersion: fluxcd.controlplane.io/v1

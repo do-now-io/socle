@@ -84,11 +84,21 @@ spec:
           podAnnotations:
             prometheus.io/scrape: "true"
             prometheus.io/port: "8000"
+          # Disk stated on every container, or GKE Autopilot reserves 1 GiB
+          # each (docs/gcp/sizing.md): logs and a small sigstore cache. The
+          # chart's own limits on the init container and the hooks stay.
+          initContainer:
+            resources:
+              requests:
+                cpu: 10m
+                memory: 64Mi
+                ephemeral-storage: 32Mi
           container:
             resources:
               requests:
                 cpu: 100m
                 memory: 128Mi
+                ephemeral-storage: 64Mi
         backgroundController:
           replicas: 1
           podAnnotations:
@@ -98,6 +108,7 @@ spec:
             requests:
               cpu: 50m
               memory: 64Mi
+              ephemeral-storage: 64Mi
         # No cleanup controller: the socle ships no cleanup or deleting
         # policy, and it is the one controller that outlives the chart's
         # uninstall hook — measured on floci, it re-registered its webhook
@@ -106,6 +117,21 @@ spec:
         # TTL cleanup turns it on in values (docs/catalog/kyverno.md).
         cleanupController:
           enabled: false
+        # The upgrade and uninstall hooks: the chart's cpu and memory, kept,
+        # and disk.
+        crds:
+          migration:
+            podResources:
+              requests:
+                cpu: 10m
+                memory: 64Mi
+                ephemeral-storage: 32Mi
+        webhooksCleanup:
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+              ephemeral-storage: 32Mi
         reportsController:
           replicas: 1
           podAnnotations:
@@ -115,6 +141,7 @@ spec:
             requests:
               cpu: 50m
               memory: 64Mi
+              ephemeral-storage: 64Mi
         config:
           # Namespaces no webhook of Kyverno's ever sees: the control plane's
           # own and Flux's, so that no policy, however it is set, can stand
@@ -133,6 +160,26 @@ spec:
                   values:
                     - kube-system
                     - flux-system
+                    <<- if eq inputs.cloud "gcp" >>
+                    # GKE's own namespaces, which GKE runs: it rewrites a
+                    # mutating webhook that reaches them, and Kyverno would
+                    # rewrite it back on every reconcile. Leases in
+                    # kube-node-lease are the nodes' heartbeat, which GKE asks
+                    # no webhook to intercept. A selector matches no prefix,
+                    # so each is named: those of a 1.35 Autopilot cluster
+                    # (measured 2026-10-07), and gke-managed-cim and
+                    # gmp-system, which GKE documents.
+                    - kube-node-lease
+                    - gke-managed-system
+                    - gke-managed-cim
+                    - gke-managed-filestorecsi
+                    - gke-managed-networking-dra-driver
+                    - gke-managed-parallelstorecsi
+                    - gke-managed-volumepopulator
+                    - gke-gmp-system
+                    - gmp-system
+                    - gmp-public
+                    <<- end >>
                 - key: resourceset.fluxcd.controlplane.io/namespace
                   operator: NotIn
                   values:

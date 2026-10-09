@@ -1,0 +1,110 @@
+# One file per cluster. Copy to prod.tfvars and edit; apply with
+#   tofu init && tofu apply -var-file=prod.tfvars
+
+# The only line an upgrade touches.
+socle_version = "0.0.0" # x-release-please-version
+
+# While the registry is private, name the pull secret created outside OpenTofu
+# (see README, "A private registry"):
+# artifact_pull_secret = "ghcr-auth"
+
+gcp = {
+  # One socle cluster per project: every Workload Identity principal names
+  # the project, not the cluster (README, "One cluster per project").
+  project_id   = "acme-prod"
+  region       = "europe-west1"
+  cluster_name = "acme-prod"
+  owner        = "platform"
+  environment  = "prod"
+
+  # When GKE may upgrade the cluster; the foundations module has no default
+  # for it on purpose. At least four hours, here Saturday 02:00-14:00 UTC.
+  maintenance_window = {
+    start_time = "2026-01-03T02:00:00Z"
+    end_time   = "2026-01-03T14:00:00Z"
+    recurrence = "FREQ=WEEKLY;BYDAY=SA"
+  }
+
+  # The foundations attach to a VPC you already own by default (network_name);
+  # true has them create one, with its subnetwork, NAT and proxy-only subnet.
+  create_network = true
+  # network_name = "acme-shared-vpc"
+
+  # Crossplane's own Google Cloud identity, the one the socle cannot create for
+  # itself: grants to its federated principal, no service account.
+  # allowed_roles is the ceiling of every role a catalog module gets: add one
+  # when you enable a module that needs it (secretmanager.secretAccessor for
+  # external_secrets, monitoring.viewer for keda, storage.objectAdmin for
+  # velero). Empty grants nothing but the DNS records role external-dns
+  # always needs, on the project: every zone of it, bounded by external-dns's
+  # domain filters — one socle cluster per project.
+  # crossplane = {
+  #   allowed_roles = ["roles/secretmanager.secretAccessor", "roles/monitoring.viewer", "roles/storage.objectAdmin"]
+  # }
+
+  # The Google-managed certificates of the two shared Gateways, public
+  # (global, through a certificate map) and private (regional): every name in
+  # domains, authorised by DNS in the managed zone dns_zone of this project.
+  # TLS terminates at their load balancers; without it no Gateway is created,
+  # and ArgoCD gets no route.
+  # gateway_certificate = { dns_zone = "acme-example", domains = ["acme.example", "*.acme.example"] }
+  # With it, kube.crossplane on and crossplane set above, external_dns turns
+  # on by itself, filtered to those domains.
+}
+
+# Only what differs from the catalog's defaults. An unknown module or
+# attribute is refused at plan, with the allowed list in the message.
+kube = {
+  # How catalog modules get their cloud access (docs/catalog/crossplane.md).
+  # Off until a module needs it; with gcp.crossplane set above, the root wires
+  # the DNS records role for you. Before turning it off again, delete
+  # the modules' claims.
+  # crossplane = { enabled = true }
+  argocd = {
+    domain = "argocd.acme.example"
+    # Your ArgoCD, your values: merged over the socle's defaults, yours win.
+    values = {
+      configs = {
+        cm   = { "accounts.alice" = "apiKey, login" }
+        rbac = { "policy.csv" = "g, alice, role:admin" }
+        repositories = {
+          # The GitHub App's private key is NOT here: a Secret in the argocd
+          # namespace named below carries it, or a repo-creds Secret of ArgoCD's own.
+          acme = { url = "https://github.com/acme", type = "git", githubAppID = "12345", githubAppInstallationID = "67890" }
+        }
+      }
+    }
+    values_secret = "argocd-values"
+  }
+  # Metrics and logs storage, on by default: 15 and 7 days on 20Gi claims of
+  # the cluster's default StorageClass, which Autopilot provides.
+  # victoria_metrics = { retention = "30d" }
+  # Traces are off by default (VictoriaTraces is pre-GA; an upgrade may drop
+  # stored traces). Turning them on:
+  # victoria_traces = { enabled = true }
+  # The admission layer is off by default. The engine and the socle's policy
+  # set, every policy reporting (Audit); enforce turns a policy into a refusal
+  # the API server applies itself (docs/catalog/kyverno-policies.md):
+  # kyverno          = { enabled = true }
+  # kyverno_policies = {
+  #   enabled            = true
+  #   enforce            = ["disallow-privileged-containers"]
+  #   allowed_registries = ["ghcr.io", "registry.k8s.io", "europe-docker.pkg.dev"]
+  # }
+  # Secrets from Secret Manager: with kube.crossplane on and
+  # roles/secretmanager.secretAccessor in gcp.crossplane.allowed_roles, the
+  # module reads the secrets named <prefix>_<name> (default prefix: the
+  # cluster name) and the ClusterSecretStore secret-manager serves them to
+  # every namespace (docs/catalog/external-secrets.md). reloader rolls the
+  # workloads annotated reloader.stakater.com/auto when those Secrets rotate.
+  # external_secrets = { enabled = true }
+  # reloader         = { enabled = true }
+  hello = {
+    replicas = 2
+  }
+  # Event-driven autoscaling. On gcp KEDA reads Cloud Monitoring, which needs
+  # roles/monitoring.viewer in gcp.crossplane.allowed_roles above
+  # (docs/catalog/keda.md). Leave services out for cron, Prometheus, Kafka,
+  # RabbitMQ or Redis triggers: no cloud role needed.
+  # keda = { enabled = true, services = ["pubsub"] }
+}

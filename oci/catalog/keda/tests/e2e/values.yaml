@@ -1,5 +1,8 @@
 # Bindings for this module's tests, on top of what the job sets (tag, cloud,
-# cluster, floci_ip): the SQS queue the scaler watches in floci, and the
-# namespace the scaled Deployment lives in.
+# cluster, floci_ip): the SQS queue the scaler watches in floci, the
+# namespace the scaled Deployment lives in, and on GKE a Pub/Sub
+# subscription that does not exist — the gcp test reads its depth as an
+# empty series (keda-module-gcp).
 queue: e2e-keda
 apps: e2e-keda
+subscription: socle-e2e-keda-absent

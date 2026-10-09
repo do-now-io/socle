@@ -109,18 +109,57 @@ spec:
               requests:
                 cpu: 100m
                 memory: 128Mi
+                ephemeral-storage: 64Mi
           haproxy:
             resources:
               requests:
                 cpu: 50m
                 memory: 64Mi
+                ephemeral-storage: 64Mi
+            init:
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                  ephemeral-storage: 32Mi
+          # The two sidecars beside each Redis and the config init containers
+          # ask nothing in the chart: GKE Autopilot would give each the
+          # default 500m CPU, 2 GiB and 1 GiB of disk.
+          sentinel:
+            resources:
+              requests:
+                cpu: 10m
+                memory: 32Mi
+                ephemeral-storage: 64Mi
+          splitBrainDetection:
+            resources:
+              requests:
+                cpu: 10m
+                memory: 32Mi
+                ephemeral-storage: 64Mi
+          init:
+            resources:
+              requests:
+                cpu: 10m
+                memory: 32Mi
+                ephemeral-storage: 32Mi
         << end >>
+        # Every container states cpu, memory and ephemeral storage: GKE
+        # Autopilot reserves 500m, 2 GiB and 1 GiB of disk for a container
+        # that leaves one out (docs/gcp/sizing.md). Disk: 64Mi holds a
+        # container's rotated logs (5 × 10Mi on GKE) and a few scratch files;
+        # the repo server, which clones the client's repositories and renders
+        # their charts under /tmp, and whose init container copies the
+        # argocd binary into an emptyDir, keeps the 1Gi Autopilot would have
+        # given it, stated — Autopilot evicts a pod past it, so a client with
+        # large repositories raises it in values.
         controller:
           replicas: 1
           resources:
             requests:
               cpu: 250m
               memory: 256Mi
+              ephemeral-storage: 64Mi
         server:
           replicas: << if inputs.modules.argocd.ha >>2<< else >>1<< end >>
           service:
@@ -129,23 +168,38 @@ spec:
             requests:
               cpu: 50m
               memory: 64Mi
+              ephemeral-storage: 64Mi
         repoServer:
           replicas: << if inputs.modules.argocd.ha >>2<< else >>1<< end >>
           resources:
             requests:
               cpu: 100m
               memory: 128Mi
+              ephemeral-storage: 1Gi
         applicationSet:
           replicas: << if inputs.modules.argocd.ha >>2<< else >>1<< end >>
           resources:
             requests:
               cpu: 50m
               memory: 64Mi
+              ephemeral-storage: 64Mi
+        # Redis at 64Mi, not 32Mi: GKE Autopilot wants at least 1 GiB of
+        # memory per vCPU, and 50m with 32Mi is below it.
         redis:
           resources:
             requests:
               cpu: 50m
-              memory: 32Mi
+              memory: 64Mi
+              ephemeral-storage: 64Mi
+        # The install hook that writes Redis's password asks nothing in the
+        # chart, for a few seconds' work. The Autopilot floor (50m, 52 MiB a
+        # pod) instead.
+        redisSecretInit:
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+              ephemeral-storage: 32Mi
         # SSO is a follow-up: no Dex until an identity provider is configured.
         dex:
           enabled: false

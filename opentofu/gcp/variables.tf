@@ -16,6 +16,17 @@ variable "project_id" {
   }
 }
 
+variable "project_number" {
+  description = "The project's number, which every Workload Identity Federation principal names the project by. Null, the default, reads it from the project; set it only where that read cannot happen — the Cloud Billing call the provider makes alongside it is what an emulator lacks."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.project_number == null || can(regex("^[1-9][0-9]{5,19}$", var.project_number))
+    error_message = "project_number must be the project's number, digits only, such as 123456789012 — not its ID."
+  }
+}
+
 variable "region" {
   description = "Region of the cluster and its subnetwork. The cluster is regional; zonal clusters are not offered."
   type        = string
@@ -56,10 +67,16 @@ variable "environment" {
   }
 }
 
+# nullable = false on every defaulted variable: a root that groups its
+# inputs in an object passes an omitted key as an explicit null, and
+# OpenTofu keeps that null unless the variable refuses it. Refusing it is
+# what makes the module's default the recommended position for every
+# caller.
 variable "additional_labels" {
   description = "Extra labels merged onto the standard set. Cannot override owner, environment or socle-version."
   type        = map(string)
   default     = {}
+  nullable    = false
 
   validation {
     condition     = length(setintersection(keys(var.additional_labels), ["owner", "environment", "socle-version"])) == 0
@@ -86,12 +103,14 @@ variable "create_network" {
   description = "Create the VPC instead of using an existing one. The common case is a network the consumer already owns."
   type        = bool
   default     = false
+  nullable    = false
 }
 
 variable "create_subnetwork" {
   description = "Create the cluster subnetwork. Set to false in a Shared VPC where the network team owns subnets, and supply subnetwork_name and pod_range_name instead."
   type        = bool
   default     = true
+  nullable    = false
 }
 
 variable "subnetwork_name" {
@@ -120,6 +139,7 @@ variable "node_range_cidr" {
   description = "Primary range of the cluster subnetwork, used by nodes and by internal load balancers. A /22 carries 1020 nodes, which is what the Pod range allows."
   type        = string
   default     = "10.0.0.0/22"
+  nullable    = false
 
   validation {
     condition     = can(cidrnetmask(var.node_range_cidr))
@@ -131,6 +151,7 @@ variable "pod_range_cidr" {
   description = "Secondary range for Pod addresses. Autopilot fixes 32 Pods per node, so a /26 is consumed per node: a /16 carries 1024 nodes. Sized generously on purpose — a cluster's Pod range cannot be changed after creation, while the primary range can be expanded in place."
   type        = string
   default     = "10.4.0.0/16"
+  nullable    = false
 
   validation {
     condition     = can(cidrnetmask(var.pod_range_cidr)) && tonumber(split("/", var.pod_range_cidr)[1]) <= 17
@@ -146,6 +167,7 @@ variable "proxy_only_range_cidr" {
   description = "Range of the REGIONAL_MANAGED_PROXY subnetwork. Regional Application Load Balancers, and therefore Gateways, cannot exist without it."
   type        = string
   default     = "10.8.0.0/23"
+  nullable    = false
 
   validation {
     condition     = can(cidrnetmask(var.proxy_only_range_cidr)) && tonumber(split("/", var.proxy_only_range_cidr)[1]) <= 26
@@ -157,12 +179,14 @@ variable "create_proxy_only_subnet" {
   description = "Create the proxy-only subnetwork. Set to false when another cluster in the same region and VPC already created it — the pool is shared."
   type        = bool
   default     = true
+  nullable    = false
 }
 
 variable "create_nat" {
   description = "Create a Cloud Router and Cloud NAT for egress. A cluster with private nodes and no NAT cannot pull an image from outside Google Cloud."
   type        = bool
   default     = true
+  nullable    = false
 
   # Failing here is kinder than failing at the first ImagePullBackOff. A
   # subnetwork the module does not own may already have egress of its own,
@@ -177,6 +201,7 @@ variable "subnet_flow_logs_enabled" {
   description = "Enable VPC flow logs on the cluster subnetwork, at half sampling over ten-minute windows. Vended network logs are billed at $0.25/GiB, which is a dollar or so a month at that sampling for a socle cluster."
   type        = bool
   default     = true
+  nullable    = false
 }
 
 # ---------------------------------------------------------------------------
@@ -187,18 +212,21 @@ variable "enable_private_nodes" {
   description = "Nodes get no external address. Flips the Autopilot default, which is public."
   type        = bool
   default     = true
+  nullable    = false
 }
 
 variable "control_plane_ip_endpoints_enabled" {
   description = "Expose the control plane on IP endpoints. Off: the DNS-based endpoint replaces them, and with it the authorized-networks maintenance problem."
   type        = bool
   default     = false
+  nullable    = false
 }
 
 variable "control_plane_dns_allow_external_traffic" {
   description = "Allow user traffic to the DNS-based control plane endpoint. True means the control plane is reachable wherever Google Cloud APIs are, gated by IAM; VPC Service Controls is the network boundary and is set outside this module."
   type        = bool
   default     = true
+  nullable    = false
 }
 
 # master_authorized_networks is absent by decision: it only applies to the IP
@@ -224,6 +252,7 @@ variable "release_channel" {
   description = "GKE release channel. REGULAR is Google's recommendation and the estate-wide default; RAPID is outside the GKE SLA and belongs in pre-production only."
   type        = string
   default     = "REGULAR"
+  nullable    = false
 
   validation {
     condition     = contains(["RAPID", "REGULAR", "STABLE"], var.release_channel)
@@ -277,7 +306,8 @@ variable "maintenance_exclusions" {
     end_time   = string
     scope      = string
   }))
-  default = []
+  default  = []
+  nullable = false
 
   validation {
     condition = alltrue([
@@ -318,6 +348,7 @@ variable "enable_upgrade_notifications" {
   description = "Create a Pub/Sub topic and publish cluster upgrade notifications to it, so automation can react instead of polling."
   type        = bool
   default     = true
+  nullable    = false
 }
 
 # ---------------------------------------------------------------------------
@@ -328,6 +359,7 @@ variable "logging_components" {
   description = "GKE log sources to send to Cloud Logging. SYSTEM_COMPONENTS cannot be removed; drop WORKLOADS when application logs are collected in-cluster."
   type        = list(string)
   default     = ["SYSTEM_COMPONENTS", "WORKLOADS"]
+  nullable    = false
 
   validation {
     condition     = contains(var.logging_components, "SYSTEM_COMPONENTS")
@@ -347,6 +379,7 @@ variable "monitoring_components" {
   description = "GKE metric sources. SYSTEM_COMPONENTS is free and mandatory; every other component is billed per sample, so none is defaulted on."
   type        = list(string)
   default     = ["SYSTEM_COMPONENTS"]
+  nullable    = false
 
   validation {
     condition     = contains(var.monitoring_components, "SYSTEM_COMPONENTS")
@@ -373,12 +406,14 @@ variable "cost_allocation_enabled" {
   description = "Add cluster, namespace and workload labels to the detailed billing export. On from day one because it does not backfill."
   type        = bool
   default     = true
+  nullable    = false
 }
 
 variable "backup_agent_enabled" {
   description = "Install the Backup for GKE agent. Off by default: $9 per protected namespace per month, where Velero covers a Persistent-Disk-backed socle for a third of that."
   type        = bool
   default     = false
+  nullable    = false
 }
 
 variable "billing_export_dataset_id" {
@@ -391,12 +426,14 @@ variable "billing_export_dataset_location" {
   description = "Location of the billing export dataset. Ignored when billing_export_dataset_id is null."
   type        = string
   default     = "EU"
+  nullable    = false
 }
 
 variable "observability_reader_members" {
   description = "Principals granted read-only access to this project's metrics — the central observability cluster's federated identity, never a key."
   type        = list(string)
   default     = []
+  nullable    = false
 
   validation {
     condition = alltrue([
@@ -412,9 +449,108 @@ variable "observability_reader_members" {
 # ---------------------------------------------------------------------------
 
 # Workload Identity Federation has no variable: Autopilot pre-configures it and
-# it cannot be disabled. The pool is exposed as an output, and binding a
-# Kubernetes service account to a Google one belongs to the layer that owns
-# those objects.
+# it cannot be disabled. The pool is exposed as an output. No Google service
+# account is created: one set of grants is made here, Crossplane's, because
+# its principal is fixed by the socle artifact; every other identity is
+# Crossplane's to bind.
+
+variable "crossplane" {
+  description = <<-EOT
+    Give the catalog's crossplane module its Google Cloud identity — the one
+    the socle cannot make for itself: grants to the federated principal of
+    crossplane-system/provider-gcp, no Google service account. allowed_roles
+    is the boundary: the roles (predefined, or custom by full name) Crossplane
+    may grant any module's principal on the project or on a bucket, through
+    Project IAM Admin under a modifiedGrantsByRole condition. Empty grants
+    nothing but the socle's own DNS records role; owner, editor, viewer,
+    iam.* and resourcemanager.* are refused, and Google caps the list at
+    nine. Predefined admin and owner roles (roles/storage.admin,
+    roles/bigquery.dataOwner, …) are refused too, roles/storage.objectAdmin
+    excepted: they grant roles on their resources, and Crossplane could give
+    one to itself. A custom role that carries a setIamPolicy permission must
+    not be listed, for the same reason. Buckets are reachable under the
+    <cluster_name>- prefix only, and never deletable. Nothing of Cloud DNS:
+    external-dns writes records through the socle's DNS records role,
+    granted on the project. Null, the default, creates nothing.
+  EOT
+  type = object({
+    allowed_roles = optional(list(string), [])
+  })
+  default = null
+
+  validation {
+    condition     = var.crossplane == null || try(alltrue([for r in var.crossplane.allowed_roles : can(regex("^(roles|projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/roles)/[A-Za-z0-9_.]+$", r))]), false)
+    error_message = "crossplane.allowed_roles must be role names as IAM writes them, such as roles/secretmanager.secretAccessor or projects/<project>/roles/<id> — a role, not a permission."
+  }
+
+  validation {
+    condition = var.crossplane == null || try(length([
+      for r in var.crossplane.allowed_roles : r
+      if contains(["roles/owner", "roles/editor", "roles/viewer"], r) || startswith(r, "roles/iam.") || startswith(r, "roles/resourcemanager.")
+    ]) == 0, true)
+    error_message = "crossplane.allowed_roles must not name ${try(join(", ", [for r in var.crossplane.allowed_roles : r if contains(["roles/owner", "roles/editor", "roles/viewer"], r) || startswith(r, "roles/iam.") || startswith(r, "roles/resourcemanager.")]), "")}: Crossplane would then be able to grant itself the project. Basic roles, iam.* and resourcemanager.* are refused."
+  }
+
+  # An admin or owner role carries setIamPolicy on its service's resources
+  # (roles/bigquery.dataOwner on datasets, roles/storage.legacyBucketOwner on
+  # buckets): granted to Crossplane itself, it would re-delegate beyond the
+  # bound.
+  # roles/storage.objectAdmin's only such permission writes object ACLs,
+  # which uniform bucket-level access disables.
+  validation {
+    condition = var.crossplane == null || try(length([
+      for r in var.crossplane.allowed_roles : r
+      if can(regex("^roles/[A-Za-z0-9_.]*(\\.admin|Admin|\\.owner|Owner)(\\.v[0-9]+)?$", r)) && r != "roles/storage.objectAdmin"
+    ]) == 0, true)
+    error_message = "crossplane.allowed_roles must not name ${try(join(", ", [for r in var.crossplane.allowed_roles : r if can(regex("^roles/[A-Za-z0-9_.]*(\\.admin|Admin|\\.owner|Owner)(\\.v[0-9]+)?$", r)) && r != "roles/storage.objectAdmin"]), "")}: an admin or owner role grants roles on its service's resources, and Crossplane could give it to itself and step outside the roles it may grant. Name the narrower role the module needs."
+  }
+
+  # Google accepts at most ten roles in a hasOnly() condition, and the socle's
+  # DNS records role always takes one of them:
+  # https://cloud.google.com/iam/docs/setting-limits-on-granting-roles
+  validation {
+    condition     = var.crossplane == null || try(length(var.crossplane.allowed_roles) <= 9, true)
+    error_message = "crossplane.allowed_roles accepts at most nine roles: Google caps a role-granting condition at ten, and the socle's DNS records role is always one of them."
+  }
+}
+
+# --- The shared Gateways' certificate — certificate.tf ---
+
+variable "gateway_certificate" {
+  description = <<-EOT
+    The Certificate Manager certificates the socle's two Gateways terminate
+    TLS with, at the load balancer: every name in `domains` (wildcards
+    included, such as ["acme.example", "*.acme.example"]), authorised by DNS
+    in the Cloud DNS managed zone `dns_zone` (its name, in this project).
+    A global certificate in a certificate map serves the public Gateway; a
+    regional one serves the internal Gateway. Every route published through a
+    Gateway — ArgoCD's included — is then `<name>.<domain>`. The zone must
+    not already hold an `_acme-challenge.<domain>` record (one another ACME
+    client left behind): the global authorization writes that name. Null, the
+    default, creates nothing, and the bootstrap module creates no Gateway: the
+    socle never serves a route in clear text.
+  EOT
+  type = object({
+    dns_zone = string
+    domains  = list(string)
+  })
+  default = null
+
+  validation {
+    condition     = var.gateway_certificate == null || try(length(var.gateway_certificate.domains) > 0, false)
+    error_message = "gateway_certificate.domains must name at least one domain: a certificate covers names, and there is nothing to issue without one."
+  }
+
+  validation {
+    condition     = var.gateway_certificate == null || try(alltrue([for d in var.gateway_certificate.domains : can(regex("^(\\*\\.)?([a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$", d))]), false)
+    error_message = "gateway_certificate.domains must be lowercase DNS names such as acme.example, or a leading-wildcard *.acme.example — no other wildcard."
+  }
+
+  validation {
+    condition     = var.gateway_certificate == null || try(can(regex("^[a-z][a-z0-9-]{0,62}$", var.gateway_certificate.dns_zone)), false)
+    error_message = "gateway_certificate.dns_zone must be a Cloud DNS managed zone name, such as acme-example — the zone's name, not its DNS name."
+  }
+}
 
 # ---------------------------------------------------------------------------
 # Lifecycle
@@ -424,4 +560,5 @@ variable "deletion_protection" {
   description = "Refuse to destroy the cluster. On by default; test fixtures turn it off."
   type        = bool
   default     = true
+  nullable    = false
 }

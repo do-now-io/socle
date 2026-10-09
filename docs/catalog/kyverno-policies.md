@@ -116,7 +116,14 @@ the native policy and in background scans alike:
   selector ([kyverno.md](kyverno.md#failure-policy-what-happens-when-kyverno-is-down)).
 - **`kube-system`, `flux-system` and `kyverno`, by name**, through the chart's
   `vpolExclude`. They are not rendered by a ResourceSet, so they carry no
-  label.
+  label. On GCP, the namespaces which GKE runs join them, the same list as
+  the engine's webhooks ([kyverno.md](kyverno.md#failure-policy-what-happens-when-kyverno-is-down)):
+  `kube-node-lease`, `gke-managed-system`, `gke-managed-cim`,
+  `gke-managed-filestorecsi`, `gke-managed-networking-dra-driver`,
+  `gke-managed-parallelstorecsi`, `gke-managed-volumepopulator`,
+  `gke-gmp-system`, `gmp-system`, `gmp-public`. GKE keeps mutating webhooks
+  out of them, not a native `ValidatingAdmissionPolicy`, so an Enforce policy
+  could otherwise refuse a pod GKE runs there.
 
 Measured on a local k3s 1.34, with a namespace labelled as the socle's and one
 not, a privileged pod in each:
@@ -143,7 +150,22 @@ who enforces a policy.
 A client's third-party charts, an ingress controller or an operator he
 installs himself, live in his namespaces and are judged like his
 applications. He exempts them through `values` (`vpolExclude`, keeping the
-three names above).
+names above).
+
+## GCP: GKE Autopilot refuses privileged pods first
+
+On Autopilot, GKE's own admission (Warden) refuses a privileged pod before
+Kyverno sees it. Measured on the sandbox: `admission webhook
+"warden-validating.common-webhooks.networking.gke.io" denied the request ...
+[denied by autogke-disallow-privilege] container pause is privileged; not
+allowed in Autopilot`. The privileged policies, `disallow-privileged-containers`
+among them, so only ever report pods Autopilot already blocks. They stay in
+the set, the same on every cloud.
+
+The e2e on GKE (`kyverno-policies-module-gke`) runs the floci test's steps on
+a violation Autopilot admits: a pod mounting the node's `/var/log` read-only,
+the one `hostPath` Autopilot allows, which `disallow-host-path` reports in
+Audit and refuses once enforced.
 
 ## What the client may set — `kube.kyverno_policies`
 
@@ -153,7 +175,7 @@ three names above).
 | `profile` | `"baseline"` | string | `baseline` or `restricted` |
 | `enforce` | `[]` | list | Policies switched to Enforce, each made native; only names this configuration renders |
 | `allowed_registries` | `[]` | list | Registry hosts, optionally with a port and a path: `ghcr.io`, `registry.k8s.io`, `ghcr.io/acme`, `localhost:5000`. No scheme, no trailing slash |
-| `values` | `{}` | object | Any `kyverno-policies` chart value, the client's winning. A list he sets replaces the socle's whole: `customPolicies` drops the socle's two, `vpolExclude.excludeNamespaces` drops the three names. The socle's namespaces stay out: their selector is not in `values` |
+| `values` | `{}` | object | Any `kyverno-policies` chart value, the client's winning. A list he sets replaces the socle's whole: `customPolicies` drops the socle's two, `vpolExclude.excludeNamespaces` drops the names above. The socle's namespaces stay out: their selector is not in `values` |
 | `values_secret` | `""` | string | A Secret in `kyverno-policies` with a `values.yaml` key, merged last |
 
 The chart carries no credential, so `values` has no path to refuse.
@@ -206,6 +228,12 @@ The job took 9m36s, `tofu destroy` and the empty-cluster suite included.
 | `profile = "restricted"` | The six restricted policies rendered |
 | Values order | Severity annotation: socle `medium`, `values` `high`, Secret `low` on the live policy; cleared, `medium` |
 | Off | Policies, native policies and namespace gone in 11 s |
+
+On GKE Autopilot (sandbox, 2026-10-07): the baseline set converged in Audit;
+`enforce: [disallow-host-path]` compiled into a native ValidatingAdmissionPolicy
+that denied the `hostPath` pod; a pod in a socle-excluded namespace was
+admitted. The content of the `PolicyReport` in the Audit step could not be
+measured, the sandbox ran out of capacity: to confirm on a full-size cluster.
 
 `tofu test`: 14 refusal cases and 1 positive for the two modules, defaults
 asserted. The CI run on floci adds its figures here once it lands.

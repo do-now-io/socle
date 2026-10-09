@@ -19,6 +19,11 @@
 #            /socle/<cluster>/ whose one policy reads SQS queue attributes
 #            and nothing else; the association never syncs on floci, so the
 #            workload is withheld; off deletes the role.
+#   module   on gcp (GKE, the sandbox), the module as its tfvars leave it,
+#            services = ["pubsub"]: the ProjectIAMMember binding
+#            roles/monitoring.viewer to the operator's principal, the
+#            workload after it, and a ScaledObject on podIdentity gcp
+#            scaling a Deployment to zero from Cloud Monitoring.
 # Not provable on floci: the association reaching EKS, the operator getting
 # the role's credentials, IAM enforcing the policy and the boundary — the
 # sandbox's (docs/catalog/keda.md §6).
@@ -892,4 +897,309 @@ spec:
         - podLogs:
             namespace: flux-system
             selector: app.kubernetes.io/name=flux-operator
+            tail: 40
+---
+# On GKE, against the sandbox (docs/catalog/keda.md §6): the module as the
+# client's tfvars leave it — keda on, Crossplane on, services = ["pubsub"],
+# roles/monitoring.viewer in gcp.crossplane.allowed_roles. Like the
+# crossplane module's gcp test, it reads the module as it stands and never
+# turns it off. The proof that matters is the last step: the operator reads
+# Cloud Monitoring as its own principal, through the binding the module
+# declared, with no key and no Google service account — what floci could
+# never show on AWS.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: keda-module-gcp
+  labels:
+    phase: module
+    cloud: gcp
+    platform: gke
+spec:
+  description: >-
+    With services = ["pubsub"], the operator's principal holds
+    roles/monitoring.viewer, and a ScaledObject on podIdentity gcp scales a
+    Deployment to zero from Cloud Monitoring.
+  timeouts:
+    # Autopilot provisions a node for pods that do not fit, minutes before a
+    # Deployment is Available; IAM takes up to minutes to propagate.
+    assert: 10m
+    error: 3m
+    delete: 3m
+  steps:
+    # The binding the module declares, read from the spec Crossplane applies:
+    # the one role, on the operator's own principal — the project's
+    # Workload Identity pool, ns/keda/sa/keda-operator — in the project the
+    # root wrote. No Google service account anywhere.
+    - name: the ProjectIAMMember binds roles/monitoring.viewer to the operator's principal, Ready
+      try:
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: projectiammembers.cloudplatform.gcp.m.upbound.io
+              status:
+                (conditions[?type == 'Established'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: cloudplatform.gcp.m.upbound.io/v1beta1
+              kind: ProjectIAMMember
+              metadata:
+                name: keda-operator
+                namespace: keda
+              spec:
+                forProvider:
+                  role: roles/monitoring.viewer
+                  (length(project) > `0`): true
+                  (starts_with(member, 'principal://iam.googleapis.com/projects/')): true
+                  (ends_with(member, '.svc.id.goog/subject/ns/keda/sa/keda-operator')): true
+                  (contains(member, join('', ['/workloadIdentityPools/', project, '.svc.id.goog/']))): true
+              status:
+                (conditions[?type == 'Synced'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: cloudplatform.gcp.m.upbound.io/v1beta1
+            kind: ProjectIAMMember
+            namespace: keda
+            name: keda-operator
+        - podLogs:
+            namespace: crossplane-system
+            selector: pkg.crossplane.io/provider=provider-gcp-cloudplatform
+            tail: 40
+    # The chart only after the binding (the child's dependsOn), the operator
+    # on its own ServiceAccount with no iam.gke.io/gcp-service-account
+    # annotation — the principal is the ServiceAccount itself — and the
+    # annotation that names its access.
+    - name: the workload converges after the binding, the operator as keda/keda-operator, no Google service account
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: keda-workload
+                namespace: flux-system
+              spec:
+                (dependsOn[?kind == 'ProjectIAMMember'] || `[]`):
+                  - name: keda-operator
+                    namespace: keda
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: keda
+                namespace: keda
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ServiceAccount
+              metadata:
+                name: keda-operator
+                namespace: keda
+                (annotations."iam.gke.io/gcp-service-account" || ''): ''
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: keda-operator
+                namespace: keda
+              spec:
+                template:
+                  metadata:
+                    annotations:
+                      socle.do-now.io/cloud-access: pubsub
+                  spec:
+                    serviceAccountName: keda-operator
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: keda-operator-metrics-apiserver
+                namespace: keda
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: keda-admission-webhooks
+                namespace: keda
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apiregistration.k8s.io/v1
+              kind: APIService
+              metadata:
+                name: v1beta1.external.metrics.k8s.io
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: keda
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: keda-workload
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: keda
+            name: keda
+        - events:
+            namespace: keda
+        - podLogs:
+            namespace: keda
+            tail: 40
+    # A client's workload, credentials from nowhere: a TriggerAuthentication
+    # on podIdentity gcp, so the operator reads with its own principal. The
+    # subscription does not exist, on purpose: Cloud Monitoring answers an
+    # authorised query on it with no series, which valueIfNull turns into 0,
+    # and the Deployment goes from one to zero. A denied query is a scaler
+    # error, and KEDA never scales on an error — so zero replicas is reached
+    # only through a read Cloud Monitoring allowed. Publishing to a real
+    # subscription would take a script, which these tests do without.
+    - name: a ScaledObject on podIdentity gcp reads Cloud Monitoring as the operator, and scales a Deployment to zero
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: ($values.apps)
+        - apply:
+            resource:
+              apiVersion: keda.sh/v1alpha1
+              kind: TriggerAuthentication
+              metadata:
+                name: operator-principal
+                namespace: ($values.apps)
+              spec:
+                podIdentity:
+                  provider: gcp
+        - apply:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: worker
+                namespace: ($values.apps)
+              spec:
+                replicas: 1
+                selector:
+                  matchLabels:
+                    app: worker
+                template:
+                  metadata:
+                    labels:
+                      app: worker
+                  spec:
+                    containers:
+                      - name: worker
+                        image: registry.k8s.io/pause:3.10
+                        resources:
+                          requests:
+                            cpu: 50m
+                            memory: 64Mi
+                        securityContext:
+                          allowPrivilegeEscalation: false
+                          runAsNonRoot: true
+                          runAsUser: 65534
+                          capabilities:
+                            drop: [ALL]
+                          seccompProfile:
+                            type: RuntimeDefault
+        - apply:
+            resource:
+              apiVersion: keda.sh/v1alpha1
+              kind: ScaledObject
+              metadata:
+                name: worker
+                namespace: ($values.apps)
+              spec:
+                scaleTargetRef:
+                  name: worker
+                minReplicaCount: 0
+                maxReplicaCount: 3
+                pollingInterval: 5
+                cooldownPeriod: 15
+                triggers:
+                  - type: gcp-pubsub
+                    authenticationRef:
+                      name: operator-principal
+                    metadata:
+                      subscriptionName: ($values.subscription)
+                      value: '5'
+                      valueIfNull: '0'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: worker
+                namespace: ($values.apps)
+              spec:
+                replicas: 0
+        - assert:
+            resource:
+              apiVersion: keda.sh/v1alpha1
+              kind: ScaledObject
+              metadata:
+                name: worker
+                namespace: ($values.apps)
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'Active'] || `[]`):
+                  - status: 'False'
+        # The ScaledObject goes while the operator still runs: its finalizer
+        # hands the Deployment back cleanly.
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Namespace
+              name: ($values.apps)
+      catch:
+        - describe:
+            apiVersion: keda.sh/v1alpha1
+            kind: ScaledObject
+            namespace: ($values.apps)
+            name: worker
+        - get:
+            apiVersion: autoscaling/v2
+            kind: HorizontalPodAutoscaler
+            namespace: ($values.apps)
+        - podLogs:
+            namespace: keda
+            selector: app=keda-operator
             tail: 40
