@@ -20,7 +20,7 @@ module itself follows [`victoria_metrics`](victoria-metrics.md) line for line.
 | Where | Every cloud, the same template, no cloud patch |
 | Default | **On** |
 | Shape | One pod, `server.mode: deployment`, strategy `Recreate`, a standalone PVC — victoria_metrics' reason: a `volumeClaimTemplate` cannot be resized by Helm |
-| Storage | 20Gi on the default StorageClass; `storage_size = ""` for an `emptyDir`. **A socle EKS has no StorageClass today**, as for victoria_metrics |
+| Storage | 20Gi on the default StorageClass; `storage_size = ""` for an `emptyDir` |
 | Retention | 7 days. The chart defaults to one month, over the binary's own 7 |
 | Ingest | OTLP over HTTP at `/insert/opentelemetry/v1/logs` |
 | Exposure | Headless `ClusterIP`, `victoria-logs.victoria-logs.svc:9428`, no auth, in-cluster only |

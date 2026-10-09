@@ -21,7 +21,7 @@ from nodes.
 | What | The official `victoria-traces-single` chart, `oci://ghcr.io/victoriametrics/helm-charts/victoria-traces-single:0.1.11` (VictoriaTraces v0.11.0), one `HelmRelease` in namespace `victoria-traces` |
 | Default | **Off** |
 | Shape | `server.mode: deployment`, a standalone PVC, strategy `Recreate`: the victoria_metrics reason |
-| Storage | 10Gi on the default StorageClass, `""` for an `emptyDir`; the EKS caveat of victoria_metrics applies |
+| Storage | 10Gi on the default StorageClass, `""` for an `emptyDir` |
 | Retention | 7 days |
 | Ingest | OTLP/HTTP at `/insert/opentelemetry/v1/traces` on `:10428`, protobuf only, which is what the gateway's `otlp_http` exporter sends. Applications speak to the gateway, never to this |
 | Query | The Jaeger query API under `/select/jaeger` |
@@ -65,7 +65,7 @@ When disabled — the default — the operator applies nothing.
 
 ```hcl
 kube = {
-  victoria_traces = { enabled = true }   # on EKS today: storage_size = "" as well
+  victoria_traces = { enabled = true }
 }
 ```
 

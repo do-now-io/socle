@@ -271,7 +271,8 @@ the EBS snapshots are still in the region.
 
 A cluster **renamed** does not find its bucket: pointing a second, read-only
 storage location at the old bucket is a manual step, written in this note
-when the sandbox has run it, and not automated in v1.
+when the sandbox has run it, and not automated in v1. Its EBS snapshots must
+also be re-tagged `ebs.csi.aws.com/cluster-name=<new name>` before a restore.
 
 ## 8. What changes outside `oci/catalog/velero/`
 
