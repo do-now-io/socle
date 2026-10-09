@@ -1,4 +1,4 @@
-# The velero module's proof (docs/catalog/velero.md §9). Off by default, so
+# The velero module's proof (docs/catalog/velero.md, Measured). Off by default, so
 # `health` proves the disabled shape only. The `module` phase, on aws, in two
 # halves:
 #
@@ -23,7 +23,7 @@
 #
 # Not provable on floci: the association reaching EKS, the pod getting the
 # role's credentials, IAM enforcing the policy and the boundary, EBS CSI
-# snapshots — the sandbox's (docs/catalog/velero.md §9).
+# snapshots — the sandbox's (docs/catalog/velero.md, Measured).
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -82,9 +82,9 @@ spec:
     exec: 3m
     delete: 3m
   steps:
-    # First half: the module's own AWS resources (docs/catalog/velero.md §2).
+    # First half: the module's own AWS resources (docs/catalog/velero.md, Cloud access).
     - name: with Crossplane on, the module declares its bucket, its Role and its association
-      # 99 s cold (docs/catalog/crossplane.md §7), one provider more here;
+      # 99 s cold (docs/catalog/crossplane.md, Measured), one provider more here;
       # ~5 min when the providers re-adopt CRDs a previous install left.
       timeouts:
         assert: 8m
@@ -1259,7 +1259,7 @@ spec:
             namespace: velero
             selector: name=node-agent
             tail: 60
-    # §7, scenario 1, without Argo CD on floci: the namespace deleted, the
+    # docs/guides/restore-a-backup.md, without Argo CD on floci: the namespace deleted, the
     # restore, the file back.
     - name: the namespace deleted and restored, the file read back
       timeouts:
@@ -1316,7 +1316,7 @@ spec:
                 sleep 2
               done
               echo "after the restore the file holds '$got', expected '$PROOF'"; exit 1
-        # §7, last step: the Restore deleted once checked, while the server
+        # docs/guides/restore-a-backup.md, step 7: the Restore deleted once checked, while the server
         # runs. Its finalizer (restores.velero.io/external-resources-finalizer)
         # is the server's to release; left in place, it holds the namespace
         # Terminating once the module goes (run 36977771047).

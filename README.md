@@ -18,10 +18,11 @@ pulls, and upgrading the whole platform is a one-line change in Git.
 
 </div>
 
-> [!WARNING]
-> **Pre-0.1.0. Socle is still being built, and nothing has been released.**
-> Every push to `main` publishes a signed alpha. The packages stay private
-> until v1. See [Status](#status).
+**Documentation: <https://do-now-io.github.io/socle/>**
+
+> [!NOTE]
+> **0.1.0 is the first release.** Before 1.0.0 a minor may break; every push
+> to `main` publishes a signed alpha. See [Status](#status).
 
 ## Why Socle
 
@@ -45,12 +46,12 @@ pulls, and upgrading the whole platform is a one-line change in Git.
 
 ```mermaid
 flowchart LR
-  tfvars["your tfvars<br/>socle_version · &lt;cloud&gt; · kube"]
+  tfvars["your main.tf<br/>socle_version · &lt;cloud&gt; · kube"]
   subgraph tofu ["tofu apply — once"]
     foundations["Foundations<br/>network · cluster · identities"]
     bootstrap["Bootstrap<br/>Cilium · Flux Operator · inputs"]
   end
-  oci[("ghcr.io/do-now-io/socle<br/>cosign-signed OCI")]
+  oci[("ghcr.io/do-now-io/socle/flux-modules<br/>cosign-signed OCI")]
   subgraph cluster ["Cluster — continuously"]
     flux["Flux<br/>pull · verify · render"]
     catalog["Catalog modules<br/>ArgoCD · monitoring · DNS · …"]
@@ -65,42 +66,48 @@ flowchart LR
 | **Bootstrap** | Cilium and CoreDNS where the cloud doesn't provide them, then the Flux Operator and your validated inputs | OpenTofu, in the same apply |
 | **Catalog** | À la carte modules, one Flux Operator `ResourceSet` each, rendered from your inputs | Flux, from the signed artifact |
 
-Design: [Flux catalog](docs/flux-catalog.md) ·
-[Distribution and releases](docs/distribution.md) ·
-[Crossplane and module IAM](docs/catalog/crossplane.md)
+How the parts fit, and why: [Architecture](https://do-now-io.github.io/socle/architecture/overview/).
 
 ## What you write
 
-You write one file per cluster. Under `kube`, list only the values that differ
-from the catalog defaults:
+You write one `main.tf` per cluster, calling the socle's root for your cloud.
+Under `kube`, list only the values that differ from the catalog defaults:
 
 ```hcl
-# clusters/prod.tfvars
-socle_version = "0.1.0"            # the only line an upgrade touches
-
-aws = {
-  region             = "eu-west-3"
-  cluster_name       = "acme-prod"
-  owner              = "platform"
-  environment        = "prod"
-  kubernetes_version = "1.34"
-  availability_zones = ["eu-west-3a", "eu-west-3b", "eu-west-3c"]
-  cluster_endpoint_public_access_cidrs = ["203.0.113.0/24"]
-  gateway_certificate = { domain = "acme.example" }
+# clusters/prod/main.tf (plus your state backend)
+locals {
+  socle_version = "0.1.0" # the only line an upgrade touches. x-release-please-version
 }
 
-kube = {
-  argocd          = { domain = "argocd.acme.example" }
-  victoria_traces = { enabled = true }
+module "socle" {
+  source = "oci://ghcr.io/do-now-io/socle/opentofu-modules//opentofu/clusters/aws?tag=${local.socle_version}"
+
+  socle_version = local.socle_version
+
+  aws = {
+    region             = "eu-west-3"
+    cluster_name       = "acme-prod"
+    owner              = "platform"
+    environment        = "prod"
+    kubernetes_version = "1.34"
+    availability_zones = ["eu-west-3a", "eu-west-3b", "eu-west-3c"]
+    cluster_endpoint_public_access_cidrs = ["203.0.113.0/24"]
+    gateway_certificate = { domain = "acme.example" }
+  }
+
+  kube = {
+    argocd          = { domain = "argocd.acme.example" }
+    victoria_traces = { enabled = true }
+  }
 }
 ```
 
 ```sh
-tofu init && tofu apply -var-file=prod.tfvars
+tofu init && tofu apply
 kubectl -n flux-system get resourceset    # socle-root and one per module
 ```
 
-The full walkthrough is in [opentofu/clusters/aws](opentofu/clusters/aws/README.md),
+The full walkthrough is the [AWS quickstart](docs/getting-started/aws.md),
 and every option is documented in
 [prod.tfvars.example](opentofu/clusters/aws/prod.tfvars.example).
 
@@ -117,7 +124,7 @@ The version is the upstream application's, pinned in the module.
 
 ### Monitoring
 
-The stack's design: [Monitoring](docs/monitoring.md).
+The stack's design: [Observability](docs/architecture/observability.md).
 
 | Module | What it does | Version | Default | Clouds | Notes |
 | --- | --- | --- | :---: | --- | --- |
@@ -144,13 +151,13 @@ The stack's design: [Monitoring](docs/monitoring.md).
 | Module | What it does | Version | Default | Clouds | Notes |
 | --- | --- | --- | :---: | --- | --- |
 | [`gateway_api`](docs/catalog/gateway-api.md) | Gateway API CRDs and the shared `public` and `private` Gateways | 1.6.1 | on | AWS · Azure · Scaleway | Built into GKE on GCP |
-| [`external_dns`](docs/catalog/external-dns.md) | Publishes routes into the cloud's DNS zone | 0.22.0 | off | All | Turned on for you on AWS once a certificate is set |
+| [`external_dns`](docs/catalog/external-dns.md) | Publishes routes into the cloud's DNS zone | 0.22.0 | off | All | Turned on for you on AWS once a certificate is set and Crossplane can use `route53` |
 
 ### Cloud resources
 
 | Module | What it does | Version | Default | Clouds | Notes |
 | --- | --- | --- | :---: | --- | --- |
-| [`crossplane`](docs/catalog/crossplane.md) | Lets each module declare its own cloud IAM | 2.4.2 | off | All | Needed by `external_dns` and `velero`, and by `keda` and `external_secrets` for their cloud access |
+| [`crossplane`](docs/catalog/crossplane.md) | Lets each module declare its own cloud IAM | 2.4.2 | off | All | Needed by `velero`, and on AWS by `external_dns`, `keda` (`services`) and `external_secrets` for their own roles |
 
 ### Autoscaling
 
@@ -166,20 +173,21 @@ The stack's design: [Monitoring](docs/monitoring.md).
 
 Cilium and CoreDNS come before the catalog. On AWS and Azure the bootstrap
 module installs them ahead of Flux. GKE and Kapsule run their own:
-[cilium.md](docs/catalog/cilium.md).
+[Cilium before Flux](docs/architecture/cilium-before-flux.md).
 
 ## Clouds
 
 | Cloud | Foundations | One-apply root | Docs |
 | --- | :---: | :---: | --- |
-| AWS · EKS | ✅ | ✅ [`clusters/aws`](opentofu/clusters/aws) | [docs/aws](docs/aws/README.md) |
-| GCP · GKE | ✅ | ⏳ | [docs/gcp](docs/gcp/README.md) |
-| Azure · AKS | ✅ | ⏳ | [docs/azure](docs/azure/prerequisites.md) |
-| Scaleway · Kapsule | ✅ | ⏳ | [docs/scaleway](docs/scaleway/README.md) |
+| AWS · EKS | ✅ | ✅ [`clusters/aws`](opentofu/clusters/aws) | [AWS](docs/clouds/aws/index.md) |
+| GCP · GKE | ✅ | ⏳ | [GCP](docs/clouds/gcp/index.md) |
+| Azure · AKS | ✅ | ⏳ | [Azure](docs/clouds/azure/index.md) |
+| Scaleway · Kapsule | ✅ | ⏳ | [Scaleway](docs/clouds/scaleway/index.md) |
 
 ## Status
 
-Socle is **pre-0.1.0**, and no version has been released yet.
+Socle's first release is **0.1.0**. Before 1.0.0, a breaking change bumps
+the minor.
 
 - The foundations modules exist for all four clouds. The single-apply root
   exists for AWS only, so far.
@@ -190,21 +198,9 @@ Socle is **pre-0.1.0**, and no version has been released yet.
 - Every push to `main` publishes `<next>-alpha.N`, signed. To release, you
   merge the release-please PR, which re-tags that same alpha. Nothing is
   rebuilt.
-- The packages on GHCR stay private until v1. Until then, a cluster needs a
-  pull secret.
-
-## Repository layout
-
-```
-opentofu/
-├── aws/  gcp/  azure/  scaleway/   # foundations, one module per cloud
-├── bootstrap/                      # Cilium, Flux Operator, inputs, catalog schema
-└── clusters/aws/                   # the root a client copies: one apply
-oci/
-├── catalog/<module>/               # one ResourceSet + its e2e suite
-└── clusters/<cloud>/               # which modules each cloud offers
-docs/                               # design notes, per cloud and per module
-```
+- Both packages are public: the cluster pulls the Flux artifact,
+  `ghcr.io/do-now-io/socle/flux-modules`, and `tofu init` the OpenTofu
+  modules, `ghcr.io/do-now-io/socle/opentofu-modules`, with no credential.
 
 ## Security
 

@@ -6,9 +6,18 @@ deliberately leaves with no default.
 
 ## Roles the apply needs
 
-At minimum, a principal able to create resource groups, VNets, subnets, NAT
-Gateways and public IPs, an AKS cluster, a Log Analytics workspace, and an
-Azure Monitor workspace with its data collection rule.
+Two roles on the subscription, since the example creates its resource group:
+
+- **Contributor**: the resource group, VNet, subnet, NAT gateway and public IP,
+  the AKS cluster, the Log Analytics workspace, and the Azure Monitor
+  workspace with its data collection rule.
+- **User Access Administrator**, or any role with
+  `Microsoft.Authorization/roleAssignments/write`: the cluster's
+  system-assigned identity needs Network Contributor on the node subnet, and
+  Contributor cannot grant it.
+
+The resource providers to register and the full list are in
+[prerequisites](../../../../docs/clouds/azure/prerequisites.md).
 
 ## Remote state
 

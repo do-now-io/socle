@@ -1,4 +1,4 @@
-# Identities — docs/scaleway/managed-scope.md.
+# Identities — docs/decisions/scaleway.md, SCALEWAY-08.
 #
 # This is the file where Scaleway costs the socle something the other three
 # clouds do not. GKE has Workload Identity Federation, EKS has Pod Identity,

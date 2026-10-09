@@ -16,14 +16,18 @@ tofu apply \
 
 Everything that has to exist on the account beforehand, with the commands to
 create it, is in
-[prerequisites](../../../../docs/scaleway/prerequisites.md).
+[prerequisites](../../../../docs/clouds/scaleway/prerequisites.md). The
+example builds the cluster only; the
+[Scaleway quickstart](../../../../docs/getting-started/scaleway.md) adds the
+bootstrap on top.
 
 ## Before the first apply
 
 - **Raise the instance quota.** The default pool is two
-  `COMPUTE3-X8C-16G` nodes per zone across two zones. Scaleway's per-type
-  quotas sit below that on a new Organization, and only a support ticket moves
-  them. An apply that hits the ceiling fails while building a pool.
+  `COMPUTE3-X8C-16G` nodes per zone across two zones, growing to five per
+  zone. Scaleway's per-type quotas sit below that on a new Organization, and
+  only a support ticket moves them. An apply that hits the ceiling fails while
+  building a pool ([quotas](../../../../docs/clouds/scaleway/prerequisites.md#quotas)).
 - **Validate the Organization's identity.** Without it, most production
   instance types have no quota at all.
 

@@ -1,181 +1,52 @@
 # Socle foundations — AWS
 
-One flat root module: VPC, EKS Standard cluster, its bootstrap nodes,
-identities. It provisions a control plane with just enough compute for the
-socle to start, and the identities the Flux-pulled socle needs, then steps
-away.
+One flat module: the VPC, the EKS Standard cluster, its bootstrap node group,
+the log groups, and the identities nothing in the cluster can create
+(Crossplane's, on request). It provisions nothing that needs a pod to run,
+except the bootstrap node group.
+
+It does not converge alone. The bootstrap nodes boot with no CNI and the
+group turns `ACTIVE` only once Cilium runs on them, so a root applies this
+module together with [`opentofu/bootstrap`](../bootstrap), which installs
+Cilium beside the group. That root is [`opentofu/clusters/aws`](../clusters/aws);
+start from the [AWS quickstart](../../docs/getting-started/aws.md).
 
 ```hcl
-module "socle" {
+module "foundations" {
   source = "oci://ghcr.io/do-now-io/socle/opentofu-modules//opentofu/aws?tag=${var.socle_version}"
 
-  cluster_name = "socle-prod"
+  cluster_name = "acme-prod"
   owner        = "platform"
   environment  = "prod"
 
-  availability_zones = ["eu-west-3a", "eu-west-3b"]
-
-  create_vpc = true
-
-  kubernetes_version                   = "<version>"
-  cluster_endpoint_public_access_cidrs = ["203.0.113.0/32"]
+  availability_zones                   = ["eu-west-3a", "eu-west-3b"]
+  kubernetes_version                   = "1.34"
+  cluster_endpoint_public_access_cidrs = ["203.0.113.10/32"]
 }
 ```
 
-The region is not a variable: it comes from the `aws` provider you configure.
-`kubernetes_version` has no default and none is suggested here — the socle
-pipeline owns that choice.
+The region is the `aws` provider's, not a variable. `kubernetes_version` has
+no default.
 
-A deployable version of that is in [`examples/minimal`](examples/minimal),
-which also lists the roles the apply needs and where remote state belongs.
+What is decided for you, what is deliberately absent, and why:
+[AWS foundations](../../docs/clouds/aws/foundations.md).
 
-> **OpenTofu does not verify OCI signatures.** It will pull an unsigned or
-> tampered artifact without complaint — Flux does, this does not. Run
-> `cosign verify` in CI before `tofu init`, or enforce it through registry
-> policy. The command, and the identity to pin:
-> [distribution](../../docs/distribution.md#who-verifies-and-who-does-not).
-
-## What is decided for you
-
-Every default traces back to a research document. The short version:
-
-| Decision | Position | Traces to |
-| --- | --- | --- |
-| EKS Standard, no Auto Mode option | enforced | [cluster mode](../../docs/aws/eks-cluster-mode.md) |
-| Karpenter, Cilium, CSI drivers, LB controller are factory components, not provisioned here | enforced | [cluster mode](../../docs/aws/eks-cluster-mode.md) |
-| One bootstrap node group — 2 nodes of 4 vCPU on Spot over six Graviton families, untainted, not autoscaled — the only compute this module owns | default | [Cilium design note §2](../../docs/catalog/cilium.md) |
-| VPC gets at least one public and one private subnet per AZ, no all-public escape hatch | enforced | [network & security](../../docs/aws/eks-network-security.md) |
-| NAT Gateway per AZ | default | [network & security](../../docs/aws/eks-network-security.md) |
-| S3 Gateway endpoint always on; ECR/STS/EC2/CloudWatch Logs Interface endpoints standard | enforced | [network & security](../../docs/aws/eks-network-security.md) |
-| Public EKS API access restricted by CIDR, private access always on | enforced | [network & security](../../docs/aws/eks-network-security.md) |
-| Secrets encryption via KMS on by default | default | [network & security](../../docs/aws/eks-network-security.md) |
-| VPC flow logs on | default | [network & security](../../docs/aws/eks-network-security.md) |
-| Control plane logs off, opt-in through `cluster_log_types` for a client whose audit needs them | default | [#80](https://github.com/do-now-io/socle/issues/80) |
-| Pod Identity exclusively, IRSA absent | enforced | [managed scope](../../docs/aws/eks-managed-scope.md) |
-| VPC CNI and kube-proxy refused — never installed at all (`bootstrap_self_managed_addons = false`) | enforced | [managed scope](../../docs/aws/eks-managed-scope.md) |
-| End of standard support: AWS upgrades the cluster rather than billing extended support (`STANDARD`) | enforced | [managed scope](../../docs/aws/eks-managed-scope.md) |
-| EBS CSI, EFS CSI and the Pod Identity Agent stay EKS-managed add-ons — installed by the bootstrap module once the nodes run, not here; CoreDNS is installed by the bootstrap module after Cilium | absent | [managed scope](../../docs/aws/eks-managed-scope.md), [catalog/cilium](../../docs/catalog/cilium.md) |
-| Workload identities (Crossplane, EBS CSI) belong to the layer that installs their pods | absent | [managed scope](../../docs/aws/eks-managed-scope.md) |
-
-## Also decided, not from research
-
-A few defaults are plain engineering, not a research decision — flagged as
-such in the code rather than dressed up with a citation that doesn't exist:
-
-- **`vpc_cidr` default (`10.0.0.0/16`)** — arbitrary, just large enough for
-  any socle estate.
-- **`access_config.authentication_mode = "API"`** — the aws-auth ConfigMap
-  is legacy.
-- **`access_config.bootstrap_cluster_creator_admin_permissions = true`** —
-  set explicitly, not left to its documented default. Measured against a
-  real cluster on provider 6.x: an apply with this unset grants cluster-admin
-  to nobody human, only an access entry for EKS's own service role. Explicit
-  is what actually lets the apply-time principal bootstrap Flux. ForceNew —
-  changing it replaces the cluster, since AWS accepts it only at creation.
-- **`upgrade_policy.support_type = "STANDARD"`, with no variable** — the
-  policy is that a cluster never enters extended support, so an option to
-  enter it is an option we would not recommend. AWS's own default is exactly
-  that option, and a cluster that takes it cannot leave until it is upgraded.
-  Hardcoding STANDARD makes the rule true rather than pious: if the socle
-  pipeline does its job, it never fires.
-- **A customer-managed KMS key on both log groups** — CloudWatch Logs already
-  encrypts at rest with an AWS-owned key, so this buys custody rather than
-  encryption. It is worth one key because the control plane audit stream,
-  once a client turns it on, is the record of who did what to the API
-  server, and because the module already
-  spends the same dollar on the Secrets key for the same reason.
-- **`log_retention_days` default (90)** — arbitrary. What is not arbitrary is
-  that the module creates both log groups itself: a group EKS or VPC flow
-  logs create implicitly never expires, and nobody notices until the bill
-  does.
-- **`kubernetes.io/role/elb`, `kubernetes.io/role/internal-elb` and
-  `kubernetes.io/cluster/<name>` subnet tags** — Karpenter and the AWS Load
-  Balancer Controller need them for subnet auto-discovery once the factory
-  installs them later; a network-level artifact this module has to lay
-  down now regardless.
-
-## What is deliberately absent
-
-Not oversights. An option in the interface is an option that is supported
-and tested, so these are refusals:
-
-- **IPv6** — Cilium's ENI IPv6 IPAM mode is still beta and has an
-  unresolved bug on EKS IPv6 clusters.
-- **Security groups for pods** — a VPC CNI (ENI trunking) feature; Socle
-  doesn't run VPC CNI. Cilium already covers the same ground in eBPF.
-- **Gateway API load balancers** — the socle's two Gateways get NLBs from
-  EKS's in-tree service controller, through annotations on the Service
-  Cilium creates for each ([gateway-api](../../docs/catalog/gateway-api.md)).
-  This module provisions only the certificate they terminate TLS with
-  (`gateway_certificate`).
-- **DynamoDB Gateway endpoint** — dropped: no cited Socle use case, here or
-  in the observability service-coverage table. S3 keeps its own citation.
-- **IRSA, or any toggle for it** — Pod Identity is the only mechanism this
-  module wires up. The OIDC issuer URL is still exposed as an output
-  (checklist requirement), not because IRSA needs it.
-- **Every EKS add-on, and every variable that pinned one** — they are still
-  EKS-managed add-ons, they are simply not installed from here. See below.
-- **Every workload identity, Crossplane's included** — a role here would be
-  half an identity. The other half is a Pod Identity association naming a
-  Kubernetes service account that does not exist until the plugins are
-  deployed, so both halves are built there.
-- **Any credential as an input** — the module authenticates through the
-  provider's ambient credentials, and issues no key.
-- **GuardDuty EKS Protection** — a single detector per account per region,
-  not per cluster. A client with several clusters in one AWS account would
-  have two applies of this module fight over the same detector. Out of
-  scope: an account-level prerequisite, not a module toggle.
+> **OpenTofu does not verify OCI signatures.** It pulls an unsigned or
+> tampered artifact without complaint; Flux verifies, OpenTofu does not. Run
+> `cosign verify` before `tofu init`:
+> [distribution](../../docs/architecture/distribution.md).
 
 ## Tests
 
 ```bash
-tofu test          # 15 runs: every validation, and the defaults
+tofu test
 ```
 
-CI plans this module directly against the floci emulator — no fixture
-directory, no cloud account, no secret. The `aws` provider already honors
-`AWS_ENDPOINT_URL` on its own, and the six variables with no default get
-throwaway values from `TF_VAR_*`, both set in `integration.yaml`'s shared
-`env:` block rather than baked into the module itself.
-
-That leg **plans, it does not apply** — no longer because the apply fails
-outright. It does not: `oidc_issuer_url` reads through `try()`, so the empty
-`identity` this image's `DescribeCluster` returns yields null and all 34
-resources converge. It is the *second* apply that cannot work, because the
-emulator does not read back what it stored — `DescribeCluster` returns
-`logging`, `encryptionConfig` and `upgradePolicy` as null, `GetRole` returns
-no tags, `DescribeLogGroups` no `kmsKeyId`, `DescribeFlowLogs` no
-`DeliverLogsPermissionArn`. A refresh therefore sees six resources as drifted
-however many times it runs, and the apply that follows dies on
-`UnsupportedOperation: Operation AssociateKmsKey is not supported`. Confirmed
-to be the emulator's gap, not the module's — the same sequence against a real
-EKS cluster showed zero drift. The reason is in the workflow's run summary
-rather than left to be rediscovered.
-
-## What an apply does not give you
-
-This module provisions **nothing that needs a pod to run**, with one
-exception it cannot do without: the bootstrap node group. Its nodes boot with
-no CNI and are Ready — and the group ACTIVE — only once Cilium's agent runs on
-them, so a root must install Cilium beside the group rather than after it
-(`opentofu/clusters/aws` does). Otherwise: no Fargate profile, no Karpenter,
-and no EKS add-on. What comes out is a VPC, a control plane, two nodes, log
-groups and identities.
-
-The add-ons left for that reason. CoreDNS and the EBS CSI controller are
-Deployments; while the nodes wait for a CNI their pods cannot schedule, the
-add-on health goes `DEGRADED`, and the apply fails before Cilium exists.
-
-So an apply gives you a cluster with the nodes the socle starts on, and no
-workload identity waiting for it. The capacity for workloads (Karpenter), the
-CNI, the add-ons and the workload identities all arrive with the layer above,
-because each of those identities has to name a Kubernetes service account
-that this module cannot see.
-
-That leaves one conformance checklist item unsatisfiable: outputs are required
-to cover "the in-cluster provider's identity", and there is no longer one to
-output. The standard needs amending once the plugins own that identity. The
-gap is recorded here rather than papered over.
+Plans only, offline: every validation fails once, and the defaults are
+asserted, with the provider's credentials stubbed. CI also plans this module against the floci emulator
+(`integration.yaml`), with the variables that have no default set through
+`TF_VAR_*`. The module is applied, through the real root, by the
+`root (aws)` job of `e2e.yaml` on floci's k3s.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements

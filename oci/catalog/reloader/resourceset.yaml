@@ -1,13 +1,13 @@
 # The reloader module: Stakater Reloader, which rolls a workload when a
 # ConfigMap or a Secret it reads changes. The other half of external_secrets
 # — a Secret that ESO rotates under a pod that never re-reads it changes
-# nothing — and useful alone for ConfigMaps. docs/catalog/reloader.md holds
-# the design; the rules of docs/flux-catalog.md §6 apply: inputsFrom the one
-# provider, the reconcile toggle on EACH resource, values tested never
-# presence.
+# nothing — and useful alone for ConfigMaps. docs/catalog/reloader.md and
+# docs/decisions/reloader.md hold the design; the rules of
+# docs/architecture/flux-catalog.md apply: inputsFrom the one provider, the
+# reconcile toggle on EACH resource, values tested never presence.
 #
 # Values, in the order helm-controller merges them, later winning
-# (docs/flux-catalog.md §6): reloader-socle-values, the socle's defaults
+# (docs/architecture/flux-catalog.md): reloader-socle-values, the socle's defaults
 # below; reloader-client-values, kube.reloader.values; then the client's
 # Secret when they name one. No inline `values:` on the HelmRelease —
 # helm-controller merges it last, so it would beat the client on every key.

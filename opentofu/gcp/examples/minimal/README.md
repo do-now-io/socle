@@ -32,13 +32,15 @@ Federation, never a key — needs, on the target project:
 | --- | --- |
 | `roles/container.admin` | the GKE cluster |
 | `roles/compute.networkAdmin` | VPC, subnetworks, router and NAT |
-| `roles/resourcemanager.projectIamAdmin` | binding roles to it |
+| `roles/resourcemanager.projectIamAdmin` | the `observability_reader_members` bindings |
 | `roles/pubsub.admin` | the upgrade-notification topic |
 | `roles/bigquery.admin` | only when `billing_export_dataset_id` is set |
 | `roles/storage.objectAdmin` | reading and writing state — granted on the state bucket, not on the project |
 
 Setting the project up to receive an apply — APIs, budget, a hardened state
-bucket — is [docs/gcp/prerequisites.md](../../../../docs/gcp/prerequisites.md).
+bucket, and the one-time roles that do it (`roles/serviceusage.serviceUsageAdmin`,
+`roles/storage.admin`) — is in
+[GCP prerequisites](../../../../docs/clouds/gcp/prerequisites.md).
 
 ## After the apply
 

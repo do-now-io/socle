@@ -2,12 +2,12 @@
 # ExternalSecret into a Kubernetes Secret read from the cloud's own secret
 # manager, and keeps it in step when the value rotates there. Pair it with the
 # reloader module for the pods that read those Secrets to roll.
-# docs/catalog/external-secrets.md holds the design; the rules of
-# docs/flux-catalog.md §6 apply: inputsFrom the one provider, the reconcile
+# docs/catalog/external-secrets.md is the module's page; the rules of
+# docs/reference/catalog-module-standard.md apply: inputsFrom the one provider, the reconcile
 # toggle on EACH resource, values tested never presence.
 #
 # Values, in the order helm-controller merges them, later winning
-# (docs/flux-catalog.md §6): external-secrets-socle-values, the socle's
+# (docs/decisions/socle.md#socle-06-the-clients-values-win): external-secrets-socle-values, the socle's
 # defaults below; external-secrets-client-values, kube.external_secrets.values;
 # then the client's Secret when they name one. No inline `values:` on the
 # HelmRelease — helm-controller merges it last, so it would beat the client on
@@ -15,7 +15,7 @@
 #
 # Cloud access (docs/catalog/external-secrets.md): on AWS with Crossplane on
 # and at least one prefix, the module declares its own IAM role through
-# Crossplane (docs/catalog/crossplane.md §3) — READ-ONLY, GetSecretValue and
+# Crossplane (docs/architecture/module-iam.md) — READ-ONLY, GetSecretValue and
 # DescribeSecret on secret:<prefix>/* in the cluster's region for each prefix
 # in kube.external_secrets.prefixes (default: the cluster name), never `*`,
 # no write, no ListSecrets — bound by Pod Identity to the controller's
@@ -29,7 +29,7 @@
 # - external-secrets-workload, a child ResourceSet holding the chart, which
 #   dependsOn the Role and the association being Ready: EKS Pod Identity
 #   injects the credentials at pod admission, and a pod admitted before its
-#   association never gets them (docs/catalog/external-dns.md);
+#   association never gets them (docs/architecture/module-iam.md);
 # - external-secrets-store, a child ResourceSet holding the ClusterSecretStore,
 #   which dependsOn the HelmRelease being Ready: the store's CRD is one the
 #   chart installs, and ESO's validating webhook must answer for it to apply.
@@ -84,7 +84,7 @@ spec:
         pod-security.kubernetes.io/enforce: restricted
     << if $access >>
     ---
-    # The module's own AWS access, docs/catalog/crossplane.md §3. Under
+    # The module's own AWS access, docs/architecture/module-iam.md. Under
     # /socle/<cluster>/ and carrying Crossplane's boundary when the root wired
     # one: Crossplane's own policy refuses any other role. Inline policy only.
     #
@@ -295,7 +295,7 @@ spec:
     # controller's default credential chain — the Pod Identity association
     # above. A ClusterSecretStore, so every namespace may reference it: the
     # IAM prefixes, not the store, bound what it reads
-    # (docs/catalog/external-secrets.md). Per-namespace SecretStores, and
+    # (docs/decisions/external-secrets.md). Per-namespace SecretStores, and
     # stores on other backends, are the client's.
     apiVersion: fluxcd.controlplane.io/v1
     kind: ResourceSet

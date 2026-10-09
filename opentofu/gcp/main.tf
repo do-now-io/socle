@@ -6,7 +6,7 @@
 # stack, application infrastructure — arrives through the socle OCI artifact
 # and Crossplane.
 #
-# Every default here traces back to a research document under docs/gcp/.
+# Every default here traces back to a decision in docs/decisions/gcp.md.
 # Resources live in network.tf, cluster.tf, iam.tf and observability.tf.
 
 locals {

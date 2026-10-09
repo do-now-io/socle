@@ -26,7 +26,7 @@ variable "additional_tags" {
   default     = {}
 }
 
-# --- Network — docs/azure/network-security.md ---
+# --- Network — docs/decisions/azure.md, AZURE-13 ---
 
 variable "location" {
   description = "Azure region for every resource this module creates. Required, no default — there is no globally correct region to pick on a client's behalf."
@@ -116,7 +116,7 @@ variable "dns_service_ip" {
 variable "pod_cidr" {
   description = <<-EOT
     Range Cilium allocates pod addresses from, as the cluster pool of the
-    Cilium the bootstrap module installs (docs/catalog/cilium.md). Not set on
+    Cilium the bootstrap module installs (docs/architecture/cilium-before-flux.md). Not set on
     the cluster: azurerm refuses pod_cidr under network_plugin = "none" (see
     cluster.tf), so this module only carries the value to the bootstrap
     through its output. Must not overlap the VNet, service_cidr or any
@@ -133,7 +133,7 @@ variable "pod_cidr" {
   }
 }
 
-# --- Cluster — docs/azure/cluster-mode.md, docs/azure/managed-scope.md ---
+# --- Cluster — docs/decisions/azure.md, AZURE-01 to AZURE-03 ---
 
 variable "kubernetes_version" {
   description = "AKS control plane version. Required, no default: the module accepts whatever version it is given rather than enforcing a version policy itself — that policy is decided and bumped by the socle Kargo pipelines, not by this module."

@@ -1,0 +1,44 @@
+/* The socle identity (#71, M0): limestone and basalt, and one green, a
+   declension of do-now.io's (forest #004F28, lime #DBF798): a deep pine for
+   the hero, lime for its call to action, and a forest accent darkened or
+   lightened until it passes AA on every surface (5.7:1 and up).
+   "Socle" is French for plinth; the wordmark sits on one. Shared by the
+   landing page and, through starlight.css, by every documentation page. */
+@import '@fontsource-variable/archivo/wdth.css';
+@import '@fontsource/ibm-plex-sans/400.css';
+@import '@fontsource/ibm-plex-sans/400-italic.css';
+@import '@fontsource/ibm-plex-sans/600.css';
+@import '@fontsource/ibm-plex-mono/400.css';
+@import '@fontsource/ibm-plex-mono/500.css';
+
+:root {
+  --stone: #f2f3ef;
+  --stone-raised: #fbfbf8;
+  --stone-sunk: #e4e7e0;
+  --basalt: #1b2026;
+  --basalt-muted: #535b63;
+  --hairline: #cbd0c8;
+  --pine: #062a19;
+  --lime: #dbf798;
+  --lime-hover: #e9fbbf;
+  --accent: #0b6b3a;
+  --accent-soft: #e6f5c9;
+  --ochre: #855500;
+  --font-display: 'Archivo Variable', 'Arial Narrow', system-ui, sans-serif;
+  --font-body: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+/* Dark is Starlight's default; the landing page follows the same switch. */
+:root:not([data-theme='light']) {
+  --stone: #111417;
+  --stone-raised: #181c20;
+  --stone-sunk: #22272c;
+  --basalt: #e6e8e3;
+  --basalt-muted: #a2a9af;
+  --hairline: #343a40;
+  --pine: #0a3420;
+  --accent: #8be3ae;
+  --accent-soft: #1b3324;
+  --ochre: #e0b04f;
+}

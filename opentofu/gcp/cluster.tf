@@ -1,5 +1,6 @@
-# The cluster — docs/gcp/cluster-mode.md (Autopilot only) and
-# docs/gcp/managed-scope.md (channel, maintenance, add-ons, identity).
+# The cluster — docs/decisions/gcp.md: GCP-01 (Autopilot only), GCP-02
+# (channel, maintenance), GCP-03 (metrics), GCP-05 (backup), GCP-08
+# (Gateway API), GCP-09 (control plane), GCP-12 (cost allocation).
 #
 # Autopilot is not a variable. A cluster mode is fixed at creation, supporting
 # both would double the surface this module has to cover, and every hardening
@@ -19,7 +20,7 @@
 # A node service account (GCP-0050) cannot be set on Autopilot at all —
 # Google owns the nodes. There is no node_config to put one in.
 #
-# All three are argued in docs/gcp/network-security.md and docs/gcp/cluster-mode.md.
+# All three are argued in docs/decisions/gcp.md, GCP-01 and GCP-09.
 #trivy:ignore:AVD-GCP-0061
 #trivy:ignore:AVD-GCP-0056
 #trivy:ignore:AVD-GCP-0050
@@ -55,7 +56,7 @@ resource "google_container_cluster" "socle" {
   # Gateway API is GKE's: its controller, and the standard-channel CRDs it
   # installs and upgrades with the cluster. Explicit so that the position is
   # enforced, not inherited from Autopilot's default, and so that the catalog
-  # module may rely on it (docs/catalog/cilium.md §4).
+  # module may rely on it (docs/catalog/gateway-api.md).
   gateway_api_config {
     channel = var.gateway_api_enabled ? "CHANNEL_STANDARD" : "CHANNEL_DISABLED"
   }

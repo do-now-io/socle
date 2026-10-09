@@ -20,6 +20,12 @@
       "groupName": "opentofu-providers"
     },
     {
+      "description": "One weekly PR for the documentation site (Astro, Starlight and their plugins)",
+      "matchManagers": ["npm"],
+      "matchFileNames": ["site/package.json"],
+      "groupName": "docs-site"
+    },
+    {
       "description": "Automerge patch, pin and digest updates once required checks pass",
       "matchUpdateTypes": ["patch", "pin", "pinDigest", "digest"],
       "automerge": true

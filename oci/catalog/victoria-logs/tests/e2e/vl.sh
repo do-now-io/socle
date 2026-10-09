@@ -23,7 +23,7 @@ fields() {
     | python3 -c 'import sys,json; r=json.loads(sys.stdin.readline()); print("  fields: " + ", ".join(sorted(k for k in r if k.startswith(("k8s.", "_")))))'
 }
 # post_otlp_log <body>: one OTLP/JSON log record posted to the gateway by
-# podinfo's own curl, as the metrics probe (docs/catalog/otel-gateway.md).
+# podinfo's own curl, as the metrics probe in vm.sh, and for its reason.
 post_otlp_log() {
   payload="$(printf '{"resourceLogs":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"socle-e2e"}}]},"scopeLogs":[{"logRecords":[{"timeUnixNano":"%s","severityText":"INFO","body":{"stringValue":"%s"}}]}]}]}' \
     "$(( $(date +%s) * 1000000000 ))" "$1")"

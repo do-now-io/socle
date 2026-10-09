@@ -39,7 +39,7 @@ for m in modules:
     # The module's e2e proof travels with it: .github/workflows/e2e.yaml
     # discovers the matrix from these folders and never names a module.
     elif not os.path.isfile(f"{folder}/tests/e2e/chainsaw-test.yaml"):
-        print(f"::error file={folder}/resourceset.yaml::{m} ships no {folder}/tests/e2e/chainsaw-test.yaml — its e2e proof (docs/flux-catalog.md §6)"); fail = 1
+        print(f"::error file={folder}/resourceset.yaml::{m} ships no {folder}/tests/e2e/chainsaw-test.yaml — its e2e proof (docs/reference/catalog-module-standard.md)"); fail = 1
 if not fail:
     print(f"catalog and overlays agree: {len(modules)} module(s) on {len(all_clouds)} cloud(s), {len(restricted)} cloud-bound, every module with its tests/e2e")
 sys.exit(fail)

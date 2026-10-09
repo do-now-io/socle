@@ -1,4 +1,4 @@
-# Cilium — the CNI, where the cloud provides none. docs/catalog/cilium.md.
+# Cilium — the CNI, where the cloud provides none. docs/architecture/cilium-before-flux.md.
 #
 # GKE (Dataplane V2) and Kapsule (cni = "cilium") operate Cilium themselves:
 # nothing to install, and the `cilium` variable is refused there. EKS and AKS
@@ -9,7 +9,8 @@
 # catalog, which Flux renders, cannot deliver the thing Flux needs to run.
 # Cilium's agent, operator and Envoy all run hostNetwork, so Helm installs
 # them on that cluster, before flux-operator. Helm is already the applier
-# here (docs/flux-catalog.md §3); this adds releases, not a mechanism.
+# here (docs/architecture/flux-catalog.md#what-opentofu-deposits); this adds
+# releases, not a mechanism.
 #
 # Two releases, in order, `count`ed on the cloud:
 #   1. cilium — ENI mode on aws, BYOCNI on azure, kube-proxy replacement on
@@ -28,7 +29,7 @@
 # runs. Cilium starts with gatewayAPI enabled and no CRDs: its operator stays
 # Ready and turns its Gateway controller off; the module then creates the
 # `cilium` GatewayClass and restarts the operator once, which turns it on.
-# Measured on Cilium 1.20.2, docs/catalog/cilium.md §4.
+# Measured on Cilium 1.20.2, docs/catalog/gateway-api.md.
 #
 # The chart versions are pinned here, not variables: they move with the
 # socle release, like the operator's. The client's surface is `var.cilium`
@@ -38,7 +39,7 @@
 # Each release lists the socle's block first and the client's second; the
 # helm provider deep-merges the list in order. Secrets are refused there —
 # a helm_release's values land in the OpenTofu state — and the charts name
-# an existing Secret instead (docs/catalog/cilium.md §5).
+# an existing Secret instead (docs/reference/inputs.md#cilium-coredns-and-the-eks-add-ons).
 
 locals {
   # Chart versions.

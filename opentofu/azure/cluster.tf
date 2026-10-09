@@ -1,13 +1,13 @@
-# The cluster — docs/azure/cluster-mode.md (Standard + Node Auto-Provisioning),
-# docs/azure/managed-scope.md (upgrades, add-ons, identity) and
-# docs/azure/network-security.md (CNI, private cluster). An empty-shell
+# The cluster — docs/decisions/azure.md: AZURE-01 (Standard + Node
+# Auto-Provisioning), AZURE-02 to AZURE-09 (upgrades, add-ons, identity, keys)
+# and AZURE-10, AZURE-12 (CNI, private cluster). An empty-shell
 # control plane: Cilium, the CSI drivers and the Gateway API controller are
 # factory components delivered through the socle OCI artifact, not
 # provisioned by this module.
 
-# AKS's Log Analytics workspace, for Container Insights below. This is
-# unrelated to the account-level PaaS metrics decision in
-# docs/azure/cloud-observability.md (which refuses Log Analytics entirely
+# AKS's Log Analytics workspace, for Container Insights below (AZURE-05,
+# superseded by SOCLE-03, still built). This is unrelated to the account-level
+# PaaS metrics decision AZURE-16 (which refuses Log Analytics entirely
 # for SQL/Storage/Service Bus/Redis, read from outside the cluster) —
 # Container Insights is a normal in-cluster AKS add-on with no other path.
 resource "azurerm_log_analytics_workspace" "container_insights" {
@@ -68,15 +68,15 @@ resource "azurerm_monitor_data_collection_rule_association" "prometheus" {
 
 # Two things intentionally absent from this resource:
 #
-# - Deployment Safeguards (Baseline/Enforce, decided in
-#   docs/azure/managed-scope.md): azurerm has no attribute for it as of the
+# - Deployment Safeguards (Baseline/Enforce, proposed in
+#   docs/decisions/azure.md, AZURE-06): azurerm has no attribute for it as of the
 #   4.x series — grepped the provider source directly, zero hits. The
 #   underlying ARM property (safeguardsProfile on the managed cluster
 #   resource) has no open-source GitOps equivalent either, unlike Cilium or
 #   Karpenter — it is a Microsoft-curated policy bundle reachable only
 #   through Azure's own API. Getting it in would mean either the azapi
-#   provider against a schema this session couldn't fully verify against
-#   the raw ARM Swagger, or a manual `az aks safeguards update` step that
+#   provider against a schema not yet verified against the raw ARM
+#   Swagger, or a manual `az aks safeguards update` step that
 #   would break the checklist's "single apply, no out-of-band step" rule.
 #   Left out of this empty-shell module rather than guessed at — revisit
 #   once azurerm supports it natively or the azapi schema is confirmed.
@@ -93,7 +93,7 @@ resource "azurerm_monitor_data_collection_rule_association" "prometheus" {
 # only accepts network_policy when network_plugin is "azure" — there is no
 # value to set under BYO CNI's "none". Cilium provides the real enforcement
 # once the factory installs it — full L3/L4/L7, not gated behind a paid
-# add-on. Argued in docs/azure/network-security.md.
+# add-on. Argued in docs/decisions/azure.md, AZURE-10.
 #
 # Disk encryption set (AZU-0067) would swap Microsoft-managed keys for a
 # customer-managed one on the node OS disks. Microsoft-managed is the
@@ -154,8 +154,9 @@ resource "azurerm_kubernetes_cluster" "socle" {
   # BYO CNI: Cilium is not installed by this module. It is the first Helm
   # release of the bootstrap module, before Flux — nothing without
   # hostNetwork starts until it runs, so the catalog cannot carry it
-  # (docs/catalog/cilium.md). Nodes stay NotReady until it lands. Pod IPAM
-  # is entirely Cilium's own from that point on, from var.pod_cidr.
+  # (docs/decisions/socle.md, SOCLE-02). Nodes stay NotReady until it
+  # lands. Pod IPAM is entirely Cilium's own from that point on, from
+  # var.pod_cidr.
   #
   # No pod_cidr here: azurerm only allows setting it when network_plugin is
   # kubenet or network_plugin_mode is overlay — not none. Microsoft's own
@@ -180,9 +181,9 @@ resource "azurerm_kubernetes_cluster" "socle" {
 
   # stable, hardcoded: our own choice, grounded in AKS's own N-2
   # support-window margin, not "no alternative" — see
-  # docs/azure/managed-scope.md. KubernetesOfficial, hardcoded: refusing
-  # LTS by policy — a cluster hardcoded to stable is never far enough
-  # behind to need it.
+  # docs/decisions/azure.md, AZURE-02. KubernetesOfficial, hardcoded:
+  # refusing LTS by policy (AZURE-03) — a cluster hardcoded to stable is
+  # never far enough behind to need it.
   automatic_upgrade_channel = "stable"
   support_plan              = "KubernetesOfficial"
 

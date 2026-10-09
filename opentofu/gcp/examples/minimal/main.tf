@@ -24,9 +24,10 @@ module "socle" {
   create_network = true
 
   # No good default exists for when a cluster may be upgraded, so the module
-  # has none. Saturday 02:00 UTC for twelve hours puts this environment last
-  # in the week: dev and staging take a version days earlier, which is what
-  # makes the ring order deterministic.
+  # has none. Saturday 02:00 UTC for twelve hours is the prod slot of the
+  # ring order (dev Tuesday, staging Wednesday, prod Saturday). This example
+  # is dev by default and keeps it; a dev cluster in an estate takes the
+  # Tuesday window, so that it upgrades first.
   maintenance_window = {
     start_time = "2026-01-03T02:00:00Z"
     end_time   = "2026-01-03T14:00:00Z"

@@ -1,176 +1,104 @@
-# Catalog module `grafana` — the one place to read
+---
+title: grafana
+description: One read-only Grafana with a datasource for each enabled Victoria backend and every module's dashboards.
+category: observability
+requires: []
+---
 
-The fourth module of the monitoring stack (#43, design in
-[`docs/monitoring.md`](../monitoring.md) §5), and the one that makes the first
-three readable. It provisions a read-only datasource for each backend that is
-on, and it loads every dashboard a module ships. It names no module: a
-dashboard travels with the module whose metrics it reads, as a ConfigMap
-labelled `grafana_dashboard`. With this PR, metrics are readable end to end:
-[`victoria_metrics`](victoria-metrics.md) stores what
-[`otel_agent`](otel-agent.md) and [`otel_gateway`](otel-gateway.md) collect,
-and Grafana shows it on their two dashboards.
+Grafana is where you read the monitoring stack: a read-only datasource for
+each Victoria backend that is on, and every dashboard a module ships. **On by
+default**, on every cloud. How the stack fits together:
+[Observability](../architecture/observability.md).
 
-| Question | Position |
-| --- | --- |
-| What | The `grafana` chart from **`grafana-community`**, `oci://ghcr.io/grafana-community/helm-charts/grafana:13.2.6` (Grafana 13.2.2, the upstream distroless image), one `HelmRelease` in namespace `grafana` |
-| Where | Every cloud, the same template, no cloud patch |
-| Default | **On** |
-| Datasources | **VictoriaMetrics** as the built-in Prometheus type, uid `victoria-metrics`, default, read-only — present only while `victoria_metrics` is on. Logs and traces add theirs in their own PRs |
-| Dashboards | The dashboard sidecar, reading **ConfigMaps only**, in every namespace, labelled `grafana_dashboard: "1"`. Today: *Kubernetes / Nodes and pods* (otel_agent), *Kubernetes / Workloads* (otel_gateway) |
-| RBAC | **A ClusterRole of the socle's, ConfigMaps only.** The chart's own reads every Secret of the cluster (below) |
-| Identity | Local `admin`, the chart's **random password** in `Secret/grafana`; no SSO |
-| Persistence | None: everything shown is provisioned |
-| Exposure | `ClusterIP`, `grafana.grafana.svc:80`. The HTTPRoute is the Gateway API follow-up, as argocd's |
-| Client surface | `domain`, plus `values` and `values_secret` as every module |
+## Getting started
 
-## What is installed
+It is already on. Give it a host, on the private Gateway:
 
-> **With `victoria_logs` on**, Grafana also provisions a read-only
-> `VictoriaLogs` datasource and installs its plugin, pinned at 0.32.0 and
-> downloaded from grafana.com at start: [victoria-logs.md](victoria-logs.md).
-
-One `ResourceSet` (`oci/catalog/grafana/resourceset.yaml`), `resourcesTemplate`,
-six objects, each carrying the reconcile toggle on
-`inputs.modules.grafana.enabled`:
-
-1. `Namespace/grafana`.
-2. **`ClusterRole/grafana-dashboards`**: `get`, `watch` and `list` on
-   `configmaps`, nothing else.
-3. `OCIRepository/grafana-chart`, pinned exactly.
-4. `ConfigMap/grafana-socle-values` and
-5. `ConfigMap/grafana-client-values`, both labelled
-   `reconcile.fluxcd.io/watch: Enabled`.
-6. `HelmRelease/grafana`: no `spec.values`; `valuesFrom` = socle, client,
-   then the client's Secret when named (`optional: true`).
-
-### Why the socle brings its own ClusterRole
-
-The chart grants its ServiceAccount `get`, `watch` and `list` on
-**`configmaps` and `secrets`, cluster-wide**, as soon as any sidecar is on,
-and no value narrows the rule (`templates/clusterrole.yaml`). So Grafana would
-read every Secret of every client: repository keys, cloud credentials,
-TLS keys. The socle sets `rbac.useExistingClusterRole: grafana-dashboards`
-instead. The chart then creates no ClusterRole of its own and binds its
-ServiceAccount to the socle's, which reads ConfigMaps and nothing else. The
-sidecar is told `resource: configmap`, so it never asks for a Secret it may
-not read. A dashboard in a Secret is not supported, deliberately.
-
-### The socle's values
-
-| Value | Setting | Why |
-| --- | --- | --- |
-| `fullnameOverride` | `grafana` | Constant names: `Deployment`, `Service`, `Secret/grafana` |
-| `rbac.useExistingClusterRole` | `grafana-dashboards` | Above |
-| `persistence.enabled` | `false` | Everything is provisioned; a restart loses only hand-made changes. `values` turns it on |
-| `testFramework.enabled` | `false` | The chart's `helm test` pod, which Flux never runs |
-| `grafana.ini.analytics` | `check_for_updates: false`, `reporting_enabled: false` | No call home from a client's cluster |
-| `grafana.ini.server` | `domain`, `root_url: https://<domain>`, only when `domain` is set | Redirects and links; the HTTPRoute reads the same host later |
-| `datasources` | VictoriaMetrics, under `<< if inputs.modules.victoria_metrics.enabled >>` | The Prometheus type needs no plugin download; `timeInterval: 30s`, the gateway's scrape cadence |
-| `sidecar.dashboards` | on, label `grafana_dashboard` = `"1"`, `searchNamespace: ALL`, `resource: configmap` | Any module or client ships a dashboard by labelling a ConfigMap |
-| `resources.requests` | 50m / 256Mi; the sidecar 10m / 64Mi | Measured on floci at about 300Mi with both dashboards loaded, the sidecar at 72Mi. No limits, as argocd |
-
-## What the client may set — `kube.grafana`
-
-| Attribute | Default | Type | Meaning |
-| --- | --- | --- | --- |
-| `enabled` | `true` | bool | Off garbage-collects the release, the namespace and the ClusterRole |
-| `domain` | `""` | string | The host Grafana is served at, e.g. `grafana.acme.example`. Validated like argocd's: empty or a lowercase FQDN, no scheme, port or path |
-| `values` | `{}` | object | Any value of the chart: SSO (`grafana.ini."auth.*"`), more datasources, plugins, persistence, a second replica with a database. Merged over the socle's, the client's winning |
-| `values_secret` | `""` | string | Name of a Secret in `grafana`, created by the client, with a `values.yaml` key. Merged last |
-
-**Adding a datasource replaces the socle's.** Helm replaces lists. A client
-adding his own datasource under the same file, `datasources.yaml`, writes the
-list in full, VictoriaMetrics included. He can also put it under another key,
-`datasources: { "client.yaml": … }`, which leaves the socle's file alone.
-
-### Secrets refused in `values`
-
-The plan refuses:
-
-- `adminPassword`. The admin's password stays the chart's random one, or
-  comes from `admin.existingSecret`.
-- `grafana.ini` `security.admin_password` and `security.secret_key`,
-  `database.password`, `smtp.password`, and an `auth.*` section's
-  `client_secret`.
-- A datasource's `password` or `basicAuthPassword`, and a **literal**
-  `secureJsonData` value.
-- An `env` entry named like a credential: the chart's `env` is always
-  literal, and `envValueFrom` is the chart's way to read a Secret.
-- A `Secret` among `extraObjects`.
-
-Values Grafana resolves itself are accepted in `secureJsonData`: `$VAR` or
-`${VAR}` (set through `envValueFrom`), and `$__env{…}` or `$__file{…}`.
-
-## Reaching it
-
-```sh
-kubectl -n grafana get secret grafana -o jsonpath='{.data.admin-password}' | base64 -d; echo
-kubectl -n grafana port-forward svc/grafana 3000:80    # then http://localhost:3000, user admin
+```hcl kube-start="grafana"
+kube = {
+  grafana = {
+    domain  = "grafana.acme.example"
+    gateway = "private"
+  }
+}
 ```
 
-## Per cloud
+Then `kubectl -n grafana get httproute grafana` shows your host.
 
-Nothing. On EKS it depends on nothing the cluster lacks: no volume, no cloud
-identity.
+## Settings
 
-## Measured
-
-**Render and merge, locally** (`flux-operator build rset` 0.60.0 with the
-sample, `helm template` of the pinned chart):
-
-- the chart creates **no ClusterRole**, and its `ClusterRoleBinding` points at
-  `grafana-dashboards`;
-- the sidecar runs with `RESOURCE=configmap`, `NAMESPACE=ALL`,
-  `LABEL=grafana_dashboard` and `LABEL_VALUE=1`;
-- the provisioned `datasources.yaml` holds exactly VictoriaMetrics (uid
-  `victoria-metrics`, `prometheus`, default, not editable);
-- `grafana.ini` has `domain` and `root_url` from the sample's
-  `grafana.example.com`, with analytics off;
-- the sample's client `resources.requests.memory: 160Mi` wins over the socle's request,
-  and the 50m request is kept;
-- the image is `grafana/grafana:13.2.2-distroless`;
-- the `Service` is port 80 → `grafana`.
-
-`tofu test`: 131 runs, 11 of them for this module: `enabled` refusing a
-string, `domain` refusing a scheme and a bare label, and `values` refusing
-`adminPassword`, `secret_key`, an OAuth `client_secret`, a literal datasource
-secret, a credential env and a Secret among `extraObjects`; an invalid
-`values_secret`; and a domain with `admin.existingSecret`, `envValueFrom`,
-`${PG_PASSWORD}` and `$__file{…}` flowing through as written. Each refusal was
-checked to raise its own message only.
-
-**e2e** (floci k3s, `ubuntu-latest` runner) — run
-<https://github.com/do-now-io/socle/actions/runs/36687650472>, tag
-`0.0.0-feat-catalog-grafana.d3c9745`, both jobs green:
-
-| Job | Step | Measured |
+| Attribute | Default | |
 | --- | --- | --- |
-| both | `resourceset/grafana` Ready and the Deployment rolled out | **1 s** after the collectors |
-| both | `/api/health` | `database: ok`, version 13.2.2 |
-| both | `/api/datasources` | exactly one: VictoriaMetrics, `prometheus`, `http://victoria-metrics.victoria-metrics.svc:8428`, default |
-| both | the collectors' dashboards, by uid | *Kubernetes / Nodes and pods*, 11 panels; *Kubernetes / Workloads*, 15 panels |
-| both | `count(k8s_pod_cpu_usage)` through Grafana's datasource proxy | **20** |
-| `e2e-aws-root` | live resources, `tests/floci.tfvars` then setting 160Mi | `cpu: 50m, memory: 160Mi` — the client's value. The e2e now sets 320Mi over the socle's 256Mi |
-| both | `kubectl top` | Grafana **302–308Mi**, 7–8m CPU; the sidecar 72Mi, 1m. The socle's 128Mi request was too low: raised to 256Mi after this run |
-| `e2e-aws-catalog` | `victoria_metrics` disabled | the provisioning names no datasource **4 s** later, the pod rolled |
-| `e2e-aws-catalog` | `victoria_metrics` re-enabled | VictoriaMetrics provisioned again 1 s after it was Ready |
-| `e2e-aws-catalog` | disabled with the collectors, then re-enabled | HelmRelease and `ClusterRole/grafana-dashboards` NotFound; Ready again with its ClusterRole after **24 s** |
+| `enabled` | `true` | Turns the module on or off. |
+| `domain` | `""` | The host Grafana is served at. Empty: no URL, no route. |
+| `gateway` | `"private"` | The shared Gateway the route uses: `private`, `public` or `""`. |
+| `values` | `{}` | Any [`grafana` chart](https://artifacthub.io/packages/helm/grafana-community/grafana) value: SSO, datasources, plugins, persistence; yours win. |
+| `values_secret` | `""` | A Secret in `grafana` with a `values.yaml` key, for what must stay out of the OpenTofu state. |
 
-**e2e, through Chainsaw** (`tests/e2e/chainsaw-test.yaml`, since the e2e moved
-into the modules — `docs/flux-catalog.md` §8). The table above is the bash phase
-this module shipped with; the same proof now runs on every push in the `root`
-job (`health`) and the module's own job (`health`, then `module`): `grafana-health` asserts the Deployment, the ClusterRole and the provisioning ConfigMap, then through Grafana's API (`grafana.sh`, a port-forward): exactly the datasources the socle provisions, the VictoriaLogs datasource healthy, both collectors' dashboards loaded, `k8s_pod_cpu_usage` read through the datasource proxy; `grafana-module` patches the memory request (320Mi over 256Mi), then off (release and ClusterRole gone) and on; `grafana-floci` (`platform: floci`) asserts no `grafana-route` ResourceSet without a shared Gateway.
+### Every setting
 
-The same run is the gateway's first green one. Its OTLP probe, from podinfo,
-came back enriched with `k8s_deployment_name=podinfo`. The workloads
-dashboard's twelve metrics all had series. Jobs: `e2e-aws-root` 4m06s,
-`e2e-aws-catalog` 13m42s.
+```hcl kube-full="grafana"
+kube = {
+  grafana = {
+    enabled = true      # on by default
+    domain  = ""        # "" = no root_url and no route; a host serves the UI
+    gateway = "private" # the route's shared Gateway: "private", "public" or ""
 
-## Open questions for the coordinator
+    # Any value of the grafana chart 13.2.6; yours win over the socle's.
+    values = {
+      persistence = { enabled = true, size = "5Gi" } # keeps dashboards made by hand
+    }
 
-1. **The admin password lives in a Secret the chart generates.** Rotating it
-   means deleting that Secret. SSO (`auth.generic_oauth`, its client secret
-   in `values_secret`) is the follow-up, as for argocd.
-2. **One replica, SQLite in an `emptyDir`.** Fine while everything is
-   provisioned. A client who builds dashboards by hand wants `persistence`,
-   and HA wants an external database; both are `values`.
+    # A Secret you create in grafana, whose values.yaml key holds chart values
+    # that must not reach the OpenTofu state, such as
+    # grafana.ini."auth.generic_oauth".client_secret.
+    values_secret = "grafana-values"
+  }
+}
+```
+
+## Good to know
+
+- **Log in as `admin`** with the chart's random password:
+  `kubectl -n grafana get secret grafana -o jsonpath='{.data.admin-password}' | base64 -d`.
+  No SSO until you set one in `values`. Without the shared Gateways (gcp,
+  scaleway): `kubectl -n grafana port-forward svc/grafana 3000:80`.
+- **Ship a dashboard as a ConfigMap labelled `grafana_dashboard: "1"`**, in
+  any namespace. A dashboard in a Secret is not loaded.
+- **Nothing is persisted**: a restart loses dashboards made by hand. Set
+  `persistence` in `values` if you build them there.
+- **Add a datasource under your own key**, such as
+  `datasources: { "client.yaml": ... }`: Helm replaces lists, so writing
+  `datasources.yaml` replaces the socle's.
+- **With [alerting](alerting.md) on, alerts and silences are in Grafana's
+  Alerting pages**, through an Alertmanager datasource. A rule you make in
+  Grafana's UI notifies no one and is lost when the pod restarts: the socle's
+  rules are the supported ones.
+- **The VictoriaLogs plugin is downloaded from grafana.com at start.**
+  Without egress there, no logs datasource.
+- **`tofu plan` refuses passwords and client secrets in `values`.** Use
+  `values_secret`, `admin.existingSecret` or `envValueFrom`. Upgrades: the
+  chart and the plugin move with `socle_version`.
+
+<details>
+<summary>Under the hood</summary>
+
+**Installed**: chart `grafana` 13.2.6 (Grafana 13.2.2, distroless) from
+`oci://ghcr.io/grafana-community/helm-charts/grafana`, in the `grafana`
+namespace, with `ClusterRole/grafana-dashboards`. With a `domain`, a `gateway`
+and the shared Gateways, `HTTPRoute/grafana`, which waits for its Gateway to
+be `Accepted`.
+
+**What the socle sets**: read-only datasources for VictoriaMetrics (the
+default), VictoriaLogs and VictoriaTraces, each only while its backend is on,
+and Alertmanager while `alerting` is on;
+a dashboard sidecar reading ConfigMaps only;
+no persistence, no analytics; requests with no limits. Your `values` are
+merged over these.
+
+**Cloud access**: none; egress to grafana.com for the plugin.
+
+**Measured** on floci k3s, 2026-09-30: Grafana 302–308Mi with both
+collectors' dashboards; a backend turned off drops its datasource in 4 s.
+
+</details>

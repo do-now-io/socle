@@ -1,7 +1,7 @@
-# Network — docs/scaleway/kapsule-capabilities.md.
+# Network — docs/decisions/scaleway.md, SCALEWAY-06.
 #
-# One VPC per environment, one Private Network per cluster, and a Public
-# Gateway in every zone the pools span. Nodes carry no public address at all:
+# A VPC per cluster unless one is given, one Private Network per cluster, and
+# a Public Gateway in every zone the pools span. Nodes carry no public address at all:
 # full isolation is the position on every environment, so that dev and staging
 # exercise the same egress path production does.
 

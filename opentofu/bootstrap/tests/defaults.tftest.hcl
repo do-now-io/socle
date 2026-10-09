@@ -68,7 +68,7 @@ run "defaults_are_the_recommended_position" {
   }
   assert {
     condition     = output.inputs.modules.victoria_metrics.enabled == true && output.inputs.modules.victoria_metrics.retention == "15d" && output.inputs.modules.victoria_metrics.storage_size == "20Gi"
-    error_message = "victoria_metrics must default to on, 15 days of retention on a 20Gi claim (docs/monitoring.md §3)."
+    error_message = "victoria_metrics must default to on, 15 days of retention on a 20Gi claim (docs/architecture/observability.md#where-the-data-lives)."
   }
   assert {
     condition     = output.inputs.modules.victoria_metrics.values == {} && output.inputs.modules.victoria_metrics.values_secret == ""
@@ -76,19 +76,19 @@ run "defaults_are_the_recommended_position" {
   }
   assert {
     condition     = output.inputs.modules.otel_agent.enabled == true && output.inputs.modules.otel_agent.values == {} && output.inputs.modules.otel_agent.values_secret == ""
-    error_message = "otel_agent must default to on, with no client values and no values Secret (docs/monitoring.md §4)."
+    error_message = "otel_agent must default to on, with no client values and no values Secret (docs/reference/inputs.md#the-catalog-schema)."
   }
   assert {
     condition     = output.inputs.modules.otel_gateway.enabled == true && output.inputs.modules.otel_gateway.values == {} && output.inputs.modules.otel_gateway.values_secret == ""
-    error_message = "otel_gateway must default to on, with no client values and no values Secret (docs/monitoring.md §4)."
+    error_message = "otel_gateway must default to on, with no client values and no values Secret (docs/reference/inputs.md#the-catalog-schema)."
   }
   assert {
     condition     = output.inputs.modules.grafana.enabled == true && output.inputs.modules.grafana.domain == "" && output.inputs.modules.grafana.values == {} && output.inputs.modules.grafana.values_secret == ""
-    error_message = "grafana must default to on, with no domain, no client values and no values Secret (docs/monitoring.md §4)."
+    error_message = "grafana must default to on, with no domain, no client values and no values Secret (docs/reference/inputs.md#the-catalog-schema)."
   }
   assert {
     condition     = output.inputs.modules.victoria_logs.enabled == true && output.inputs.modules.victoria_logs.retention == "7d" && output.inputs.modules.victoria_logs.storage_size == "20Gi"
-    error_message = "victoria_logs must default to on, 7 days of retention on a 20Gi claim (docs/monitoring.md §3)."
+    error_message = "victoria_logs must default to on, 7 days of retention on a 20Gi claim (docs/architecture/observability.md#where-the-data-lives)."
   }
   assert {
     condition     = output.inputs.modules.otel_agent.logs == true
@@ -100,7 +100,7 @@ run "defaults_are_the_recommended_position" {
   }
   assert {
     condition     = output.inputs.modules.victoria_traces.enabled == false && output.inputs.modules.victoria_traces.retention == "7d" && output.inputs.modules.victoria_traces.storage_size == "10Gi"
-    error_message = "victoria_traces must default to OFF (pre-GA, docs/monitoring.md §10 question 7), 7 days on a 10Gi claim when turned on."
+    error_message = "victoria_traces must default to OFF (pre-GA, docs/catalog/victoria-traces.md), 7 days on a 10Gi claim when turned on."
   }
   assert {
     condition     = output.inputs.modules.alerting.enabled == false && output.inputs.modules.alerting.watchdog == true && length(output.inputs.modules.alerting.receivers) == 0 && output.inputs.modules.alerting.receivers_secret == ""
@@ -348,7 +348,7 @@ run "scaleway_is_a_plain_kubernetes_cluster_for_the_operator" {
   }
 }
 
-# --- Cilium — cilium.tf, docs/catalog/cilium.md ---
+# --- Cilium — cilium.tf, docs/architecture/cilium-before-flux.md ---
 
 run "aws_installs_cilium_and_coredns_before_flux" {
   command = plan
@@ -729,7 +729,7 @@ run "otel_agent_values_flow_through_and_credentials_read_from_the_environment_ar
   }
 }
 
-# --- EKS-managed add-ons — eks_addons.tf, docs/aws/eks-managed-scope.md ---
+# --- EKS-managed add-ons — eks_addons.tf, docs/decisions/aws.md ---
 
 run "aws_installs_the_pod_identity_agent_and_ebs_csi_by_default" {
   command = plan

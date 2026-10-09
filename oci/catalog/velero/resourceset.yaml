@@ -1,8 +1,9 @@
 # The velero module: backup and restore of what GitOps cannot restore — the
 # data in the applications' EBS and EFS volumes, with their objects — into the
-# module's own bucket. docs/catalog/velero.md holds the design; the rules of
-# docs/flux-catalog.md §6 apply: inputsFrom the one provider, the reconcile
-# toggle on EACH resource, values tested never presence.
+# module's own bucket. docs/catalog/velero.md and docs/decisions/velero.md
+# hold the design; the rules of docs/architecture/flux-catalog.md apply:
+# inputsFrom the one provider, the reconcile toggle on EACH resource, values
+# tested never presence.
 #
 # Values, in the order helm-controller merges them, later winning: the
 # socle's velero-socle-values, the client's velero-client-values
@@ -13,7 +14,7 @@
 # - this ResourceSet: the Namespace and, on AWS with Crossplane on, the
 #   module's bucket and its settings, its IAM Role and the Pod Identity
 #   association binding it to velero/velero-server
-#   (docs/catalog/crossplane.md §3);
+#   (docs/architecture/module-iam.md);
 # - velero-workload, a child ResourceSet holding the chart, the
 #   VolumeSnapshotClass and the admission policy, which dependsOn the bucket,
 #   the Role and the association being Ready: EKS Pod Identity injects the
@@ -166,7 +167,7 @@ spec:
             abortIncompleteMultipartUpload:
               - daysAfterInitiation: 7
     ---
-    # The module's own AWS access, docs/catalog/crossplane.md §3: S3 object
+    # The module's own AWS access, docs/architecture/module-iam.md: S3 object
     # actions on its bucket, nothing else. No EC2: in CSI mode Velero creates
     # VolumeSnapshot objects and the EBS CSI driver takes the snapshots with
     # its own role (opentofu/bootstrap/eks_addons.tf).
@@ -538,7 +539,7 @@ spec:
               messageExpression: >-
                 'socle.do-now.io/backup-frequency and -retention name ' + variables.pair +
                 ', which is not a backup policy of this cluster: this object is not backed up' +
-                ' (docs/catalog/velero.md §3)'
+                ' (docs/catalog/velero.md)'
       - apiVersion: admissionregistration.k8s.io/v1
         kind: ValidatingAdmissionPolicyBinding
         metadata:

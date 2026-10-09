@@ -2,8 +2,9 @@
 # stack's traces storage — the applications' OTLP traces from otel_gateway,
 # the Jaeger query API out to Grafana. Off by default: VictoriaTraces is still
 # pre-GA and its storage format not yet committed, so an upgrade may drop
-# stored traces (docs/monitoring.md §10, question 7).
-# Design: docs/monitoring.md; this module: docs/catalog/victoria-traces.md.
+# stored traces (docs/decisions/victoria-traces.md, VICTORIA-TRACES-01).
+# The stack: docs/architecture/observability.md; this module:
+# docs/catalog/victoria-traces.md.
 #
 # resourcesTemplate rather than resources: the persistence block and the
 # Secret in valuesFrom only exist under a condition, and the operator's block
@@ -12,7 +13,7 @@
 #
 # Values: no spec.values on the HelmRelease. The socle's defaults are a
 # ConfigMap listed first in valuesFrom, the client's second, his Secret last —
-# later wins, so the client overrides any socle default (docs/flux-catalog.md §6).
+# later wins, so the client overrides any socle default (docs/architecture/flux-catalog.md).
 #
 # The pipeline that writes here and the datasource that reads it live in the
 # modules that run them (otel_gateway, grafana), each under a test on

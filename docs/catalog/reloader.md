@@ -1,120 +1,96 @@
-# Catalog module `reloader` — a workload rolled when what it reads changes
+---
+title: reloader
+description: Rolls a workload when a ConfigMap or Secret it reads changes, opt-in per workload.
+category: secrets
+---
 
-Half of #56, with [`external_secrets`](external-secrets.md). External Secrets
-Operator rewrites a `Secret` when its value rotates in the cloud's secret
-manager; a pod that read it at start never sees the change. Stakater Reloader
-closes that gap: it watches ConfigMaps and Secrets and rolls the workloads
-that ask for it. It ships as its own module so that it stays usable alone,
-for ConfigMaps, with its own namespace and toggle.
+Stakater Reloader rolls the workloads that ask for it when a ConfigMap or
+Secret they read changes. Turn it on with
+[external-secrets](external-secrets.md), whose rotated Secrets a running pod
+never re-reads, or alone for ConfigMaps. **Off by default**, on every cloud.
 
-| Question | Position |
-| --- | --- |
-| What | The official chart, `oci://ghcr.io/stakater/charts/reloader:2.2.18` (Reloader v1.4.22), one `HelmRelease` in namespace `reloader` |
-| Default | **Off** |
-| Mode | **Opt-in per workload**, never `autoReloadAll`: refused at plan in `values` |
-| Strategy | `annotations`: a reload writes `reloader.stakater.com/last-reloaded-from` on the pod template |
-| Pod security | `restricted`, enforced on the namespace |
-| Cloud access | None |
-| Client surface | `enabled`, `values`, `values_secret` |
+## Getting started
 
-## What is installed
+Turn it on; it then rolls only the workloads you annotate (see Good to know).
 
-When enabled: `Namespace` `reloader` labelled
-`pod-security.kubernetes.io/enforce: restricted`, an `OCIRepository` pinned at
-2.2.18, `reloader-socle-values` and `reloader-client-values` (both labelled
-`reconcile.fluxcd.io/watch: Enabled`), and a `HelmRelease` with no
-`spec.values`; `valuesFrom` lists the socle's document, the client's, then
-his Secret when he names one (`docs/flux-catalog.md` §6).
-
-The socle's values:
-
-- `fullnameOverride: reloader`;
-- `reloader.autoReloadAll: false`, stated rather than inherited;
-- `reloader.reloadStrategy: annotations`;
-- `readOnlyRootFileSystem: true`, `allowPrivilegeEscalation: false`, every
-  capability dropped; the chart already runs as 65534 with the
-  `RuntimeDefault` seccomp profile, so the namespace holds `restricted`;
-- requests 10m / 64Mi, a 256Mi memory limit, from which the chart derives
-  `GOMEMLIMIT`;
-- `prometheus.io/scrape` on port 9090, for [`otel_gateway`](otel-gateway.md).
-
-## How a client uses it
-
-On the workload, one of Reloader's annotations:
-
-```yaml
-metadata:
-  annotations:
-    reloader.stakater.com/auto: "true"                    # every ConfigMap and Secret it references
-    # secret.reloader.stakater.com/reload: "db-credentials"   # or only those named
-    # configmap.reloader.stakater.com/reload: "app-config"
+```hcl kube-start="reloader"
+kube = {
+  reloader = {
+    enabled = true
+  }
+}
 ```
 
-A workload with none of them is never touched.
+Then `kubectl -n reloader get deployment reloader` shows it ready.
 
-## Decisions
+## Settings
 
-**Opt-in, never `autoReloadAll`.** With `autoReloadAll` every Deployment,
-StatefulSet and DaemonSet of the cluster restarts when anything it reads
-changes, the client's tenants included. Whether a restart is safe is a
-property of the workload, so the workload says it. `variables.tf` refuses
-`kube.reloader.values.reloader.autoReloadAll = true` with the annotation to
-use instead. `values_secret` is never read by OpenTofu, so a Secret could
-still set it: that Secret is the client's own, reviewed outside the socle.
+| Attribute | Default | |
+| --- | --- | --- |
+| `enabled` | `false` | Turns the module on or off. |
+| `values` | `{}` | Any [`reloader` chart](https://artifacthub.io/packages/helm/stakater/reloader) value; yours win. |
+| `values_secret` | `""` | A Secret in `reloader` with a `values.yaml` key, for what must stay out of the OpenTofu state. |
 
-**The `annotations` strategy.** The chart's default writes a `STAKATER_*`
-environment variable into the pod template. Both strategies change the
-template, but an annotation is something a GitOps diff (ArgoCD's
-`ignoreDifferences`, a Flux drift exclusion) can be told to ignore, and an
-injected env entry in a container list is not. It also names what changed:
-`last-reloaded-from` is a JSON with the kind, namespace and name of the
-object, which the e2e reads.
+### Every setting
 
-**Off by default.** Reloader's ClusterRole lists, gets and watches every
-ConfigMap and Secret of the cluster. That is inherent to what it does, and
-the chart's scoped mode (`reloader.namespaces`, a Role per namespace) is
-`values` away for a client who wants it narrower. It is a grant a client
-chooses, not one the socle makes for him.
+```hcl kube-full="reloader"
+kube = {
+  reloader = {
+    enabled = false # off by default; it reads every ConfigMap and Secret of the cluster
 
-**Secrets refused in `values`.** The chart turns `reloader.deployment.env.secret`
-into a Secret of its own (its alerting webhook URL is a credential) and
-`env.open` into literal variables. Any `env.secret` entry, and an `env.open`
-entry named like a credential, are refused at plan; `env.existing` names a
-Secret the client made and passes.
+    # Any value of the reloader chart 2.2.18; yours win over the socle's.
+    values = {
+      reloader = {
+        logFormat      = "json"
+        ignoreCronJobs = true
+      }
+    }
 
-## What the e2e proves
+    # A Secret you create in reloader, whose values.yaml key holds chart values
+    # that must not reach the OpenTofu state, reloader.deployment.env.secret's
+    # ALERT_WEBHOOK_URL say; merged last.
+    values_secret = "reloader-values"
+  }
+}
+```
 
-`oci/catalog/reloader/tests/e2e/chainsaw-test.yaml`, on floci's k3s:
+## Good to know
 
-- `health`: off, the ResourceSet Ready with an empty inventory, no namespace;
-- `module`: on, the Deployment Available in a `restricted` namespace with
-  `--reload-strategy=annotations` and no `--auto-reload-all`; two workloads
-  reading one ConfigMap and one Secret, one annotated: a ConfigMap change,
-  then a Secret change, roll the annotated one, each time naming the object
-  that changed, and leave the other at generation 1; the whole `valuesFrom`
-  order on the memory request (socle 64Mi, `values` 80Mi, Secret 96Mi, back
-  to 64Mi); off, garbage-collected.
+- **A workload is rolled only when it asks**, with
+  `reloader.stakater.com/auto: "true"` (every ConfigMap and Secret it
+  references), or `secret.reloader.stakater.com/reload` /
+  `configmap.reloader.stakater.com/reload` naming them. A workload with none
+  is never touched.
+- **Tell your GitOps tool to ignore `reloader.stakater.com/last-reloaded-from`**,
+  which a reload writes on the pod template (Argo CD's `ignoreDifferences`),
+  or it sees the workload as drifted.
+- **`tofu plan` refuses** `autoReloadAll = true`, which would roll every
+  workload of the cluster, and credentials in `reloader.deployment.env`: name
+  your own Secret in `reloader.deployment.env.existing`, or use
+  `values_secret`.
+- **A change made while Reloader restarts is missed**: one replica, and it
+  reacts to update events. `reloader.enableHA` or `syncAfterRestart` through
+  `values` close that window.
+- **Upgrades**: the chart moves with `socle_version`. The socle stays on the
+  2.x chart until Reloader 3.x is stable.
 
-Nothing here needs floci to emulate a cloud service.
+<details>
+<summary>Under the hood</summary>
 
-## What was measured
+**Installed**: chart `reloader` 2.2.18 (Reloader v1.4.22) from
+`oci://ghcr.io/stakater/charts`, in the `reloader` namespace (Pod Security
+`restricted`): one Deployment `reloader`, one replica. Its ClusterRole lists
+and watches every ConfigMap and Secret; the chart's scoped mode
+(`reloader.namespaces`) is available through `values`.
 
-| | Result |
-| --- | --- |
-| Render (`flux-operator build rset`, `oci/.ci/inputs-sample.yaml`) | 5 objects; the Secret entry in `valuesFrom` only when `values_secret` is set; kubeconform strict: valid |
-| Chart render with the socle's values (`helm template`) | args `--log-level=info --reload-strategy=annotations`; container `readOnlyRootFilesystem`, no privilege escalation, `ALL` dropped; pod `runAsNonRoot`, 65534, `RuntimeDefault` |
-| `tofu test` | the default, a values pass-through, and six refusals |
-| e2e, CI (`reloader (aws)`, [run 36865489015](https://github.com/do-now-io/socle/actions/runs/36865489015), green on its first run too) | on, Available in 16 s; ConfigMap change to roll: under 1 s; Secret change to roll: 10 s; the whole `valuesFrom` order 34 s; off 26 s; the module's suite 1m33s. **Job: 6m26s** |
+**What the socle sets**: `autoReloadAll: false` and
+`reloadStrategy: annotations`, a hardened container (read-only root
+filesystem, every capability dropped), requests 10m CPU and 64Mi with a 256Mi
+memory limit, and `prometheus.io/scrape` for [otel-gateway](otel-gateway.md).
 
-## Left out
+**Cloud access**: none.
 
-- **HA.** One replica, no leader election. A change made while Reloader is
-  restarting is not seen: it reacts to update events, and `syncAfterRestart`
-  stays off because it rolls every annotated workload on each restart. A
-  client who cannot afford the window sets `reloader.enableHA` and
-  `deployment.replicas`, or `syncAfterRestart`, through `values`.
-- **Argo Rollouts, OpenShift, CSI driver integration.** Not in the socle.
-- **Alerting on reload.** Its webhook is a credential: `env.existing` from a
-  Secret the client made.
-- **Reloader 3.x.** In beta at the time of writing (3.0.0-beta.2); the pin
-  moves when it is stable.
+**Measured** on floci k3s, 2026-10-02: Available in 16 s; a ConfigMap change
+rolled the annotated workload in under 1 s, a Secret change in 10 s.
+
+</details>

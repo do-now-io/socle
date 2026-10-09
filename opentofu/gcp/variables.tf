@@ -1,6 +1,6 @@
 # Every variable is typed, every constrained value is enforced by a validation
-# block rather than by documentation, and every default is the position the
-# research documents recommend. Options we would not recommend are absent.
+# block rather than by documentation, and every default is the position
+# docs/decisions/gcp.md takes. Options we would not recommend are absent.
 
 # ---------------------------------------------------------------------------
 # Identity of the deployment
@@ -68,7 +68,7 @@ variable "additional_labels" {
 }
 
 # ---------------------------------------------------------------------------
-# Network — docs/gcp/network-security.md
+# Network — docs/decisions/gcp.md, GCP-09 and GCP-10
 # ---------------------------------------------------------------------------
 
 variable "network_name" {
@@ -180,7 +180,7 @@ variable "subnet_flow_logs_enabled" {
 }
 
 # ---------------------------------------------------------------------------
-# Control plane access — docs/gcp/network-security.md
+# Control plane access — docs/decisions/gcp.md, GCP-09
 # ---------------------------------------------------------------------------
 
 variable "enable_private_nodes" {
@@ -206,7 +206,7 @@ variable "control_plane_dns_allow_external_traffic" {
 # consumer's subnet or CI runner address changes.
 
 # ---------------------------------------------------------------------------
-# Exposure — docs/gcp/network-security.md, docs/catalog/cilium.md §4
+# Exposure — docs/decisions/gcp.md, GCP-08; docs/catalog/gateway-api.md
 # ---------------------------------------------------------------------------
 
 variable "gateway_api_enabled" {
@@ -217,7 +217,7 @@ variable "gateway_api_enabled" {
 }
 
 # ---------------------------------------------------------------------------
-# Upgrades — docs/gcp/managed-scope.md
+# Upgrades — docs/decisions/gcp.md, GCP-02
 # ---------------------------------------------------------------------------
 
 variable "release_channel" {
@@ -321,7 +321,7 @@ variable "enable_upgrade_notifications" {
 }
 
 # ---------------------------------------------------------------------------
-# Observability and cost — docs/gcp/managed-scope.md, docs/gcp/cloud-observability.md
+# Observability and cost — docs/decisions/gcp.md, GCP-03, GCP-05, GCP-11 and GCP-12
 # ---------------------------------------------------------------------------
 
 variable "logging_components" {
@@ -408,7 +408,7 @@ variable "observability_reader_members" {
 }
 
 # ---------------------------------------------------------------------------
-# Identities — docs/gcp/managed-scope.md
+# Identities — docs/decisions/gcp.md, GCP-06
 # ---------------------------------------------------------------------------
 
 # Workload Identity Federation has no variable: Autopilot pre-configures it and

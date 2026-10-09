@@ -7,7 +7,7 @@
 #            a value reaching the chart, the module off (garbage-collected)
 #            and back on. The last step puts the inputs back as it found them.
 # A cloud-bound Test carries `cloud: <cloud>` and runs on that cloud's job.
-# Every `catch` prints what the next failure needs. docs/flux-catalog.md §6.
+# Every `catch` prints what the next failure needs. docs/reference/catalog-module-standard.md.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:

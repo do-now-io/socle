@@ -5,6 +5,8 @@ extends: default
 
 ignore:
   - .git/
+  # The documentation site's dependencies, installed by `npm ci` in site/.
+  - site/node_modules/
   # The bootstrap envelope's templates carry one Helm expression ({{- toYaml
   # ... }}) that is not a YAML node. They are checked by rendering them —
   # helm template + kubeconform in pr-static.yaml. Chart.yaml stays linted.

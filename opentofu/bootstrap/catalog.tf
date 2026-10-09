@@ -31,16 +31,16 @@ locals {
       domain_filters = []
       policy         = "upsert-only"
       txt_owner_id   = var.cluster_name
-      # docs/flux-catalog.md §6: free-form chart values, and the name of a
-      # Secret the client creates in the external-dns namespace for what must
-      # not reach the OpenTofu state.
+      # docs/architecture/flux-catalog.md#how-values-merge: free-form chart
+      # values, and the name of a Secret the client creates in the
+      # external-dns namespace for what must not reach the OpenTofu state.
       values        = {}
       values_secret = ""
     }
     # The Gateway API standard CRDs, from upstream pinned by commit, and on
     # the clouds where the socle runs Cilium, the `cilium` GatewayClass and
     # the one operator restart that turns Cilium's controller on
-    # (docs/catalog/cilium.md §4). Not on gcp, where GKE owns the CRDs and
+    # (docs/catalog/gateway-api.md). Not on gcp, where GKE owns the CRDs and
     # the controller. No chart, so no values/values_secret. Disabling it
     # removes the Flux objects and orphans the CRDs: every Gateway survives.
     #
@@ -109,13 +109,13 @@ locals {
       values        = {}
       values_secret = ""
     }
-    # The monitoring stack's metrics storage (docs/monitoring.md):
+    # The monitoring stack's metrics storage (docs/architecture/observability.md):
     # VictoriaMetrics single-node, OTLP in from the collectors, PromQL out to
     # Grafana, no cloud access. On by default, like every monitoring module but
     # traces. retention is a VictoriaMetrics duration, at least a day.
     # storage_size sizes the PVC on the cluster's default StorageClass; empty
     # means no claim at all, an emptyDir — the escape for a cluster with no
-    # default class, which a socle EKS is until the EBS CSI driver exists
+    # default class, which a socle EKS is until one is marked default
     # (docs/catalog/victoria-metrics.md). values and values_secret as every
     # module: the client's chart values, his winning, secrets refused there
     # and put in a Secret he creates in victoria-metrics instead.
@@ -126,7 +126,7 @@ locals {
       values        = {}
       values_secret = ""
     }
-    # The node-level collector of the monitoring stack (docs/monitoring.md):
+    # The node-level collector of the monitoring stack (docs/architecture/observability.md):
     # the OpenTelemetry Collector as a DaemonSet, kubelet metrics for every
     # node, pod and container, exported to victoria_metrics when it is on —
     # nowhere otherwise. Ships the nodes and pods dashboard. No port on the
@@ -155,7 +155,7 @@ locals {
       values        = {}
       values_secret = ""
     }
-    # The monitoring stack's one place to read (docs/monitoring.md §5):
+    # The monitoring stack's one place to read (docs/architecture/observability.md#reading):
     # Grafana from the grafana-community chart, a read-only datasource for
     # each backend that is on, and every dashboard a module ships as a
     # ConfigMap labelled grafana_dashboard. ClusterIP, no persistence, the
@@ -173,8 +173,8 @@ locals {
       values        = {}
       values_secret = ""
     }
-    # The monitoring stack's logs storage (docs/monitoring.md): VictoriaLogs
-    # single-node, OTLP in from both collectors — container logs from
+    # The monitoring stack's logs storage (docs/architecture/observability.md):
+    # VictoriaLogs single-node, OTLP in from both collectors — container logs from
     # otel_agent, Kubernetes events and the applications' logs from
     # otel_gateway — LogsQL out to Grafana. Same shape as victoria_metrics:
     # retention (7 days) and storage_size (20Gi, empty for an emptyDir), values
@@ -186,8 +186,8 @@ locals {
       values        = {}
       values_secret = ""
     }
-    # The monitoring stack's traces storage (docs/monitoring.md): VictoriaTraces
-    # single-node, the applications' OTLP traces in through otel_gateway, the
+    # The monitoring stack's traces storage (docs/architecture/observability.md):
+    # VictoriaTraces single-node, the applications' OTLP traces in through otel_gateway, the
     # Jaeger query API out to Grafana. OFF by default: pre-GA, its storage
     # format not yet committed, so an upgrade may drop stored traces — turning
     # it on accepts that. Same shape as victoria_logs, 10Gi by default

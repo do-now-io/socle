@@ -1,8 +1,8 @@
 # The otel_agent module: the OpenTelemetry Collector as a DaemonSet, one pod
 # per node, for what lives on a node — node, pod and container metrics from the
 # kubelet and, with victoria_logs on, every container's log, with Kubernetes
-# metadata on every point and record. Design: docs/monitoring.md;
-# this module: docs/catalog/otel-agent.md.
+# metadata on every point and record. The stack:
+# docs/architecture/observability.md; this module: docs/catalog/otel-agent.md.
 #
 # resourcesTemplate rather than resources: the exporter depends on whether the
 # victoria_metrics module is on, and the Secret in valuesFrom only exists when
@@ -11,10 +11,10 @@
 #
 # Values: no spec.values on the HelmRelease. The socle's defaults are a
 # ConfigMap listed first in valuesFrom, the client's second, his Secret last —
-# later wins, so the client overrides any socle default (docs/flux-catalog.md §6).
+# later wins, so the client overrides any socle default (docs/architecture/flux-catalog.md).
 #
 # The nodes and pods dashboard ships here, not in Grafana: the module whose
-# metrics a dashboard reads carries it (docs/monitoring.md §5). It is a plain
+# metrics a dashboard reads carries it (docs/decisions/socle.md, SOCLE-03). It is a plain
 # ConfigMap under dashboards/, applied by a Flux Kustomization from the socle
 # artifact, as gateway-api applies its cilium/ folder.
 #
