@@ -85,7 +85,8 @@ spec:
                   app.kubernetes.io/instance: otel-agent
                   component: agent-collector
               spec:
-                (priorityClassName != 'socle-node-agent' || priority != `1000000`): true
+                # to_number: the API's integer never equals a JMESPath literal.
+                (priorityClassName != 'socle-node-agent' || to_number(priority) != `1000000`): true
         - assert:
             resource:
               apiVersion: v1
@@ -490,7 +491,8 @@ spec:
                   app.kubernetes.io/instance: otel-agent
                   component: agent-collector
               spec:
-                (priorityClassName != 'socle-node-agent' || priority != `1000000`): true
+                # to_number: the API's integer never equals a JMESPath literal.
+                (priorityClassName != 'socle-node-agent' || to_number(priority) != `1000000`): true
         - assert:
             resource:
               apiVersion: fluxcd.controlplane.io/v1
