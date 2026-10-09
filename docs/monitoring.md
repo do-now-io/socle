@@ -188,14 +188,6 @@ already relies on the default for the source-controller cache.
 an `emptyDir`, lost when the pod is rescheduled. That is the escape for a
 cluster with no default class, not a production setting.
 
-**EKS has none today.** `opentofu/aws` installs no EBS CSI driver — it is an
-EKS-managed add-on left to the factory (`opentofu/aws/cluster.tf`,
-`docs/aws/eks-managed-scope.md`) — and EKS itself marks no class default
-since 1.30. A claim on a socle EKS therefore stays `Pending` and the backend
-never starts. That is a foundations/factory gap, tracked on its own, and the
-catalog does not paper over it: an AWS client sets `storage_size = ""` until
-the driver exists (`opentofu/clusters/aws/prod.tfvars.example` says so), and a
-per-cloud default in the template would hide the gap rather than close it.
 floci's k3s ships `local-path` as its default class, so the e2e exercises the
 PVC path.
 
@@ -373,8 +365,7 @@ above:
 
 - **Stack order** — metrics first (§8).
 - **Question 3, a default StorageClass** — a PVC by default, `storage_size =
-  ""` for an `emptyDir`; EKS has no class today, a foundations/factory gap
-  tracked on its own (§3).
+  ""` for an `emptyDir` (§3).
 - **Question 5, dashboards** — the socle's own, on OpenTelemetry names, each
   shipped by the module whose metrics it shows (§5).
 - **Questions 1, 2, 4, 6 and 7 stand as written below**, and so do the
@@ -391,9 +382,8 @@ above:
    `prometheus-operator-crds` chart (32.0.1) plus the standalone OpenTelemetry
    target allocator chart (0.159.0), which watches both kinds without the
    operator. Two more releases; worth it the day a client asks, not before.
-3. **A default StorageClass on every cloud.** *Decided, §3.* EKS has none
-   until the EBS CSI driver is installed; GKE, AKS and Kapsule ship one,
-   confirmed when each cloud's e2e exists.
+3. **A default StorageClass on every cloud.** *Decided, §3.* Confirmed when
+   each cloud's e2e exists.
 4. **The VictoriaLogs plugin is downloaded at Grafana's start**, from
    grafana.com. A cluster without egress to it gets Grafana without logs.
    The alternative is baking the plugin into an init container image the

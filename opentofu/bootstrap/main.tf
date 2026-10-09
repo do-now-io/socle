@@ -207,5 +207,6 @@ resource "helm_release" "socle" {
     inputs = local.inputs
   })]
 
-  depends_on = [helm_release.instance]
+  # A claim takes the default class when it is created.
+  depends_on = [helm_release.instance, helm_release.storage_class]
 }

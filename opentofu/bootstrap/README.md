@@ -60,7 +60,7 @@ type, is an error at plan, with the allowed list in the message.
 | `argocd` | `values_secret` | `""` | Name of a Secret in `argocd` with a `values.yaml` key, created by the client, merged last — where the private keys and client secrets go |
 | `victoria_metrics` | `enabled` | `true` | Deploy VictoriaMetrics single-node, the monitoring stack's metrics storage: OTLP in, PromQL out, no cloud access ([design note](../../docs/catalog/victoria-metrics.md), [stack](../../docs/monitoring.md)) |
 | `victoria_metrics` | `retention` | `"15d"` | How long samples are kept: whole hours, days, weeks or years, at least a day |
-| `victoria_metrics` | `storage_size` | `"20Gi"` | Size of the claim on the cluster's default StorageClass, in `Gi` or `Ti`; `""` means no claim, an `emptyDir` — what a socle EKS needs until the EBS CSI driver exists |
+| `victoria_metrics` | `storage_size` | `"20Gi"` | Size of the claim on the cluster's default StorageClass, in `Gi` or `Ti`; `""` means no claim, an `emptyDir` |
 | `victoria_metrics` | `values` | `{}` | The client's own chart values, merged over the socle's defaults, client wins. Secrets refused at plan; numeric flags written as strings |
 | `victoria_metrics` | `values_secret` | `""` | Name of a Secret in `victoria-metrics` with a `values.yaml` key, created by the client, merged last |
 | `otel_agent` | `enabled` | `true` | Deploy the OpenTelemetry Collector as a DaemonSet: kubelet metrics for every node, pod and container, to `victoria_metrics` when it is on, and the nodes and pods dashboard ([design note](../../docs/catalog/otel-agent.md)) |
@@ -195,7 +195,7 @@ drivers need the agent; turning it off with either on is refused at plan.
 | CNI on aws and azure | Cilium 1.20.2, pinned here: ENI IPAM on aws, BYOCNI overlay on azure, kube-proxy replacement on both |
 | DNS on aws | CoreDNS by Helm after Cilium; the EKS add-on cannot exist before a CNI |
 | Identity on aws | the Pod Identity Agent add-on, before Flux, pinned; IRSA absent |
-| Storage on aws | EBS CSI add-on on by default, EFS CSI on request, each with its own Pod Identity role |
+| Storage on aws | EBS CSI add-on on by default with a default `gp3` StorageClass (encrypted), EFS CSI on request, each with its own Pod Identity role |
 
 ## Reading the result
 
@@ -247,6 +247,7 @@ No modules.
 | [helm_release.instance](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 | [helm_release.operator](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 | [helm_release.socle](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
+| [helm_release.storage_class](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
 
 ## Inputs

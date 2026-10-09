@@ -9,6 +9,8 @@ ignore:
   # ... }}) that is not a YAML node. They are checked by rendering them —
   # helm template + kubeconform in pr-static.yaml. Chart.yaml stays linted.
   - opentofu/*/manifests/templates/
+  # The same for the StorageClass chart; tofu test checks its values.
+  - opentofu/bootstrap/storage-class/templates/
 
 rules:
   # Manifests with long image references or URLs need some headroom.

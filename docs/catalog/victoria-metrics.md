@@ -13,7 +13,7 @@ copies.
 | Where | Every cloud, the same template, no cloud patch |
 | Default | **On**, like every monitoring module but traces |
 | Shape | One pod, a `Deployment` with strategy `Recreate`, and a standalone PVC — not the chart's default StatefulSet |
-| Storage | 20Gi on the cluster's default StorageClass; `storage_size = ""` for an `emptyDir`. **A socle EKS has no StorageClass today** (below) |
+| Storage | 20Gi on the cluster's default StorageClass; `storage_size = ""` for an `emptyDir` |
 | Retention | 15 days |
 | Ingest | OTLP over HTTP at `/opentelemetry/v1/metrics`, names converted to the Prometheus form |
 | Cardinality | At most 100 000 new series an hour, then new series are dropped with a log line |
@@ -140,14 +140,10 @@ StorageClass under the claim:
 
 | Cloud | Default class | Consequence |
 | --- | --- | --- |
-| AWS | **None.** `opentofu/aws` installs no EBS CSI driver — an EKS-managed add-on left to the factory (`opentofu/aws/cluster.tf`, `docs/aws/eks-managed-scope.md`) — and EKS marks no class default since 1.30 | The claim stays `Pending`, the pod never starts, and the root `ResourceSet` does not turn Ready. **An AWS client sets `storage_size = ""`** until the driver exists; `opentofu/clusters/aws/prod.tfvars.example` does. A foundations/factory gap, tracked on its own |
+| AWS | `gp3` (EBS CSI, encrypted), created by the bootstrap module | Proven on a sandbox EKS (#95) |
 | GCP | `standard-rwo` (Persistent Disk CSI, managed by GKE) | To confirm when a GCP e2e exists |
 | Azure | `managed-csi` (Azure Disk CSI, managed by AKS) | Same |
 | Scaleway | `scw-bssd` (Block Storage CSI, managed by Kapsule) | Same |
-
-Choosing a per-cloud default in the template — `""` on aws — was considered
-and refused: it would hide the gap rather than close it, and flip silently the
-day the driver lands.
 
 ## Templating notes
 
@@ -251,19 +247,14 @@ which side varies it is not established. Sorting costs some ingestion
 throughput, by the flag's own description. The `victoria-metrics-health`
 assertion checks the flag on the live args.
 
-**What floci cannot prove:** a cloud StorageClass, volume expansion, and the
-EKS gap itself — floci's k3s brings its own class.
+**What floci cannot prove:** a cloud StorageClass and volume expansion —
+floci's k3s brings its own class.
 
 ## Open questions for the coordinator
 
-1. **The EKS StorageClass gap.** Every stateful module the socle ships from
-   now on inherits it. The fix is the EBS CSI driver on the cluster, which
-   the AWS documents leave to "the factory" — a layer that does not exist
-   yet. Until it does, is the driver a catalog module (its role through
-   Crossplane, like external-dns), or a foundations add-on after all?
-2. **Renovate does not see the chart pin**, the same open point as argocd's:
+1. **Renovate does not see the chart pin**, the same open point as argocd's:
    `spec.ref.tag` sits in a string.
-3. **Memory on the e2e runner.** This module is 12Mi idle, nothing to
+2. **Memory on the e2e runner.** This module is 12Mi idle, nothing to
    budget. The figure that matters is under ingest, once the collectors
    write to it; if the stack's six modules together crowd the runner, the
    monitoring note's §7 rule applies — a module that cannot converge on floci
