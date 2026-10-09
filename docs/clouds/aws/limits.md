@@ -26,6 +26,5 @@ sidebar:
 ## What the socle does not offer here yet
 
 - **Capacity for workloads**: no Karpenter ([#53](https://github.com/do-now-io/socle/issues/53)); everything runs on the two bootstrap Spot nodes.
-- **A default StorageClass**: a claim with no class stays `Pending`. Keep `storage_size = ""` on `victoria_metrics`, `victoria_logs` and `victoria_traces` (an `emptyDir`), or create a StorageClass with provisioner `ebs.csi.aws.com` annotated `storageclass.kubernetes.io/is-default-class: "true"`.
 - **Backups outside the cluster's account and region** ([velero](../../catalog/velero.md)).
 - **The Upgrade Insights pre-check** and **cloud-resource observability**: proposed, not built.

@@ -41,7 +41,8 @@ On aws, in one apply:
 4. **`flux-operator`**, then the instance and the envelope
    ([The Flux catalog](flux-catalog.md#what-opentofu-deposits)). Alongside
    it, after CoreDNS: **`snapshot-controller`**, the **EBS CSI** driver and,
-   with `eks_addons.efs_csi`, the **EFS CSI** driver, each with its own role.
+   with `eks_addons.efs_csi`, the **EFS CSI** driver, each with its own role;
+   with EBS CSI, the default StorageClass `gp3`, encrypted.
 
 On azure, the same without CoreDNS and the add-ons. On every cloud, what
 hands out cloud identities runs before the first module.
