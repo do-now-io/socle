@@ -21,6 +21,7 @@
 #      velero module's, docs/catalog/velero.md). A Deployment with no AWS
 #      identity: it only watches the API server. AWS asks for it before the
 #      EBS driver, so it comes first.
+#   5. the default StorageClass, which EKS does not provide.
 #
 # Each driver's identity is written here, beside the add-on that runs its
 # pods, and bound through the add-on's own pod_identity_association — the
@@ -141,16 +142,21 @@ resource "aws_eks_addon" "snapshot_controller" {
   depends_on = [helm_release.cilium, helm_release.coredns]
 }
 
-# 2. EBS CSI, and its identity. AWS's managed policy, the driver's own list;
-# its write actions are conditioned on the tags the driver puts on the
-# volumes and snapshots it creates.
+# 2. EBS CSI, and its identity. AWS's cluster-scoped policy
+# (aws-ebs-csi-driver#2918): the driver acts only on its own cluster's volumes,
+# snapshots and nodes. It is also the role's permissions boundary.
+locals {
+  ebs_csi_policy_arn = "arn:aws:iam::aws:policy/AmazonEBSCSIDriverEKSClusterScopedPolicy"
+}
+
 resource "aws_iam_role" "ebs_csi" {
   count = local.eks_addon_installed.ebs_csi ? 1 : 0
 
   name = "${var.cluster_name}-ebs-csi"
   # Written out: not /socle/<cluster>/, the path Crossplane may rewrite.
-  path               = "/"
-  assume_role_policy = local.pod_identity_trust
+  path                 = "/"
+  assume_role_policy   = local.pod_identity_trust
+  permissions_boundary = local.ebs_csi_policy_arn
 
   tags = local.aws_tags
 }
@@ -159,7 +165,7 @@ resource "aws_iam_role_policy_attachment" "ebs_csi" {
   count = local.eks_addon_installed.ebs_csi ? 1 : 0
 
   role       = aws_iam_role.ebs_csi[0].name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+  policy_arn = local.ebs_csi_policy_arn
 }
 
 resource "aws_eks_addon" "ebs_csi" {
@@ -251,4 +257,39 @@ resource "aws_eks_addon" "efs_csi" {
     aws_eks_addon.pod_identity_agent,
     aws_iam_role_policy_attachment.efs_csi,
   ]
+}
+
+# 5. The default StorageClass, as the EKS user guide writes it ("Create a
+# storage class"). The add-on's own (defaultStorageClass) is not encrypted.
+locals {
+  ebs_storage_class = {
+    apiVersion = "storage.k8s.io/v1"
+    kind       = "StorageClass"
+    metadata = {
+      name        = "gp3"
+      annotations = { "storageclass.kubernetes.io/is-default-class" = "true" }
+    }
+    provisioner = "ebs.csi.aws.com"
+    parameters = {
+      type      = "gp3"
+      encrypted = "true"
+    }
+    volumeBindingMode    = "WaitForFirstConsumer"
+    allowVolumeExpansion = true
+    reclaimPolicy        = "Delete"
+  }
+}
+
+resource "helm_release" "storage_class" {
+  count = local.eks_addon_installed.ebs_csi ? 1 : 0
+
+  name      = "socle-storage-class"
+  chart     = "${path.module}/storage-class"
+  namespace = "kube-system"
+
+  values = [yamlencode({
+    storageClass = local.ebs_storage_class
+  })]
+
+  depends_on = [aws_eks_addon.ebs_csi]
 }

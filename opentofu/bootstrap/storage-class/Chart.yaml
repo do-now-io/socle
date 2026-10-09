@@ -1,0 +1,5 @@
+apiVersion: v2
+name: socle-storage-class
+# Fixed: the class is all in the values.
+version: 1.0.0
+description: The default StorageClass the socle bootstrap creates on EKS.
