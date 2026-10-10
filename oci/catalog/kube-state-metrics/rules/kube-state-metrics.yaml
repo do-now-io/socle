@@ -1,7 +1,7 @@
 # The Kubernetes objects' and Flux's health, from kube-state-metrics as
-# otel_gateway scrapes it: awesome-prometheus-alerts' Kubernetes and FluxCD
-# sections (github.com/samber/awesome-prometheus-alerts, _data/rules.yml at
-# 822af1e, read 2026-10-10), taken as written. Above each rule, its section
+# otel_gateway scrapes it: the Kubernetes and FluxCD sections of
+# awesome-prometheus-alerts (github.com/samber/awesome-prometheus-alerts,
+# _data/rules.yml at 822af1e, read 2026-10-10). Above each rule, its section
 # and name upstream; a comment says where the socle departs from it — the
 # severity first: critical only for a node lost, or data lost or about to be
 # (docs/catalog/alerting.md). The rules upstream not taken, and why:
@@ -120,8 +120,9 @@ data:
               severity: warning
             annotations:
               summary: >-
-                Container {{ $labels.container }} in pod {{ $labels.namespace }}/{{ $labels.pod
-                }} has been OOMKilled {{ $value }} times in the last 10 minutes.
+                Container {{ $labels.container }} in pod
+                {{ $labels.namespace }}/{{ $labels.pod }} has been OOMKilled {{ $value }} times
+                in the last 10 minutes.
           # Kubernetes / Kubernetes Container waiting
           - alert: KubernetesContainerWaiting
             expr: >-
@@ -131,10 +132,10 @@ data:
               severity: warning
             annotations:
               summary: >-
-                Container {{ $labels.container }} in pod {{ $labels.namespace }}/{{ $labels.pod
-                }} has been in waiting state for longer than 1 hour, for a reason other than
-                CrashLoopBackOff (e.g. ImagePullBackOff, CreateContainerConfigError,
-                InvalidImageName).
+                Container {{ $labels.container }} in pod
+                {{ $labels.namespace }}/{{ $labels.pod }} has been in waiting state for longer
+                than 1 hour, for a reason other than CrashLoopBackOff (e.g. ImagePullBackOff,
+                CreateContainerConfigError, InvalidImageName).
           # Kubernetes / Kubernetes Deployment replicas mismatch
           - alert: KubernetesDeploymentReplicasMismatch
             expr: >-
@@ -317,8 +318,8 @@ data:
               severity: warning
             annotations:
               summary: >-
-                PersistentVolumeClaim {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim
-                }} is pending
+                PersistentVolumeClaim
+                {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} is pending
           # Kubernetes / Kubernetes PersistentVolume error
           - alert: KubernetesPersistentvolumeError
             expr: >-
@@ -381,7 +382,8 @@ data:
                 and the enforced quota.
           # Kubernetes / Kubernetes kube-state-metrics list/watch errors (awesome: critical)
           # warning: every rule of this file goes stale with it, which is why it is
-          # here; nothing is lost yet.
+          # here; nothing is lost yet. kube-state-metrics 2.20 counts watches only
+          # (kube_state_metrics_watch_total): the list half reads nothing, kept as written.
           - alert: KubernetesKubeStateMetricsListWatchErrors
             expr: >-
               (rate(kube_state_metrics_list_total{result="error"}[5m]) /
@@ -410,8 +412,8 @@ data:
               severity: warning
             annotations:
               summary: >-
-                The {{ $labels.customresource_kind }} '{{ $labels.name }}' in namespace {{
-                $labels.exported_namespace }} is marked as not ready.
+                The {{ $labels.customresource_kind }} '{{ $labels.name }}' in namespace
+                {{ $labels.exported_namespace }} is marked as not ready.
           # FluxCD / Flux HelmRelease Failure
           - alert: FluxHelmreleaseFailure
             expr: >-
@@ -421,8 +423,8 @@ data:
               severity: warning
             annotations:
               summary: >-
-                The {{ $labels.customresource_kind }} '{{ $labels.name }}' in namespace {{
-                $labels.exported_namespace }} is marked as not ready.
+                The {{ $labels.customresource_kind }} '{{ $labels.name }}' in namespace
+                {{ $labels.exported_namespace }} is marked as not ready.
           # FluxCD / Flux Source Issue
           - alert: FluxSourceIssue
             expr: >-

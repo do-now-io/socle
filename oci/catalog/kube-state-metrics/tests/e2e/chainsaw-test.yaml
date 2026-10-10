@@ -99,10 +99,10 @@ spec:
                 name: kube-state-metrics
                 namespace: kube-state-metrics
               spec:
-                (ports[?port == `8080`] || `[]`):
-                  - name: http
-                (ports[?port == `8081`] || `[]`):
-                  - name: metrics
+                (ports[?name == 'http'] || `[]`):
+                  - port: 8080
+                (ports[?name == 'metrics'] || `[]`):
+                  - port: 8081
         - assert:
             resource:
               apiVersion: v1
