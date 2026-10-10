@@ -3,6 +3,9 @@
 // pages through route-data.ts, the landing page directly.
 export const channel: string = import.meta.env.SOCLE_CHANNEL ?? 'dev';
 export const released = import.meta.env.SOCLE_RELEASED === 'true';
+// The last release, even one tagged before this site existed.
+export const release: string = import.meta.env.SOCLE_RELEASE ?? '';
+const notes = (v: string) => `<a href="https://github.com/do-now-io/socle/releases/tag/${v}">${v}</a>`;
 export const pr: string = import.meta.env.SOCLE_PR ?? '';
 
 /** The banner's HTML, or undefined on the last release. */
@@ -13,8 +16,14 @@ export function bannerHtml(): string | undefined {
   if (channel === 'dev') {
     return released
       ? 'You are reading <strong>dev</strong>: the documentation of <code>main</code>, not yet released. <a href="/socle/">Read the last release</a>.'
-      : 'You are reading <strong>dev</strong>: the documentation of <code>main</code>. Nothing has been released yet.';
+      : release
+        ? `You are reading <strong>dev</strong>: the documentation of <code>main</code>. The last release, ${notes(release)}, predates this site.`
+        : 'You are reading <strong>dev</strong>: the documentation of <code>main</code>. Nothing has been released yet.';
   }
-  if (!released) return 'Nothing has been released yet: this is the documentation of <code>main</code>.';
+  if (!released) {
+    return release
+      ? `The last release, ${notes(release)}, predates this site: this is the documentation of <code>main</code>.`
+      : 'Nothing has been released yet: this is the documentation of <code>main</code>.';
+  }
   return undefined;
 }

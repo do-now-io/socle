@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Assembles the whole GitHub Pages site into one directory. A Pages
 # deployment replaces the site, so every deploy rebuilds every part of it:
-#   <out>/          latest: the last release tag (X.Y.Z), or main until there is one
+#   <out>/          latest: the last release tag (X.Y.Z) that has a site/, or main
+#                   until there is one (0.1.0 was tagged before site/ existed)
 #   <out>/dev/      dev: the commit checked out (main, in pages.yaml)
 #   <out>/pr/<N>/   one preview per line of the PR list, built from its head
 # Usage: build-pages.sh <out> [<pr-list>]
@@ -48,22 +49,26 @@ checkout() {
   echo "${work}/$1"
 }
 
-tag=""
+# release: the last X.Y.Z tag. tag: the last one that has a site to build.
+# They differ while the last release predates site/: the root then serves
+# main, and its banner names the release rather than claiming there is none.
+release="" tag=""
 for t in $(git tag --list --sort=-v:refname | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' || true); do
+  [ -n "${release}" ] || release="${t}"
   if git cat-file -e "${t}:site/package.json" 2>/dev/null; then tag="${t}"; break; fi
 done
 released=$([ -n "${tag}" ] && echo true || echo false)
 echo "### Docs site" >> "${summary}"
 
-build . "${out}/dev" SOCLE_CHANNEL=dev SOCLE_REF=main SOCLE_RELEASED="${released}"
+build . "${out}/dev" SOCLE_CHANNEL=dev SOCLE_REF=main SOCLE_RELEASED="${released}" SOCLE_RELEASE="${release}"
 echo "- dev: \`$(git rev-parse --short HEAD)\` ✅" >> "${summary}"
 
 if [ -n "${tag}" ]; then
-  build "$(checkout latest "${tag}")" "${out}" SOCLE_CHANNEL=latest SOCLE_REF="${tag}" SOCLE_RELEASED=true
+  build "$(checkout latest "${tag}")" "${out}" SOCLE_CHANNEL=latest SOCLE_REF="${tag}" SOCLE_RELEASED=true SOCLE_RELEASE="${release}"
 else
-  build . "${out}" SOCLE_CHANNEL=latest SOCLE_REF=main SOCLE_RELEASED=false
+  build . "${out}" SOCLE_CHANNEL=latest SOCLE_REF=main SOCLE_RELEASED=false SOCLE_RELEASE="${release}"
 fi
-echo "- latest: \`${tag:-main, no release yet}\` ✅" >> "${summary}"
+echo "- latest: \`${tag:-main}\` (last release: ${release:-none}) ✅" >> "${summary}"
 
 while read -r number sha; do
   [ -n "${number}" ] || continue
