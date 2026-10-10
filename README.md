@@ -133,6 +133,7 @@ The stack's design: [Observability](docs/architecture/observability.md).
 | [`victoria_traces`](docs/catalog/victoria-traces.md) | Traces storage | 0.11.0 | off | All | Pre-GA upstream |
 | [`otel_agent`](docs/catalog/otel-agent.md) | Node-level OpenTelemetry collector: kubelet metrics and container logs | 0.160.0 | on | All | |
 | [`otel_gateway`](docs/catalog/otel-gateway.md) | Cluster-level collector: object state, Prometheus scraping, OTLP | 0.160.0 | on | All | |
+| [`kube_state_metrics`](docs/catalog/kube-state-metrics.md) | Every Kubernetes object's state as metrics, for the Kubernetes and Flux alerts | 2.20.0 | on | All | |
 | [`grafana`](docs/catalog/grafana.md) | One place to read every signal, with each module's dashboards loaded | 13.2.2 | on | All | |
 | [`alerting`](docs/catalog/alerting.md) | vmalert evaluates the socle's rules, and Alertmanager routes what fires to your receivers | 1.153.0 · 0.34.1 | off | All | Needs `victoria_metrics` |
 | [`metrics_server`](docs/catalog/metrics-server.md) | The resource metrics API behind `kubectl top` and CPU or memory autoscaling | 0.9.0 | on | AWS | GKE, AKS and Kapsule ship their own |

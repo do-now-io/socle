@@ -10,7 +10,7 @@ the Victoria family stores, Grafana reads. Same templates on all four clouds,
 no remote-write, no federation,
 and no cloud access: every backend stores on a volume.
 
-## Seven modules
+## Eight modules
 
 One module per chart release:
 
@@ -18,6 +18,7 @@ One module per chart release:
 | --- | --- | --- |
 | [`otel_agent`](../catalog/otel-agent.md) | OpenTelemetry Collector, DaemonSet | on |
 | [`otel_gateway`](../catalog/otel-gateway.md) | OpenTelemetry Collector, 1 replica | on |
+| [`kube_state_metrics`](../catalog/kube-state-metrics.md) | kube-state-metrics, 1 replica, scraped by `otel_gateway` | on |
 | [`victoria_metrics`](../catalog/victoria-metrics.md) | 1 pod and a PVC | on |
 | [`victoria_logs`](../catalog/victoria-logs.md) | 1 pod and a PVC | on |
 | [`victoria_traces`](../catalog/victoria-traces.md) | 1 pod and a PVC | **off**: pre-GA, an upgrade may drop stored traces |
@@ -29,6 +30,7 @@ One module per chart release:
 ```text
 applications ──OTLP 4317/4318──▶ otel_gateway ──┐
 annotated pods ◀──scrape──────── otel_gateway   │  OTLP over HTTP
+kube_state_metrics ◀──scrape──── otel_gateway   │
 Kubernetes API ◀──object state, events── gateway ├─▶ victoria_metrics :8428  /opentelemetry/v1/metrics
                                                  ├─▶ victoria_logs    :9428  /insert/opentelemetry/v1/logs
 kubelet, /var/log/pods ◀──── otel_agent ─────────┤
@@ -41,7 +43,7 @@ alerting: vmalert ──rules──▶ victoria_metrics;  firing ──▶ Alert
 - **The agent exports straight to the backends**, not through the gateway.
 - **Pipelines follow the modules that are on**: turning a backend off removes
   its pipelines and its datasource in one reconciliation. No `dependsOn`
-  links the seven.
+  links the eight.
 - **Do not override `fullnameOverride`** in `values`: the endpoints rely on
   it, and the plan does not refuse it.
 
@@ -56,6 +58,8 @@ alerting: vmalert ──rules──▶ victoria_metrics;  firing ──▶ Alert
 | Object state | API server | `otel_gateway` | `clusterMetrics` |
 | Kubernetes events, as logs | API server | `otel_gateway` | `kubernetesEvents` |
 | Prometheus endpoints | pods annotated `prometheus.io/scrape` | `otel_gateway` | `prometheus` receiver |
+| Object state for the alert rules | kube-state-metrics, ports 8080 and 8081 | `otel_gateway` | `prometheus` receiver, its own job |
+| PersistentVolumeClaims' fill | kubelet stats API, `volume` group, claims only | `otel_agent` | `kubeletstats` |
 | Application OTLP | gRPC 4317, HTTP 4318 on `otel-gateway.otel-gateway.svc` | `otel_gateway` | `otlp` receiver |
 
 The collectors run the `otelcol-k8s` distribution. Host metrics are off

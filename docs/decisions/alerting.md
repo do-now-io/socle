@@ -91,3 +91,32 @@ silence on the Watchdog raises a false alarm. A missing Secret keeps
 Alertmanager from starting rather than silently dropping the watchdog.
 
 **Sources.** #59, measured on floci 2026-10-07.
+
+## ALERTING-05: Every rule taken from awesome-prometheus-alerts, by hand, with one severity rule
+
+**accepted** · 2026-10-10 · [`oci/catalog/kube-state-metrics/rules/`](../../oci/catalog/kube-state-metrics/rules/), [`oci/catalog/otel-agent/rules/`](../../oci/catalog/otel-agent/rules/), [`oci/catalog/otel-gateway/rules/`](../../oci/catalog/otel-gateway/rules/)
+
+**Context.** #59 and #85 wrote each rule from nothing, one candidate at a
+time; that does not reach kube-prometheus-stack's coverage, which a managed
+cluster needs from the moment alerting is on. awesome-prometheus-alerts
+publishes rules per component. #91 first proposed a generator fed by a
+declaration per module and a name-mapping table; it was dropped: the
+embedded exporters' rules copy as they are, and most node-exporter rules do
+not translate mechanically onto kubeletstats, so a generator would save
+little and cost a tool.
+
+**Decision.** Each module's `vmalert_rules` ConfigMap carries
+awesome-prometheus-alerts' rules for what it measures, copied by hand, the
+alert named as upstream renders it (CamelCase), its section and name upstream
+in a comment above it, the expression, threshold and `for` as written unless
+a comment says why not. Severity follows one rule: `critical` for a node
+lost, or data lost or about to be; `warning` otherwise; upstream `info` rules
+are not taken. Each file's header names the upstream commit read. Rules
+upstream lacks are written in the same shape.
+
+**Consequences.** Coverage comes with the module: alerting on is all a client
+does. An upstream change reaches the socle when someone rereads it; nothing
+follows the upstream file automatically. The rules not taken are listed with
+their reason ([Alert rules](../reference/alert-rules.md)).
+
+**Sources.** #91; awesome-prometheus-alerts `_data/rules.yml` at 822af1e.

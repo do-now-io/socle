@@ -70,9 +70,10 @@ kube = {
 - **`tofu plan` refuses** literal credentials in `values` (authenticators,
   exporter headers, `extraEnvs`, a `Secret` in `extraManifests`). Write
   `${env:NAME}`, with `NAME` set from a Secret by `extraEnvs` `valueFrom`.
-- **Its alert rules ship with it**: a pod crash-looping or `Pending`, a node
-  not ready, a Deployment missing replicas. They fire once
-  [alerting](alerting.md) is on.
+- **Its alert rules ship with it**: the gateway's own health, refused or
+  failed data and a full queue ([every rule](../reference/alert-rules.md)).
+  They fire once [alerting](alerting.md) is on. The Kubernetes rules ship
+  with [kube_state_metrics](kube-state-metrics.md), which this module scrapes.
 - **Keep one replica**: the socle configures no leader election, so with
   `replicaCount = 2` every object's state is reported twice.
 
@@ -85,7 +86,7 @@ from `oci://ghcr.io/open-telemetry/opentelemetry-helm-charts`, in
 Service and the *Kubernetes / Workloads* dashboard for Grafana.
 
 **What the socle sets**: `k8s_cluster` every 10 s, annotated scrapes every
-30 s, Kubernetes events, OTLP receivers; each exporter and the logs and
+30 s, kube-state-metrics' two ports every 30 s while that module is on, Kubernetes events, OTLP receivers; each exporter and the logs and
 traces pipelines follow their backend's `enabled`. Requests 100m CPU and
 128Mi, a 1Gi memory limit.
 

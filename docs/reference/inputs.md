@@ -56,6 +56,7 @@ module's namespace with a `values.yaml` key, merged last); not repeated below.
 | `otel_agent` | `enabled` | `true` | the OpenTelemetry Collector as a DaemonSet: kubelet metrics, container logs, the nodes and pods dashboard |
 | `otel_agent` | `logs` | `true` | container logs from `/var/log/pods` to `victoria_logs` while it is on; `false` keeps the agent to metrics |
 | `otel_gateway` | `enabled` | `true` | the OpenTelemetry Collector as a one-replica Deployment: object state, scraping, the applications' OTLP, the workloads dashboard |
+| `kube_state_metrics` | `enabled` | `true` | kube-state-metrics, scraped by `otel_gateway`: every object's state, the Kubernetes and Flux alert rules |
 | `grafana` | `enabled` | `true` | Grafana, a datasource per backend that is on, every dashboard a module ships |
 | `grafana` | `domain` | `""` | the host Grafana is served at (`server.root_url` and the HTTPRoute); empty means none |
 | `grafana` | `gateway` | `"private"` | the shared Gateway its HTTPRoute attaches to: `private`, `public`, or `""` for none |
