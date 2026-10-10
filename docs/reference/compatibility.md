@@ -64,6 +64,7 @@ From each `oci/catalog/<module>/resourceset.yaml`. Offered is not proven: CI app
 | `victoria_metrics` | `victoria-metrics-single`, `oci://ghcr.io/victoriametrics/helm-charts` | `0.48.0` | v1.153.0 | all |
 | `otel_agent` | `opentelemetry-collector`, `oci://ghcr.io/open-telemetry/opentelemetry-helm-charts` | `0.173.1` | 0.160.0 | all |
 | `otel_gateway` | `opentelemetry-collector`, same | `0.173.1` | 0.160.0 | all |
+| `kube_state_metrics` | `kube-state-metrics`, `oci://ghcr.io/prometheus-community/charts` | `8.6.0` | 2.20.0 | all |
 | `grafana` | `grafana`, `oci://ghcr.io/grafana-community/helm-charts` | `13.2.6` | 13.2.2 | all |
 | `victoria_logs` | `victoria-logs-single`, `oci://ghcr.io/victoriametrics/helm-charts` | `0.13.9` | v1.52.0 | all |
 | `victoria_traces` | `victoria-traces-single`, `oci://ghcr.io/victoriametrics/helm-charts` | `0.1.11` | v0.11.0 | all |

@@ -73,8 +73,12 @@ kube = {
   `extraEnvs` `valueFrom`.
 - **On GKE Autopilot each agent is billed** by its requests, 50m CPU and
   128Mi, on every node.
-- **Its alert rule ships with it**: a node's filesystem under 10 % free. It
-  fires once [alerting](alerting.md) is on.
+- **Its alert rules ship with it**: a node out of memory, CPU or disk, a
+  PersistentVolumeClaim nearly full or filling, and the agent's own health
+  ([every rule](../reference/alert-rules.md)). They fire once
+  [alerting](alerting.md) is on. The CPU and claim rules also read
+  [kube_state_metrics](kube-state-metrics.md): without it they return
+  nothing.
 - **Upgrades**: write the current component names (`otlp_http`,
   `k8s_attributes`) in `values`; a later chart stops rewriting the old ones.
 
@@ -88,7 +92,9 @@ in `daemonset` mode, in the `otel-agent` namespace, with the
 port, no `hostPort`.
 
 **What the socle sets**: `kubeletstats` every 20 s over the node IP
-(`insecure_skip_verify`: kubelet certificates are self-signed), `file_log` on
+(`insecure_skip_verify`: kubelet certificates are self-signed), with the
+`volume` group but neither the ServiceAccount token volumes nor the used
+inodes, which no rule reads; `file_log` on
 `/var/log/pods` while logs are on, `k8s_attributes` on both; each exporter
 follows its backend's `enabled`. Host metrics are off. Requests 50m CPU and
 128Mi, a 512Mi memory limit.

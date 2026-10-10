@@ -498,7 +498,7 @@ default class exists, and loses data when the pod moves.
 
 ## SOCLE-31: The socle's dashboards, on OpenTelemetry names
 
-**accepted** · 2026-09-29 · [`oci/catalog/otel-agent/dashboards/`](../../oci/catalog/otel-agent/dashboards/), [`oci/catalog/otel-gateway/dashboards/`](../../oci/catalog/otel-gateway/dashboards/)
+**superseded by [SOCLE-32](#socle-32-kube-state-metrics-beside-the-collectors-for-alerting-no-node-exporter)** · 2026-09-29 · [`oci/catalog/otel-agent/dashboards/`](../../oci/catalog/otel-agent/dashboards/), [`oci/catalog/otel-gateway/dashboards/`](../../oci/catalog/otel-gateway/dashboards/)
 
 **Decision.** The socle writes its dashboards on the OpenTelemetry names
 VictoriaMetrics stores, each shipped by the module whose metrics it shows. No
@@ -511,3 +511,30 @@ the collectors.
 under its module's toggle. Community dashboards do not work unmodified.
 
 **Sources.** [Observability](../architecture/observability.md#reading).
+
+## SOCLE-32: kube-state-metrics beside the collectors, for alerting; no node-exporter
+
+**accepted** · 2026-10-10 · [`oci/catalog/kube-state-metrics/`](../../oci/catalog/kube-state-metrics/), [`oci/catalog/otel-gateway/resourceset.yaml`](../../oci/catalog/otel-gateway/resourceset.yaml)
+
+**Decision.** The socle's alert rules are taken from awesome-prometheus-alerts.
+For Kubernetes objects and Flux they read kube-state-metrics, which the
+`kube_state_metrics` module runs and otel_gateway scrapes; for nodes they read
+kubeletstats. No node-exporter. The dashboards stay on the OpenTelemetry names
+VictoriaMetrics stores, each shipped by the module whose metrics it shows.
+
+**Context.** #91: a default alerting comparable to kube-prometheus-stack's.
+No published rule set reads OpenTelemetry's k8s names, the projects that
+offer Kubernetes alerting on OpenTelemetry keep kube-state-metrics, and those
+names are still in development
+([KUBE-STATE-METRICS-01](kube-state-metrics.md#kube-state-metrics-01-kube-state-metrics-for-object-state-scraped-by-otel_gateway)).
+node-exporter would need the node's root filesystem, which Autopilot and the
+Baseline Pod Security Standard refuse.
+
+**Consequences.** Still one collection layer: the collectors send everything,
+kube-state-metrics is one more endpoint they scrape. Object state is
+collected twice, for the dashboards and for the rules. The node rules
+awesome-prometheus-alerts writes on node-exporter are translated where
+kubeletstats has the figure, and listed as not covered where it does not
+([Alert rules](../reference/alert-rules.md)).
+
+**Sources.** #91; [Observability](../architecture/observability.md).

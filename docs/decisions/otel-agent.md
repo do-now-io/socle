@@ -77,3 +77,27 @@ Service.
 `otel-gateway.otel-gateway.svc`, one hop further than a node-local agent.
 
 **Sources.** The `opentelemetry-collector` chart 0.173.1 values.
+
+## OTEL-AGENT-05: Volume metrics without nodes/proxy, claims named by kube-state-metrics
+
+**accepted** · 2026-10-10 · [`oci/catalog/otel-agent/resourceset.yaml`](../../oci/catalog/otel-agent/resourceset.yaml), [`oci/catalog/otel-agent/rules/otel-agent.yaml`](../../oci/catalog/otel-agent/rules/otel-agent.yaml)
+
+**Context.** The PersistentVolumeClaim rules (#91) need how full each claim
+is. kubeletstats' `volume` group reports every volume of every pod; it labels
+a volume's type and claim only through `extra_metadata_labels`, which reads
+the kubelet's `/pods` and so needs `nodes/proxy`, a grant that also allows
+exec into any pod of the node. kube-state-metrics publishes each pod's
+volume-to-claim mapping (`kube_pod_spec_volumes_persistentvolumeclaims_info`).
+
+**Decision.** The `volume` group on, without `extra_metadata_labels`; a
+filter drops the ServiceAccount token volume (`kube-api-access-*`) and the
+used inodes. The volume rules join kube-state-metrics' mapping, which keeps
+the claims and names them.
+
+**Consequences.** The ConfigMap, Secret and emptyDir volumes still reach
+VictoriaMetrics, four series each; measured on floci, 28 volume series down
+to 15. Without kube_state_metrics the volume rules return nothing. The inode
+counts are stored as `*_ratio`: kubeletstats gives them the unit `1`.
+
+**Sources.** kubeletstats receiver 0.160.0 (`extra_metadata_labels`); measured
+on floci, 2026-10-10.

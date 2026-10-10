@@ -33,9 +33,11 @@ const marks: Record<string, string> = {
   'victoria-metrics': victoriametrics,
   'victoria-logs': victoriametrics,
   'victoria-traces': victoriametrics,
-  // vmalert is VictoriaMetrics'; metrics-server is a kubernetes-sigs project.
+  // vmalert is VictoriaMetrics'; metrics-server and kube-state-metrics are
+  // Kubernetes projects.
   alerting: victoriametrics,
   'metrics-server': kubernetes,
+  'kube-state-metrics': kubernetes,
   grafana,
 };
 const monogram: Record<string, string> = { 'external-dns': 'DNS', 'external-secrets': 'ES', reloader: 'R', velero: 'V', hello: 'H' };

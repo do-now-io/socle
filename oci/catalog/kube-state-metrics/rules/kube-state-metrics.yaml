@@ -1,0 +1,453 @@
+# The Kubernetes objects' and Flux's health, from kube-state-metrics as
+# otel_gateway scrapes it: the Kubernetes and FluxCD sections of
+# awesome-prometheus-alerts (github.com/samber/awesome-prometheus-alerts,
+# _data/rules.yml at 822af1e, read 2026-10-10). Above each rule, its section
+# and name upstream; a comment says where the socle departs from it — the
+# severity first: critical only for a node lost, or data lost or about to be
+# (docs/catalog/alerting.md). The rules upstream not taken, and why:
+# docs/reference/alert-rules.md. Read by the alerting module's sidecar, inert
+# without it. Checked in CI with vmalert -dryRun (.github/scripts/check-rules.sh).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kube-state-metrics-rules
+  labels:
+    vmalert_rules: "1"
+data:
+  kubernetes.yaml: |
+    groups:
+      - name: socle-kubernetes
+        rules:
+          # Kubernetes / Kubernetes Node not ready
+          - alert: KubernetesNodeNotReady
+            expr: >-
+              kube_node_status_condition{condition="Ready",status="true"} == 0
+            for: 10m
+            labels:
+              severity: critical
+            annotations:
+              summary: >-
+                Node {{ $labels.node }} has been unready for a long time
+          # Kubernetes / Kubernetes Node network unavailable
+          - alert: KubernetesNodeNetworkUnavailable
+            expr: >-
+              kube_node_status_condition{condition="NetworkUnavailable",status="true"} == 1
+            for: 2m
+            labels:
+              severity: critical
+            annotations:
+              summary: >-
+                Node {{ $labels.node }} has NetworkUnavailable condition
+          # Kubernetes / Kubernetes Node memory pressure (awesome: critical)
+          # warning: the kubelet acts on it by evicting pods, and a node lost to it
+          # raises KubernetesNodeNotReady, which is critical.
+          - alert: KubernetesNodeMemoryPressure
+            expr: >-
+              kube_node_status_condition{condition="MemoryPressure",status="true"} == 1
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                Node {{ $labels.node }} has MemoryPressure condition
+          # Kubernetes / Kubernetes Node disk pressure (awesome: critical)
+          # warning, as memory pressure: the kubelet evicts; a node lost raises
+          # KubernetesNodeNotReady.
+          - alert: KubernetesNodeDiskPressure
+            expr: >-
+              kube_node_status_condition{condition="DiskPressure",status="true"} == 1
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                Node {{ $labels.node }} has DiskPressure condition
+          # Kubernetes / Kubernetes Node scheduling disabled
+          - alert: KubernetesNodeSchedulingDisabled
+            expr: >-
+              kube_node_spec_taint{key="node.kubernetes.io/unschedulable"} == 1
+            for: 30m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                Node {{ $labels.node }} has been marked as unschedulable for more than 30
+                minutes.
+          # Kubernetes / Kubernetes Node out of pod capacity
+          # No instance label once scraped through OpenTelemetry: on (uid, instance)
+          # matches on uid alone, as intended — the expression is kept as written.
+          - alert: KubernetesNodeOutOfPodCapacity
+            expr: >-
+              sum by (node) ((kube_pod_status_phase{phase="Running"} == 1) + on(uid, instance)
+              group_left(node) (0 * kube_pod_info{pod_template_hash=""})) / sum by (node)
+              (kube_node_status_allocatable{resource="pods"}) * 100 > 90
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                Node {{ $labels.node }} is out of pod capacity
+          # Kubernetes / Kubernetes pod crash looping
+          - alert: KubernetesPodCrashLooping
+            expr: >-
+              max_over_time(kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"}[5m]) >= 1
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                Pod {{ $labels.namespace }}/{{ $labels.pod }} is crash looping
+          # Kubernetes / Kubernetes Pod not healthy (awesome: critical)
+          # warning: one pod down is not a node or data lost; a workload short of
+          # replicas raises its own *ReplicasMismatch.
+          - alert: KubernetesPodNotHealthy
+            expr: >-
+              sum by (namespace, pod) (kube_pod_status_phase{phase=~"Pending|Unknown|Failed"}) > 0
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                Pod {{ $labels.namespace }}/{{ $labels.pod }} has been in a non-running state
+                for longer than 15 minutes.
+          # Kubernetes / Kubernetes Container oom killer
+          - alert: KubernetesContainerOomKiller
+            expr: >-
+              (kube_pod_container_status_restarts_total - kube_pod_container_status_restarts_total offset 10m
+              >= 1) and ignoring (reason)
+              min_over_time(kube_pod_container_status_last_terminated_reason{reason="OOMKilled"}[10m]) == 1
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                Container {{ $labels.container }} in pod
+                {{ $labels.namespace }}/{{ $labels.pod }} has been OOMKilled {{ $value }} times
+                in the last 10 minutes.
+          # Kubernetes / Kubernetes Container waiting
+          - alert: KubernetesContainerWaiting
+            expr: >-
+              kube_pod_container_status_waiting_reason{reason!="CrashLoopBackOff"} > 0
+            for: 1h
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                Container {{ $labels.container }} in pod
+                {{ $labels.namespace }}/{{ $labels.pod }} has been in waiting state for longer
+                than 1 hour, for a reason other than CrashLoopBackOff (e.g. ImagePullBackOff,
+                CreateContainerConfigError, InvalidImageName).
+          # Kubernetes / Kubernetes Deployment replicas mismatch
+          - alert: KubernetesDeploymentReplicasMismatch
+            expr: >-
+              kube_deployment_spec_replicas != kube_deployment_status_replicas_available
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                Deployment {{ $labels.namespace }}/{{ $labels.deployment }} replicas mismatch
+          # Kubernetes / Kubernetes Deployment rollout stuck
+          - alert: KubernetesDeploymentRolloutStuck
+            expr: >-
+              kube_deployment_status_condition{condition="Progressing",status="false"} != 0
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                Deployment {{ $labels.namespace }}/{{ $labels.deployment }} rollout is not
+                progressing, as reported by its Progressing=false condition.
+          # Kubernetes / Kubernetes Deployment generation mismatch (awesome: critical)
+          # warning: a rollout that failed leaves the previous ReplicaSet serving.
+          - alert: KubernetesDeploymentGenerationMismatch
+            expr: >-
+              kube_deployment_status_observed_generation != kube_deployment_metadata_generation
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                Deployment {{ $labels.namespace }}/{{ $labels.deployment }} has failed but has
+                not been rolled back.
+          # Kubernetes / Kubernetes ReplicaSet replicas mismatch
+          - alert: KubernetesReplicasetReplicasMismatch
+            expr: >-
+              kube_replicaset_spec_replicas != kube_replicaset_status_ready_replicas
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                ReplicaSet {{ $labels.namespace }}/{{ $labels.replicaset }} replicas mismatch
+          # Kubernetes / Kubernetes StatefulSet down (awesome: critical)
+          # warning: the volumes survive the pods; their filling is what is critical
+          # (otel_agent's volume rules).
+          - alert: KubernetesStatefulsetDown
+            expr: >-
+              kube_statefulset_replicas > 0 and kube_statefulset_replicas !=
+              kube_statefulset_status_replicas_ready and
+              changes(kube_statefulset_status_replicas_updated[10m]) == 0
+            for: 3m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                StatefulSet {{ $labels.namespace }}/{{ $labels.statefulset }} went down
+          # Kubernetes / Kubernetes StatefulSet replicas mismatch
+          - alert: KubernetesStatefulsetReplicasMismatch
+            expr: >-
+              kube_statefulset_status_replicas_ready != kube_statefulset_status_replicas
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                StatefulSet does not match the expected number of replicas.
+          # Kubernetes / Kubernetes StatefulSet generation mismatch (awesome: critical)
+          - alert: KubernetesStatefulsetGenerationMismatch
+            expr: >-
+              kube_statefulset_status_observed_generation != kube_statefulset_metadata_generation
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                StatefulSet {{ $labels.namespace }}/{{ $labels.statefulset }} has failed but has
+                not been rolled back.
+          # Kubernetes / Kubernetes StatefulSet update not rolled out
+          - alert: KubernetesStatefulsetUpdateNotRolledOut
+            expr: >-
+              max without (revision) (kube_statefulset_status_current_revision unless
+              kube_statefulset_status_update_revision) * (kube_statefulset_replicas !=
+              kube_statefulset_status_replicas_updated)
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                StatefulSet {{ $labels.namespace }}/{{ $labels.statefulset }} update has not
+                been rolled out.
+          # Kubernetes / Kubernetes DaemonSet rollout stuck
+          - alert: KubernetesDaemonsetRolloutStuck
+            expr: >-
+              ((kube_daemonset_status_number_ready / kube_daemonset_status_desired_number_scheduled * 100 <
+              100 and kube_daemonset_status_desired_number_scheduled > 0) or
+              kube_daemonset_status_desired_number_scheduled - kube_daemonset_status_current_number_scheduled
+              > 0) and changes(kube_daemonset_status_updated_number_scheduled[5m]) == 0
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                Some Pods of DaemonSet {{ $labels.namespace }}/{{ $labels.daemonset }} are not
+                scheduled or not ready
+          # Kubernetes / Kubernetes DaemonSet misscheduled
+          - alert: KubernetesDaemonsetMisscheduled
+            expr: >-
+              kube_daemonset_status_number_misscheduled > 0
+            for: 1m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                Some Pods of DaemonSet {{ $labels.namespace }}/{{ $labels.daemonset }} are
+                running where they are not supposed to run
+          # Kubernetes / Kubernetes Job failed
+          - alert: KubernetesJobFailed
+            expr: >-
+              kube_job_status_failed > 0
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                Job {{ $labels.namespace }}/{{ $labels.job_name }} failed to complete
+          # Kubernetes / Kubernetes Job not starting
+          - alert: KubernetesJobNotStarting
+            expr: >-
+              kube_job_status_active == 0 and kube_job_status_failed == 0 and kube_job_status_succeeded == 0
+              and (time() - kube_job_status_start_time) > 600
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                Job {{ $labels.namespace }}/{{ $labels.job_name }} did not start for 10 minutes
+          # Kubernetes / Kubernetes Job slow completion (awesome: critical)
+          - alert: KubernetesJobSlowCompletion
+            expr: >-
+              kube_job_spec_completions - kube_job_status_succeeded - kube_job_status_failed > 0
+            for: 12h
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                Kubernetes Job {{ $labels.namespace }}/{{ $labels.job_name }} did not complete
+                in time.
+          # Kubernetes / Kubernetes CronJob too long
+          # Expression rewritten: awesome's `and absent(kube_job_status_completion_time)`
+          # matches no Job — absent() returns at most one sample with no labels,
+          # which `and` pairs with no Job's — so the rule can never fire. Per Job
+          # instead: started over an hour ago, not completed, not failed
+          # (KubernetesJobFailed has those).
+          - alert: KubernetesCronjobTooLong
+            expr: >-
+              time() - kube_job_status_start_time > 3600
+              unless on (namespace, job_name) kube_job_status_completion_time
+              unless on (namespace, job_name) kube_job_status_failed > 0
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                Job {{ $labels.namespace }}/{{ $labels.job_name }} is taking more than 1h to
+                complete.
+          # Kubernetes / Kubernetes CronJob failing (awesome: critical)
+          - alert: KubernetesCronjobFailing
+            expr: >-
+              (kube_cronjob_status_last_schedule_time > kube_cronjob_status_last_successful_time) AND
+              (kube_cronjob_status_active == 0) AND (kube_cronjob_spec_suspend == 0)
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                CronJob {{ $labels.namespace }}/{{ $labels.cronjob }} is failing
+          # Kubernetes / Kubernetes PersistentVolumeClaim pending
+          - alert: KubernetesPersistentvolumeclaimPending
+            expr: >-
+              kube_persistentvolumeclaim_status_phase{phase="Pending"} == 1
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                PersistentVolumeClaim
+                {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} is pending
+          # Kubernetes / Kubernetes PersistentVolume error
+          - alert: KubernetesPersistentvolumeError
+            expr: >-
+              kube_persistentvolume_status_phase{phase=~"Failed|Pending"} > 0
+            labels:
+              severity: critical
+            annotations:
+              summary: >-
+                Persistent volume {{ $labels.persistentvolume }} is in bad state
+          # Kubernetes / Kubernetes HPA scale inability
+          - alert: KubernetesHpaScaleInability
+            expr: >-
+              (kube_horizontalpodautoscaler_spec_max_replicas -
+              kube_horizontalpodautoscaler_status_desired_replicas) * on (horizontalpodautoscaler,namespace)
+              (kube_horizontalpodautoscaler_status_condition{condition="ScalingLimited", status="true"} == 1)
+              == 0
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                HPA {{ $labels.namespace }}/{{ $labels.horizontalpodautoscaler }} is unable to
+                scale
+          # Kubernetes / Kubernetes HPA metrics unavailability
+          - alert: KubernetesHpaMetricsUnavailability
+            expr: >-
+              kube_horizontalpodautoscaler_status_condition{status="false", condition="ScalingActive"} == 1
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                HPA {{ $labels.namespace }}/{{ $labels.horizontalpodautoscaler }} is unable to
+                collect metrics
+          # Kubernetes / Kubernetes PodDisruptionBudget not enough healthy pods
+          - alert: KubernetesPoddisruptionbudgetNotEnoughHealthyPods
+            expr: >-
+              kube_poddisruptionbudget_status_desired_healthy -
+              kube_poddisruptionbudget_status_current_healthy > 0
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                PodDisruptionBudget {{ $labels.namespace }}/{{ $labels.poddisruptionbudget }}
+                does not have the desired number of healthy pods, so voluntary disruptions such
+                as node drains or cluster upgrades may be blocked or the application may be
+                under-provisioned during maintenance.
+          # Kubernetes / Kubernetes ResourceQuota exceeded
+          - alert: KubernetesResourcequotaExceeded
+            expr: >-
+              kube_resourcequota{type="used"} / ignoring(type) (kube_resourcequota{type="hard"} > 0) > 1
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                Namespace {{ $labels.namespace }} is using more of its {{ $labels.resource }}
+                ResourceQuota than the configured hard limit ({{ $value | humanizePercentage }}
+                of quota), indicating a misconfiguration or inconsistency between actual usage
+                and the enforced quota.
+          # Kubernetes / Kubernetes kube-state-metrics list/watch errors (awesome: critical)
+          # warning: every rule of this file goes stale with it, which is why it is
+          # here; nothing is lost yet. Expression fixed: upstream divides the error
+          # series by the total one to one, matching on result too, so the ratio is
+          # always 1 and any error fires; summed by resource here. kube-state-metrics
+          # 2.20 counts watches only: the list half reads nothing.
+          - alert: KubernetesKubeStateMetricsListWatchErrors
+            expr: >-
+              (sum by (resource) (rate(kube_state_metrics_list_total{result="error"}[5m]))
+              / sum by (resource) (rate(kube_state_metrics_list_total[5m])) > 0.01)
+              or
+              (sum by (resource) (rate(kube_state_metrics_watch_total{result="error"}[5m]))
+              / sum by (resource) (rate(kube_state_metrics_watch_total[5m])) > 0.01)
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                kube-state-metrics is failing to list or watch objects from the Kubernetes API
+                server, which means every other kube-state-metrics-based alert may silently stop
+                firing because its data has gone stale or missing.
+  flux.yaml: |
+    groups:
+      - name: socle-flux
+        rules:
+          # FluxCD / Flux Kustomization Failure
+          - alert: FluxKustomizationFailure
+            expr: >-
+              gotk_resource_info{ready="False", customresource_kind="Kustomization"} > 0
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                The {{ $labels.customresource_kind }} '{{ $labels.name }}' in namespace
+                {{ $labels.exported_namespace }} is marked as not ready.
+          # FluxCD / Flux HelmRelease Failure
+          - alert: FluxHelmreleaseFailure
+            expr: >-
+              gotk_resource_info{ready="False", customresource_kind="HelmRelease"} > 0
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                The {{ $labels.customresource_kind }} '{{ $labels.name }}' in namespace
+                {{ $labels.exported_namespace }} is marked as not ready.
+          # FluxCD / Flux Source Issue
+          - alert: FluxSourceIssue
+            expr: >-
+              gotk_resource_info{ready="False",
+              customresource_kind=~"GitRepository|HelmRepository|Bucket|OCIRepository"} > 0
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                Flux source {{ $labels.customresource_kind }} '{{ $labels.name }}' has issue(s).
+          # Not upstream: the same shape for the Flux Operator's ResourceSet,
+          # which every catalog module is. One not Ready is a module that
+          # does not converge.
+          - alert: FluxResourcesetFailure
+            expr: >-
+              gotk_resource_info{ready="False", customresource_kind="ResourceSet"} > 0
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                The {{ $labels.customresource_kind }} '{{ $labels.name }}' in namespace
+                {{ $labels.exported_namespace }} is marked as not ready: the module does not converge.

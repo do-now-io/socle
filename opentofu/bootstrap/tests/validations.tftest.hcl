@@ -651,6 +651,44 @@ run "kube_refuses_otel_gateway_values_secret_that_is_not_a_secret_name" {
   expect_failures = [var.kube]
 }
 
+# --- kube_state_metrics — docs/catalog/kube-state-metrics.md ---------------
+
+run "kube_refuses_kube_state_metrics_enabled_that_is_not_a_bool" {
+  command = plan
+  variables { kube = { kube_state_metrics = { enabled = "yes" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_kube_state_metrics_values_that_are_not_an_object" {
+  command = plan
+  variables { kube = { kube_state_metrics = { values = "replicas: 2" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_kube_state_metrics_values_carrying_a_kubeconfig" {
+  command = plan
+  variables { kube = { kube_state_metrics = { values = { kubeconfig = { enabled = true, secret = "YXBpVmVyc2lvbjogdjEK" } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_kube_state_metrics_values_carrying_a_secret_manifest" {
+  command = plan
+  variables { kube = { kube_state_metrics = { values = { extraManifests = [{ apiVersion = "v1", kind = "Secret", metadata = { name = "x" }, stringData = { token = "abc" } }] } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_kube_state_metrics_values_secret_that_is_not_a_secret_name" {
+  command = plan
+  variables { kube = { kube_state_metrics = { values_secret = "KSM values" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_kube_state_metrics_unknown_attribute" {
+  command = plan
+  variables { kube = { kube_state_metrics = { replicas = 2 } } }
+  expect_failures = [var.kube]
+}
+
 run "kube_refuses_grafana_enabled_that_is_not_a_bool" {
   command = plan
   variables { kube = { grafana = { enabled = "on" } } }

@@ -1,0 +1,354 @@
+# The kube_state_metrics module: kube-state-metrics, one replica, the state
+# of every Kubernetes object as metrics — what the socle's Kubernetes and Flux
+# alert rules read. otel_gateway scrapes it, so the collectors remain the only
+# thing that sends to VictoriaMetrics (docs/decisions/kube-state-metrics.md).
+# The stack: docs/architecture/observability.md; this module:
+# docs/catalog/kube-state-metrics.md.
+#
+# resourcesTemplate rather than resources: the Secret in valuesFrom only
+# exists when named — the operator's block `<< if >>`/`<< end >>` is text
+# templating, which the structured resources list cannot carry.
+#
+# Values: no spec.values on the HelmRelease. The socle's defaults are a
+# ConfigMap listed first in valuesFrom, the client's second, their Secret last —
+# later wins, so the client overrides any socle default (docs/architecture/flux-catalog.md).
+#
+# Every other rule is the hello module's: inputsFrom the one provider, the
+# reconcile toggle on each resource, values tested never presence.
+apiVersion: fluxcd.controlplane.io/v1
+kind: ResourceSet
+metadata:
+  name: kube-state-metrics
+  namespace: flux-system
+spec:
+  inputsFrom:
+    - apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSetInputProvider
+      name: socle
+  wait: true
+  resourcesTemplate: |
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: kube-state-metrics
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.kube_state_metrics.enabled >>enabled<< else >>disabled<< end >>
+      labels:
+        # The chart's pod runs non-root, read-only, no capabilities, default
+        # seccomp: restricted holds, and pins it.
+        pod-security.kubernetes.io/enforce: restricted
+    ---
+    apiVersion: source.toolkit.fluxcd.io/v1
+    kind: OCIRepository
+    metadata:
+      name: kube-state-metrics-chart
+      namespace: kube-state-metrics
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.kube_state_metrics.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 1h
+      url: oci://ghcr.io/prometheus-community/charts/kube-state-metrics
+      layerSelector:
+        mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+        operation: copy
+      ref:
+        tag: 8.6.0  # appVersion 2.20.0
+    ---
+    # The socle's own chart values, as a document rather than the HelmRelease's
+    # spec.values: helm-controller merges valuesFrom in order and then
+    # spec.values over the result, so an inline socle default would beat the
+    # client on every key both set. (No template delimiters in these
+    # comments: the operator templates them too.)
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: kube-state-metrics-socle-values
+      namespace: kube-state-metrics
+      labels:
+        reconcile.fluxcd.io/watch: Enabled
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.kube_state_metrics.enabled >>enabled<< else >>disabled<< end >>
+    data:
+      values.yaml: |
+        # A constant name: otel_gateway scrapes
+        # kube-state-metrics.kube-state-metrics.svc, port 8080 for the objects
+        # and 8081 for kube-state-metrics' own health.
+        fullnameOverride: kube-state-metrics
+        # No ServiceMonitor exists to read it, and the scrape is otel_gateway's
+        # own job, not the prometheus.io annotation: one annotation names one
+        # port, and that job labels every series with the scraped pod's
+        # namespace, which here is not the object's.
+        prometheusScrape: false
+        # Port 8081: kube-state-metrics' list and watch errors, which one of
+        # the module's rules reads.
+        selfMonitor:
+          enabled: true
+        # The chart's collectors, minus secrets: reading every Secret of the
+        # cluster to count them is a grant no rule needs.
+        collectorsExclude:
+          - secrets
+        # gotk_resource_info, the Flux objects' readiness, as the Flux project
+        # publishes it (fluxcd/flux2-monitoring-example), for the kinds the
+        # socle's Flux runs by default and the operator's ResourceSet, which
+        # every catalog module is. A kind whose CRD is absent would only be
+        # waited for, but the image automation kinds are left out with their
+        # controllers (flux_components).
+        rbac:
+          extraRules:
+            - apiGroups:
+                - source.toolkit.fluxcd.io
+                - kustomize.toolkit.fluxcd.io
+                - helm.toolkit.fluxcd.io
+                - fluxcd.controlplane.io
+              resources:
+                - gitrepositories
+                - ocirepositories
+                - helmrepositories
+                - helmcharts
+                - buckets
+                - kustomizations
+                - helmreleases
+                - resourcesets
+              verbs: ["list", "watch"]
+        customResourceState:
+          enabled: true
+          config:
+            spec:
+              resources:
+                - groupVersionKind:
+                    group: kustomize.toolkit.fluxcd.io
+                    version: v1
+                    kind: Kustomization
+                  metricNamePrefix: gotk
+                  metrics:
+                    - name: resource_info
+                      help: The current state of a Flux Kustomization resource.
+                      each:
+                        type: Info
+                        info:
+                          labelsFromPath:
+                            name: [metadata, name]
+                      labelsFromPath:
+                        exported_namespace: [metadata, namespace]
+                        ready: [status, conditions, "[type=Ready]", status]
+                        suspended: [spec, suspend]
+                        revision: [status, lastAppliedRevision]
+                        source_name: [spec, sourceRef, name]
+                - groupVersionKind:
+                    group: helm.toolkit.fluxcd.io
+                    version: v2
+                    kind: HelmRelease
+                  metricNamePrefix: gotk
+                  metrics:
+                    - name: resource_info
+                      help: The current state of a Flux HelmRelease resource.
+                      each:
+                        type: Info
+                        info:
+                          labelsFromPath:
+                            name: [metadata, name]
+                      labelsFromPath:
+                        exported_namespace: [metadata, namespace]
+                        ready: [status, conditions, "[type=Ready]", status]
+                        suspended: [spec, suspend]
+                        revision: [status, history, "0", chartVersion]
+                        chart_name: [status, history, "0", chartName]
+                        chart_app_version: [status, history, "0", appVersion]
+                        chart_ref_name: [spec, chartRef, name]
+                        chart_source_name: [spec, chart, spec, sourceRef, name]
+                - groupVersionKind:
+                    group: source.toolkit.fluxcd.io
+                    version: v1
+                    kind: GitRepository
+                  metricNamePrefix: gotk
+                  metrics:
+                    - name: resource_info
+                      help: The current state of a Flux GitRepository resource.
+                      each:
+                        type: Info
+                        info:
+                          labelsFromPath:
+                            name: [metadata, name]
+                      labelsFromPath:
+                        exported_namespace: [metadata, namespace]
+                        ready: [status, conditions, "[type=Ready]", status]
+                        suspended: [spec, suspend]
+                        revision: [status, artifact, revision]
+                        url: [spec, url]
+                - groupVersionKind:
+                    group: source.toolkit.fluxcd.io
+                    version: v1
+                    kind: OCIRepository
+                  metricNamePrefix: gotk
+                  metrics:
+                    - name: resource_info
+                      help: The current state of a Flux OCIRepository resource.
+                      each:
+                        type: Info
+                        info:
+                          labelsFromPath:
+                            name: [metadata, name]
+                      labelsFromPath:
+                        exported_namespace: [metadata, namespace]
+                        ready: [status, conditions, "[type=Ready]", status]
+                        suspended: [spec, suspend]
+                        revision: [status, artifact, revision]
+                        url: [spec, url]
+                - groupVersionKind:
+                    group: source.toolkit.fluxcd.io
+                    version: v1
+                    kind: HelmRepository
+                  metricNamePrefix: gotk
+                  metrics:
+                    - name: resource_info
+                      help: The current state of a Flux HelmRepository resource.
+                      each:
+                        type: Info
+                        info:
+                          labelsFromPath:
+                            name: [metadata, name]
+                      labelsFromPath:
+                        exported_namespace: [metadata, namespace]
+                        ready: [status, conditions, "[type=Ready]", status]
+                        suspended: [spec, suspend]
+                        revision: [status, artifact, revision]
+                        url: [spec, url]
+                - groupVersionKind:
+                    group: source.toolkit.fluxcd.io
+                    version: v1
+                    kind: HelmChart
+                  metricNamePrefix: gotk
+                  metrics:
+                    - name: resource_info
+                      help: The current state of a Flux HelmChart resource.
+                      each:
+                        type: Info
+                        info:
+                          labelsFromPath:
+                            name: [metadata, name]
+                      labelsFromPath:
+                        exported_namespace: [metadata, namespace]
+                        ready: [status, conditions, "[type=Ready]", status]
+                        suspended: [spec, suspend]
+                        revision: [status, artifact, revision]
+                        chart_name: [spec, chart]
+                        chart_version: [spec, version]
+                - groupVersionKind:
+                    group: source.toolkit.fluxcd.io
+                    version: v1
+                    kind: Bucket
+                  metricNamePrefix: gotk
+                  metrics:
+                    - name: resource_info
+                      help: The current state of a Flux Bucket resource.
+                      each:
+                        type: Info
+                        info:
+                          labelsFromPath:
+                            name: [metadata, name]
+                      labelsFromPath:
+                        exported_namespace: [metadata, namespace]
+                        ready: [status, conditions, "[type=Ready]", status]
+                        suspended: [spec, suspend]
+                        revision: [status, artifact, revision]
+                        endpoint: [spec, endpoint]
+                        bucket_name: [spec, bucketName]
+                # Not a Flux toolkit kind: the Flux Operator's. Same metric,
+                # same labels, so one rule shape covers a catalog module too.
+                - groupVersionKind:
+                    group: fluxcd.controlplane.io
+                    version: v1
+                    kind: ResourceSet
+                  metricNamePrefix: gotk
+                  metrics:
+                    - name: resource_info
+                      help: The current state of a Flux Operator ResourceSet.
+                      each:
+                        type: Info
+                        info:
+                          labelsFromPath:
+                            name: [metadata, name]
+                      labelsFromPath:
+                        exported_namespace: [metadata, namespace]
+                        ready: [status, conditions, "[type=Ready]", status]
+                        revision: [status, lastAppliedRevision]
+        resources:
+          requests:
+            cpu: 10m
+            memory: 64Mi
+    ---
+    # The client's own chart values, as they wrote them in
+    # kube.kube_state_metrics.values, merged over the socle's document above —
+    # the client wins wherever the two meet. OpenTofu refuses secrets in there.
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: kube-state-metrics-client-values
+      namespace: kube-state-metrics
+      labels:
+        reconcile.fluxcd.io/watch: Enabled
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.kube_state_metrics.enabled >>enabled<< else >>disabled<< end >>
+    data:
+      values.yaml: |<< toYaml inputs.modules.kube_state_metrics.values | nindent 4 >>
+    ---
+    apiVersion: helm.toolkit.fluxcd.io/v2
+    kind: HelmRelease
+    metadata:
+      name: kube-state-metrics
+      namespace: kube-state-metrics
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.kube_state_metrics.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 10m
+      releaseName: kube-state-metrics
+      chartRef:
+        kind: OCIRepository
+        name: kube-state-metrics-chart
+      # No spec.values, on purpose: it would be merged last and win. The
+      # order below is the precedence, later wins — the socle's defaults, the
+      # client's values from kube.kube_state_metrics.values, then their Secret
+      # when they named one, created by them in kube-state-metrics, never read
+      # by OpenTofu, optional so the release does not wait for it.
+      valuesFrom:
+        - kind: ConfigMap
+          name: kube-state-metrics-socle-values
+          valuesKey: values.yaml
+        - kind: ConfigMap
+          name: kube-state-metrics-client-values
+          valuesKey: values.yaml
+        << if inputs.modules.kube_state_metrics.values_secret >>
+        - kind: Secret
+          name: << inputs.modules.kube_state_metrics.values_secret | quote >>
+          valuesKey: values.yaml
+          optional: true
+        << end >>
+      install:
+        remediation:
+          retries: 3
+      upgrade:
+        remediation:
+          retries: 3
+    ---
+    # The module's alert rules — awesome-prometheus-alerts' Kubernetes and
+    # FluxCD sections — a ConfigMap the alerting module's sidecar picks up by
+    # its vmalert_rules label: this namespace is on its list
+    # (docs/catalog/alerting.md). Applied from the socle artifact itself, under
+    # this module's toggle; inert with alerting off.
+    apiVersion: kustomize.toolkit.fluxcd.io/v1
+    kind: Kustomization
+    metadata:
+      name: kube-state-metrics-rules
+      namespace: flux-system
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.kube_state_metrics.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 1h
+      sourceRef:
+        kind: OCIRepository
+        name: socle
+      path: ./catalog/kube-state-metrics/rules
+      targetNamespace: kube-state-metrics
+      prune: true
+      wait: true
+      timeout: 2m

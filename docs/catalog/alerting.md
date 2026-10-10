@@ -88,14 +88,18 @@ kube = {
 
 ## Good to know
 
-- **The rules are the socle's.** Each module ships the rules for what it
-  measures: [otel_gateway](otel-gateway.md) (pods crash-looping or `Pending`,
-  nodes not ready, Deployments missing replicas), [otel_agent](otel-agent.md)
-  (a node filesystem nearly full), [victoria_metrics](victoria-metrics.md)
-  (its disk, its series guard), and this module (the Watchdog, rules failing,
-  notifications failing). You add none in this version.
-- **Two severities**: `critical` for a node or data lost, `warning` for the
-  rest. Route `severity="critical"` to your on-call, as above.
+- **The rules are the socle's**, [every one listed](../reference/alert-rules.md).
+  Each module ships the rules for what it measures, taken from
+  [awesome-prometheus-alerts](https://samber.github.io/awesome-prometheus-alerts/):
+  [kube_state_metrics](kube-state-metrics.md) the Kubernetes objects and
+  Flux, [otel_agent](otel-agent.md) the nodes, the volumes and itself,
+  [otel_gateway](otel-gateway.md) itself, [victoria_metrics](victoria-metrics.md) its disk and
+  its series guard, and this module the Watchdog, rules failing and
+  notifications failing. Turning this module on is all it takes. You add
+  none in this version.
+- **Two severities**: `critical` for a node lost, or data lost or about to
+  be (a volume full, a persistent volume failed, series dropped); `warning`
+  for the rest. Route `severity="critical"` to your on-call, as above.
 - **Point the watchdog at a dead man's switch** (Healthchecks.io, your
   on-call platform's heartbeat) that tolerates about 10 minutes between
   pings. If the stack or its node dies, the pings stop and the service
@@ -138,5 +142,8 @@ rule file passes `vmalert -dryRun` before it is published.
 `PodCrashLooping` on the receiver after 8 min; the Watchdog arrived every
 6 minutes, and stopped within 2 minutes of vmalert scaled to 0. Measured
 use: vmalert 3m / 31Mi, the sidecar 1m / 72Mi, Alertmanager 2m / 30Mi.
+That rule is now `KubernetesPodCrashLooping`, from kube_state_metrics;
+on floci, 2026-10-10, it fired 3 minutes after a pod started crash-looping,
+and the 71 rules of the socle all evaluated without error.
 
 </details>

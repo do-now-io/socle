@@ -144,6 +144,27 @@ spec:
               # the scrape could not verify them. The call still carries the
               # ServiceAccount token, which the kubelet authorizes.
               insecure_skip_verify: true
+              # The chart's three groups, and volume: how full each volume a
+              # pod mounts is, which the socle's PersistentVolumeClaim rules
+              # read, joined to kube-state-metrics' pod-to-claim info. The
+              # receiver labels a volume's type only through the kubelet's
+              # /pods, which needs nodes/proxy — a grant that also opens exec
+              # into every pod of the node — so it is not asked for.
+              metric_groups:
+                - node
+                - pod
+                - container
+                - volume
+          processors:
+            # What no rule reads: the ServiceAccount token volume every pod
+            # mounts (kube-api-access-*), and the used inodes (inodes minus
+            # free). Measured on floci: 28 volume series down to 15.
+            filter/volumes:
+              error_mode: ignore
+              metrics:
+                metric:
+                  - 'name == "k8s.volume.inodes.used"'
+                  - 'HasPrefix(name, "k8s.volume.") and HasPrefix(resource.attributes["k8s.volume.name"], "kube-api-access-")'
           exporters:
             debug: null
             << if inputs.modules.victoria_metrics.enabled >>
@@ -181,6 +202,10 @@ spec:
                 # kubernetesAttributes preset k8s_attributes to the processors.
                 receivers:
                   - prometheus
+                processors:
+                  - memory_limiter
+                  - filter/volumes
+                  - batch
                 exporters:
                   << if inputs.modules.victoria_metrics.enabled >>
                   - otlp_http/victoria-metrics
