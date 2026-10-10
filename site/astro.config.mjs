@@ -29,9 +29,12 @@ const base = { latest: '/socle', pr: `/socle/pr/${pr}` }[channel] ?? '/socle/dev
 // The ref the content was checked out at: links to files outside docs/ point
 // at that exact tree on GitHub, so a released page links to released code.
 const ref = process.env.SOCLE_REF ?? 'main';
-// Whether a release exists at all: until the first one, the root serves main
-// too, and says so (src/route-data.ts).
+// Whether the root serves a release's documentation; until one has a site,
+// the root serves main too, and says so (src/channel.ts). SOCLE_RELEASE is
+// the last release, documented or not: 0.1.0 predates the site.
 const released = process.env.SOCLE_RELEASED === 'true';
+const release = process.env.SOCLE_RELEASE ?? '';
+if (release && !/^[0-9]+\.[0-9]+\.[0-9]+$/.test(release)) throw new Error(`SOCLE_RELEASE is not X.Y.Z: ${release}`);
 
 // Rule 8: a page missing from the navigation fails the build. The navigation
 // is generated from `sections`, so a page is missing from it exactly when it
@@ -72,6 +75,7 @@ export default defineConfig({
     define: {
       'import.meta.env.SOCLE_CHANNEL': JSON.stringify(channel),
       'import.meta.env.SOCLE_RELEASED': JSON.stringify(String(released)),
+      'import.meta.env.SOCLE_RELEASE': JSON.stringify(release),
       'import.meta.env.SOCLE_PR': JSON.stringify(pr),
     },
   },
