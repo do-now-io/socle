@@ -1,7 +1,15 @@
-# The nodes as otel_agent's kubeletstats receiver reports them, on the names
-# VictoriaMetrics stores from OpenTelemetry. Read by the alerting module's
-# sidecar, inert without it. Checked in CI with vmalert -dryRun
-# (.github/scripts/check-rules.sh).
+# What otel_agent's kubeletstats receiver reports — the nodes and the
+# PersistentVolumeClaims — and the agent's own health, on the names
+# VictoriaMetrics stores from OpenTelemetry: the Host and hardware rules that
+# kubeletstats can feed, translated; the Kubernetes section's volume rules,
+# translated; the OpenTelemetry Collector section, for the agent. From
+# awesome-prometheus-alerts (github.com/samber/awesome-prometheus-alerts,
+# _data/rules.yml at 822af1e, read 2026-10-10). Above each rule, its section
+# and name upstream; a comment says where the socle departs from it — the
+# severity first: critical only for a node lost, or data lost or about to be
+# (docs/catalog/alerting.md). The rules upstream not taken, and why:
+# docs/reference/alert-rules.md. Read by the alerting module's sidecar, inert
+# without it. Checked in CI with vmalert -dryRun (.github/scripts/check-rules.sh).
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -9,20 +17,292 @@ metadata:
   labels:
     vmalert_rules: "1"
 data:
-  otel-agent.yaml: |
+  nodes.yaml: |
     groups:
       - name: socle-nodes
         rules:
-          - alert: NodeFilesystemAlmostFull
+          # Host and hardware / Host out of memory
+          # Translated: what the kubelet counts as available, over available plus the
+          # working set — its own measure of the node's memory, which it evicts on.
+          - alert: HostOutOfMemory
             expr: >-
-              k8s_node_filesystem_available_bytes
-              / k8s_node_filesystem_capacity_bytes
+              k8s_node_memory_available_bytes
+              / (k8s_node_memory_available_bytes + k8s_node_memory_working_set_bytes)
               < 0.10
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                Node {{ $labels.k8s_node_name }} memory is filling up (< 10% left)
+          # Host and hardware / Host high CPU load
+          # Translated: the cores the node uses over its capacity, which kube-state-metrics
+          # reports (nothing without the kube_state_metrics module).
+          - alert: HostHighCpuLoad
+            expr: >-
+              k8s_node_cpu_usage
+              / on (k8s_node_name)
+              label_replace(kube_node_status_capacity{resource="cpu"}, "k8s_node_name", "$1", "node", "(.*)")
+              > 0.80
             for: 10m
             labels:
               severity: warning
             annotations:
               summary: >-
-                Node {{ $labels.k8s_node_name }} has
-                {{ $value | humanizePercentage }} of its filesystem left;
-                below that the kubelet starts evicting pods.
+                Node {{ $labels.k8s_node_name }} CPU load is > 80%
+          # Host and hardware / Host out of disk space (awesome: critical)
+          # Translated onto the node filesystem the kubelet reports (the one it evicts on).
+          # warning: under 10% the kubelet already evicts pods, KubernetesNodeDiskPressure
+          # says so, and a node lost raises KubernetesNodeNotReady.
+          - alert: HostOutOfDiskSpace
+            expr: >-
+              k8s_node_filesystem_available_bytes / k8s_node_filesystem_capacity_bytes < 0.10
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                Node {{ $labels.k8s_node_name }} disk is almost full (< 10% left)
+          # Host and hardware / Host disk may fill in 24 hours
+          # Translated onto the node filesystem the kubelet reports.
+          - alert: HostDiskMayFillIn24Hours
+            expr: >-
+              predict_linear(k8s_node_filesystem_available_bytes[3h], 86400) <= 0
+              and k8s_node_filesystem_available_bytes > 0
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                Node {{ $labels.k8s_node_name }} filesystem will likely run out of space within
+                the next 24 hours.
+  volumes.yaml: |
+    groups:
+      - name: socle-volumes
+        rules:
+          # Kubernetes / Kubernetes Volume out of disk space
+          # kubeletstats' volume metrics, kept to the claims by joining kube-state-metrics'
+          # pod-to-claim info (which names the claim): the receiver labels a volume's type only
+          # with nodes/proxy on the kubelet, a grant the socle does not give. The inode counts
+          # are stored as *_ratio: kubeletstats gives them the unit 1.
+          - alert: KubernetesVolumeOutOfDiskSpace
+            expr: >-
+              k8s_volume_available_bytes / k8s_volume_capacity_bytes * 100
+              * on (k8s_namespace_name, k8s_pod_name, k8s_volume_name) group_left (persistentvolumeclaim)
+              label_replace(label_replace(label_replace(kube_pod_spec_volumes_persistentvolumeclaims_info,
+              "k8s_namespace_name", "$1", "namespace", "(.*)"), "k8s_pod_name", "$1", "pod", "(.*)"),
+              "k8s_volume_name", "$1", "volume", "(.*)")
+              < 10
+            for: 2m
+            labels:
+              severity: critical
+            annotations:
+              summary: >-
+                Volume {{ $labels.k8s_namespace_name }}/{{ $labels.persistentvolumeclaim }} is
+                almost full (< 10% left)
+          # Kubernetes / Kubernetes Volume full in four days
+          # The same join, on the available bytes.
+          - alert: KubernetesVolumeFullInFourDays
+            expr: >-
+              predict_linear(k8s_volume_available_bytes[6h:5m], 4 * 24 * 3600)
+              * on (k8s_namespace_name, k8s_pod_name, k8s_volume_name) group_left (persistentvolumeclaim)
+              label_replace(label_replace(label_replace(kube_pod_spec_volumes_persistentvolumeclaims_info,
+              "k8s_namespace_name", "$1", "namespace", "(.*)"), "k8s_pod_name", "$1", "pod", "(.*)"),
+              "k8s_volume_name", "$1", "volume", "(.*)")
+              < 0
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                Volume under
+                {{ $labels.k8s_namespace_name }}/{{ $labels.persistentvolumeclaim }} is expected
+                to fill up within four days.
+          # Kubernetes / Kubernetes Volume out of inodes (awesome: warning)
+          # critical, as out of disk space: no file can be written either way.
+          - alert: KubernetesVolumeOutOfInodes
+            expr: >-
+              k8s_volume_inodes_free_ratio / k8s_volume_inodes_ratio
+              * on (k8s_namespace_name, k8s_pod_name, k8s_volume_name) group_left (persistentvolumeclaim)
+              label_replace(label_replace(label_replace(kube_pod_spec_volumes_persistentvolumeclaims_info,
+              "k8s_namespace_name", "$1", "namespace", "(.*)"), "k8s_pod_name", "$1", "pod", "(.*)"),
+              "k8s_volume_name", "$1", "volume", "(.*)")
+              < 0.03
+            for: 2m
+            labels:
+              severity: critical
+            annotations:
+              summary: >-
+                PersistentVolume claimed by
+                {{ $labels.k8s_namespace_name }}/{{ $labels.persistentvolumeclaim }} has less
+                than 3% of its inodes free. A volume can run out of inodes (too many small
+                files) even while free bytes remain available.
+          # Kubernetes / Kubernetes Volume inodes full in four days (awesome: critical)
+          - alert: KubernetesVolumeInodesFullInFourDays
+            expr: >-
+              predict_linear(k8s_volume_inodes_free_ratio[6h:5m], 4 * 24 * 3600)
+              * on (k8s_namespace_name, k8s_pod_name, k8s_volume_name) group_left (persistentvolumeclaim)
+              label_replace(label_replace(label_replace(kube_pod_spec_volumes_persistentvolumeclaims_info,
+              "k8s_namespace_name", "$1", "namespace", "(.*)"), "k8s_pod_name", "$1", "pod", "(.*)"),
+              "k8s_volume_name", "$1", "volume", "(.*)")
+              < 0
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                PersistentVolume claimed by
+                {{ $labels.k8s_namespace_name }}/{{ $labels.persistentvolumeclaim }} is expected
+                to run out of free inodes within four days at the current rate.
+  otel-agent.yaml: |
+    groups:
+      - name: socle-otel-agent
+        rules:
+          # OpenTelemetry Collector / OpenTelemetry Collector high memory usage
+          # No instance or job label through OpenTelemetry: one collector is one
+          # service_instance_id.
+          - alert: OpentelemetryCollectorHighMemoryUsage
+            expr: >-
+              otelcol_process_runtime_heap_alloc_bytes{k8s_namespace_name="otel-agent"}
+              / on (service_instance_id) otelcol_process_runtime_total_sys_memory_bytes
+              > 0.9
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                OpenTelemetry Collector memory usage is above 90%
+          # OpenTelemetry Collector / OpenTelemetry Collector receiver refused spans (awesome: critical)
+          # warning: spans and logs refused are lost, but no alert reads them.
+          - alert: OpentelemetryCollectorReceiverRefusedSpans
+            expr: >-
+              rate(otelcol_receiver_refused_spans_total{k8s_namespace_name="otel-agent"}[5m]) > 0.05
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                OpenTelemetry Collector is refusing {{ $value | humanize }}/s spans on
+                {{ $labels.receiver }}.
+          # OpenTelemetry Collector / OpenTelemetry Collector receiver refused metric points
+          # Refused metric points are alerts going blind: critical, as upstream.
+          - alert: OpentelemetryCollectorReceiverRefusedMetricPoints
+            expr: >-
+              rate(otelcol_receiver_refused_metric_points_total{k8s_namespace_name="otel-agent"}[5m]) > 0.05
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: >-
+                OpenTelemetry Collector is refusing {{ $value | humanize }}/s metric points on
+                {{ $labels.receiver }}.
+          # OpenTelemetry Collector / OpenTelemetry Collector receiver refused log records (awesome: critical)
+          # warning: spans and logs refused are lost, but no alert reads them.
+          - alert: OpentelemetryCollectorReceiverRefusedLogRecords
+            expr: >-
+              rate(otelcol_receiver_refused_log_records_total{k8s_namespace_name="otel-agent"}[5m]) > 0.05
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                OpenTelemetry Collector is refusing {{ $value | humanize }}/s log records on
+                {{ $labels.receiver }}.
+          # OpenTelemetry Collector / OpenTelemetry Collector OTLP receiver errors (awesome: critical)
+          # warning: spans, which no alert reads.
+          - alert: OpentelemetryCollectorOtlpReceiverErrors
+            expr: >-
+              rate(otelcol_receiver_accepted_spans_total{k8s_namespace_name="otel-agent",
+              receiver=~"otlp"}[5m]) == 0
+              and rate(otelcol_receiver_refused_spans_total{k8s_namespace_name="otel-agent",
+              receiver=~"otlp"}[5m]) > 0
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                OpenTelemetry Collector OTLP receiver is completely failing - all spans are
+                being refused
+          # OpenTelemetry Collector / OpenTelemetry Collector exporter failed spans
+          # The counter exists once a send has failed for good, after the exporter's
+          # retries (5 minutes): a backend restarting is retried, not counted.
+          - alert: OpentelemetryCollectorExporterFailedSpans
+            expr: >-
+              rate(otelcol_exporter_send_failed_spans_total{k8s_namespace_name="otel-agent"}[5m]) > 0.05
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                OpenTelemetry Collector failing to send {{ $value | humanize }}/s spans via
+                {{ $labels.exporter }}.
+          # OpenTelemetry Collector / OpenTelemetry Collector exporter failed metric points
+          - alert: OpentelemetryCollectorExporterFailedMetricPoints
+            expr: >-
+              rate(otelcol_exporter_send_failed_metric_points_total{k8s_namespace_name="otel-agent"}[5m]) >
+              0.05
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                OpenTelemetry Collector failing to send {{ $value | humanize }}/s metric points
+                via {{ $labels.exporter }}.
+          # OpenTelemetry Collector / OpenTelemetry Collector exporter failed log records
+          - alert: OpentelemetryCollectorExporterFailedLogRecords
+            expr: >-
+              rate(otelcol_exporter_send_failed_log_records_total{k8s_namespace_name="otel-agent"}[5m]) > 0.05
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                OpenTelemetry Collector failing to send {{ $value | humanize }}/s log records
+                via {{ $labels.exporter }}.
+          # OpenTelemetry Collector / OpenTelemetry Collector exporter queue nearly full
+          - alert: OpentelemetryCollectorExporterQueueNearlyFull
+            expr: >-
+              (otelcol_exporter_queue_size{k8s_namespace_name="otel-agent"}
+              / on (service_instance_id, exporter) otelcol_exporter_queue_capacity) > 0.8
+              and on (service_instance_id, exporter) otelcol_exporter_queue_capacity > 0
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                OpenTelemetry Collector exporter {{ $labels.exporter }} queue is over 80% full
+          # OpenTelemetry Collector / OpenTelemetry Collector exporter enqueue failed spans
+          - alert: OpentelemetryCollectorExporterEnqueueFailedSpans
+            expr: >-
+              rate(otelcol_exporter_enqueue_failed_spans_total{k8s_namespace_name="otel-agent"}[5m]) > 0.05
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                OpenTelemetry Collector exporter {{ $labels.exporter }} is dropping
+                {{ $value | humanize }}/s spans because its sending queue is full and rejects
+                new items before they can be queued.
+          # OpenTelemetry Collector / OpenTelemetry Collector exporter enqueue failed metric points
+          - alert: OpentelemetryCollectorExporterEnqueueFailedMetricPoints
+            expr: >-
+              rate(otelcol_exporter_enqueue_failed_metric_points_total{k8s_namespace_name="otel-agent"}[5m]) >
+              0.05
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                OpenTelemetry Collector exporter {{ $labels.exporter }} is dropping
+                {{ $value | humanize }}/s metric points because its sending queue is full and
+                rejects new items before they can be queued.
+          # OpenTelemetry Collector / OpenTelemetry Collector exporter enqueue failed log records
+          - alert: OpentelemetryCollectorExporterEnqueueFailedLogRecords
+            expr: >-
+              rate(otelcol_exporter_enqueue_failed_log_records_total{k8s_namespace_name="otel-agent"}[5m]) >
+              0.05
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                OpenTelemetry Collector exporter {{ $labels.exporter }} is dropping
+                {{ $value | humanize }}/s log records because its sending queue is full and
+                rejects new items before they can be queued.

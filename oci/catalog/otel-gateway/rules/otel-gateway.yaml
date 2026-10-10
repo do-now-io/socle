@@ -1,7 +1,17 @@
-# The cluster's state as otel_gateway's k8s_cluster receiver reports it:
-# pods, nodes and Deployments, on the names VictoriaMetrics stores from
-# OpenTelemetry. Read by the alerting module's sidecar, inert without it.
-# Checked in CI with vmalert -dryRun (.github/scripts/check-rules.sh).
+# otel_gateway's own health, from its telemetry, which it scrapes from
+# itself: the OpenTelemetry Collector section of
+# awesome-prometheus-alerts (github.com/samber/awesome-prometheus-alerts,
+# _data/rules.yml at 822af1e, read 2026-10-10). Above each rule, its section
+# and name upstream; a comment says where the socle departs from it — the
+# severity first: critical only for a node lost, or data lost or about to be
+# (docs/catalog/alerting.md). The rules upstream not taken, and why:
+# docs/reference/alert-rules.md. Read by the alerting module's sidecar, inert
+# without it. Checked in CI with vmalert -dryRun (.github/scripts/check-rules.sh).
+#
+# No "collector down": a collector scraping itself cannot report itself
+# gone. Its Deployment is watched by kube_state_metrics' rules
+# (KubernetesDeploymentReplicasMismatch), as the agent's DaemonSet is
+# (KubernetesDaemonsetRolloutStuck).
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -11,55 +21,156 @@ metadata:
 data:
   otel-gateway.yaml: |
     groups:
-      - name: socle-kubernetes
+      - name: socle-otel-gateway
         rules:
-          # container_id changes at every restart, so each restart is a new
-          # series: the max over it is the container's own count. 20 minutes,
-          # as the kubelet's back-off reaches 5: a pod crash-looping for long
-          # restarts 3 or 4 times in that window, never once.
-          - alert: PodCrashLooping
+          # OpenTelemetry Collector / OpenTelemetry Collector high memory usage
+          # No instance or job label through OpenTelemetry: one collector is one
+          # service_instance_id.
+          - alert: OpentelemetryCollectorHighMemoryUsage
             expr: >-
-              increase((max without (container_id) (k8s_container_restarts))[20m:1m])
-              >= 3
+              otelcol_process_runtime_heap_alloc_bytes{k8s_namespace_name="otel-gateway"}
+              / on (service_instance_id) otelcol_process_runtime_total_sys_memory_bytes
+              > 0.9
             for: 5m
             labels:
               severity: warning
             annotations:
               summary: >-
-                {{ $labels.k8s_namespace_name }}/{{ $labels.k8s_pod_name }}
-                ({{ $labels.k8s_container_name }}) restarted
-                {{ $value | humanize }} times in the last 20 minutes.
-          # Phase 1 is Pending: no node fits it, or an image or a volume is
-          # missing. A rollout passes through it for seconds, not 15 minutes.
-          - alert: PodPending
-            expr: k8s_pod_phase == 1
-            for: 15m
+                OpenTelemetry Collector memory usage is above 90%
+          # OpenTelemetry Collector / OpenTelemetry Collector receiver refused spans (awesome: critical)
+          # warning: spans and logs refused are lost, but no alert reads them.
+          - alert: OpentelemetryCollectorReceiverRefusedSpans
+            expr: >-
+              rate(otelcol_receiver_refused_spans_total{k8s_namespace_name="otel-gateway"}[5m]) > 0.05
+            for: 5m
             labels:
               severity: warning
             annotations:
               summary: >-
-                {{ $labels.k8s_namespace_name }}/{{ $labels.k8s_pod_name }} has
-                been Pending for 15 minutes: no node fits it, or an image or a
-                volume is missing.
-          # 1 ready, 0 not ready, -1 unknown (the node stopped reporting).
-          - alert: NodeNotReady
-            expr: k8s_node_condition_ready != 1
+                OpenTelemetry Collector is refusing {{ $value | humanize }}/s spans on
+                {{ $labels.receiver }}.
+          # OpenTelemetry Collector / OpenTelemetry Collector receiver refused metric points
+          # Refused metric points are alerts going blind: critical, as upstream.
+          - alert: OpentelemetryCollectorReceiverRefusedMetricPoints
+            expr: >-
+              rate(otelcol_receiver_refused_metric_points_total{k8s_namespace_name="otel-gateway"}[5m]) > 0.05
             for: 5m
             labels:
               severity: critical
             annotations:
               summary: >-
-                Node {{ $labels.k8s_node_name }} has not been Ready for 5
-                minutes; its pods are not running or not reachable.
-          - alert: DeploymentReplicasMissing
+                OpenTelemetry Collector is refusing {{ $value | humanize }}/s metric points on
+                {{ $labels.receiver }}.
+          # OpenTelemetry Collector / OpenTelemetry Collector receiver refused log records (awesome: critical)
+          # warning: spans and logs refused are lost, but no alert reads them.
+          - alert: OpentelemetryCollectorReceiverRefusedLogRecords
             expr: >-
-              k8s_deployment_available
-              < on (k8s_namespace_name, k8s_deployment_name)
-              k8s_deployment_desired
-            for: 15m
+              rate(otelcol_receiver_refused_log_records_total{k8s_namespace_name="otel-gateway"}[5m]) > 0.05
+            for: 5m
             labels:
               severity: warning
             annotations:
               summary: >-
-                {{ $labels.k8s_namespace_name }}/{{ $labels.k8s_deployment_name }}
-                has had fewer replicas available than desired for 15 minutes.
+                OpenTelemetry Collector is refusing {{ $value | humanize }}/s log records on
+                {{ $labels.receiver }}.
+          # OpenTelemetry Collector / OpenTelemetry Collector OTLP receiver errors (awesome: critical)
+          # warning: spans, which no alert reads.
+          - alert: OpentelemetryCollectorOtlpReceiverErrors
+            expr: >-
+              rate(otelcol_receiver_accepted_spans_total{k8s_namespace_name="otel-gateway",
+              receiver=~"otlp"}[5m]) == 0
+              and rate(otelcol_receiver_refused_spans_total{k8s_namespace_name="otel-gateway",
+              receiver=~"otlp"}[5m]) > 0
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                OpenTelemetry Collector OTLP receiver is completely failing - all spans are
+                being refused
+          # OpenTelemetry Collector / OpenTelemetry Collector exporter failed spans
+          # The counter exists once a send has failed for good, after the exporter's
+          # retries (5 minutes): a backend restarting is retried, not counted.
+          - alert: OpentelemetryCollectorExporterFailedSpans
+            expr: >-
+              rate(otelcol_exporter_send_failed_spans_total{k8s_namespace_name="otel-gateway"}[5m]) > 0.05
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                OpenTelemetry Collector failing to send {{ $value | humanize }}/s spans via
+                {{ $labels.exporter }}.
+          # OpenTelemetry Collector / OpenTelemetry Collector exporter failed metric points
+          - alert: OpentelemetryCollectorExporterFailedMetricPoints
+            expr: >-
+              rate(otelcol_exporter_send_failed_metric_points_total{k8s_namespace_name="otel-gateway"}[5m]) >
+              0.05
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                OpenTelemetry Collector failing to send {{ $value | humanize }}/s metric points
+                via {{ $labels.exporter }}.
+          # OpenTelemetry Collector / OpenTelemetry Collector exporter failed log records
+          - alert: OpentelemetryCollectorExporterFailedLogRecords
+            expr: >-
+              rate(otelcol_exporter_send_failed_log_records_total{k8s_namespace_name="otel-gateway"}[5m]) >
+              0.05
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                OpenTelemetry Collector failing to send {{ $value | humanize }}/s log records
+                via {{ $labels.exporter }}.
+          # OpenTelemetry Collector / OpenTelemetry Collector exporter queue nearly full
+          - alert: OpentelemetryCollectorExporterQueueNearlyFull
+            expr: >-
+              (otelcol_exporter_queue_size{k8s_namespace_name="otel-gateway"}
+              / on (service_instance_id, exporter) otelcol_exporter_queue_capacity) > 0.8
+              and on (service_instance_id, exporter) otelcol_exporter_queue_capacity > 0
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                OpenTelemetry Collector exporter {{ $labels.exporter }} queue is over 80% full
+          # OpenTelemetry Collector / OpenTelemetry Collector exporter enqueue failed spans
+          - alert: OpentelemetryCollectorExporterEnqueueFailedSpans
+            expr: >-
+              rate(otelcol_exporter_enqueue_failed_spans_total{k8s_namespace_name="otel-gateway"}[5m]) > 0.05
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                OpenTelemetry Collector exporter {{ $labels.exporter }} is dropping
+                {{ $value | humanize }}/s spans because its sending queue is full and rejects
+                new items before they can be queued.
+          # OpenTelemetry Collector / OpenTelemetry Collector exporter enqueue failed metric points
+          - alert: OpentelemetryCollectorExporterEnqueueFailedMetricPoints
+            expr: >-
+              rate(otelcol_exporter_enqueue_failed_metric_points_total{k8s_namespace_name="otel-gateway"}[5m])
+              > 0.05
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                OpenTelemetry Collector exporter {{ $labels.exporter }} is dropping
+                {{ $value | humanize }}/s metric points because its sending queue is full and
+                rejects new items before they can be queued.
+          # OpenTelemetry Collector / OpenTelemetry Collector exporter enqueue failed log records
+          - alert: OpentelemetryCollectorExporterEnqueueFailedLogRecords
+            expr: >-
+              rate(otelcol_exporter_enqueue_failed_log_records_total{k8s_namespace_name="otel-gateway"}[5m]) >
+              0.05
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: >-
+                OpenTelemetry Collector exporter {{ $labels.exporter }} is dropping
+                {{ $value | humanize }}/s log records because its sending queue is full and
+                rejects new items before they can be queued.
