@@ -58,7 +58,7 @@ where the socle departs from it.
 | `KubernetesHpaMetricsUnavailability` | warning | upstream |
 | `KubernetesPoddisruptionbudgetNotEnoughHealthyPods` | warning | upstream |
 | `KubernetesResourcequotaExceeded` | warning | upstream |
-| `KubernetesKubeStateMetricsListWatchErrors` | warning | upstream (critical there) |
+| `KubernetesKubeStateMetricsListWatchErrors` | warning | upstream (critical there), expression fixed: its ratio matched each error series with itself |
 | `FluxKustomizationFailure` | warning | upstream |
 | `FluxHelmreleaseFailure` | warning | upstream |
 | `FluxSourceIssue` | warning | upstream |
@@ -78,16 +78,25 @@ where the socle departs from it.
 | `KubernetesVolumeInodesFullInFourDays` | warning | translated (critical there) |
 | `OpentelemetryCollectorHighMemoryUsage` | warning | translated: one collector is one `service_instance_id` |
 | `OpentelemetryCollectorReceiverRefusedMetricPoints` | critical | upstream: the alerts go blind |
-| `OpentelemetryCollectorReceiverRefusedSpans`, `…RefusedLogRecords` | warning | upstream (critical there): no alert reads them |
-| `OpentelemetryCollectorOtlpReceiverErrors` | warning | upstream (critical there) |
-| `OpentelemetryCollectorExporterFailedSpans`, `…MetricPoints`, `…LogRecords` | warning | upstream |
+| `OpentelemetryCollectorReceiverRefusedLogRecords` | warning | upstream (critical there): no alert reads them |
+| `OpentelemetryCollectorExporterFailedMetricPoints`, `…LogRecords` | warning | upstream |
 | `OpentelemetryCollectorExporterQueueNearlyFull` | warning | translated, as high memory usage |
-| `OpentelemetryCollectorExporterEnqueueFailedSpans`, `…MetricPoints`, `…LogRecords` | warning | upstream |
+| `OpentelemetryCollectorExporterEnqueueFailedMetricPoints`, `…LogRecords` | warning | upstream |
+
+The spans and OTLP rules are not in otel_agent's file: the agent has no
+traces pipeline and no receiver.
 
 ### otel_gateway: the gateway itself
 
-The same twelve OpenTelemetry Collector rules as otel_agent, on the
-gateway's own telemetry.
+| Alert | Severity | Origin |
+| --- | --- | --- |
+| `OpentelemetryCollectorHighMemoryUsage` | warning | translated, as otel_agent's |
+| `OpentelemetryCollectorReceiverRefusedMetricPoints` | critical | upstream: the alerts go blind |
+| `OpentelemetryCollectorReceiverRefusedSpans`, `…RefusedLogRecords` | warning | upstream (critical there): no alert reads them |
+| `OpentelemetryCollectorOtlpReceiverErrors` | warning | upstream (critical there) |
+| `OpentelemetryCollectorExporterFailedSpans`, `…MetricPoints`, `…LogRecords` | warning | upstream |
+| `OpentelemetryCollectorExporterQueueNearlyFull` | warning | translated, as otel_agent's |
+| `OpentelemetryCollectorExporterEnqueueFailedSpans`, `…MetricPoints`, `…LogRecords` | warning | upstream |
 
 ### victoria_metrics and alerting
 

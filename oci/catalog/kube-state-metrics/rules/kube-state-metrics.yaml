@@ -382,15 +382,17 @@ data:
                 and the enforced quota.
           # Kubernetes / Kubernetes kube-state-metrics list/watch errors (awesome: critical)
           # warning: every rule of this file goes stale with it, which is why it is
-          # here; nothing is lost yet. kube-state-metrics 2.20 counts watches only
-          # (kube_state_metrics_watch_total): the list half reads nothing, kept as written.
+          # here; nothing is lost yet. Expression fixed: upstream divides the error
+          # series by the total one to one, matching on result too, so the ratio is
+          # always 1 and any error fires; summed by resource here. kube-state-metrics
+          # 2.20 counts watches only: the list half reads nothing.
           - alert: KubernetesKubeStateMetricsListWatchErrors
             expr: >-
-              (rate(kube_state_metrics_list_total{result="error"}[5m]) /
-              rate(kube_state_metrics_list_total[5m]) > 0.01 and rate(kube_state_metrics_list_total[5m]) > 0)
-              or (rate(kube_state_metrics_watch_total{result="error"}[5m]) /
-              rate(kube_state_metrics_watch_total[5m]) > 0.01 and rate(kube_state_metrics_watch_total[5m]) >
-              0)
+              (sum by (resource) (rate(kube_state_metrics_list_total{result="error"}[5m]))
+              / sum by (resource) (rate(kube_state_metrics_list_total[5m])) > 0.01)
+              or
+              (sum by (resource) (rate(kube_state_metrics_watch_total{result="error"}[5m]))
+              / sum by (resource) (rate(kube_state_metrics_watch_total[5m])) > 0.01)
             for: 5m
             labels:
               severity: warning

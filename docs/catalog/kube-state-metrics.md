@@ -66,9 +66,10 @@ kube = {
   `Pending`, HPAs unable to scale, and any Flux object or catalog module not
   `Ready` for 15 minutes. They are awesome-prometheus-alerts' rules, as
   written.
-- **Off, the Kubernetes and Flux alerts go with it**, and otel_agent's CPU
-  rule, which reads the nodes' capacity here, returns nothing. Nothing
-  fails: the rules have no series to read.
+- **Off, the Kubernetes and Flux alerts go with it**, and so do five of
+  otel_agent's rules, which read it: the CPU rule (the nodes' capacity) and
+  the four PersistentVolumeClaim rules (which volume is a claim), the two
+  critical ones included. Nothing fails: the rules have no series to read.
 - **Without otel_gateway nothing is scraped**, and the rules have nothing to
   read either.
 - **Secrets are not collected**: kube-state-metrics never reads one. Every

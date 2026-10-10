@@ -142,5 +142,8 @@ rule file passes `vmalert -dryRun` before it is published.
 `PodCrashLooping` on the receiver after 8 min; the Watchdog arrived every
 6 minutes, and stopped within 2 minutes of vmalert scaled to 0. Measured
 use: vmalert 3m / 31Mi, the sidecar 1m / 72Mi, Alertmanager 2m / 30Mi.
+That rule is now `KubernetesPodCrashLooping`, from kube_state_metrics;
+on floci, 2026-10-10, it fired 3 minutes after a pod started crash-looping,
+and the 71 rules of the socle all evaluated without error.
 
 </details>

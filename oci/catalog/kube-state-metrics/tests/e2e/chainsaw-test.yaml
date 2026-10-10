@@ -81,7 +81,10 @@ spec:
                   spec:
                     (containers[?name == 'kube-state-metrics'] || `[]`):
                       - (contains(args || `[]`, '--custom-resource-state-config-file=/etc/customresourcestate/config.yaml')): true
-                        # Every Secret of the cluster is not read.
+                        # Every Secret of the cluster is not read: the list is
+                        # rendered (without it kube-state-metrics collects
+                        # everything) and does not name them.
+                        (length((args || `[]`)[?starts_with(@, '--resources=')])): 1
                         (contains(((args || `[]`)[?starts_with(@, '--resources=')] | [0]) || '', 'secrets')): false
                         resources:
                           requests:

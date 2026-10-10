@@ -2,8 +2,9 @@
 # PersistentVolumeClaims — and the agent's own health, on the names
 # VictoriaMetrics stores from OpenTelemetry: the Host and hardware rules that
 # kubeletstats can feed, translated; the Kubernetes section's volume rules,
-# translated; the OpenTelemetry Collector section, for the agent. From
-# awesome-prometheus-alerts (github.com/samber/awesome-prometheus-alerts,
+# translated; the OpenTelemetry Collector section, for the agent, but its
+# spans and OTLP rules: the agent has no traces pipeline and no receiver.
+# From awesome-prometheus-alerts (github.com/samber/awesome-prometheus-alerts,
 # _data/rules.yml at 822af1e, read 2026-10-10). Above each rule, its section
 # and name upstream; a comment says where the socle departs from it — the
 # severity first: critical only for a node lost, or data lost or about to be
@@ -170,18 +171,6 @@ data:
             annotations:
               summary: >-
                 OpenTelemetry Collector memory usage is above 90%
-          # OpenTelemetry Collector / OpenTelemetry Collector receiver refused spans (awesome: critical)
-          # warning: spans and logs refused are lost, but no alert reads them.
-          - alert: OpentelemetryCollectorReceiverRefusedSpans
-            expr: >-
-              rate(otelcol_receiver_refused_spans_total{k8s_namespace_name="otel-agent"}[5m]) > 0.05
-            for: 5m
-            labels:
-              severity: warning
-            annotations:
-              summary: >-
-                OpenTelemetry Collector is refusing {{ $value | humanize }}/s spans on
-                {{ $labels.receiver }}.
           # OpenTelemetry Collector / OpenTelemetry Collector receiver refused metric points
           # Refused metric points are alerts going blind: critical, as upstream.
           - alert: OpentelemetryCollectorReceiverRefusedMetricPoints
@@ -206,35 +195,9 @@ data:
               summary: >-
                 OpenTelemetry Collector is refusing {{ $value | humanize }}/s log records on
                 {{ $labels.receiver }}.
-          # OpenTelemetry Collector / OpenTelemetry Collector OTLP receiver errors (awesome: critical)
-          # warning: spans, which no alert reads.
-          - alert: OpentelemetryCollectorOtlpReceiverErrors
-            expr: >-
-              rate(otelcol_receiver_accepted_spans_total{k8s_namespace_name="otel-agent",
-              receiver=~"otlp"}[5m]) == 0
-              and rate(otelcol_receiver_refused_spans_total{k8s_namespace_name="otel-agent",
-              receiver=~"otlp"}[5m]) > 0
-            for: 2m
-            labels:
-              severity: warning
-            annotations:
-              summary: >-
-                OpenTelemetry Collector OTLP receiver is completely failing - all spans are
-                being refused
-          # OpenTelemetry Collector / OpenTelemetry Collector exporter failed spans
+          # OpenTelemetry Collector / OpenTelemetry Collector exporter failed metric points
           # The counter exists once a send has failed for good, after the exporter's
           # retries (5 minutes): a backend restarting is retried, not counted.
-          - alert: OpentelemetryCollectorExporterFailedSpans
-            expr: >-
-              rate(otelcol_exporter_send_failed_spans_total{k8s_namespace_name="otel-agent"}[5m]) > 0.05
-            for: 5m
-            labels:
-              severity: warning
-            annotations:
-              summary: >-
-                OpenTelemetry Collector failing to send {{ $value | humanize }}/s spans via
-                {{ $labels.exporter }}.
-          # OpenTelemetry Collector / OpenTelemetry Collector exporter failed metric points
           - alert: OpentelemetryCollectorExporterFailedMetricPoints
             expr: >-
               rate(otelcol_exporter_send_failed_metric_points_total{k8s_namespace_name="otel-agent"}[5m]) >
@@ -268,18 +231,6 @@ data:
             annotations:
               summary: >-
                 OpenTelemetry Collector exporter {{ $labels.exporter }} queue is over 80% full
-          # OpenTelemetry Collector / OpenTelemetry Collector exporter enqueue failed spans
-          - alert: OpentelemetryCollectorExporterEnqueueFailedSpans
-            expr: >-
-              rate(otelcol_exporter_enqueue_failed_spans_total{k8s_namespace_name="otel-agent"}[5m]) > 0.05
-            for: 5m
-            labels:
-              severity: warning
-            annotations:
-              summary: >-
-                OpenTelemetry Collector exporter {{ $labels.exporter }} is dropping
-                {{ $value | humanize }}/s spans because its sending queue is full and rejects
-                new items before they can be queued.
           # OpenTelemetry Collector / OpenTelemetry Collector exporter enqueue failed metric points
           - alert: OpentelemetryCollectorExporterEnqueueFailedMetricPoints
             expr: >-
