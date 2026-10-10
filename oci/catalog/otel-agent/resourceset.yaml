@@ -144,6 +144,23 @@ spec:
               # the scrape could not verify them. The call still carries the
               # ServiceAccount token, which the kubelet authorizes.
               insecure_skip_verify: true
+              # The chart's three groups, and volume: how full each
+              # PersistentVolumeClaim a pod mounts is, which the socle's
+              # volume rules read. The filter below keeps the claims only.
+              metric_groups:
+                - node
+                - pod
+                - container
+                - volume
+          processors:
+            # Every pod mounts volumes no rule reads — its ServiceAccount
+            # token, ConfigMaps, emptyDirs — each five series. Only
+            # PersistentVolumeClaims fill up with data that matters.
+            filter/claims-only:
+              error_mode: ignore
+              metrics:
+                metric:
+                  - 'HasPrefix(name, "k8s.volume.") and resource.attributes["k8s.volume.type"] != "persistentVolumeClaim"'
           exporters:
             debug: null
             << if inputs.modules.victoria_metrics.enabled >>
@@ -181,6 +198,10 @@ spec:
                 # kubernetesAttributes preset k8s_attributes to the processors.
                 receivers:
                   - prometheus
+                processors:
+                  - memory_limiter
+                  - filter/claims-only
+                  - batch
                 exporters:
                   << if inputs.modules.victoria_metrics.enabled >>
                   - otlp_http/victoria-metrics
