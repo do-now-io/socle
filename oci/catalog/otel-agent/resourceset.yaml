@@ -144,23 +144,27 @@ spec:
               # the scrape could not verify them. The call still carries the
               # ServiceAccount token, which the kubelet authorizes.
               insecure_skip_verify: true
-              # The chart's three groups, and volume: how full each
-              # PersistentVolumeClaim a pod mounts is, which the socle's
-              # volume rules read. The filter below keeps the claims only.
+              # The chart's three groups, and volume: how full each volume a
+              # pod mounts is, which the socle's PersistentVolumeClaim rules
+              # read, joined to kube-state-metrics' pod-to-claim info. The
+              # receiver labels a volume's type only through the kubelet's
+              # /pods, which needs nodes/proxy — a grant that also opens exec
+              # into every pod of the node — so it is not asked for.
               metric_groups:
                 - node
                 - pod
                 - container
                 - volume
           processors:
-            # Every pod mounts volumes no rule reads — its ServiceAccount
-            # token, ConfigMaps, emptyDirs — each five series. Only
-            # PersistentVolumeClaims fill up with data that matters.
-            filter/claims-only:
+            # What no rule reads: the ServiceAccount token volume every pod
+            # mounts (kube-api-access-*), and the used inodes (inodes minus
+            # free). Measured on floci: 28 volume series down to 15.
+            filter/volumes:
               error_mode: ignore
               metrics:
                 metric:
-                  - 'HasPrefix(name, "k8s.volume.") and resource.attributes["k8s.volume.type"] != "persistentVolumeClaim"'
+                  - 'name == "k8s.volume.inodes.used"'
+                  - 'HasPrefix(name, "k8s.volume.") and HasPrefix(resource.attributes["k8s.volume.name"], "kube-api-access-")'
           exporters:
             debug: null
             << if inputs.modules.victoria_metrics.enabled >>
@@ -200,7 +204,7 @@ spec:
                   - prometheus
                 processors:
                   - memory_limiter
-                  - filter/claims-only
+                  - filter/volumes
                   - batch
                 exporters:
                   << if inputs.modules.victoria_metrics.enabled >>
