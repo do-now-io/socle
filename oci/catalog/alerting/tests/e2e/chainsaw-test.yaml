@@ -4,8 +4,9 @@
 #            no namespace, no Alertmanager datasource in Grafana.
 #   module   on, with a receiver and the watchdog both pointed at podinfo's
 #            /echo (the hello module): vmalert and Alertmanager Available,
-#            its rules and those of otel_gateway, otel_agent and
-#            victoria_metrics loaded by the sidecar and healthy, the Watchdog firing
+#            its rules and those of kube_state_metrics, otel_gateway,
+#            otel_agent and victoria_metrics loaded by the sidecar and healthy,
+#            the Watchdog firing
 #            and delivered through the webhook with no failure, Grafana's
 #            Alertmanager datasource; a ConfigMap labelled vmalert_rules in a
 #            client namespace — broken on purpose — never read, vmalert's
@@ -186,6 +187,7 @@ spec:
               . ./alerting.sh
               eventually 120 has_group socle-alerting
               eventually 120 has_group socle-kubernetes
+              eventually 120 has_group socle-flux
               eventually 120 has_group socle-nodes
               eventually 120 has_group socle-victoria-metrics
               echo "rule groups: $(rule_groups | tr '\n' ' ')"

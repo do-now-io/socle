@@ -1,0 +1,371 @@
+# The kube_state_metrics module's proof (docs/catalog/kube-state-metrics.md).
+# On by default, so `health` runs in every job, the real root's included:
+#   on        the Deployment Available in a restricted namespace, both ports
+#             on the Service, the Flux custom resource state read, Secrets
+#             not collected, the rules ConfigMap shipped;
+#   scraped   otel_gateway's configuration carries the kube-state-metrics job.
+# The `module` phase:
+#   values    the whole valuesFrom order on a key the socle sets;
+#   off       garbage-collected — the rules with it — and otel_gateway's job
+#             gone; the ResourceSet Ready and empty.
+# That the series reach VictoriaMetrics under the names the rules read is a
+# query no Chainsaw operation makes: measured on floci and recorded in the
+# page instead. Everything here is in the cluster: no `script`.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: kube-state-metrics-health
+  labels:
+    phase: health
+    cloud: any
+    platform: any
+spec:
+  description: >-
+    On by default, kube-state-metrics is Available with the socle's values, its
+    rules are shipped, and otel_gateway scrapes it.
+  timeouts:
+    assert: 5m
+  steps:
+    - name: the ResourceSet is Ready and the release converged
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: kube-state-metrics
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: kube-state-metrics
+                labels:
+                  pod-security.kubernetes.io/enforce: restricted
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: kube-state-metrics
+                namespace: kube-state-metrics
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: kube-state-metrics
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: kube-state-metrics
+            name: kube-state-metrics
+    - name: kube-state-metrics runs with the socle's values
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: kube-state-metrics
+                namespace: kube-state-metrics
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'kube-state-metrics'] || `[]`):
+                      - (contains(args || `[]`, '--custom-resource-state-config-file=/etc/customresourcestate/config.yaml')): true
+                        # Every Secret of the cluster is not read.
+                        (contains(((args || `[]`)[?starts_with(@, '--resources=')] | [0]) || '', 'secrets')): false
+                        resources:
+                          requests:
+                            memory: 64Mi
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        # 8080 the objects, 8081 kube-state-metrics' own list and watch
+        # counters, which a rule reads.
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Service
+              metadata:
+                name: kube-state-metrics
+                namespace: kube-state-metrics
+              spec:
+                (ports[?port == `8080`] || `[]`):
+                  - name: http
+                (ports[?port == `8081`] || `[]`):
+                  - name: metrics
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: kube-state-metrics-rules
+                namespace: kube-state-metrics
+                labels:
+                  vmalert_rules: '1'
+              (contains(keys(data), 'kubernetes.yaml')): true
+              (contains(keys(data), 'flux.yaml')): true
+      catch:
+        - describe:
+            apiVersion: apps/v1
+            kind: Deployment
+            namespace: kube-state-metrics
+            name: kube-state-metrics
+        - events:
+            namespace: kube-state-metrics
+        - podLogs:
+            namespace: kube-state-metrics
+            tail: 40
+    # The collector chart renders its configuration into the otel-gateway
+    # ConfigMap, key relay. Only while otel_gateway is on: the e2e roots keep it on.
+    - name: otel_gateway scrapes both ports
+      try:
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: otel-gateway
+                namespace: otel-gateway
+              (contains(data.relay, 'kube-state-metrics.kube-state-metrics.svc:8080')): true
+              (contains(data.relay, 'kube-state-metrics.kube-state-metrics.svc:8081')): true
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: otel-gateway
+            name: otel-gateway
+---
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: kube-state-metrics-module
+  labels:
+    phase: module
+    cloud: any
+    platform: any
+spec:
+  description: >-
+    The client's values win in valuesFrom order; off garbage-collects the module
+    and its rules, and otel_gateway stops scraping it.
+  timeouts:
+    assert: 3m
+    error: 3m
+    delete: 2m
+    cleanup: 2m
+  steps:
+    # The order of valuesFrom, proven whole (docs/architecture/flux-catalog.md):
+    # the socle's 64Mi request, 80Mi in kube.kube_state_metrics.values, 96Mi in
+    # the Secret named in values_secret — merged last; both cleared, 64Mi.
+    - name: kube.kube_state_metrics.values_secret is merged last, over values and the socle
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: kube-state-metrics-e2e-values
+                namespace: kube-state-metrics
+                labels:
+                  reconcile.fluxcd.io/watch: Enabled
+              stringData:
+                values.yaml: |
+                  resources:
+                    requests:
+                      memory: 96Mi
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    kube_state_metrics:
+                      values:
+                        resources:
+                          requests:
+                            memory: 80Mi
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: kube-state-metrics
+                namespace: kube-state-metrics
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'kube-state-metrics'] || `[]`):
+                      - resources:
+                          requests:
+                            memory: 80Mi
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    kube_state_metrics:
+                      values_secret: kube-state-metrics-e2e-values
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: kube-state-metrics
+                namespace: kube-state-metrics
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'kube-state-metrics'] || `[]`):
+                      - resources:
+                          requests:
+                            memory: 96Mi
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    kube_state_metrics:
+                      values_secret: ''
+                      values:
+                        resources: null
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: kube-state-metrics
+                namespace: kube-state-metrics
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'kube-state-metrics'] || `[]`):
+                      - resources:
+                          requests:
+                            memory: 64Mi
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Secret
+              name: kube-state-metrics-e2e-values
+              namespace: kube-state-metrics
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: kube-state-metrics
+            name: kube-state-metrics
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 40
+    - name: enabled = false garbage-collects the module, its rules, and otel_gateway's job
+      try:
+        # The release must be idle before the module goes: helm-controller
+        # honours a deletion only once the running action returns, and the
+        # values step above has just driven an upgrade (docs/architecture/flux-catalog.md).
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: kube-state-metrics
+                namespace: kube-state-metrics
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'Released'] || `[]`):
+                  - status: 'True'
+                (length(conditions[?type == 'Reconciling'] || `[]`)): 0
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    kube_state_metrics:
+                      enabled: false
+        - error:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: kube-state-metrics
+                namespace: kube-state-metrics
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: kube-state-metrics
+        - error:
+            resource:
+              apiVersion: kustomize.toolkit.fluxcd.io/v1
+              kind: Kustomization
+              metadata:
+                name: kube-state-metrics-rules
+                namespace: flux-system
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: kube-state-metrics
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (length(inventory.entries || `[]`)): 0
+        # otel_gateway re-renders without the job: no scrape of a Service
+        # that is gone.
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: otel-gateway
+                namespace: otel-gateway
+              (contains(data.relay, 'scrape_configs')): true
+              (contains(data.relay, 'kube-state-metrics.kube-state-metrics.svc')): false
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: kube-state-metrics
+        - podLogs:
+            namespace: flux-system
+            selector: app.kubernetes.io/name=flux-operator
+            tail: 40

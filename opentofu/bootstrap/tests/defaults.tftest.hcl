@@ -83,6 +83,10 @@ run "defaults_are_the_recommended_position" {
     error_message = "otel_gateway must default to on, with no client values and no values Secret (docs/reference/inputs.md#the-catalog-schema)."
   }
   assert {
+    condition     = output.inputs.modules.kube_state_metrics.enabled == true && output.inputs.modules.kube_state_metrics.values == {} && output.inputs.modules.kube_state_metrics.values_secret == ""
+    error_message = "kube_state_metrics must default to on, with no client values and no values Secret: the socle's Kubernetes and Flux alert rules read it (docs/catalog/kube-state-metrics.md)."
+  }
+  assert {
     condition     = output.inputs.modules.grafana.enabled == true && output.inputs.modules.grafana.domain == "" && output.inputs.modules.grafana.values == {} && output.inputs.modules.grafana.values_secret == ""
     error_message = "grafana must default to on, with no domain, no client values and no values Secret (docs/reference/inputs.md#the-catalog-schema)."
   }

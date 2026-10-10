@@ -155,6 +155,18 @@ locals {
       values        = {}
       values_secret = ""
     }
+    # The state of every Kubernetes object as metrics (docs/catalog/kube-state-metrics.md):
+    # kube-state-metrics, one replica, scraped by otel_gateway — the
+    # collectors remain the only sender to victoria_metrics. What the socle's
+    # Kubernetes and Flux alert rules read, from awesome-prometheus-alerts as
+    # written (Flux readiness through its custom resource state). On by
+    # default, like the collectors. No cloud access; reads every object but
+    # Secrets. values and values_secret as every module, secrets refused there.
+    kube_state_metrics = {
+      enabled       = true
+      values        = {}
+      values_secret = ""
+    }
     # The monitoring stack's one place to read (docs/architecture/observability.md#reading):
     # Grafana from the grafana-community chart, a read-only datasource for
     # each backend that is on, and every dashboard a module ships as a

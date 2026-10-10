@@ -402,6 +402,29 @@ variable "kube" {
     error_message = "kube.otel_gateway.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
   }
 
+  # --- kube_state_metrics — docs/catalog/kube-state-metrics.md -------------
+  # values is free-form on purpose, minus one rule: no secret material. The
+  # chart takes one credential itself, kubeconfig.secret, a whole kubeconfig
+  # in base64 rendered into a Secret of its own; and a Secret among
+  # extraManifests would be a literal one. Both would land in the state and in
+  # a plain ConfigMap. They go through values_secret.
+  validation {
+    condition = (
+      !can(var.kube.kube_state_metrics.values)
+      || !can(keys(var.kube.kube_state_metrics.values))
+      || (
+        try(var.kube.kube_state_metrics.values.kubeconfig.secret, null) == null
+        && !anytrue(try([for o in var.kube.kube_state_metrics.values.extraManifests : try(o.kind == "Secret", false)], []))
+      )
+    )
+    error_message = "kube.kube_state_metrics.values must not carry secrets: kubeconfig.secret, a kubeconfig in clear, and a Secret in extraManifests are refused. Put them in a Secret in the kube-state-metrics namespace named in kube.kube_state_metrics.values_secret."
+  }
+
+  validation {
+    condition     = !can(var.kube.kube_state_metrics.values_secret) || try(var.kube.kube_state_metrics.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.kube_state_metrics.values_secret)), true)
+    error_message = "kube.kube_state_metrics.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
+  }
+
   # --- grafana — docs/catalog/grafana.md ------------------------------------
   validation {
     condition = (

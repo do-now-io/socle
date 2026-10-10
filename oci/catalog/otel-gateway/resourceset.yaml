@@ -163,6 +163,21 @@ spec:
                         target_label: k8s_pod_name
                       - source_labels: [__meta_kubernetes_pod_node_name]
                         target_label: k8s_node_name
+                  << if inputs.modules.kube_state_metrics.enabled >>
+                  # The kube_state_metrics module: every object's state on
+                  # 8080, kube-state-metrics' own health on 8081. Its own job,
+                  # not the annotation: one annotation names one port, and the
+                  # job above would label every object's series with the
+                  # kube-state-metrics pod's namespace. Its series keep the
+                  # labels kube-state-metrics gives them (namespace, pod,
+                  # node…), the names awesome-prometheus-alerts' rules read.
+                  - job_name: kube-state-metrics
+                    scrape_interval: 30s
+                    static_configs:
+                      - targets:
+                          - kube-state-metrics.kube-state-metrics.svc:8080
+                          - kube-state-metrics.kube-state-metrics.svc:8081
+                  << end >>
           exporters:
             debug: null
             << if inputs.modules.victoria_metrics.enabled >>

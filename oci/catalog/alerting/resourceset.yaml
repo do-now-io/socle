@@ -145,7 +145,7 @@ spec:
                 - name: FOLDER
                   value: /rules
                 - name: NAMESPACE
-                  value: alerting,otel-agent,otel-gateway,victoria-metrics
+                  value: alerting,kube-state-metrics,otel-agent,otel-gateway,victoria-metrics
                 - name: RESOURCE
                   value: configmap
                 - name: UNIQUE_FILENAMES

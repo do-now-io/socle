@@ -70,6 +70,13 @@
           requests:
             memory: 320Mi
       values_secret: otel-gateway-values
+    kube_state_metrics:
+      enabled: true
+      values:
+        resources:
+          requests:
+            memory: 96Mi
+      values_secret: kube-state-metrics-values
     grafana:
       enabled: true
       domain: grafana.example.com
