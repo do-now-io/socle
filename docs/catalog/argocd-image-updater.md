@@ -11,7 +11,7 @@ requires:
 ---
 
 Argo CD Image Updater watches your registry and moves your ArgoCD
-`Application`s to the new image tags your rules allow: push `crm-api:1.5.0`,
+applications to the new image tags your rules allow: push `crm-api:1.5.0`,
 and the application runs it, with no commit to bump a tag. Turn it on when
 releases should reach an environment by themselves. **Off by default**, on
 every cloud; the socle's read access to ECR is aws only.
@@ -31,7 +31,7 @@ kube = {
 }
 ```
 
-Nothing is updated yet: write an `ImageUpdater` next to your `Application`s,
+Nothing is updated yet: write an `ImageUpdater` next to your `Application` objects,
 in `argocd`, from your own GitOps repository.
 
 ```yaml
@@ -126,7 +126,7 @@ kube = {
 - **Overrides outlive the module.** Turned off, an `Application` stays on its
   last override, whatever Git says, until you remove it:
   `argocd app unset crm-api-uat1 --parameter image.tag`.
-- **Only `Application`s in `argocd` are watched**, the namespace ArgoCD reads.
+- **Only `Application` objects in `argocd` are watched**, the namespace ArgoCD reads.
 - **`repositories` needs crossplane and aws.** `tofu plan` refuses it
   otherwise. It cannot see `aws.crossplane.allowed_services`: without `ecr`
   there, the role fails at IAM, with the reason on the Role's `Synced`
@@ -151,7 +151,7 @@ kube = {
   `tofu plan` refuses a literal credential there, and `config.registries` in
   `values`, which would replace the socle's entry.
 - **Upgrades**: the chart moves with `socle_version`. The `ImageUpdater` CRD
-  is kept when the module is off; your `ImageUpdater`s stay, inert.
+  is kept when the module is off; your `ImageUpdater` objects stay, inert.
 
 <details>
 <summary>Under the hood</summary>
