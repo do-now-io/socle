@@ -66,8 +66,9 @@ tofu destroy
 | What | Why | How to remove it |
 | --- | --- | --- |
 | The Gateway API CRDs | deleting a CRD deletes every Gateway and route | by hand once unused, or with the cluster |
-| The CRDs of `external_secrets`, `keda`, `velero`, `crossplane` | they hold your objects | as above |
+| The CRDs of `external_secrets`, `keda`, `velero`, `crossplane`, `argocd_image_updater` | they hold your objects | as above |
 | Module roles, when `crossplane` went first | nothing is left to delete them | delete the roles under `/socle/<cluster>/` in IAM |
 | Velero's bucket | Crossplane may not delete a bucket of data | in the cloud, once its backups are not needed |
 | A pending Velero `Restore` | its finalizer holds the namespace | delete the `Restore` ([Restore a backup](restore-a-backup.md)) |
+| `ImageUpdater` objects in `argocd`, once `argocd_image_updater` is off | their finalizer holds them, and the `argocd` namespace, with no controller to release it | delete them before turning the module off, or release them: `kubectl -n argocd patch imageupdater <name> --type merge -p '{"metadata":{"finalizers":[]}}'` |
 | A mirror's pull secret | `flux-system` outlives the operator's release | with the cluster |
