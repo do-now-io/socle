@@ -154,8 +154,9 @@ spec:
               data:
                 argocd.namespace: argocd
                 watch.namespaces: argocd
-                (contains(registries.conf, 'prefix: ghcr.io')): true
-                (contains(registries.conf, 'dkr.ecr')): false
+                # registries.conf is one key: quoted, JMESPath does not read a path.
+                '(contains("registries.conf", ''prefix: ghcr.io''))': true
+                '(contains("registries.conf", ''dkr.ecr''))': false
         - assert:
             resource:
               apiVersion: rbac.authorization.k8s.io/v1
@@ -745,6 +746,11 @@ spec:
     # as written — and nothing else: no other ECR action, no write, no read
     # on every repository. Read from what Crossplane reports (status.atProvider).
     - name: the Role becomes an IAM role whose one policy gets the registry token and reads the repositories named, nothing else
+      bindings:
+        - name: repository
+          value: (join('', ['arn:aws:ecr:', $values.region, ':', $values.account, ':repository/']))
+        - name: role
+          value: (join('', [$values.cluster, '/', $values.cluster, '-argocd-image-updater']))
       try:
         - assert:
             resource:
@@ -757,15 +763,15 @@ spec:
                 (conditions[?type == 'Ready'] || `[]`):
                   - status: 'True'
                 atProvider:
-                  arn: (join('', ['arn:aws:iam::', $values.account, ':role/socle/', $values.cluster, '/', $values.cluster, '-argocd-image-updater']))
+                  arn: (join('', ['arn:aws:iam::', $values.account, ':role/socle/', $role]))
                   (contains(assumeRolePolicy || '', 'pods.eks.amazonaws.com')): true
                   (inlinePolicy[?name == 'ecr'] || `[]`):
                     - (contains(policy || '', '"ecr:GetAuthorizationToken"')): true
                       (contains(policy || '', '"ecr:ListImages"')): true
                       (contains(policy || '', '"ecr:DescribeImages"')): true
                       (contains(policy || '', '"ecr:BatchGetImage"')): true
-                      (contains(policy || '', join('', ['arn:aws:ecr:', $values.region, ':', $values.account, ':repository/crm-api"']))): true
-                      (contains(policy || '', join('', ['arn:aws:ecr:', $values.region, ':', $values.account, ':repository/acme/*"']))): true
+                      (contains(policy || '', join('', [$repository, 'crm-api"']))): true
+                      (contains(policy || '', join('', [$repository, 'acme/*"']))): true
                       (contains(policy || '', ':repository/*"')): false
                       (contains(policy || '', '"ecr:*"')): false
                       (contains(policy || '', 'ecr:PutImage')): false
