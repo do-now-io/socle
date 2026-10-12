@@ -207,5 +207,24 @@ resource "helm_release" "socle" {
     inputs = local.inputs
   })]
 
+  lifecycle {
+    # With repositories set, the socle writes the entry of the registry of
+    # the cluster's account and region; Image Updater keys entries by
+    # prefix, so one of the client's for the same registry would silently
+    # replace it, or never be read (docs/decisions/argocd-image-updater.md,
+    # ARGOCD-IMAGE-UPDATER-07). A rule on var.kube cannot know the account.
+    precondition {
+      condition = (
+        var.cloud != "aws"
+        || length(local.modules.argocd_image_updater.repositories) == 0
+        || !anytrue([
+          for r in local.modules.argocd_image_updater.registries :
+          startswith(lower(try(r.prefix, "")), "${local.account_id}.dkr.ecr.${var.region}.amazonaws.com")
+        ])
+      )
+      error_message = "kube.argocd_image_updater.registries names ${local.account_id}.dkr.ecr.${var.region}.amazonaws.com, the ECR registry of the cluster's account and region, which the socle already configures from repositories. To read one more of its repositories, add its name to kube.argocd_image_updater.repositories."
+    }
+  }
+
   depends_on = [helm_release.instance]
 }

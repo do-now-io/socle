@@ -265,6 +265,85 @@ variable "kube" {
     error_message = "kube.argocd.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
   }
 
+  # --- argocd_image_updater — docs/catalog/argocd-image-updater.md ----------
+  # It moves ArgoCD's Applications: without argocd there is nothing to move,
+  # and its ResourceSet would wait on argocd's for nothing.
+  validation {
+    condition     = !can(keys(var.kube)) || !try(var.kube.argocd_image_updater.enabled, false) || try(var.kube.argocd.enabled, true)
+    error_message = "kube.argocd_image_updater needs ArgoCD: set kube.argocd.enabled = true, or turn both off in the same change."
+  }
+
+  # Repository names as ECR writes them, with * for a glob, each naming
+  # something: a bare * would be every repository of the registry.
+  validation {
+    condition = !can(keys(var.kube)) || alltrue([
+      for r in try(tolist(var.kube.argocd_image_updater.repositories), []) :
+      can(regex("^[a-z0-9*][a-z0-9._/*-]{0,255}$", r)) && can(regex("[a-z0-9]", r))
+    ])
+    error_message = "kube.argocd_image_updater.repositories: each entry must be an ECR repository name, such as crm-api or acme/front — lowercase letters, digits, '.', '_', '-' and '/' — with * for a glob such as acme/*, never * alone."
+  }
+
+  # The role reading those repositories is a Crossplane managed resource.
+  validation {
+    condition     = !can(keys(var.kube)) || length(try(tolist(var.kube.argocd_image_updater.repositories), [])) == 0 || try(var.kube.crossplane.enabled, false)
+    error_message = "kube.argocd_image_updater.repositories names ECR repositories, so Image Updater needs its own role, which only Crossplane creates: set kube.crossplane.enabled = true (and ecr in the foundations' aws.crossplane.allowed_services), or leave repositories empty and configure the registry through registries with a credential of yours."
+  }
+
+  validation {
+    condition     = !can(keys(var.kube)) || length(try(tolist(var.kube.argocd_image_updater.repositories), [])) == 0 || var.cloud == "aws"
+    error_message = "kube.argocd_image_updater.repositories names ECR repositories, which exist on aws only. Configure your registry through registries, with a credential in a Secret of yours, and leave repositories empty."
+  }
+
+  validation {
+    condition     = !can(keys(var.kube)) || var.cloud != "aws" || length(try(tolist(var.kube.argocd_image_updater.repositories), [])) == 0 || var.region != ""
+    error_message = "kube.argocd_image_updater.repositories needs the cluster's region: the repositories' ARNs, the registry's address and the Pod Identity association are regional. Pass region to the bootstrap module (the aws root wires var.aws.region)."
+  }
+
+  # Each entry is a registry as Image Updater's registries.conf writes it.
+  # credentials is a reference — to a Secret, a pull secret, an environment
+  # variable or a script — never the credential itself.
+  validation {
+    condition = !can(keys(var.kube)) || alltrue([
+      for r in try(tolist(var.kube.argocd_image_updater.registries), []) :
+      can(keys(r))
+      && alltrue([for k in try(keys(r), []) : contains(["name", "prefix", "api_url", "credentials", "credsexpire", "insecure", "ping", "defaultns", "default", "tagsortmode", "limit", "ca_file", "ca_data"], k)])
+      && can(regex("^[A-Za-z0-9][A-Za-z0-9 ._-]*$", r.name))
+      && can(regex("^[^\\s/][^\\s]*$", r.prefix))
+      && can(regex("^https?://[^\\s]+$", r.api_url))
+      && try(r.credentials == "" || can(regex("^(secret|pullsecret|env|ext):[^\\s]+$", r.credentials)), true)
+    ])
+    error_message = "kube.argocd_image_updater.registries: each entry must be an object with name, prefix (the registry host, such as ghcr.io) and api_url (https://…), and only registries.conf keys (credentials, credsexpire, insecure, ping, defaultns, default, tagsortmode, limit, ca_file, ca_data). credentials must be a reference — secret:<namespace>/<secret>#<key>, pullsecret:<namespace>/<secret>, env:<VARIABLE> or ext:<script> — never the credential itself."
+  }
+
+  # values is free-form on purpose, minus two rules. A registry entry goes
+  # through registries: the chart's config.registries is a list, which
+  # helm-controller replaces whole, so one from values would drop the socle's
+  # ECR entry. And no secret material, which would reach the state and a
+  # ConfigMap: a Secret among extraObjects, an extraEnv entry with a literal
+  # value named like a credential, and authScripts, whose scripts are where
+  # a registry token is written by hand.
+  validation {
+    condition = (
+      !can(var.kube.argocd_image_updater.values)
+      || !can(keys(var.kube.argocd_image_updater.values))
+      || (
+        !can(var.kube.argocd_image_updater.values.config.registries)
+        && !can(var.kube.argocd_image_updater.values.authScripts)
+        && !anytrue(try([for o in var.kube.argocd_image_updater.values.extraObjects : try(o.kind == "Secret", false)], []))
+        && alltrue([
+          for e in try(tolist(var.kube.argocd_image_updater.values.extraEnv), []) :
+          !(can(e.value) && can(regex("(?i)(secret|password|passwd|token|credential|api_?key|access_?key|private_?key)", try(e.name, ""))))
+        ])
+      )
+    )
+    error_message = "kube.argocd_image_updater.values: config.registries is refused — list your registries in kube.argocd_image_updater.registries, after the socle's ECR entry. Secrets are refused too: authScripts, a Secret in extraObjects, and an extraEnv entry with a literal value named like a credential. Put them in a Secret in argocd-image-updater and name it in kube.argocd_image_updater.values_secret, or reference it from a registry's credentials."
+  }
+
+  validation {
+    condition     = !can(var.kube.argocd_image_updater.values_secret) || try(var.kube.argocd_image_updater.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.argocd_image_updater.values_secret)), true)
+    error_message = "kube.argocd_image_updater.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
+  }
+
   # --- victoria_metrics — docs/catalog/victoria-metrics.md ------------------
   # A value of the wrong kind is the kind check's to refuse; these rules only
   # judge strings, so one mistake gives one diagnostic.

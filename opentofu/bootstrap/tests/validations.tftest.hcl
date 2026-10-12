@@ -449,6 +449,275 @@ run "kube_refuses_argocd_values_secret_that_is_not_a_secret_name" {
   expect_failures = [var.kube]
 }
 
+# --- argocd_image_updater — docs/catalog/argocd-image-updater.md ----------
+# Each run is one aws configuration that plans — crossplane on, the region,
+# one repository, one registry — changed in one place: the refusal can only
+# come from that change.
+
+run "argocd_image_updater_refuses_to_run_without_argocd" {
+  command = plan
+  variables {
+    region = "eu-west-3"
+    kube = {
+      crossplane = { enabled = true }
+      argocd     = { enabled = false }
+      argocd_image_updater = {
+        enabled      = true
+        repositories = ["crm-api"]
+        registries   = [{ name = "ghcr", prefix = "ghcr.io", api_url = "https://ghcr.io", credentials = "secret:argocd-image-updater/ghcr#creds" }]
+      }
+    }
+  }
+  expect_failures = [var.kube]
+}
+
+run "argocd_image_updater_refuses_a_bare_wildcard_repository" {
+  command = plan
+  variables {
+    region = "eu-west-3"
+    kube = {
+      crossplane = { enabled = true }
+      argocd_image_updater = {
+        enabled      = true
+        repositories = ["*"]
+        registries   = [{ name = "ghcr", prefix = "ghcr.io", api_url = "https://ghcr.io", credentials = "secret:argocd-image-updater/ghcr#creds" }]
+      }
+    }
+  }
+  expect_failures = [var.kube]
+}
+
+run "argocd_image_updater_refuses_a_repository_in_uppercase" {
+  command = plan
+  variables {
+    region = "eu-west-3"
+    kube = {
+      crossplane = { enabled = true }
+      argocd_image_updater = {
+        enabled      = true
+        repositories = ["CRM-API"]
+        registries   = [{ name = "ghcr", prefix = "ghcr.io", api_url = "https://ghcr.io", credentials = "secret:argocd-image-updater/ghcr#creds" }]
+      }
+    }
+  }
+  expect_failures = [var.kube]
+}
+
+run "argocd_image_updater_refuses_repositories_without_crossplane" {
+  command = plan
+  variables {
+    region = "eu-west-3"
+    kube = {
+      argocd_image_updater = {
+        enabled      = true
+        repositories = ["crm-api"]
+        registries   = [{ name = "ghcr", prefix = "ghcr.io", api_url = "https://ghcr.io", credentials = "secret:argocd-image-updater/ghcr#creds" }]
+      }
+    }
+  }
+  expect_failures = [var.kube]
+}
+
+run "argocd_image_updater_refuses_repositories_outside_aws" {
+  command = plan
+  variables {
+    cloud           = "gcp"
+    cluster_network = null
+    region          = "europe-west1"
+    kube = {
+      crossplane = { enabled = true }
+      argocd_image_updater = {
+        enabled      = true
+        repositories = ["crm-api"]
+        registries   = [{ name = "ghcr", prefix = "ghcr.io", api_url = "https://ghcr.io", credentials = "secret:argocd-image-updater/ghcr#creds" }]
+      }
+    }
+  }
+  expect_failures = [var.kube]
+}
+
+run "argocd_image_updater_with_repositories_refuses_an_empty_region" {
+  command = plan
+  variables {
+    region = ""
+    kube = {
+      crossplane = { enabled = true }
+      argocd_image_updater = {
+        enabled      = true
+        repositories = ["crm-api"]
+        registries   = [{ name = "ghcr", prefix = "ghcr.io", api_url = "https://ghcr.io", credentials = "secret:argocd-image-updater/ghcr#creds" }]
+      }
+    }
+  }
+  expect_failures = [var.kube]
+}
+
+run "argocd_image_updater_refuses_registries_that_are_not_a_list" {
+  command = plan
+  variables {
+    region = "eu-west-3"
+    kube = {
+      crossplane = { enabled = true }
+      argocd_image_updater = {
+        enabled      = true
+        repositories = ["crm-api"]
+        registries   = "ghcr.io"
+      }
+    }
+  }
+  expect_failures = [var.kube]
+}
+
+run "argocd_image_updater_refuses_a_registry_without_an_api_url" {
+  command = plan
+  variables {
+    region = "eu-west-3"
+    kube = {
+      crossplane = { enabled = true }
+      argocd_image_updater = {
+        enabled      = true
+        repositories = ["crm-api"]
+        registries   = [{ name = "ghcr", prefix = "ghcr.io", credentials = "secret:argocd-image-updater/ghcr#creds" }]
+      }
+    }
+  }
+  expect_failures = [var.kube]
+}
+
+run "argocd_image_updater_refuses_a_literal_credential_in_a_registry" {
+  command = plan
+  variables {
+    region = "eu-west-3"
+    kube = {
+      crossplane = { enabled = true }
+      argocd_image_updater = {
+        enabled      = true
+        repositories = ["crm-api"]
+        registries   = [{ name = "ghcr", prefix = "ghcr.io", api_url = "https://ghcr.io", credentials = "acme:ghp_0123456789" }]
+      }
+    }
+  }
+  expect_failures = [var.kube]
+}
+
+run "argocd_image_updater_refuses_a_registry_key_registries_conf_does_not_know" {
+  command = plan
+  variables {
+    region = "eu-west-3"
+    kube = {
+      crossplane = { enabled = true }
+      argocd_image_updater = {
+        enabled      = true
+        repositories = ["crm-api"]
+        registries   = [{ name = "ghcr", prefix = "ghcr.io", api_url = "https://ghcr.io", password = "ghp_0123456789" }]
+      }
+    }
+  }
+  expect_failures = [var.kube]
+}
+
+run "argocd_image_updater_refuses_config_registries_in_values" {
+  command = plan
+  variables {
+    region = "eu-west-3"
+    kube = {
+      crossplane = { enabled = true }
+      argocd_image_updater = {
+        enabled      = true
+        repositories = ["crm-api"]
+        registries   = [{ name = "ghcr", prefix = "ghcr.io", api_url = "https://ghcr.io", credentials = "secret:argocd-image-updater/ghcr#creds" }]
+        values       = { config = { registries = [{ name = "ghcr", prefix = "ghcr.io", api_url = "https://ghcr.io", credentials = "secret:argocd-image-updater/ghcr#creds" }] } }
+      }
+    }
+  }
+  expect_failures = [var.kube]
+}
+
+run "argocd_image_updater_refuses_auth_scripts_in_values" {
+  command = plan
+  variables {
+    region = "eu-west-3"
+    kube = {
+      crossplane = { enabled = true }
+      argocd_image_updater = {
+        enabled      = true
+        repositories = ["crm-api"]
+        registries   = [{ name = "ghcr", prefix = "ghcr.io", api_url = "https://ghcr.io", credentials = "secret:argocd-image-updater/ghcr#creds" }]
+        values       = { authScripts = { enabled = true, scripts = { "ghcr.sh" = "echo acme:ghp_0123456789" } } }
+      }
+    }
+  }
+  expect_failures = [var.kube]
+}
+
+run "argocd_image_updater_refuses_a_secret_among_extra_objects" {
+  command = plan
+  variables {
+    region = "eu-west-3"
+    kube = {
+      crossplane = { enabled = true }
+      argocd_image_updater = {
+        enabled      = true
+        repositories = ["crm-api"]
+        registries   = [{ name = "ghcr", prefix = "ghcr.io", api_url = "https://ghcr.io", credentials = "secret:argocd-image-updater/ghcr#creds" }]
+        values       = { extraObjects = [{ apiVersion = "v1", kind = "Secret", metadata = { name = "ghcr" }, stringData = { creds = "acme:ghp_0123456789" } }] }
+      }
+    }
+  }
+  expect_failures = [var.kube]
+}
+
+run "argocd_image_updater_refuses_a_credential_in_values_extra_env" {
+  command = plan
+  variables {
+    region = "eu-west-3"
+    kube = {
+      crossplane = { enabled = true }
+      argocd_image_updater = {
+        enabled      = true
+        repositories = ["crm-api"]
+        registries   = [{ name = "ghcr", prefix = "ghcr.io", api_url = "https://ghcr.io", credentials = "secret:argocd-image-updater/ghcr#creds" }]
+        values       = { extraEnv = [{ name = "GITHUB_TOKEN", value = "ghp_0123456789" }] }
+      }
+    }
+  }
+  expect_failures = [var.kube]
+}
+
+run "argocd_image_updater_refuses_values_that_are_not_an_object" {
+  command = plan
+  variables {
+    region = "eu-west-3"
+    kube = {
+      crossplane = { enabled = true }
+      argocd_image_updater = {
+        enabled      = true
+        repositories = ["crm-api"]
+        registries   = [{ name = "ghcr", prefix = "ghcr.io", api_url = "https://ghcr.io", credentials = "secret:argocd-image-updater/ghcr#creds" }]
+        values       = "config: {}"
+      }
+    }
+  }
+  expect_failures = [var.kube]
+}
+
+run "argocd_image_updater_refuses_an_invalid_values_secret_name" {
+  command = plan
+  variables {
+    region = "eu-west-3"
+    kube = {
+      crossplane = { enabled = true }
+      argocd_image_updater = {
+        enabled       = true
+        repositories  = ["crm-api"]
+        registries    = [{ name = "ghcr", prefix = "ghcr.io", api_url = "https://ghcr.io", credentials = "secret:argocd-image-updater/ghcr#creds" }]
+        values_secret = "Image_Updater"
+      }
+    }
+  }
+  expect_failures = [var.kube]
+}
+
 run "kube_refuses_victoria_metrics_enabled_that_is_not_a_bool" {
   command = plan
   variables { kube = { victoria_metrics = { enabled = "true" } } }
