@@ -158,7 +158,10 @@ aws only.
 stated in the socle's values.
 
 **Consequences.** Turned off, the client's `ImageUpdater` objects stay, inert; on
-again, they resume.
+again, they resume. Each keeps the controller's finalizer, which only drops
+its metrics: with the controller gone, deleting one, or the `argocd`
+namespace, hangs until the finalizer is released by hand. Documented, not
+automated: a cleanup job would touch the client's objects for a rare case.
 
 **Sources.** The `argocd-image-updater` chart's `values.yaml`.
 

@@ -80,6 +80,7 @@ kube = {
       prefix      = "ghcr.io"
       api_url     = "https://ghcr.io"
       credentials = "pullsecret:argocd-image-updater/ghcr"
+      credsexpire = "1h" # re-read the Secret hourly, so a rotated key is taken
     }]
 
     # Any value of the argocd-image-updater chart; yours win over the socle's.
@@ -126,6 +127,10 @@ kube = {
 - **Overrides outlive the module.** Turned off, an `Application` stays on its
   last override, whatever Git says, until you remove it:
   `argocd app unset crm-api-uat1 --parameter image.tag`.
+- **Delete your `ImageUpdater` objects before turning the module off.**
+  Each carries a finalizer only the controller removes: afterwards, deleting
+  one, or the `argocd` namespace, hangs until you release it:
+  `kubectl -n argocd patch imageupdater <name> --type merge -p '{"metadata":{"finalizers":[]}}'`.
 - **Only `Application` objects in `argocd` are watched**, the namespace ArgoCD reads.
 - **`repositories` needs crossplane and aws.** `tofu plan` refuses it
   otherwise. It cannot see `aws.crossplane.allowed_services`: without `ecr`
