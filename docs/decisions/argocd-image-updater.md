@@ -5,7 +5,7 @@ sidebar:
   order: 10
 ---
 
-The argocd-image-updater module moves the client's ArgoCD `Application`s to
+The argocd-image-updater module moves the client's ArgoCD applications to
 new image tags without a commit. The socle installs the controller and, on
 aws, its read access to ECR; what to update, and how, stays the client's.
 
@@ -39,7 +39,7 @@ apply. One more catalog entry.
 
 **Context.**
 
-- An `ImageUpdater` selects `Application`s in its own namespace only, and the
+- An `ImageUpdater` selects `Application` objects in its own namespace only, and the
   socle's are in `argocd`: ArgoCD reads no other namespace unless "apps in
   any namespace" is turned on, which the socle does not do.
 - Upstream installs the controller in the ArgoCD namespace. In the socle a
@@ -60,7 +60,7 @@ for the `git` write-back credentials.
 - ArgoCD's SSH known hosts ConfigMap is not mounted from another namespace:
   `git` write-back over SSH is measured on aws before this is accepted; HTTPS
   and a GitHub App are unaffected.
-- `Application`s outside `argocd` are not watched.
+- `Application` objects outside `argocd` are not watched.
 
 **Sources.** [Installation](https://argocd-image-updater.readthedocs.io/en/stable/install/installation/); [Applications in any namespace](https://argo-cd.readthedocs.io/en/stable/operator-manual/app-any-namespace/).
 
@@ -70,7 +70,7 @@ for the `git` write-back credentials.
 
 **Context.**
 
-- An `ImageUpdater` names the client's `Application`s, images and version
+- An `ImageUpdater` names the client's applications, images and version
   rules, which the socle does not know, and decides what reaches production.
 - The write-back method is a field of each `ImageUpdater`
   (`writeBackConfig.method`), per application: `argocd` by default, a
@@ -157,7 +157,7 @@ aws only.
 **Decision.** The chart's `crds.keep` (`helm.sh/resource-policy: keep`),
 stated in the socle's values.
 
-**Consequences.** Turned off, the client's `ImageUpdater`s stay, inert; on
+**Consequences.** Turned off, the client's `ImageUpdater` objects stay, inert; on
 again, they resume.
 
 **Sources.** The `argocd-image-updater` chart's `values.yaml`.
