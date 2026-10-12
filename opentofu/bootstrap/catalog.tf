@@ -109,6 +109,27 @@ locals {
       values        = {}
       values_secret = ""
     }
+    # Argo CD Image Updater: moves the client's ArgoCD Applications to the
+    # new image tags their ImageUpdater objects allow, without a commit
+    # (docs/catalog/argocd-image-updater.md). Off by default, and refused
+    # while argocd is off: it does nothing until the client writes an
+    # ImageUpdater, in argocd. Runs in its own namespace, watching argocd.
+    # repositories names the ECR repositories of the cluster's account and
+    # region its own role may read, globs allowed; on aws with crossplane on,
+    # the module declares that read-only role and the registry entry whose
+    # token a login script renews. Empty means no role and no entry.
+    # registries is the client's other registries, as Image Updater writes
+    # them, rendered after the socle's ECR entry: a registry entry is never
+    # set through values, whose list would replace the socle's. Credentials
+    # are references to a Secret, never literals. values and values_secret
+    # as every module, secrets refused there.
+    argocd_image_updater = {
+      enabled       = false
+      repositories  = []
+      registries    = []
+      values        = {}
+      values_secret = ""
+    }
     # The monitoring stack's metrics storage (docs/architecture/observability.md):
     # VictoriaMetrics single-node, OTLP in from the collectors, PromQL out to
     # Grafana, no cloud access. On by default, like every monitoring module but

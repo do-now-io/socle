@@ -651,6 +651,169 @@ run "argocd_values_flow_through_untouched_and_a_repository_without_credentials_i
   }
 }
 
+# --- argocd_image_updater ------------------------------------------------
+# Every attribute set at once must plan; validations.tftest.hcl refuses a
+# configuration of the same shape changed in one place.
+
+run "argocd_image_updater_is_off_by_default_with_no_role_and_no_registry" {
+  command = plan
+
+  assert {
+    condition     = output.inputs.modules.argocd_image_updater.enabled == false && output.inputs.modules.argocd_image_updater.repositories == [] && output.inputs.modules.argocd_image_updater.registries == [] && output.inputs.modules.argocd_image_updater.values == {} && output.inputs.modules.argocd_image_updater.values_secret == ""
+    error_message = "argocd_image_updater must default to off — it does nothing until the client writes an ImageUpdater — with no repository and no registry: a role only for the repositories the client names."
+  }
+}
+
+run "argocd_image_updater_with_repositories_registries_and_values_passes_on_aws" {
+  command = plan
+  variables {
+    region = "eu-west-3"
+    kube = {
+      crossplane = { enabled = true }
+      argocd_image_updater = {
+        enabled      = true
+        repositories = ["crm-api", "acme/*"]
+        registries = [{
+          name        = "ghcr"
+          prefix      = "ghcr.io"
+          api_url     = "https://ghcr.io"
+          credentials = "secret:argocd-image-updater/ghcr#creds"
+          credsexpire = "1h"
+        }]
+        values = {
+          config = { "log.level" = "debug" }
+          extraEnv = [{
+            name      = "GITHUB_TOKEN"
+            valueFrom = { secretKeyRef = { name = "ghcr", key = "token" } }
+          }]
+        }
+        values_secret = "argocd-image-updater-values"
+      }
+    }
+  }
+
+  assert {
+    condition     = output.inputs.modules.argocd_image_updater.repositories == ["crm-api", "acme/*"] && output.inputs.modules.argocd_image_updater.registries[0].credentials == "secret:argocd-image-updater/ghcr#creds"
+    error_message = "repositories and registries must reach the inputs as written: the template builds the role's ARNs and the registry list from them."
+  }
+  assert {
+    condition     = output.inputs.modules.argocd_image_updater.values.config["log.level"] == "debug" && output.inputs.modules.argocd_image_updater.values_secret == "argocd-image-updater-values"
+    error_message = "values and values_secret must reach the inputs as written."
+  }
+  assert {
+    condition     = output.inputs.cluster.accountId == "000000000000" && output.inputs.cluster.region == "eu-west-3"
+    error_message = "the account and the region must reach the inputs: the registry's address and the repositories' ARNs are built from them."
+  }
+}
+
+run "argocd_image_updater_on_without_repositories_needs_neither_crossplane_nor_a_region" {
+  command = plan
+  variables {
+    kube = { argocd_image_updater = { enabled = true } }
+  }
+
+  assert {
+    condition     = output.inputs.modules.argocd_image_updater.enabled && length(output.inputs.modules.argocd_image_updater.repositories) == 0
+    error_message = "Image Updater on a registry of the client's own needs no cloud role: on with no repository must plan without Crossplane."
+  }
+}
+
+run "argocd_image_updater_takes_a_registry_with_a_credential_of_the_clients_off_aws" {
+  command = plan
+  variables {
+    cloud           = "scaleway"
+    cluster_network = null
+    region          = "fr-par"
+    kube = {
+      argocd_image_updater = {
+        enabled = true
+        registries = [{
+          name        = "scaleway"
+          prefix      = "rg.fr-par.scw.cloud"
+          api_url     = "https://rg.fr-par.scw.cloud"
+          credentials = "secret:argocd-image-updater/scw-registry#creds"
+        }]
+      }
+    }
+  }
+
+  assert {
+    condition     = output.inputs.modules.argocd_image_updater.registries[0].prefix == "rg.fr-par.scw.cloud"
+    error_message = "off aws the client's registry and its credential reference must reach the inputs."
+  }
+}
+
+run "argocd_image_updater_refuses_an_entry_for_the_registry_it_already_configures" {
+  command = plan
+  variables {
+    region = "eu-west-3"
+    kube = {
+      crossplane = { enabled = true }
+      argocd_image_updater = {
+        enabled      = true
+        repositories = ["crm-api"]
+        registries = [{
+          name        = "ecr"
+          prefix      = "000000000000.dkr.ecr.eu-west-3.amazonaws.com"
+          api_url     = "https://000000000000.dkr.ecr.eu-west-3.amazonaws.com"
+          credentials = "pullsecret:argocd-image-updater/ecr"
+        }]
+      }
+    }
+  }
+
+  expect_failures = [helm_release.socle]
+}
+
+run "argocd_image_updater_takes_that_registry_when_it_has_no_repositories" {
+  command = plan
+  variables {
+    region = "eu-west-3"
+    kube = {
+      argocd_image_updater = {
+        enabled = true
+        registries = [{
+          name        = "ecr"
+          prefix      = "000000000000.dkr.ecr.eu-west-3.amazonaws.com"
+          api_url     = "https://000000000000.dkr.ecr.eu-west-3.amazonaws.com"
+          credentials = "pullsecret:argocd-image-updater/ecr"
+        }]
+      }
+    }
+  }
+
+  assert {
+    condition     = length(output.inputs.modules.argocd_image_updater.registries) == 1
+    error_message = "with no repositories the socle writes no ECR entry, so the client may configure that registry with a credential of their own."
+  }
+}
+
+run "argocd_image_updater_takes_another_accounts_registry_beside_its_repositories" {
+  command = plan
+  variables {
+    region = "eu-west-3"
+    kube = {
+      crossplane = { enabled = true }
+      argocd_image_updater = {
+        enabled      = true
+        repositories = ["crm-api"]
+        registries = [{
+          name        = "shared-ecr"
+          prefix      = "111111111111.dkr.ecr.eu-west-1.amazonaws.com"
+          api_url     = "https://111111111111.dkr.ecr.eu-west-1.amazonaws.com"
+          credentials = "ext:/scripts/shared-ecr.sh"
+          credsexpire = "11h"
+        }]
+      }
+    }
+  }
+
+  assert {
+    condition     = output.inputs.modules.argocd_image_updater.registries[0].prefix == "111111111111.dkr.ecr.eu-west-1.amazonaws.com"
+    error_message = "another account's or region's registry is the client's to configure, beside the socle's entry."
+  }
+}
+
 run "victoria_metrics_accepts_no_volume_and_a_retention_in_hours" {
   command = plan
   variables {

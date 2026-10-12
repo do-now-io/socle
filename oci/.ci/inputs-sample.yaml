@@ -46,6 +46,19 @@
             policy.csv: |
               g, ci, role:readonly
       values_secret: argocd-values
+    argocd_image_updater:
+      enabled: true
+      repositories: [crm-api, acme/*]
+      registries:
+        - name: ghcr
+          prefix: ghcr.io
+          api_url: https://ghcr.io
+          credentials: secret:argocd-image-updater/ghcr#creds
+          credsexpire: 1h
+      values:
+        config:
+          log.level: debug
+      values_secret: argocd-image-updater-values
     victoria_metrics:
       enabled: true
       retention: 15d
