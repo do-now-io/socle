@@ -142,8 +142,10 @@ spec:
     << range $m.repositories ->>
     << $arns = append $arns (printf "arn:aws:ecr:%s:%s:repository/%s" inputs.cluster.region inputs.cluster.accountId .) ->>
     << end ->>
-    << $token := dict "Sid" "GetTheRegistryToken" "Effect" "Allow" "Action" (list "ecr:GetAuthorizationToken") "Resource" "*" ->>
-    << $read := dict "Sid" "ReadTheRepositoriesNamed" "Effect" "Allow" "Action" (list "ecr:ListImages" "ecr:DescribeImages" "ecr:BatchGetImage") "Resource" $arns ->>
+    << $tokenCalls := list "ecr:GetAuthorizationToken" ->>
+    << $token := dict "Sid" "GetTheRegistryToken" "Effect" "Allow" "Action" $tokenCalls "Resource" "*" ->>
+    << $readCalls := list "ecr:ListImages" "ecr:DescribeImages" "ecr:BatchGetImage" ->>
+    << $read := dict "Sid" "ReadTheRepositoriesNamed" "Effect" "Allow" "Action" $readCalls "Resource" $arns ->>
     apiVersion: iam.aws.m.upbound.io/v1beta1
     kind: Role
     metadata:
@@ -238,7 +240,9 @@ spec:
       << $registries := list ->>
       << if $ecr ->>
       << $host := printf "%s.dkr.ecr.%s.amazonaws.com" inputs.cluster.accountId inputs.cluster.region ->>
-      << $registries = append $registries (dict "name" "ecr" "prefix" $host "api_url" (printf "https://%s" $host) "credentials" "ext:/scripts/ecr-login.sh" "credsexpire" "11h") ->>
+      << $api := printf "https://%s" $host ->>
+      << $entry := dict "name" "ecr" "prefix" $host "api_url" $api "credentials" "ext:/scripts/ecr-login.sh" "credsexpire" "11h" ->>
+      << $registries = append $registries $entry ->>
       << end ->>
       << range $m.registries ->>
       << $registries = append $registries . ->>
@@ -284,7 +288,8 @@ spec:
               scripts:
                 ecr-login.sh: |
                   #!/bin/sh
-                  aws ecr get-authorization-token --region << inputs.cluster.region >> --output text --query 'authorizationData[0].authorizationToken' | base64 -d
+                  aws ecr get-authorization-token --region << inputs.cluster.region >> \
+                    --output text --query 'authorizationData[0].authorizationToken' | base64 -d
             << end >>
             # The chart sets none; sized for an idle controller.
             resources:
