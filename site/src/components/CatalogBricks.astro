@@ -23,6 +23,8 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 // Modules with no logo of their own get a monogram.
 const marks: Record<string, string> = {
   argocd: argo,
+  // argoproj-labs: an Argo project.
+  'argocd-image-updater': argo,
   'gateway-api': kubernetes,
   crossplane,
   kyverno,
