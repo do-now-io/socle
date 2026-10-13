@@ -184,4 +184,10 @@ on the repositories named. Read-only.
 **Ordering**: waits for the `argocd` and `crossplane` ResourceSets; on aws
 the chart waits for the role and its association.
 
+**Measured** on the sandbox EKS, 2026-10-13: an `ImageUpdater` moved an
+`Application` to a new tag pushed to ECR within one 2-minute cycle, Git
+untouched; the controller at idle, one `Application` watched, used 2m CPU
+and 25Mi. On floci, every CI run: the same loop on GHCR, and the role's
+policy in IAM.
+
 </details>

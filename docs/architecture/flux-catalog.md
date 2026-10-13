@@ -126,6 +126,7 @@ Turning a module off garbage-collects what it rendered. Its CRDs:
 | `external_secrets` | kept | `helm.sh/resource-policy: keep`: your `ExternalSecret`s and stores outlive it |
 | `keda` | kept | `helm.sh/resource-policy: keep`: your `ScaledObject`s outlive it |
 | `velero` | kept | `cleanUpCRDs: false`: a re-enable re-syncs `Backup`s from the bucket |
+| `argocd_image_updater` | kept | `helm.sh/resource-policy: keep`: your `ImageUpdater` objects outlive it, inert; delete them first, their finalizer needs the controller |
 | `crossplane` | kept | the core applies them outside Helm; module roles still declared are orphaned in the cloud |
 | `kyverno` | **deleted** | the chart's default: every Kyverno policy goes with them |
 

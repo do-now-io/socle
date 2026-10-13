@@ -11,7 +11,7 @@ aws, its read access to ECR; what to update, and how, stays the client's.
 
 ## ARGOCD-IMAGE-UPDATER-01: Its own module, off by default, refused without argocd
 
-**proposed** · 2026-10-12 · [`opentofu/bootstrap/catalog.tf`](../../opentofu/bootstrap/catalog.tf), [`opentofu/bootstrap/variables.tf`](../../opentofu/bootstrap/variables.tf)
+**accepted** · 2026-10-13 · [`opentofu/bootstrap/catalog.tf`](../../opentofu/bootstrap/catalog.tf), [`opentofu/bootstrap/variables.tf`](../../opentofu/bootstrap/variables.tf)
 
 **Context.** Two shapes were weighed: a switch under `kube.argocd`, or a
 module of its own.
@@ -35,7 +35,7 @@ apply. One more catalog entry.
 
 ## ARGOCD-IMAGE-UPDATER-02: Its own namespace, watching argocd
 
-**proposed** · 2026-10-12 · [`oci/catalog/argocd-image-updater/resourceset.yaml`](../../oci/catalog/argocd-image-updater/resourceset.yaml)
+**accepted** · 2026-10-13 · [`oci/catalog/argocd-image-updater/resourceset.yaml`](../../oci/catalog/argocd-image-updater/resourceset.yaml)
 
 **Context.**
 
@@ -58,15 +58,15 @@ for the `git` write-back credentials.
 - The same access as the upstream layout, written by the socle and removed
   with the module.
 - ArgoCD's SSH known hosts ConfigMap is not mounted from another namespace:
-  `git` write-back over SSH is measured on aws before this is accepted; HTTPS
-  and a GitHub App are unaffected.
+  `git` write-back over SSH may fail host-key verification, not measured;
+  HTTPS and a GitHub App are unaffected.
 - `Application` objects outside `argocd` are not watched.
 
 **Sources.** [Installation](https://argocd-image-updater.readthedocs.io/en/stable/install/installation/); [Applications in any namespace](https://argo-cd.readthedocs.io/en/stable/operator-manual/app-any-namespace/).
 
 ## ARGOCD-IMAGE-UPDATER-03: No `ImageUpdater` from the socle; the write-back method is the client's
 
-**proposed** · 2026-10-12 · [`oci/catalog/argocd-image-updater/resourceset.yaml`](../../oci/catalog/argocd-image-updater/resourceset.yaml)
+**accepted** · 2026-10-13 · [`oci/catalog/argocd-image-updater/resourceset.yaml`](../../oci/catalog/argocd-image-updater/resourceset.yaml)
 
 **Context.**
 
@@ -92,7 +92,7 @@ stays on its last override until the client removes it, whatever Git says.
 
 ## ARGOCD-IMAGE-UPDATER-04: On aws, a read-only role on the repositories named, its token refreshed by a script
 
-**proposed** · 2026-10-12 · [`oci/catalog/argocd-image-updater/resourceset.yaml`](../../oci/catalog/argocd-image-updater/resourceset.yaml), [`opentofu/bootstrap/variables.tf`](../../opentofu/bootstrap/variables.tf)
+**accepted** · 2026-10-13 · [`oci/catalog/argocd-image-updater/resourceset.yaml`](../../oci/catalog/argocd-image-updater/resourceset.yaml), [`opentofu/bootstrap/variables.tf`](../../opentofu/bootstrap/variables.tf)
 
 **Context.**
 
@@ -135,7 +135,7 @@ the cluster's region.
 
 ## ARGOCD-IMAGE-UPDATER-05: Elsewhere, the client's credential
 
-**proposed** · 2026-10-12 · [`oci/catalog/argocd-image-updater/resourceset.yaml`](../../oci/catalog/argocd-image-updater/resourceset.yaml)
+**accepted** · 2026-10-13 · [`oci/catalog/argocd-image-updater/resourceset.yaml`](../../oci/catalog/argocd-image-updater/resourceset.yaml)
 
 **Context.** The socle has Crossplane providers on aws only.
 
@@ -152,7 +152,7 @@ aws only.
 
 ## ARGOCD-IMAGE-UPDATER-06: The `ImageUpdater` CRD is kept
 
-**proposed** · 2026-10-12 · [`oci/catalog/argocd-image-updater/resourceset.yaml`](../../oci/catalog/argocd-image-updater/resourceset.yaml)
+**accepted** · 2026-10-13 · [`oci/catalog/argocd-image-updater/resourceset.yaml`](../../oci/catalog/argocd-image-updater/resourceset.yaml)
 
 **Context.** Deleting a CRD deletes every object of its kind: every
 `ImageUpdater` the client wrote.
@@ -170,7 +170,7 @@ automated: a cleanup job would touch the client's objects for a rare case.
 
 ## ARGOCD-IMAGE-UPDATER-07: The client's registries in an attribute, after the socle's
 
-**proposed** · 2026-10-12 · [`opentofu/bootstrap/catalog.tf`](../../opentofu/bootstrap/catalog.tf), [`opentofu/bootstrap/variables.tf`](../../opentofu/bootstrap/variables.tf), [`oci/catalog/argocd-image-updater/resourceset.yaml`](../../oci/catalog/argocd-image-updater/resourceset.yaml)
+**accepted** · 2026-10-13 · [`opentofu/bootstrap/catalog.tf`](../../opentofu/bootstrap/catalog.tf), [`opentofu/bootstrap/variables.tf`](../../opentofu/bootstrap/variables.tf), [`oci/catalog/argocd-image-updater/resourceset.yaml`](../../oci/catalog/argocd-image-updater/resourceset.yaml)
 
 **Context.**
 
