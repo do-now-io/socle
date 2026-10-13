@@ -108,8 +108,8 @@ repositories of the cluster's account and region (globs allowed). When it is
 not empty, the module declares through Crossplane:
 
 - a Role: `ecr:GetAuthorizationToken` on `*`; `ecr:ListImages`,
-  `ecr:DescribeImages` and `ecr:BatchGetImage` on
-  `arn:aws:ecr:<region>:<account>:repository/<name>` for each name;
+  `ecr:DescribeImages`, `ecr:BatchGetImage` and `ecr:GetDownloadUrlForLayer`
+  on `arn:aws:ecr:<region>:<account>:repository/<name>` for each name;
 - a Pod Identity association to `argocd-image-updater/argocd-image-updater`;
   the chart waits for both to be Ready.
 
@@ -124,9 +124,12 @@ the cluster's region.
 - The client adds `ecr` to the foundations' `aws.crossplane.allowed_services`;
   missing, the role fails at IAM.
 - Another account or region is not covered.
-- Measured on aws before this is accepted: whether `ecr:GetDownloadUrlForLayer`
-  is needed too (an update strategy that reads an image's configuration),
-  and whether the image's `aws` CLI takes Pod Identity credentials.
+- Measured on EKS (2026-10-13): the image's `aws` CLI takes the Pod
+  Identity credentials, and `semver` needs no more than the three reads.
+  `newest-build` also reads each image's config blob, for its creation date:
+  without `ecr:GetDownloadUrlForLayer` it skips every image, `AccessDenied`
+  in its error lines and `errors=0` in its summary. Granted, so that every
+  documented strategy works; still a read, on the same repositories.
 
 **Sources.** [ECR private registry authentication](https://docs.aws.amazon.com/AmazonECR/latest/userguide/registry_auth.html); [ECR actions and resources](https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazonelasticcontainerregistry.html); [Registries](https://argocd-image-updater.readthedocs.io/en/stable/configuration/registries/).
 
