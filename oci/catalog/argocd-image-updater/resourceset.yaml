@@ -138,13 +138,17 @@ spec:
     # token it returns reaches only what the role may read. The reads are on
     # the repositories the client named, in the registry of the cluster's
     # account and region, globs as written — never every repository.
+    # GetDownloadUrlForLayer reads an image's config blob, where the
+    # newest-build strategy finds its creation date: without it, that
+    # strategy skips every image, its summary line still saying errors=0
+    # (measured on EKS; docs/decisions/argocd-image-updater.md).
     << $arns := list ->>
     << range $m.repositories ->>
     << $arns = append $arns (printf "arn:aws:ecr:%s:%s:repository/%s" inputs.cluster.region inputs.cluster.accountId .) ->>
     << end ->>
     << $tokenCalls := list "ecr:GetAuthorizationToken" ->>
     << $token := dict "Sid" "GetTheRegistryToken" "Effect" "Allow" "Action" $tokenCalls "Resource" "*" ->>
-    << $readCalls := list "ecr:ListImages" "ecr:DescribeImages" "ecr:BatchGetImage" ->>
+    << $readCalls := list "ecr:ListImages" "ecr:DescribeImages" "ecr:BatchGetImage" "ecr:GetDownloadUrlForLayer" ->>
     << $read := dict "Sid" "ReadTheRepositoriesNamed" "Effect" "Allow" "Action" $readCalls "Resource" $arns ->>
     apiVersion: iam.aws.m.upbound.io/v1beta1
     kind: Role
@@ -291,11 +295,12 @@ spec:
                   aws ecr get-authorization-token --region << inputs.cluster.region >> \
                     --output text --query 'authorizationData[0].authorizationToken' | base64 -d
             << end >>
-            # The chart sets none; sized for an idle controller.
+            # The chart sets none. Measured on EKS with one Application watched:
+            # 2m CPU, 25Mi; the memory request leaves twice that.
             resources:
               requests:
                 cpu: 50m
-                memory: 128Mi
+                memory: 64Mi
       # The client's own chart values, as written in
       # kube.argocd_image_updater.values. OpenTofu refuses secrets and
       # config.registries in there.

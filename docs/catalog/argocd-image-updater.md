@@ -131,6 +131,9 @@ kube = {
   Each carries a finalizer only the controller removes: afterwards, deleting
   one, or the `argocd` namespace, hangs until you release it:
   `kubectl -n argocd patch imageupdater <name> --type merge -p '{"metadata":{"finalizers":[]}}'`.
+- **Read the controller's `level=error` lines, not its summary.** An image
+  it cannot read, for want of access, is counted as skipped: the summary
+  still says `errors=0`.
 - **Only `Application` objects in `argocd` are watched**, the namespace ArgoCD reads.
 - **`repositories` needs crossplane and aws.** `tofu plan` refuses it
   otherwise. It cannot see `aws.crossplane.allowed_services`: without `ecr`
@@ -175,8 +178,8 @@ hours; your `registries` follow it. Your `values` are merged over these.
 
 **Cloud access**: on aws, the role `<cluster>-argocd-image-updater` gets the
 registry token on `*`, which reaches only what the role may read, and
-`ListImages`, `DescribeImages` and `BatchGetImage` on the repositories named.
-Read-only.
+`ListImages`, `DescribeImages`, `BatchGetImage` and `GetDownloadUrlForLayer`
+on the repositories named. Read-only.
 
 **Ordering**: waits for the `argocd` and `crossplane` ResourceSets; on aws
 the chart waits for the role and its association.
