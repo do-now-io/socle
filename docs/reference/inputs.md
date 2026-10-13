@@ -50,6 +50,9 @@ module's namespace with a `values.yaml` key, merged last); not repeated below.
 | `argocd` | `domain` | `""` | the host ArgoCD is served at (`configs.cm.url` and the HTTPRoute), a lowercase FQDN; empty means no URL and no route |
 | `argocd` | `gateway` | `"private"` | the shared Gateway its HTTPRoute attaches to: `private`, `public`, or `""` for none |
 | `argocd` | `ha` | `false` | the chart's HA layout: Redis HA, two replicas of server, repo-server and applicationset |
+| `argocd_image_updater` | `enabled` | `false` | Argo CD Image Updater, watching `argocd`; refused while `argocd` is off |
+| `argocd_image_updater` | `repositories` | `[]` | aws only: the ECR repositories of the cluster's account and region its own read-only role may read, globs allowed, never `*` alone. Needs `crossplane` on and `ecr` in `aws.crossplane.allowed_services`. `[]`: no role, no registry entry |
+| `argocd_image_updater` | `registries` | `[]` | the client's other registries, as Image Updater's `registries.conf` writes them, after the socle's ECR entry; `credentials` a `secret:`, `pullsecret:`, `env:` or `ext:` reference. `config.registries` is refused in `values` |
 | `victoria_metrics` | `enabled` | `true` | VictoriaMetrics single-node, the metrics storage |
 | `victoria_metrics` | `retention` | `"15d"` | whole hours, days, weeks or years (`15d`, `4w`, `1y`), at least a day |
 | `victoria_metrics` | `storage_size` | `"20Gi"` | the claim on the default StorageClass, in `Gi` or `Ti`; `""` means no claim, an `emptyDir` |

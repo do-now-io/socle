@@ -121,6 +121,7 @@ The version is the upstream application's, pinned in the module.
 | Module | What it does | Version | Default | Clouds | Notes |
 | --- | --- | --- | :---: | --- | --- |
 | [`argocd`](docs/catalog/argocd.md) | GitOps for your applications. Flux runs the socle, and ArgoCD runs your apps | 3.5.3 | on | All | |
+| [`argocd_image_updater`](docs/catalog/argocd-image-updater.md) | New image tags in your registry reach your applications, without a commit | 1.3.0 | off | All | Needs `argocd`; on AWS, `crossplane` for its read-only ECR role (`repositories`) |
 
 ### Monitoring
 
@@ -157,7 +158,7 @@ The stack's design: [Observability](docs/architecture/observability.md).
 
 | Module | What it does | Version | Default | Clouds | Notes |
 | --- | --- | --- | :---: | --- | --- |
-| [`crossplane`](docs/catalog/crossplane.md) | Lets each module declare its own cloud IAM | 2.4.2 | off | All | Needed by `velero`, and on AWS by `external_dns`, `keda` (`services`) and `external_secrets` for their own roles |
+| [`crossplane`](docs/catalog/crossplane.md) | Lets each module declare its own cloud IAM | 2.4.2 | off | All | Needed by `velero`, and on AWS by `external_dns`, `keda` (`services`), `external_secrets` and `argocd_image_updater` (`repositories`) for their own roles |
 
 ### Autoscaling
 

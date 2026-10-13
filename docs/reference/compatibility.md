@@ -61,6 +61,7 @@ From each `oci/catalog/<module>/resourceset.yaml`. Offered is not proven: CI app
 | `crossplane` | `crossplane`, `https://charts.crossplane.io/stable` | `2.4.2` | v2.4.2; AWS providers v2.8.1 | all (providers on aws only) |
 | `external_dns` | `external-dns`, `https://kubernetes-sigs.github.io/external-dns/` | `1.22.0` | 0.22.0 | all |
 | `argocd` | `argo-cd`, `oci://ghcr.io/argoproj/argo-helm` | `10.9.2` | v3.5.3 | all |
+| `argocd_image_updater` | `argocd-image-updater`, `oci://ghcr.io/argoproj/argo-helm` | `1.3.1` | v1.3.0 | all (`repositories` on aws only) |
 | `victoria_metrics` | `victoria-metrics-single`, `oci://ghcr.io/victoriametrics/helm-charts` | `0.48.0` | v1.153.0 | all |
 | `otel_agent` | `opentelemetry-collector`, `oci://ghcr.io/open-telemetry/opentelemetry-helm-charts` | `0.173.1` | 0.160.0 | all |
 | `otel_gateway` | `opentelemetry-collector`, same | `0.173.1` | 0.160.0 | all |

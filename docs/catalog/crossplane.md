@@ -8,7 +8,8 @@ requires: []
 Crossplane is the tooling a module that needs a cloud service uses to declare
 its own role, beside its workload. It grants nothing by itself. **Off by
 default**; turn it on when a module you want needs cloud access (external-dns,
-external-secrets, keda with `services`, velero). Providers exist on aws only.
+external-secrets, keda with `services`, velero, argocd-image-updater with
+`repositories`). Providers exist on aws only.
 
 ## Getting started
 
