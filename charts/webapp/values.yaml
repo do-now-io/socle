@@ -1,0 +1,415 @@
+# webapp is the entry point for a client to deploy a web application that runs
+# continuously and serves HTTP: its Deployment, its Service, its route, and the
+# secrets that are its own. It applies the socle's conventions, so that the
+# catalog's modules work with no configuration, and it complies with the
+# Kyverno policies by construction.
+#
+# It is not for scheduled tasks (that is cronjob), nor for applications that
+# keep state (databases, StatefulSet), nor for creating secrets shared by
+# several applications.
+
+# The application's container image, rendered as registry/repository:tag or
+# registry/repository@digest. Exactly one of tag and digest is set.
+image:
+  # The registry the image is pulled from. Required.
+  # Example: europe-west1-docker.pkg.dev/my-project
+  registry:
+  # The image's repository in that registry. Required.
+  # Example: my-app
+  repository:
+  # The version to run: any tag but latest. Refused if digest is set too.
+  # Example: 1.0.0
+  tag:
+  # The image's digest, which pins one exact image: unlike a tag, nobody can
+  # move it to another image. Refused if tag is set too.
+  # Example: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+  digest:
+  # When the node pulls the image: Always asks the registry each time a pod
+  # starts, so a pod that starts takes the image last pushed under the same
+  # tag. Running pods are never updated: until they restart, they keep the
+  # image they started with.
+  pullPolicy: Always
+  # Secrets holding the credentials of a private registry, by name. webapp
+  # does not create them: they must exist in the application's namespace.
+  # Example: [{name: regcred}]
+  imagePullSecrets: []
+
+# Environment variables shared by several applications, in the same form as
+# env below: for a values file every application loads, while env stays the
+# application's own. Helm replaces a list instead of merging it, so one env in
+# both files would keep only the last; the chart puts commonEnv first and env
+# after it, and where both name the same variable, env wins.
+# Example:
+#   - name: MAIL_FROM
+#     value: contact@example.com
+commonEnv: []
+
+# The application's environment variables, in Kubernetes' own form: a value,
+# or a key read from a ConfigMap or a Secret that already exists.
+# Example:
+#   - name: LOG_LEVEL
+#     value: info
+#   - name: DATABASE_URL
+#     valueFrom:
+#       secretKeyRef: {name: my-database, key: url}
+env: []
+
+# The port the application listens on. Required: no default, every
+# application has its own. The Service sends the traffic to it, and the
+# container names it http, so that a probe can target port: http.
+# Example: 8080
+port:
+
+# How Kubernetes knows the application is alive: when this check fails, the
+# container is restarted. Required: no default, every application answers on
+# its own path.
+# Example:
+#   httpGet:
+#     path: /health
+#     port: http
+livenessProbe:
+
+# How Kubernetes knows the application can take traffic: while this check
+# fails, the Service sends the pod nothing. Required, like livenessProbe.
+# Example:
+#   httpGet:
+#     path: /health
+#     port: http
+readinessProbe:
+
+# The CPU and memory of the container, in Kubernetes' own form: whatever is
+# set here is copied to the container as is, ephemeral-storage included.
+resources:
+  # What the container is guaranteed: a pod is only placed on a node that has
+  # this much left. Required, CPU and memory: no default, every application
+  # needs its own, and the socle's require-requests policy refuses a container
+  # without them.
+  requests:
+    # In cores: 1 is a whole core, 250m a quarter of one.
+    # Example: 250m
+    cpu:
+    # Example: 256Mi
+    memory:
+  # The ceiling the container cannot go past. Optional, none by default. Over
+  # its memory limit the container is killed (OOMKilled) and restarted; over
+  # its CPU limit it is only slowed down. Without a CPU limit, it can use the
+  # node's idle CPU beyond its request.
+  # Example:
+  #   memory: 256Mi
+  limits: {}
+
+# The rights the application runs with. The chart always renders the Pod
+# Security restricted profile, which no value here can loosen: not root,
+# every capability dropped, no privilege escalation, the RuntimeDefault
+# seccomp profile, and a read-only root filesystem with an emptyDir mounted
+# on /tmp, the one directory most applications write to. These values only
+# tighten it.
+securityContext:
+  # The user the application runs as, by number. Required: the chart does not
+  # guess, and the kubelet refuses to start a container that would run as
+  # root, or whose image names its user without a number. Never 0 (root).
+  # Example: 1000
+  runAsUser:
+  # The group the application runs as, by number. Optional: unset, the image's
+  # own group. Never 0 (root).
+  # runAsGroup: 1000
+  # The group given to the files of the volumes the pod mounts, so that the
+  # application can write to them. Optional: only needed when it writes to a
+  # volume.
+  # fsGroup: 1000
+  # Adds NET_BIND_SERVICE, the one capability allowed back: it lets the
+  # application listen on a port under 1024, such as 80. Off by default.
+  netBindService: false
+
+# The application's HTTPRoutes: how traffic from outside the cluster reaches
+# it, through a Gateway. None by default: the application is then reachable
+# from inside the cluster only, through its Service. Each route takes:
+#   name        required, unique among the routes: the HTTPRoute is named
+#               <release>-<name>.
+#   parentRefs  required, Gateway API's own: the Gateways the route attaches
+#               to, each by name, namespace and listener (sectionName). No
+#               default: the Gateways' names and namespaces differ per cluster.
+#               Without namespace, the Gateway is looked for in the
+#               application's namespace.
+#   hostnames   the domain names the route answers for; external-dns
+#               publishes them. Empty, the route takes every request the
+#               Gateway receives.
+#   rules       Gateway API's own, copied as is. The chart adds the backendRefs
+#               to the application's Service: they are refused here.
+# Example: the API on the public Gateway, the admin pages on the private one.
+#   - name: api
+#     parentRefs:
+#       - name: public
+#         namespace: gateway-system
+#         sectionName: https
+#     hostnames: [app.example.com]
+#     rules:
+#       - matches:
+#           - path:
+#               type: PathPrefix
+#               value: /api
+#   - name: admin
+#     parentRefs:
+#       - name: private
+#         namespace: gateway-system
+#         sectionName: https
+#     hostnames: [app.internal.example.com]
+#     rules:
+#       - matches:
+#           - path:
+#               type: PathPrefix
+#               value: /admin
+routes: []
+
+# Secrets and ConfigMaps shared by several applications, every key as an
+# environment variable, in the same form as envFrom below: for a values file
+# every application loads, while envFrom stays the application's own. As
+# with commonEnv, the chart puts commonEnvFrom first and envFrom after it.
+# Example:
+#   - secretRef:
+#       name: shared-database
+commonEnvFrom: []
+
+# Every key of a Secret or a ConfigMap as an environment variable, in
+# Kubernetes' own form. The object must exist: one the chart creates (below)
+# is named <release>-<name>.
+# Example: every key of my-database, and every key of the chart's own
+# ConfigMap config in release shop, each prefixed with CFG_.
+#   - secretRef:
+#       name: my-database
+#   - configMapRef:
+#       name: shop-config
+#     prefix: CFG_
+envFrom: []
+
+# The volumes plugged into the pod, in Kubernetes' own form; volumeMounts
+# below shows them in the container, matched by name. Allowed types, the Pod
+# Security restricted ones: configMap, secret, emptyDir, projected,
+# downwardAPI. The chart already plugs in an emptyDir named tmp, for /tmp.
+# The object a volume reads must exist, or the pod stays in
+# ContainerCreating: one the chart creates (below) is named <release>-<name>.
+# Example: the chart's own ConfigMap config in release shop, and an existing
+# Secret holding a key file.
+#   - name: config
+#     configMap:
+#       name: shop-config
+#   - name: credentials
+#     secret:
+#       secretName: my-credentials
+volumes: []
+
+# Where the container shows the volumes above, in Kubernetes' own form. A
+# volume mounted on a directory hides what the image has there; subPath
+# mounts one key as one file and leaves the rest of the directory as is.
+# Example: the whole ConfigMap in /config, one of its keys over the image's
+# logback.xml, and the key file in /secret.
+#   - name: config
+#     mountPath: /config
+#   - name: config
+#     mountPath: /opt/app/conf/logback.xml
+#     subPath: logback.xml
+#   - name: credentials
+#     mountPath: /secret
+#     readOnly: true
+volumeMounts: []
+
+# The ConfigMaps the chart creates, each named <release>-<name>: shop-config
+# for name config in release shop. Read them like any other, through env,
+# envFrom or volumes above. Under data, each key holds text only: quote what
+# YAML would read as a boolean or a number ("false", "8080"); a whole file
+# goes after |.
+# Example: two ConfigMaps, shop-config with two keys, shop-templates with one.
+#   - name: config
+#     data:
+#       APP_DEBUG: "false"
+#       logback.xml: |
+#         <configuration>
+#           ...
+#         </configuration>
+#   - name: templates
+#     data:
+#       welcome.html: |
+#         <h1>Hello</h1>
+configMaps: []
+
+# The Secrets the chart creates from values in plaintext, each named
+# <release>-<name>: shop-api-key for name api-key in release shop. Read them
+# like any other, through env, envFrom or volumes above. Under stringData, the
+# values in plaintext, text only, as in configMaps; Kubernetes encodes them.
+# These values sit in plaintext wherever the values file is, Git included:
+# prefer externalSecrets below when a secret manager is available.
+# Only for a secret this application alone reads. A Secret several
+# applications read is created once, outside the charts: created by each
+# application, it would have one owner per application, each sync
+# overwriting the others, and deleting one application would delete it for
+# every other.
+# Example:
+#   - name: api-key
+#     stringData:
+#       API_KEY: change-me
+secrets: []
+
+# The ExternalSecrets the chart creates: each asks external-secrets to read
+# values from a secret manager and write them to a Secret named
+# <release>-<name>, shop-database for name database in release shop. Read
+# that Secret like any other, through env, envFrom or volumes above. Only the
+# way to fetch the values sits in the values file, never the values.
+# Each takes, in External Secrets' own form:
+#   name            required, unique among them.
+#   secretStoreRef  required, no default: the store to read from, a
+#                   SecretStore in the namespace or a ClusterSecretStore. The
+#                   socle's own, where the cluster has one, is the
+#                   ClusterSecretStore secret-manager.
+#   data            required: one entry per value, secretKey its key in the
+#                   Secret, remoteRef where it is in the secret manager (key,
+#                   and property for one field of a JSON secret).
+# The Secret's name is the chart's: no target here.
+# Example: the password field of the JSON secret shop/db, as the key
+# DB_PASSWORD of shop-database.
+#   - name: database
+#     secretStoreRef:
+#       kind: SecretStore
+#       name: my-store
+#     data:
+#       - secretKey: DB_PASSWORD
+#         remoteRef:
+#           key: shop/db
+#           property: password
+externalSecrets: []
+
+# The PersistentVolumeClaims the chart creates: disks that outlive the pods,
+# each named <release>-<name>, shop-data for name data in release shop. Read
+# them like any other volume: a persistentVolumeClaim volume in volumes above,
+# claimName shop-data, and its mount in volumeMounts. Each takes:
+#   name              required, unique among them.
+#   size              required: the disk's size, such as 10Gi.
+#   accessModes       ReadWriteOnce by default, the one mode every cluster's
+#                     default class serves: the disk attaches to one node at a
+#                     time. With it, keep one replica: pods on other nodes
+#                     cannot attach it. ReadWriteMany shares it between nodes,
+#                     where storageClassName names a class that serves it.
+#   storageClassName  optional: unset, the cluster's default class.
+#   keep              true by default: the disk and its data stay when the
+#                     application is deleted, and stay billed until deleted
+#                     by hand. false deletes them with it.
+# Example:
+#   - name: data
+#     size: 10Gi
+persistence: []
+
+# The application's own ServiceAccount, named <release>: the identity its
+# pods run as, to which rights in the cluster or in the cloud are granted.
+serviceAccount:
+  # Mounts the ServiceAccount's token, the credential to the Kubernetes API,
+  # in the pod. Off by default: most applications never call the API, and a
+  # mounted token is one an attacker who takes the application could use.
+  # Turn it on only for an application that does.
+  automountServiceAccountToken: false
+  # Annotations on the ServiceAccount, copied as is: how some platforms bind
+  # it to a cloud identity.
+  # Example, GKE's Workload Identity through a Google service account:
+  #   iam.gke.io/gcp-service-account: my-app@my-project.iam.gserviceaccount.com
+  annotations: {}
+
+# Which nodes the pods may run on, in Kubernetes' own form: nodeSelector
+# requires node labels, tolerations accept node taints, affinity requires or
+# prefers. Copied as is: the labels and taints are the platform's, the chart
+# names none. Unset, any node.
+# Example, spot nodes on GKE: preferred, accepted, with standard nodes as a
+# fallback.
+#   tolerations:
+#     - key: cloud.google.com/gke-spot
+#       operator: Equal
+#       value: "true"
+#       effect: NoSchedule
+#   affinity:
+#     nodeAffinity:
+#       preferredDuringSchedulingIgnoredDuringExecution:
+#         - weight: 100
+#           preference:
+#             matchExpressions:
+#               - key: cloud.google.com/gke-spot
+#                 operator: In
+#                 values: ["true"]
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# The chart spreads the replicas across nodes and across zones, so that
+# losing one node or one zone does not take every replica at once.
+topologySpread:
+  # ScheduleAnyway, the default, makes the spread a preference the scheduler
+  # drops when it cannot meet it. DoNotSchedule makes it a requirement: a
+  # replica waits Pending until a node or a zone that meets it is there.
+  whenUnsatisfiable: ScheduleAnyway
+
+# The number of pods while autoscaling is off. With autoscaling on, the
+# HorizontalPodAutoscaler sets it in the cluster and the Deployment is
+# rendered without it: this value then has no effect.
+replicas: 1
+
+# A HorizontalPodAutoscaler, which adds pods when their CPU use passes the
+# target and removes them when it falls back, between minReplicas and
+# maxReplicas.
+autoscaling:
+  # Off by default. A switch rather than an empty object, so that a values
+  # file can turn off what another one turned on.
+  enabled: false
+  # Two by default, so that the application runs on while one pod is
+  # replaced, and the podDisruptionBudget below applies.
+  minReplicas: 2
+  maxReplicas: 10
+  # The target, as a percentage of the CPU the pods request
+  # (resources.requests.cpu).
+  targetCPUUtilizationPercentage: 70
+
+# A PodDisruptionBudget: when a node is emptied, for an upgrade or to pack
+# pods onto fewer nodes, no more than maxUnavailable pods are evicted at once.
+# Rendered only when at least two pods are guaranteed (replicas, or
+# autoscaling.minReplicas when autoscaling is on): with one pod, it would
+# either protect nothing or block every node drain.
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+
+# How a new version replaces the running pods, in Kubernetes' own form.
+# RollingUpdate, the default, starts new pods before it stops old ones: no
+# downtime. Recreate stops every old pod first, a short downtime: the one
+# that works with a ReadWriteOnce disk in persistence, which an old pod on
+# another node would still hold.
+# Example:
+#   type: RollingUpdate
+#   rollingUpdate:
+#     maxSurge: 25%
+#     maxUnavailable: 0
+strategy:
+  type: RollingUpdate
+
+# The container's command and its arguments, in Kubernetes' own form: command
+# replaces the image's entrypoint, args its arguments. Empty, the image's own.
+# Example:
+#   command: [java]
+#   args: [-jar, /app/app.jar, --port=8080]
+command: []
+args: []
+
+# Reloader rolls the pods when a ConfigMap or a Secret they read changes: the
+# chart annotates the Deployment with reloader.stakater.com/auto when it reads
+# at least one, through env, envFrom or volumes. On by default.
+reloader:
+  enabled: true
+
+# The application's metrics, for the socle's collector: on, the chart
+# annotates the pods with prometheus.io/scrape, port and path, and the
+# collector scrapes them. Off by default.
+metrics:
+  enabled: false
+  # The port the metrics are served on. Optional: unset, the application's
+  # port above.
+  # port: 9090
+  path: /metrics
+
+# How long a stopping pod has to finish its work, in seconds, between the
+# signal that asks it to stop (SIGTERM) and the one that kills it (SIGKILL). A
+# maximum: a pod that exits sooner is gone sooner. Kubernetes' own default.
+terminationGracePeriodSeconds: 30
