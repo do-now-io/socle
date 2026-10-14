@@ -1,0 +1,13 @@
+# The fewest values cronjob renders with: every required key, nothing else.
+schedule: "0 3 * * *"
+activeDeadlineSeconds: 3600
+image:
+  registry: ghcr.io/acme
+  repository: billing
+  tag: 1.0.0
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+securityContext:
+  runAsUser: 1000

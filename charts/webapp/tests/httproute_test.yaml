@@ -1,0 +1,141 @@
+suite: httproute
+templates:
+  - httproute.yaml
+release:
+  name: shop
+  namespace: shop
+values:
+  - ../ci/minimal-values.yaml
+tests:
+  - it: renders no route by default
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders one HTTPRoute per route, named <release>-<name>
+    values:
+      - ../ci/full-values.yaml
+    asserts:
+      - hasDocuments:
+          count: 2
+      - isKind:
+          of: HTTPRoute
+      - isAPIVersion:
+          of: gateway.networking.k8s.io/v1
+      - equal:
+          path: metadata.name
+          value: shop-api
+        documentIndex: 0
+      - equal:
+          path: metadata.name
+          value: shop-admin
+        documentIndex: 1
+      - isSubset:
+          path: metadata.labels
+          content:
+            app.kubernetes.io/name: shop
+            app.kubernetes.io/instance: shop
+            app.kubernetes.io/component: webapp
+
+  - it: copies the parentRefs and the hostnames as written
+    set:
+      routes:
+        - name: api
+          parentRefs:
+            - name: public
+              namespace: gateway-system
+              sectionName: https
+          hostnames: [app.example.com, www.example.com]
+          rules:
+            - matches:
+                - path:
+                    type: PathPrefix
+                    value: /api
+    asserts:
+      - equal:
+          path: spec.parentRefs
+          value:
+            - name: public
+              namespace: gateway-system
+              sectionName: https
+      - equal:
+          path: spec.hostnames
+          value: [app.example.com, www.example.com]
+
+  - it: renders no hostnames when none is set
+    set:
+      routes:
+        - name: api
+          parentRefs:
+            - name: private
+          rules:
+            - matches:
+                - path:
+                    type: PathPrefix
+                    value: /
+    asserts:
+      - notExists:
+          path: spec.hostnames
+
+  - it: copies each rule and adds the application's Service as its backend
+    set:
+      port: 9000
+      routes:
+        - name: api
+          parentRefs:
+            - name: public
+              namespace: gateway-system
+          rules:
+            - matches:
+                - path:
+                    type: PathPrefix
+                    value: /api
+              filters:
+                - type: RequestHeaderModifier
+                  requestHeaderModifier:
+                    set:
+                      - name: X-Env
+                        value: prod
+            - matches:
+                - method: GET
+                  path:
+                    type: Exact
+                    value: /status
+    asserts:
+      - equal:
+          path: spec.rules
+          value:
+            - matches:
+                - path:
+                    type: PathPrefix
+                    value: /api
+              filters:
+                - type: RequestHeaderModifier
+                  requestHeaderModifier:
+                    set:
+                      - name: X-Env
+                        value: prod
+              backendRefs:
+                - name: shop
+                  port: 9000
+            - matches:
+                - method: GET
+                  path:
+                    type: Exact
+                    value: /status
+              backendRefs:
+                - name: shop
+                  port: 9000
+
+  - it: refuses two routes with the same name
+    set:
+      routes:
+        - name: api
+          parentRefs: [{name: public}]
+          rules: [{matches: [{path: {type: PathPrefix, value: /}}]}]
+        - name: api
+          parentRefs: [{name: private}]
+          rules: [{matches: [{path: {type: PathPrefix, value: /}}]}]
+    asserts:
+      - failedTemplate:
+          errorPattern: "routes: two named api"

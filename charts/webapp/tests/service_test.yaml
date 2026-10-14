@@ -1,0 +1,56 @@
+suite: service
+templates:
+  - service.yaml
+release:
+  name: shop
+  namespace: shop
+values:
+  - ../ci/minimal-values.yaml
+tests:
+  - it: renders one ClusterIP Service named after the release
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: Service
+      - isAPIVersion:
+          of: v1
+      - equal:
+          path: metadata.name
+          value: shop
+      - equal:
+          path: spec.type
+          value: ClusterIP
+
+  - it: labels the Service and selects the Deployment's pods
+    asserts:
+      - isSubset:
+          path: metadata.labels
+          content:
+            app.kubernetes.io/name: shop
+            app.kubernetes.io/instance: shop
+            app.kubernetes.io/component: webapp
+            app.kubernetes.io/managed-by: Helm
+      - equal:
+          path: spec.selector
+          value:
+            app.kubernetes.io/name: shop
+            app.kubernetes.io/instance: shop
+
+  - it: sends the traffic to the container's port, by its name
+    asserts:
+      - equal:
+          path: spec.ports
+          value:
+            - name: http
+              port: 8080
+              targetPort: http
+              protocol: TCP
+
+  - it: exposes the port the application listens on
+    set:
+      port: 9000
+    asserts:
+      - equal:
+          path: spec.ports[0].port
+          value: 9000

@@ -1,0 +1,438 @@
+suite: cronjob
+templates:
+  - cronjob.yaml
+release:
+  name: billing
+  namespace: billing
+values:
+  - ../ci/minimal-values.yaml
+tests:
+  # Defaults: what every client gets without asking.
+  - it: renders one CronJob named after the release
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: CronJob
+      - isAPIVersion:
+          of: batch/v1
+      - equal:
+          path: metadata.name
+          value: billing
+
+  - it: labels the CronJob and the Job's pods
+    asserts:
+      - isSubset:
+          path: metadata.labels
+          content:
+            app.kubernetes.io/name: billing
+            app.kubernetes.io/instance: billing
+            app.kubernetes.io/component: cronjob
+            app.kubernetes.io/managed-by: Helm
+      - matchRegex:
+          path: metadata.labels["helm.sh/chart"]
+          pattern: ^cronjob-
+      - isSubset:
+          path: spec.jobTemplate.spec.template.metadata.labels
+          content:
+            app.kubernetes.io/name: billing
+            app.kubernetes.io/instance: billing
+            app.kubernetes.io/component: cronjob
+
+  - it: runs on the schedule, in UTC, one run at a time, keeping 3 successes and 1 failure
+    asserts:
+      - equal:
+          path: spec.schedule
+          value: "0 3 * * *"
+      - equal:
+          path: spec.timeZone
+          value: Etc/UTC
+      - equal:
+          path: spec.suspend
+          value: false
+      - equal:
+          path: spec.concurrencyPolicy
+          value: Forbid
+      - equal:
+          path: spec.successfulJobsHistoryLimit
+          value: 3
+      - equal:
+          path: spec.failedJobsHistoryLimit
+          value: 1
+      - notExists:
+          path: spec.startingDeadlineSeconds
+
+  - it: never retries a failed Job, never restarts its container, and stops it at its deadline
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.backoffLimit
+          value: 0
+      - equal:
+          path: spec.jobTemplate.spec.activeDeadlineSeconds
+          value: 3600
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.restartPolicy
+          value: Never
+
+  - it: runs as the release's own ServiceAccount, its token not mounted
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.serviceAccountName
+          value: billing
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.automountServiceAccountToken
+          value: false
+
+  - it: renders the restricted profile on the pod
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.securityContext
+          value:
+            runAsNonRoot: true
+            runAsUser: 1000
+            seccompProfile:
+              type: RuntimeDefault
+
+  - it: renders the restricted profile on the container, read-only root filesystem included
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].securityContext
+          value:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+
+  - it: runs one container, the image fully qualified with its tag
+    asserts:
+      - lengthEqual:
+          path: spec.jobTemplate.spec.template.spec.containers
+          count: 1
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].name
+          value: app
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].image
+          value: ghcr.io/acme/billing:1.0.0
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].imagePullPolicy
+          value: Always
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].resources
+          value:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+
+  - it: mounts an emptyDir on /tmp, and nothing else
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.volumes
+          value:
+            - name: tmp
+              emptyDir: {}
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].volumeMounts
+          value:
+            - name: tmp
+              mountPath: /tmp
+
+  - it: renders none of webapp's, and nothing the client did not set
+    asserts:
+      - notExists:
+          path: spec.jobTemplate.spec.template.spec.containers[0].ports
+      - notExists:
+          path: spec.jobTemplate.spec.template.spec.containers[0].livenessProbe
+      - notExists:
+          path: spec.jobTemplate.spec.template.spec.containers[0].readinessProbe
+      - notExists:
+          path: spec.jobTemplate.spec.template.spec.topologySpreadConstraints
+      - notExists:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+      - notExists:
+          path: spec.jobTemplate.spec.template.spec.containers[0].envFrom
+      - notExists:
+          path: spec.jobTemplate.spec.template.spec.containers[0].command
+      - notExists:
+          path: spec.jobTemplate.spec.template.spec.containers[0].args
+      - notExists:
+          path: spec.jobTemplate.spec.template.spec.nodeSelector
+      - notExists:
+          path: spec.jobTemplate.spec.template.spec.tolerations
+      - notExists:
+          path: spec.jobTemplate.spec.template.spec.affinity
+      - notExists:
+          path: spec.jobTemplate.spec.template.spec.imagePullSecrets
+
+  - it: leaves Kubernetes' 30 seconds to stop
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.terminationGracePeriodSeconds
+          value: 30
+
+  # The task's own keys.
+  - it: renders the schedule and its time zone
+    set:
+      schedule: "30 9 * * 1-5"
+      timeZone: Europe/Paris
+    asserts:
+      - equal:
+          path: spec.schedule
+          value: "30 9 * * 1-5"
+      - equal:
+          path: spec.timeZone
+          value: Europe/Paris
+
+  - it: suspends the task
+    set:
+      suspend: true
+    asserts:
+      - equal:
+          path: spec.suspend
+          value: true
+
+  - it: renders the concurrency policy and the history kept
+    set:
+      concurrencyPolicy: Replace
+      successfulJobsHistoryLimit: 5
+      failedJobsHistoryLimit: 2
+    asserts:
+      - equal:
+          path: spec.concurrencyPolicy
+          value: Replace
+      - equal:
+          path: spec.successfulJobsHistoryLimit
+          value: 5
+      - equal:
+          path: spec.failedJobsHistoryLimit
+          value: 2
+
+  - it: renders how late a missed run may start
+    set:
+      startingDeadlineSeconds: 600
+    asserts:
+      - equal:
+          path: spec.startingDeadlineSeconds
+          value: 600
+
+  - it: renders the retries, the deadline and the restart policy
+    set:
+      backoffLimit: 2
+      activeDeadlineSeconds: 7200
+      restartPolicy: OnFailure
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.backoffLimit
+          value: 2
+      - equal:
+          path: spec.jobTemplate.spec.activeDeadlineSeconds
+          value: 7200
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.restartPolicy
+          value: OnFailure
+
+  # The shared pod spec, asserted here as in webapp's suite.
+  - it: renders a digest after @ instead of a tag
+    set:
+      image:
+        tag: null
+        digest: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].image
+          value: ghcr.io/acme/billing@sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+
+  - it: sets the pull policy and the pull secrets
+    set:
+      image:
+        pullPolicy: IfNotPresent
+        imagePullSecrets:
+          - name: regcred
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].imagePullPolicy
+          value: IfNotPresent
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.imagePullSecrets
+          value:
+            - name: regcred
+
+  - it: puts commonEnv first and env after it, so that env wins
+    set:
+      commonEnv:
+        - name: MAIL_FROM
+          value: shared@example.com
+      env:
+        - name: MAIL_FROM
+          value: billing@example.com
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          value:
+            - name: MAIL_FROM
+              value: shared@example.com
+            - name: MAIL_FROM
+              value: billing@example.com
+
+  - it: puts commonEnvFrom first and envFrom after it
+    set:
+      commonEnvFrom:
+        - secretRef:
+            name: shared-database
+      envFrom:
+        - configMapRef:
+            name: billing-config
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].envFrom
+          value:
+            - secretRef:
+                name: shared-database
+            - configMapRef:
+                name: billing-config
+
+  - it: copies limits and ephemeral-storage as written
+    set:
+      resources:
+        requests:
+          ephemeral-storage: 1Gi
+        limits:
+          memory: 2Gi
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].resources
+          value:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+              ephemeral-storage: 1Gi
+            limits:
+              memory: 2Gi
+
+  - it: tightens the pod with a group and a volume group
+    set:
+      securityContext:
+        runAsGroup: 2000
+        fsGroup: 3000
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.securityContext
+          value:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 2000
+            fsGroup: 3000
+            seccompProfile:
+              type: RuntimeDefault
+
+  - it: adds NET_BIND_SERVICE back, and only it, when asked
+    set:
+      securityContext:
+        netBindService: true
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].securityContext.capabilities
+          value:
+            drop: [ALL]
+            add: [NET_BIND_SERVICE]
+
+  - it: plugs the client's volumes in after /tmp, and mounts them
+    set:
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: billing-data
+      volumeMounts:
+        - name: data
+          mountPath: /data
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.volumes
+          value:
+            - name: tmp
+              emptyDir: {}
+            - name: data
+              persistentVolumeClaim:
+                claimName: billing-data
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].volumeMounts
+          value:
+            - name: tmp
+              mountPath: /tmp
+            - name: data
+              mountPath: /data
+
+  - it: mounts the token when asked
+    set:
+      serviceAccount:
+        automountServiceAccountToken: true
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.automountServiceAccountToken
+          value: true
+
+  - it: copies the placement as written
+    set:
+      nodeSelector:
+        kubernetes.io/arch: arm64
+      tolerations:
+        - key: example.com/batch
+          operator: Exists
+          effect: NoSchedule
+      affinity:
+        nodeAffinity: {}
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.nodeSelector
+          value:
+            kubernetes.io/arch: arm64
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.tolerations
+          value:
+            - key: example.com/batch
+              operator: Exists
+              effect: NoSchedule
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.affinity
+          value:
+            nodeAffinity: {}
+
+  - it: replaces the image's command and arguments
+    set:
+      command: [/app/bill]
+      args: [--month=current]
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].command
+          value: [/app/bill]
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].args
+          value: [--month=current]
+
+  - it: renders the time left to stop
+    set:
+      terminationGracePeriodSeconds: 25
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.terminationGracePeriodSeconds
+          value: 25
+
+  - it: does not ask Reloader, since every run starts a new pod
+    set:
+      envFrom:
+        - secretRef:
+            name: billing-database
+    asserts:
+      - notExists:
+          path: metadata.annotations
+
+  # Everything on: the CronJob still holds together.
+  - it: renders with every value set
+    values:
+      - ../ci/full-values.yaml
+    asserts:
+      - isKind:
+          of: CronJob
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.restartPolicy
+          value: OnFailure

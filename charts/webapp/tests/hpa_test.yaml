@@ -1,0 +1,83 @@
+suite: hpa
+templates:
+  - hpa.yaml
+release:
+  name: shop
+  namespace: shop
+values:
+  - ../ci/minimal-values.yaml
+tests:
+  - it: renders no HorizontalPodAutoscaler by default
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: scales the Deployment between 2 and 10 pods on 70% of the CPU requested when on
+    set:
+      autoscaling:
+        enabled: true
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: HorizontalPodAutoscaler
+      - isAPIVersion:
+          of: autoscaling/v2
+      - equal:
+          path: metadata.name
+          value: shop
+      - equal:
+          path: spec.scaleTargetRef
+          value:
+            apiVersion: apps/v1
+            kind: Deployment
+            name: shop
+      - equal:
+          path: spec.minReplicas
+          value: 2
+      - equal:
+          path: spec.maxReplicas
+          value: 10
+      - equal:
+          path: spec.metrics
+          value:
+            - type: Resource
+              resource:
+                name: cpu
+                target:
+                  type: Utilization
+                  averageUtilization: 70
+      - isSubset:
+          path: metadata.labels
+          content:
+            app.kubernetes.io/name: shop
+            app.kubernetes.io/instance: shop
+            app.kubernetes.io/component: webapp
+
+  - it: renders the bounds and the target set
+    set:
+      autoscaling:
+        enabled: true
+        minReplicas: 3
+        maxReplicas: 6
+        targetCPUUtilizationPercentage: 80
+    asserts:
+      - equal:
+          path: spec.minReplicas
+          value: 3
+      - equal:
+          path: spec.maxReplicas
+          value: 6
+      - equal:
+          path: spec.metrics[0].resource.target.averageUtilization
+          value: 80
+
+  - it: refuses a minimum above the maximum
+    set:
+      autoscaling:
+        enabled: true
+        minReplicas: 5
+        maxReplicas: 3
+    asserts:
+      - failedTemplate:
+          errorPattern: "autoscaling: minReplicas 5 is above maxReplicas 3"

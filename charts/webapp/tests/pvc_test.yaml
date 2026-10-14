@@ -1,0 +1,93 @@
+suite: pvc
+templates:
+  - pvc.yaml
+release:
+  name: shop
+  namespace: shop
+values:
+  - ../ci/minimal-values.yaml
+tests:
+  - it: renders no PersistentVolumeClaim by default
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders one claim per entry, named <release>-<name>, ReadWriteOnce on the default class
+    set:
+      persistence:
+        - name: data
+          size: 10Gi
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: PersistentVolumeClaim
+      - isAPIVersion:
+          of: v1
+      - equal:
+          path: metadata.name
+          value: shop-data
+      - equal:
+          path: spec.accessModes
+          value: [ReadWriteOnce]
+      - equal:
+          path: spec.resources
+          value:
+            requests:
+              storage: 10Gi
+      - notExists:
+          path: spec.storageClassName
+      - isSubset:
+          path: metadata.labels
+          content:
+            app.kubernetes.io/name: shop
+            app.kubernetes.io/instance: shop
+            app.kubernetes.io/component: webapp
+
+  - it: keeps the disk when the release or the Application is deleted, by default
+    set:
+      persistence:
+        - name: data
+          size: 10Gi
+    asserts:
+      - equal:
+          path: metadata.annotations
+          value:
+            helm.sh/resource-policy: keep
+            argocd.argoproj.io/sync-options: Delete=false
+
+  - it: deletes the disk with the application when keep is false
+    set:
+      persistence:
+        - name: data
+          size: 10Gi
+          keep: false
+    asserts:
+      - notExists:
+          path: metadata.annotations
+
+  - it: sets the access modes and the class
+    set:
+      persistence:
+        - name: shared
+          size: 50Gi
+          accessModes: [ReadWriteMany]
+          storageClassName: files
+    asserts:
+      - equal:
+          path: spec.accessModes
+          value: [ReadWriteMany]
+      - equal:
+          path: spec.storageClassName
+          value: files
+
+  - it: refuses two disks with the same name
+    set:
+      persistence:
+        - name: data
+          size: 1Gi
+        - name: data
+          size: 2Gi
+    asserts:
+      - failedTemplate:
+          errorPattern: "persistence: two named data"
