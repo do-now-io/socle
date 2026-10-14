@@ -1,0 +1,625 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "cronjob",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schedule",
+    "activeDeadlineSeconds",
+    "image",
+    "resources",
+    "securityContext"
+  ],
+  "properties": {
+    "schedule": {
+      "type": "string",
+      "minLength": 9
+    },
+    "timeZone": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*$"
+    },
+    "suspend": {
+      "type": "boolean"
+    },
+    "concurrencyPolicy": {
+      "enum": [
+        "Allow",
+        "Forbid",
+        "Replace"
+      ]
+    },
+    "successfulJobsHistoryLimit": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "failedJobsHistoryLimit": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "startingDeadlineSeconds": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "backoffLimit": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "activeDeadlineSeconds": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "restartPolicy": {
+      "enum": [
+        "Never",
+        "OnFailure"
+      ]
+    },
+    "image": {
+      "$ref": "#/definitions/image"
+    },
+    "commonEnv": {
+      "$ref": "#/definitions/env"
+    },
+    "env": {
+      "$ref": "#/definitions/env"
+    },
+    "resources": {
+      "$ref": "#/definitions/resources"
+    },
+    "securityContext": {
+      "$ref": "#/definitions/securityContext"
+    },
+    "commonEnvFrom": {
+      "$ref": "#/definitions/envFrom"
+    },
+    "envFrom": {
+      "$ref": "#/definitions/envFrom"
+    },
+    "volumes": {
+      "$ref": "#/definitions/volumes"
+    },
+    "volumeMounts": {
+      "$ref": "#/definitions/volumeMounts"
+    },
+    "configMaps": {
+      "$ref": "#/definitions/configMaps"
+    },
+    "secrets": {
+      "$ref": "#/definitions/secrets"
+    },
+    "externalSecrets": {
+      "$ref": "#/definitions/externalSecrets"
+    },
+    "persistence": {
+      "$ref": "#/definitions/persistence"
+    },
+    "serviceAccount": {
+      "$ref": "#/definitions/serviceAccount"
+    },
+    "nodeSelector": {
+      "$ref": "#/definitions/nodeSelector"
+    },
+    "tolerations": {
+      "$ref": "#/definitions/tolerations"
+    },
+    "affinity": {
+      "$ref": "#/definitions/affinity"
+    },
+    "command": {
+      "$ref": "#/definitions/stringList"
+    },
+    "args": {
+      "$ref": "#/definitions/stringList"
+    },
+    "terminationGracePeriodSeconds": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "definitions": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+      "maxLength": 40
+    },
+    "image": {
+      "type": "object",
+      "properties": {
+        "registry": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]+)?(/[a-z0-9]([a-z0-9._-]*[a-z0-9])?)*$"
+        },
+        "repository": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+([._-][a-z0-9]+)*(/[a-z0-9]+([._-][a-z0-9]+)*)*$"
+        },
+        "tag": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$",
+          "not": {
+            "const": "latest"
+          }
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "pullPolicy": {
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ]
+        },
+        "imagePullSecrets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "name"
+            ]
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "registry",
+        "repository"
+      ],
+      "oneOf": [
+        {
+          "required": [
+            "tag"
+          ]
+        },
+        {
+          "required": [
+            "digest"
+          ]
+        }
+      ]
+    },
+    "env": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "value": {
+            "type": "string"
+          },
+          "valueFrom": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ],
+        "not": {
+          "required": [
+            "value",
+            "valueFrom"
+          ]
+        }
+      }
+    },
+    "envFrom": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "configMapRef": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "optional": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "name"
+            ]
+          },
+          "secretRef": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "optional": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "name"
+            ]
+          },
+          "prefix": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "oneOf": [
+          {
+            "required": [
+              "configMapRef"
+            ]
+          },
+          {
+            "required": [
+              "secretRef"
+            ]
+          }
+        ]
+      }
+    },
+    "resourceList": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^(cpu|memory|ephemeral-storage|hugepages-.+|[a-z0-9.-]+/[a-z0-9._-]+)$"
+      },
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "string",
+            "pattern": "^[0-9]+(\\.[0-9]+)?(m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei)?$"
+          },
+          {
+            "type": "number",
+            "exclusiveMinimum": 0
+          }
+        ]
+      }
+    },
+    "resources": {
+      "type": "object",
+      "properties": {
+        "requests": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/resourceList"
+            },
+            {
+              "required": [
+                "cpu",
+                "memory"
+              ]
+            }
+          ]
+        },
+        "limits": {
+          "$ref": "#/definitions/resourceList"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "requests"
+      ]
+    },
+    "securityContext": {
+      "type": "object",
+      "properties": {
+        "runAsUser": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "runAsGroup": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "fsGroup": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "netBindService": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "runAsUser"
+      ]
+    },
+    "volumes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+            "not": {
+              "const": "tmp"
+            }
+          },
+          "configMap": {
+            "type": "object"
+          },
+          "secret": {
+            "type": "object"
+          },
+          "emptyDir": {
+            "type": "object"
+          },
+          "projected": {
+            "type": "object"
+          },
+          "downwardAPI": {
+            "type": "object"
+          },
+          "persistentVolumeClaim": {
+            "type": "object"
+          },
+          "csi": {
+            "type": "object"
+          },
+          "ephemeral": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ],
+        "minProperties": 2,
+        "maxProperties": 2
+      }
+    },
+    "volumeMounts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "mountPath": {
+            "type": "string",
+            "pattern": "^/"
+          },
+          "subPath": {
+            "type": "string"
+          },
+          "subPathExpr": {
+            "type": "string"
+          },
+          "readOnly": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "mountPath"
+        ]
+      }
+    },
+    "textData": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^[-._a-zA-Z0-9]+$"
+      },
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "configMaps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "$ref": "#/definitions/name"
+          },
+          "data": {
+            "$ref": "#/definitions/textData"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "data"
+        ]
+      }
+    },
+    "secrets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "$ref": "#/definitions/name"
+          },
+          "stringData": {
+            "$ref": "#/definitions/textData"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "stringData"
+        ]
+      }
+    },
+    "externalSecrets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "$ref": "#/definitions/name"
+          },
+          "secretStoreRef": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "enum": [
+                  "SecretStore",
+                  "ClusterSecretStore"
+                ]
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "name"
+            ]
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "secretKey": {
+                  "type": "string",
+                  "pattern": "^[-._a-zA-Z0-9]+$"
+                },
+                "remoteRef": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "property": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "version": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "key"
+                  ]
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "secretKey",
+                "remoteRef"
+              ]
+            },
+            "minItems": 1
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "secretStoreRef",
+          "data"
+        ]
+      }
+    },
+    "persistence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "$ref": "#/definitions/name"
+          },
+          "size": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]+(\\.[0-9]+)?(m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei)?$"
+              },
+              {
+                "type": "number",
+                "exclusiveMinimum": 0
+              }
+            ]
+          },
+          "accessModes": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "ReadWriteOnce",
+                "ReadWriteOncePod",
+                "ReadOnlyMany",
+                "ReadWriteMany"
+              ]
+            },
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "storageClassName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "keep": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "size"
+        ]
+      }
+    },
+    "serviceAccount": {
+      "type": "object",
+      "properties": {
+        "automountServiceAccountToken": {
+          "type": "boolean"
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "nodeSelector": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "tolerations": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "affinity": {
+      "type": "object"
+    },
+    "stringList": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}
