@@ -134,8 +134,9 @@ securityContext:
 #   hostnames   the domain names the route answers for; external-dns
 #               publishes them. Empty, the route takes every request the
 #               Gateway receives.
-#   rules       Gateway API's own, copied as is. The chart adds the backendRefs
-#               to the application's Service: they are refused here.
+#   rules       required, at least one: Gateway API's own, copied as is. The
+#               chart adds the backendRefs to the application's Service: they
+#               are refused here.
 # Example: the API on the public Gateway, the admin pages on the private one.
 #   - name: api
 #     parentRefs:
@@ -184,8 +185,9 @@ envFrom: []
 
 # The volumes plugged into the pod, in Kubernetes' own form; volumeMounts
 # below shows them in the container, matched by name. Allowed types, the Pod
-# Security restricted ones: configMap, secret, emptyDir, projected,
-# downwardAPI. The chart already plugs in an emptyDir named tmp, for /tmp.
+# Security restricted ones: configMap, secret, persistentVolumeClaim,
+# emptyDir, projected, downwardAPI, csi, ephemeral. The chart already plugs in
+# an emptyDir named tmp, for /tmp.
 # The object a volume reads must exist, or the pod stays in
 # ContainerCreating: one the chart creates (below) is named <release>-<name>.
 # Example: the chart's own ConfigMap config in release shop, and an existing
