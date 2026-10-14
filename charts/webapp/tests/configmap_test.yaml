@@ -1,0 +1,64 @@
+suite: configmap
+templates:
+  - configmap.yaml
+release:
+  name: shop
+  namespace: shop
+values:
+  - ../ci/minimal-values.yaml
+tests:
+  - it: renders no ConfigMap by default
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders one ConfigMap per entry, named <release>-<name>, its data as written
+    set:
+      configMaps:
+        - name: config
+          data:
+            APP_DEBUG: "false"
+            logback.xml: |
+              <configuration/>
+        - name: templates
+          data:
+            welcome.html: <h1>Hello</h1>
+    asserts:
+      - hasDocuments:
+          count: 2
+      - isKind:
+          of: ConfigMap
+      - isAPIVersion:
+          of: v1
+      - equal:
+          path: metadata.name
+          value: shop-config
+        documentIndex: 0
+      - equal:
+          path: data
+          value:
+            APP_DEBUG: "false"
+            logback.xml: |
+              <configuration/>
+        documentIndex: 0
+      - equal:
+          path: metadata.name
+          value: shop-templates
+        documentIndex: 1
+      - isSubset:
+          path: metadata.labels
+          content:
+            app.kubernetes.io/name: shop
+            app.kubernetes.io/instance: shop
+            app.kubernetes.io/component: webapp
+
+  - it: refuses two ConfigMaps with the same name
+    set:
+      configMaps:
+        - name: config
+          data: {A: "1"}
+        - name: config
+          data: {B: "2"}
+    asserts:
+      - failedTemplate:
+          errorPattern: "configMaps: two named config"

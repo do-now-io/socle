@@ -1,0 +1,104 @@
+# Every key of cronjob set: every optional object rendered.
+schedule: "30 9 * * 1-5"
+timeZone: Europe/Paris
+suspend: true
+concurrencyPolicy: Replace
+successfulJobsHistoryLimit: 5
+failedJobsHistoryLimit: 2
+startingDeadlineSeconds: 600
+backoffLimit: 2
+activeDeadlineSeconds: 7200
+restartPolicy: OnFailure
+image:
+  registry: ghcr.io/acme
+  repository: billing
+  tag: 1.2.3
+  pullPolicy: IfNotPresent
+  imagePullSecrets:
+    - name: regcred
+commonEnv:
+  - name: MAIL_FROM
+    value: contact@example.com
+env:
+  - name: LOG_LEVEL
+    value: info
+  - name: API_KEY
+    valueFrom:
+      secretKeyRef:
+        name: shop-api-key
+        key: API_KEY
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+    ephemeral-storage: 1Gi
+  limits:
+    memory: 256Mi
+securityContext:
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  netBindService: true
+commonEnvFrom:
+  - configMapRef:
+      name: shop-config
+envFrom:
+  - secretRef:
+      name: shop-database
+    prefix: DB_
+volumes:
+  - name: config
+    configMap:
+      name: shop-config
+  - name: data
+    persistentVolumeClaim:
+      claimName: shop-data
+volumeMounts:
+  - name: config
+    mountPath: /config
+  - name: data
+    mountPath: /data
+configMaps:
+  - name: config
+    data:
+      APP_DEBUG: "false"
+secrets:
+  - name: api-key
+    stringData:
+      API_KEY: change-me
+externalSecrets:
+  - name: database
+    secretStoreRef:
+      kind: SecretStore
+      name: my-store
+    data:
+      - secretKey: PASSWORD
+        remoteRef:
+          key: shop/db
+          property: password
+persistence:
+  - name: data
+    size: 1Gi
+serviceAccount:
+  automountServiceAccountToken: true
+  annotations:
+    example.com/identity: shop
+nodeSelector:
+  kubernetes.io/arch: amd64
+tolerations:
+  - key: example.com/dedicated
+    operator: Equal
+    value: shop
+    effect: NoSchedule
+affinity:
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        preference:
+          matchExpressions:
+            - key: example.com/pool
+              operator: In
+              values: [apps]
+command: [/app/bill]
+args: [--month=current]
+terminationGracePeriodSeconds: 25

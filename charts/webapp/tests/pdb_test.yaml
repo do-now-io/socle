@@ -1,0 +1,80 @@
+suite: pdb
+templates:
+  - pdb.yaml
+release:
+  name: shop
+  namespace: shop
+values:
+  - ../ci/minimal-values.yaml
+tests:
+  - it: renders no PodDisruptionBudget for one replica, the default
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders one from two replicas, one pod evicted at a time
+    set:
+      replicas: 2
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: PodDisruptionBudget
+      - isAPIVersion:
+          of: policy/v1
+      - equal:
+          path: metadata.name
+          value: shop
+      - equal:
+          path: spec.maxUnavailable
+          value: 1
+      - equal:
+          path: spec.selector.matchLabels
+          value:
+            app.kubernetes.io/name: shop
+            app.kubernetes.io/instance: shop
+      - isSubset:
+          path: metadata.labels
+          content:
+            app.kubernetes.io/name: shop
+            app.kubernetes.io/instance: shop
+            app.kubernetes.io/component: webapp
+
+  - it: counts the autoscaler's minimum when autoscaling is on
+    set:
+      replicas: 1
+      autoscaling:
+        enabled: true
+        minReplicas: 2
+    asserts:
+      - hasDocuments:
+          count: 1
+
+  - it: renders none when the autoscaler's minimum is one
+    set:
+      replicas: 3
+      autoscaling:
+        enabled: true
+        minReplicas: 1
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders none when off
+    set:
+      replicas: 3
+      podDisruptionBudget:
+        enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders the maxUnavailable set, a percentage included
+    set:
+      replicas: 4
+      podDisruptionBudget:
+        maxUnavailable: 25%
+    asserts:
+      - equal:
+          path: spec.maxUnavailable
+          value: 25%

@@ -1,0 +1,620 @@
+suite: deployment
+templates:
+  - deployment.yaml
+release:
+  name: shop
+  namespace: shop
+values:
+  - ../ci/minimal-values.yaml
+tests:
+  # Defaults: what every client gets without asking.
+  - it: renders one Deployment named after the release
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: Deployment
+      - isAPIVersion:
+          of: apps/v1
+      - equal:
+          path: metadata.name
+          value: shop
+
+  - it: labels the Deployment and selects its pods by name and instance
+    asserts:
+      - isSubset:
+          path: metadata.labels
+          content:
+            app.kubernetes.io/name: shop
+            app.kubernetes.io/instance: shop
+            app.kubernetes.io/component: webapp
+            app.kubernetes.io/managed-by: Helm
+      - matchRegex:
+          path: metadata.labels["helm.sh/chart"]
+          pattern: ^webapp-
+      - equal:
+          path: spec.selector.matchLabels
+          value:
+            app.kubernetes.io/name: shop
+            app.kubernetes.io/instance: shop
+      - isSubset:
+          path: spec.template.metadata.labels
+          content:
+            app.kubernetes.io/name: shop
+            app.kubernetes.io/instance: shop
+            app.kubernetes.io/component: webapp
+
+  - it: runs one replica with a rolling update by default
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 1
+      - equal:
+          path: spec.strategy
+          value:
+            type: RollingUpdate
+
+  - it: runs as the release's own ServiceAccount, its token not mounted
+    asserts:
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: shop
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+
+  - it: renders the restricted profile on the pod
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext
+          value:
+            runAsNonRoot: true
+            runAsUser: 1000
+            seccompProfile:
+              type: RuntimeDefault
+
+  - it: renders the restricted profile on the container, read-only root filesystem included
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].securityContext
+          value:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+
+  - it: runs one container, the image fully qualified with its tag
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.containers
+          count: 1
+      - equal:
+          path: spec.template.spec.containers[0].name
+          value: app
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/acme/shop:1.0.0
+      - equal:
+          path: spec.template.spec.containers[0].imagePullPolicy
+          value: Always
+      - notExists:
+          path: spec.template.spec.imagePullSecrets
+      - notExists:
+          path: spec.template.spec.initContainers
+
+  - it: names the container's port http
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].ports
+          value:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+
+  - it: copies the probes and the resources as written
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe
+          value:
+            httpGet:
+              path: /health
+              port: http
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe
+          value:
+            httpGet:
+              path: /health
+              port: http
+      - equal:
+          path: spec.template.spec.containers[0].resources
+          value:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+
+  - it: mounts an emptyDir on /tmp, and nothing else
+    asserts:
+      - equal:
+          path: spec.template.spec.volumes
+          value:
+            - name: tmp
+              emptyDir: {}
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts
+          value:
+            - name: tmp
+              mountPath: /tmp
+
+  - it: spreads the replicas across nodes and zones, as a preference
+    asserts:
+      - equal:
+          path: spec.template.spec.topologySpreadConstraints
+          value:
+            - maxSkew: 1
+              topologyKey: kubernetes.io/hostname
+              whenUnsatisfiable: ScheduleAnyway
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: shop
+                  app.kubernetes.io/instance: shop
+            - maxSkew: 1
+              topologyKey: topology.kubernetes.io/zone
+              whenUnsatisfiable: ScheduleAnyway
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: shop
+                  app.kubernetes.io/instance: shop
+
+  - it: leaves Kubernetes' 30 seconds to stop
+    asserts:
+      - equal:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 30
+
+  - it: renders nothing the client did not set
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].env
+      - notExists:
+          path: spec.template.spec.containers[0].envFrom
+      - notExists:
+          path: spec.template.spec.containers[0].command
+      - notExists:
+          path: spec.template.spec.containers[0].args
+      - notExists:
+          path: spec.template.spec.nodeSelector
+      - notExists:
+          path: spec.template.spec.tolerations
+      - notExists:
+          path: spec.template.spec.affinity
+      - notExists:
+          path: metadata.annotations
+      - notExists:
+          path: spec.template.metadata.annotations
+
+  # image
+  - it: renders a digest after @ instead of a tag
+    set:
+      image:
+        tag: null
+        digest: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/acme/shop@sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+
+  - it: sets the pull policy and the pull secrets
+    set:
+      image:
+        pullPolicy: IfNotPresent
+        imagePullSecrets:
+          - name: regcred
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].imagePullPolicy
+          value: IfNotPresent
+      - equal:
+          path: spec.template.spec.imagePullSecrets
+          value:
+            - name: regcred
+
+  # commonEnv, env
+  - it: puts commonEnv first and env after it, so that env wins
+    set:
+      commonEnv:
+        - name: MAIL_FROM
+          value: shared@example.com
+        - name: REGION
+          value: eu
+      env:
+        - name: MAIL_FROM
+          value: shop@example.com
+        - name: API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: shop-api-key
+              key: API_KEY
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env
+          value:
+            - name: MAIL_FROM
+              value: shared@example.com
+            - name: REGION
+              value: eu
+            - name: MAIL_FROM
+              value: shop@example.com
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: shop-api-key
+                  key: API_KEY
+
+  # commonEnvFrom, envFrom
+  - it: puts commonEnvFrom first and envFrom after it
+    set:
+      commonEnvFrom:
+        - secretRef:
+            name: shared-database
+      envFrom:
+        - configMapRef:
+            name: shop-config
+          prefix: CFG_
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].envFrom
+          value:
+            - secretRef:
+                name: shared-database
+            - configMapRef:
+                name: shop-config
+              prefix: CFG_
+
+  # port
+  - it: renders the port the application listens on
+    set:
+      port: 9000
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].ports[0].containerPort
+          value: 9000
+
+  # resources
+  - it: copies limits and ephemeral-storage as written
+    set:
+      resources:
+        requests:
+          ephemeral-storage: 1Gi
+        limits:
+          memory: 512Mi
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].resources
+          value:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+              ephemeral-storage: 1Gi
+            limits:
+              memory: 512Mi
+
+  # securityContext
+  - it: tightens the pod with a group and a volume group
+    set:
+      securityContext:
+        runAsGroup: 2000
+        fsGroup: 3000
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext
+          value:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 2000
+            fsGroup: 3000
+            seccompProfile:
+              type: RuntimeDefault
+
+  - it: adds NET_BIND_SERVICE back, and only it, when asked
+    set:
+      securityContext:
+        netBindService: true
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.capabilities
+          value:
+            drop: [ALL]
+            add: [NET_BIND_SERVICE]
+
+  # volumes, volumeMounts
+  - it: plugs the client's volumes in after /tmp, and mounts them
+    set:
+      volumes:
+        - name: config
+          configMap:
+            name: shop-config
+      volumeMounts:
+        - name: config
+          mountPath: /opt/app/conf/logback.xml
+          subPath: logback.xml
+    asserts:
+      - equal:
+          path: spec.template.spec.volumes
+          value:
+            - name: tmp
+              emptyDir: {}
+            - name: config
+              configMap:
+                name: shop-config
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts
+          value:
+            - name: tmp
+              mountPath: /tmp
+            - name: config
+              mountPath: /opt/app/conf/logback.xml
+              subPath: logback.xml
+
+  # serviceAccount
+  - it: mounts the token when asked
+    set:
+      serviceAccount:
+        automountServiceAccountToken: true
+    asserts:
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: true
+
+  # nodeSelector, tolerations, affinity
+  - it: copies the placement as written
+    set:
+      nodeSelector:
+        kubernetes.io/arch: arm64
+      tolerations:
+        - key: example.com/dedicated
+          operator: Exists
+          effect: NoSchedule
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: example.com/pool
+                    operator: In
+                    values: [apps]
+    asserts:
+      - equal:
+          path: spec.template.spec.nodeSelector
+          value:
+            kubernetes.io/arch: arm64
+      - equal:
+          path: spec.template.spec.tolerations
+          value:
+            - key: example.com/dedicated
+              operator: Exists
+              effect: NoSchedule
+      - equal:
+          path: spec.template.spec.affinity
+          value:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - key: example.com/pool
+                        operator: In
+                        values: [apps]
+
+  # topologySpread
+  - it: makes the spread a requirement when asked
+    set:
+      topologySpread:
+        whenUnsatisfiable: DoNotSchedule
+    asserts:
+      - equal:
+          path: spec.template.spec.topologySpreadConstraints[0].whenUnsatisfiable
+          value: DoNotSchedule
+      - equal:
+          path: spec.template.spec.topologySpreadConstraints[1].whenUnsatisfiable
+          value: DoNotSchedule
+
+  # replicas, autoscaling
+  - it: renders the replicas set
+    set:
+      replicas: 3
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 3
+
+  - it: leaves the replicas to the HorizontalPodAutoscaler when it is on
+    set:
+      replicas: 3
+      autoscaling:
+        enabled: true
+    asserts:
+      - notExists:
+          path: spec.replicas
+
+  # strategy
+  - it: copies the strategy as written
+    set:
+      strategy:
+        type: Recreate
+    asserts:
+      - equal:
+          path: spec.strategy
+          value:
+            type: Recreate
+
+  - it: copies the rolling update's settings
+    set:
+      strategy:
+        rollingUpdate:
+          maxSurge: 25%
+          maxUnavailable: 0
+    asserts:
+      - equal:
+          path: spec.strategy
+          value:
+            type: RollingUpdate
+            rollingUpdate:
+              maxSurge: 25%
+              maxUnavailable: 0
+
+  # command, args
+  - it: replaces the image's command and arguments
+    set:
+      command: [/app/shop]
+      args: [--port=8080, --verbose]
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].command
+          value: [/app/shop]
+      - equal:
+          path: spec.template.spec.containers[0].args
+          value: [--port=8080, --verbose]
+
+  # reloader
+  - it: asks Reloader to roll the pods when they read a Secret through envFrom
+    set:
+      envFrom:
+        - secretRef:
+            name: shop-database
+    asserts:
+      - equal:
+          path: metadata.annotations["reloader.stakater.com/auto"]
+          value: "true"
+
+  - it: asks Reloader when they read a ConfigMap through commonEnvFrom
+    set:
+      commonEnvFrom:
+        - configMapRef:
+            name: shared-config
+    asserts:
+      - equal:
+          path: metadata.annotations["reloader.stakater.com/auto"]
+          value: "true"
+
+  - it: asks Reloader when an env variable reads a Secret
+    set:
+      env:
+        - name: API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: shop-api-key
+              key: API_KEY
+    asserts:
+      - equal:
+          path: metadata.annotations["reloader.stakater.com/auto"]
+          value: "true"
+
+  - it: asks Reloader when a commonEnv variable reads a ConfigMap
+    set:
+      commonEnv:
+        - name: REGION
+          valueFrom:
+            configMapKeyRef:
+              name: shared-config
+              key: region
+    asserts:
+      - equal:
+          path: metadata.annotations["reloader.stakater.com/auto"]
+          value: "true"
+
+  - it: asks Reloader when a volume reads a ConfigMap
+    set:
+      volumes:
+        - name: config
+          configMap:
+            name: shop-config
+    asserts:
+      - equal:
+          path: metadata.annotations["reloader.stakater.com/auto"]
+          value: "true"
+
+  - it: asks Reloader when a volume reads a Secret
+    set:
+      volumes:
+        - name: credentials
+          secret:
+            secretName: shop-credentials
+    asserts:
+      - equal:
+          path: metadata.annotations["reloader.stakater.com/auto"]
+          value: "true"
+
+  - it: does not ask Reloader for a plain value or a disk
+    set:
+      env:
+        - name: LOG_LEVEL
+          value: info
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: shop-data
+    asserts:
+      - notExists:
+          path: metadata.annotations
+
+  - it: does not ask Reloader when it is off
+    set:
+      reloader:
+        enabled: false
+      envFrom:
+        - secretRef:
+            name: shop-database
+    asserts:
+      - notExists:
+          path: metadata.annotations
+
+  # metrics
+  - it: annotates the pods for scraping on the application's port when metrics are on
+    set:
+      metrics:
+        enabled: true
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations
+          value:
+            prometheus.io/scrape: "true"
+            prometheus.io/port: "8080"
+            prometheus.io/path: /metrics
+
+  - it: annotates the metrics' own port and path when set
+    set:
+      metrics:
+        enabled: true
+        port: 9090
+        path: /internal/metrics
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations
+          value:
+            prometheus.io/scrape: "true"
+            prometheus.io/port: "9090"
+            prometheus.io/path: /internal/metrics
+
+  # terminationGracePeriodSeconds
+  - it: renders the time left to stop
+    set:
+      terminationGracePeriodSeconds: 25
+    asserts:
+      - equal:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 25
+
+  # Everything on: the Deployment still holds together.
+  - it: renders with every value set
+    values:
+      - ../ci/full-values.yaml
+    asserts:
+      - isKind:
+          of: Deployment
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/acme/shop:1.2.3
+      - notExists:
+          path: spec.replicas
+      - equal:
+          path: metadata.annotations["reloader.stakater.com/auto"]
+          value: "true"

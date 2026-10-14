@@ -1,0 +1,417 @@
+suite: schema
+templates:
+  - deployment.yaml
+release:
+  name: shop
+  namespace: shop
+values:
+  - ../ci/minimal-values.yaml
+tests:
+  # What the client must set: each refused when unset.
+  - it: refuses a missing port
+    set:
+      port: null
+    asserts:
+      - failedTemplate:
+          errorPattern: "missing propert(y|ies) .*'port'"
+
+  - it: refuses a missing livenessProbe
+    set:
+      livenessProbe: null
+    asserts:
+      - failedTemplate:
+          errorPattern: "missing propert(y|ies) .*'livenessProbe'"
+
+  - it: refuses a missing readinessProbe
+    set:
+      readinessProbe: null
+    asserts:
+      - failedTemplate:
+          errorPattern: "missing propert(y|ies) .*'readinessProbe'"
+
+  - it: refuses a missing runAsUser
+    set:
+      securityContext:
+        runAsUser: null
+    asserts:
+      - failedTemplate:
+          errorPattern: "/securityContext.*runAsUser"
+
+  - it: refuses a missing CPU request
+    set:
+      resources:
+        requests:
+          cpu: null
+    asserts:
+      - failedTemplate:
+          errorPattern: "/resources/requests"
+
+  - it: refuses a missing memory request
+    set:
+      resources:
+        requests:
+          memory: null
+    asserts:
+      - failedTemplate:
+          errorPattern: "/resources/requests"
+
+  - it: refuses a missing registry
+    set:
+      image:
+        registry: null
+    asserts:
+      - failedTemplate:
+          errorPattern: "/image"
+
+  - it: refuses neither tag nor digest
+    set:
+      image:
+        tag: null
+    asserts:
+      - failedTemplate:
+          errorPattern: "/image"
+
+  # What would loosen a policy, or break at apply time: each refused at render.
+  - it: refuses the latest tag
+    set:
+      image:
+        tag: latest
+    asserts:
+      - failedTemplate:
+          errorPattern: "/image/tag"
+
+  - it: refuses a tag and a digest together
+    set:
+      image:
+        digest: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+    asserts:
+      - failedTemplate:
+          errorPattern: "/image"
+
+  - it: refuses a digest that is not sha256
+    set:
+      image:
+        tag: null
+        digest: md5:abc
+    asserts:
+      - failedTemplate:
+          errorPattern: "/image/digest"
+
+  - it: refuses a bare Docker Hub image
+    set:
+      image:
+        registry: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: "/image/registry"
+
+  - it: refuses an unknown key
+    set:
+      foo: bar
+    asserts:
+      - failedTemplate:
+          errorPattern: "additional properties 'foo'"
+
+  - it: refuses an unknown resource name
+    set:
+      resources:
+        limits:
+          memroy: 1Gi
+    asserts:
+      - failedTemplate:
+          errorPattern: "memroy"
+
+  - it: refuses a quantity that is not one
+    set:
+      resources:
+        requests:
+          cpu: lots
+    asserts:
+      - failedTemplate:
+          errorPattern: "/resources/requests/cpu"
+
+  - it: refuses runAsUser 0
+    set:
+      securityContext:
+        runAsUser: 0
+    asserts:
+      - failedTemplate:
+          errorPattern: "/securityContext/runAsUser"
+
+  - it: refuses runAsGroup 0
+    set:
+      securityContext:
+        runAsGroup: 0
+    asserts:
+      - failedTemplate:
+          errorPattern: "/securityContext/runAsGroup"
+
+  - it: refuses privileged
+    set:
+      securityContext:
+        privileged: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "additional properties 'privileged'"
+
+  - it: refuses added capabilities
+    set:
+      securityContext:
+        capabilities:
+          add: [SYS_ADMIN]
+    asserts:
+      - failedTemplate:
+          errorPattern: "additional properties 'capabilities'"
+
+  - it: refuses runAsNonRoot false
+    set:
+      securityContext:
+        runAsNonRoot: false
+    asserts:
+      - failedTemplate:
+          errorPattern: "additional properties 'runAsNonRoot'"
+
+  - it: refuses allowPrivilegeEscalation
+    set:
+      securityContext:
+        allowPrivilegeEscalation: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "additional properties 'allowPrivilegeEscalation'"
+
+  - it: refuses a hostPath volume
+    set:
+      volumes:
+        - name: host
+          hostPath:
+            path: /etc
+    asserts:
+      - failedTemplate:
+          errorPattern: "additional properties 'hostPath'"
+
+  - it: refuses a volume named tmp, the chart's
+    set:
+      volumes:
+        - name: tmp
+          emptyDir: {}
+    asserts:
+      - failedTemplate:
+          errorPattern: "/volumes/0/name"
+
+  - it: refuses a volume with two sources
+    set:
+      volumes:
+        - name: two
+          emptyDir: {}
+          configMap:
+            name: c
+    asserts:
+      - failedTemplate:
+          errorPattern: "/volumes/0"
+
+  - it: refuses a relative mountPath
+    set:
+      volumeMounts:
+        - name: c
+          mountPath: config
+    asserts:
+      - failedTemplate:
+          errorPattern: "/volumeMounts/0/mountPath"
+
+  - it: refuses backendRefs in a route's rule
+    set:
+      routes:
+        - name: api
+          parentRefs: [{name: public}]
+          rules:
+            - backendRefs: [{name: other, port: 80}]
+    asserts:
+      - failedTemplate:
+          errorPattern: "backendRefs"
+
+  - it: refuses a route without parentRefs
+    set:
+      routes:
+        - name: api
+          rules: [{}]
+    asserts:
+      - failedTemplate:
+          errorPattern: "missing property 'parentRefs'"
+
+  - it: refuses a route without rules
+    set:
+      routes:
+        - name: api
+          parentRefs: [{name: public}]
+    asserts:
+      - failedTemplate:
+          errorPattern: "missing property 'rules'"
+
+  - it: refuses a ConfigMap value that is not text
+    set:
+      configMaps:
+        - name: c
+          data:
+            DEBUG: false
+    asserts:
+      - failedTemplate:
+          errorPattern: "/configMaps/0/data/DEBUG"
+
+  - it: refuses a Secret value that is not text
+    set:
+      secrets:
+        - name: s
+          stringData:
+            PORT: 8080
+    asserts:
+      - failedTemplate:
+          errorPattern: "/secrets/0/stringData/PORT"
+
+  - it: refuses an env value that is not text
+    set:
+      env:
+        - name: PORT
+          value: 8080
+    asserts:
+      - failedTemplate:
+          errorPattern: "/env/0/value"
+
+  - it: refuses an env variable with a value and a valueFrom
+    set:
+      env:
+        - name: A
+          value: x
+          valueFrom:
+            secretKeyRef: {name: s, key: k}
+    asserts:
+      - failedTemplate:
+          errorPattern: "/env/0"
+
+  - it: refuses an ExternalSecret without a store
+    set:
+      externalSecrets:
+        - name: e
+          data: [{secretKey: k, remoteRef: {key: r}}]
+    asserts:
+      - failedTemplate:
+          errorPattern: "missing property 'secretStoreRef'"
+
+  - it: refuses an ExternalSecret's target, the chart's
+    set:
+      externalSecrets:
+        - name: e
+          secretStoreRef: {kind: SecretStore, name: s}
+          data: [{secretKey: k, remoteRef: {key: r}}]
+          target: {name: x}
+    asserts:
+      - failedTemplate:
+          errorPattern: "additional properties 'target'"
+
+  - it: refuses a store of an unknown kind
+    set:
+      externalSecrets:
+        - name: e
+          secretStoreRef: {kind: Vault, name: s}
+          data: [{secretKey: k, remoteRef: {key: r}}]
+    asserts:
+      - failedTemplate:
+          errorPattern: "/externalSecrets/0/secretStoreRef/kind"
+
+  - it: refuses a disk without a size
+    set:
+      persistence:
+        - name: data
+    asserts:
+      - failedTemplate:
+          errorPattern: "missing property 'size'"
+
+  - it: refuses an unknown access mode
+    set:
+      persistence:
+        - name: data
+          size: 1Gi
+          accessModes: [ReadWriteAll]
+    asserts:
+      - failedTemplate:
+          errorPattern: "/persistence/0/accessModes/0"
+
+  - it: refuses an object name that is not a DNS label
+    set:
+      configMaps:
+        - name: My_Config
+          data: {A: "1"}
+    asserts:
+      - failedTemplate:
+          errorPattern: "/configMaps/0/name"
+
+  - it: refuses a port as text
+    set:
+      port: "8080"
+    asserts:
+      - failedTemplate:
+          errorPattern: "/port"
+
+  - it: refuses a port out of range
+    set:
+      port: 70000
+    asserts:
+      - failedTemplate:
+          errorPattern: "/port"
+
+  - it: refuses a probe without a handler
+    set:
+      livenessProbe:
+        httpGet: null
+        periodSeconds: 10
+    asserts:
+      - failedTemplate:
+          errorPattern: "/livenessProbe"
+
+  - it: refuses an unknown spread mode
+    set:
+      topologySpread:
+        whenUnsatisfiable: Never
+    asserts:
+      - failedTemplate:
+          errorPattern: "/topologySpread/whenUnsatisfiable"
+
+  - it: refuses Recreate with rolling update settings
+    set:
+      strategy:
+        type: Recreate
+        rollingUpdate:
+          maxSurge: 1
+    asserts:
+      - failedTemplate:
+          errorPattern: "/strategy"
+
+  - it: refuses a metrics port as a name
+    set:
+      metrics:
+        port: http
+    asserts:
+      - failedTemplate:
+          errorPattern: "/metrics/port"
+
+  - it: refuses a metrics path not starting with /
+    set:
+      metrics:
+        path: metrics
+    asserts:
+      - failedTemplate:
+          errorPattern: "/metrics/path"
+
+  - it: refuses a PDB of zero
+    set:
+      podDisruptionBudget:
+        maxUnavailable: 0
+    asserts:
+      - failedTemplate:
+          errorPattern: "/podDisruptionBudget/maxUnavailable"
+
+  - it: refuses a negative grace period
+    set:
+      terminationGracePeriodSeconds: -1
+    asserts:
+      - failedTemplate:
+          errorPattern: "/terminationGracePeriodSeconds"
