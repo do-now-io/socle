@@ -115,6 +115,12 @@
     "terminationGracePeriodSeconds": {
       "type": "integer",
       "minimum": 0
+    },
+    "socle-lib": {
+      "type": "object"
+    },
+    "global": {
+      "type": "object"
     }
   },
   "definitions": {
@@ -135,14 +141,20 @@
           "pattern": "^[a-z0-9]+([._-][a-z0-9]+)*(/[a-z0-9]+([._-][a-z0-9]+)*)*$"
         },
         "tag": {
-          "type": "string",
+          "type": [
+            "string",
+            "null"
+          ],
           "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$",
           "not": {
             "const": "latest"
           }
         },
         "digest": {
-          "type": "string",
+          "type": [
+            "string",
+            "null"
+          ],
           "pattern": "^sha256:[a-f0-9]{64}$"
         },
         "pullPolicy": {
@@ -178,12 +190,28 @@
         {
           "required": [
             "tag"
-          ]
+          ],
+          "properties": {
+            "tag": {
+              "type": "string"
+            },
+            "digest": {
+              "type": "null"
+            }
+          }
         },
         {
           "required": [
             "digest"
-          ]
+          ],
+          "properties": {
+            "digest": {
+              "type": "string"
+            },
+            "tag": {
+              "type": "null"
+            }
+          }
         }
       ]
     },
