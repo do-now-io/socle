@@ -41,12 +41,15 @@ definitions = {
                      "pattern": "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]+)?(/[a-z0-9]([a-z0-9._-]*[a-z0-9])?)*$"},
         "repository": {"type": "string",
                        "pattern": "^[a-z0-9]+([._-][a-z0-9]+)*(/[a-z0-9]+([._-][a-z0-9]+)*)*$"},
-        "tag": {"type": "string", "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$", "not": {"const": "latest"}},
-        "digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+        # null is unset: a values file can drop the tag another one set, for a digest.
+        "tag": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$",
+                "not": {"const": "latest"}},
+        "digest": {"type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$"},
         "pullPolicy": {"enum": ["Always", "IfNotPresent", "Never"]},
         "imagePullSecrets": arr(obj({"name": {"type": "string", "minLength": 1}}, ["name"])),
     }, ["registry", "repository"],
-        oneOf=[{"required": ["tag"]}, {"required": ["digest"]}]),
+        oneOf=[{"required": ["tag"], "properties": {"tag": {"type": "string"}, "digest": {"type": "null"}}},
+               {"required": ["digest"], "properties": {"digest": {"type": "string"}, "tag": {"type": "null"}}}]),
     "env": arr(obj({
         "name": {"type": "string", "minLength": 1},
         "value": {"type": "string"},
@@ -264,7 +267,8 @@ def chart_schema(title, properties, required):
         "type": "object",
         "additionalProperties": False,
         "required": required,
-        "properties": properties,
+        # Helm adds the library's values and the global ones to every chart's.
+        "properties": {**properties, "socle-lib": {"type": "object"}, "global": {"type": "object"}},
         "definitions": {k: v for k, v in definitions.items() if "#/definitions/" + k in used},
     }
 
