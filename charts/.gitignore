@@ -1,0 +1,4 @@
+# A chart's built dependencies: helm dependency build makes them from
+# socle-lib, and their lock: file:// dependencies need none.
+/*/charts/
+/*/Chart.lock

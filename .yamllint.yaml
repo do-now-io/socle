@@ -17,6 +17,9 @@ ignore:
   - oci/catalog/*/monitoring/dashboard-*.yaml
   # The same for the StorageClass chart; tofu test checks its values.
   - opentofu/bootstrap/storage-class/templates/
+  # The charts' templates, for the same reason: checked by helm-unittest and
+  # by rendering them.
+  - charts/*/templates/
 
 rules:
   # Manifests with long image references or URLs need some headroom.
