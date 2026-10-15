@@ -1,0 +1,58 @@
+# What the floci e2e deploys (charts/tests/e2e): podinfo, whose image names
+# its user (USER app) instead of numbering it, so runAsUser is what lets the
+# kubelet run it non-root; a ConfigMap and an ExternalSecret it reads, a route.
+image:
+  registry: ghcr.io/stefanprodan
+  repository: podinfo
+  tag: 6.9.4
+port: 9898
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: http
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    memory: 64Mi
+securityContext:
+  runAsUser: 1000
+commonEnvFrom:
+  - configMapRef:
+      name: shop-config
+envFrom:
+  - secretRef:
+      name: shop-database
+configMaps:
+  - name: config
+    data:
+      PODINFO_UI_MESSAGE: from the chart
+externalSecrets:
+  - name: database
+    secretStoreRef:
+      kind: ClusterSecretStore
+      name: floci
+    data:
+      - secretKey: DATABASE_PASSWORD
+        remoteRef:
+          key: charts-e2e/database
+routes:
+  - name: api
+    parentRefs:
+      - name: private
+        namespace: gateway-system
+        sectionName: https
+    hostnames:
+      - shop.example.com
+    rules:
+      - matches:
+          - path:
+              type: PathPrefix
+              value: /
+metrics:
+  enabled: true
