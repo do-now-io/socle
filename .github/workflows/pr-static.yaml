@@ -278,15 +278,21 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # webapp and cronjob (#83): their values schemas, written from one set of
-  # definitions, and their helm-unittest suites, which came before the
-  # templates (values, failing tests, then templates).
+  # definitions; their helm-unittest suites, which came before the templates
+  # (values, failing tests, then templates); every fixture's render, under
+  # helm lint, kubeconform and the kyverno_policies module's policies.
   charts:
-    name: Helm charts — schemas, helm-unittest
+    name: Helm charts — schemas, helm-unittest, kubeconform, Kyverno
     runs-on: ubuntu-24.04
     env:
       HELM_VERSION: 4.2.4
       HELM_SHA256: c306b46f719b0a4da32d0f78ee21bf90ce8d602f15b22ab753f0674d1670a7f3
       HELM_UNITTEST_VERSION: 1.2.1
+      # The version kyverno_policies' engine runs (oci/catalog/kyverno).
+      KYVERNO_VERSION: 1.19.1
+      KYVERNO_SHA256: b38228f367fc0fdc2b08f4c83ea50ac5f16c60ff8d62d76a66157c33c47b70ae
+      FLUX_OPERATOR_VERSION: 0.60.0
+      FLUX_OPERATOR_SHA256: dd7d504bf02117fc8625ef7e71fe757473a9d69cc1d6369586d0e3ae19e40e01
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -312,6 +318,36 @@ jobs:
             helm unittest "charts/${chart}" | tee -a unittest.out || rc=1
           done
           exit "${rc}"
+      - name: helm lint and kubeconform every fixture's render
+        run: |
+          mkdir -p rendered
+          for chart in webapp cronjob; do
+            for fixture in "charts/${chart}"/ci/*-values.yaml; do
+              helm lint --strict "charts/${chart}" --values "${fixture}"
+              helm template shop "charts/${chart}" --namespace shop --values "${fixture}" \
+                > "rendered/${chart}-$(basename "${fixture}" -values.yaml).yaml"
+            done
+          done
+          docker run --rm -v "${PWD}/rendered:/work/rendered" -w /work \
+            ghcr.io/yannh/kubeconform:v0.7.0@sha256:85dbef6b4b312b99133decc9c6fc9495e9fc5f92293d4ff3b7e1b30f5611823c \
+            -strict -summary \
+            -schema-location default \
+            -schema-location \
+            'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            rendered/ | tee kubeconform.out
+      - name: Install the Kyverno CLI and flux-operator
+        run: |
+          python3 -m pip install --user --require-hashes -r .github/requirements-yamllint.txt
+          curl -sSLo /tmp/kyverno.tgz \
+            "https://github.com/kyverno/kyverno/releases/download/v${KYVERNO_VERSION}/kyverno-cli_v${KYVERNO_VERSION}_linux_x86_64.tar.gz"
+          echo "${KYVERNO_SHA256}  /tmp/kyverno.tgz" | sha256sum -c -
+          sudo tar xzf /tmp/kyverno.tgz -C /usr/local/bin kyverno
+          curl -sSLo /tmp/flux-operator.tgz \
+            "https://github.com/controlplaneio-fluxcd/flux-operator/releases/download/v${FLUX_OPERATOR_VERSION}/flux-operator_${FLUX_OPERATOR_VERSION}_linux_amd64.tar.gz"
+          echo "${FLUX_OPERATOR_SHA256}  /tmp/flux-operator.tgz" | sha256sum -c -
+          sudo tar xzf /tmp/flux-operator.tgz -C /usr/local/bin flux-operator
+      - name: Every fixture's pods pass the kyverno_policies module's policies
+        run: python3 .github/scripts/charts-kyverno.py | tee kyverno.out
       - name: Summary
         if: always()
         run: |
@@ -319,6 +355,8 @@ jobs:
             echo "### Helm charts"
             echo '```'
             grep -E '^(Charts|Test Suites|Tests):' unittest.out || echo "helm-unittest did not run"
+            tail -1 kubeconform.out 2>/dev/null || echo "kubeconform did not run"
+            cat kyverno.out 2>/dev/null || echo "Kyverno did not run"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
