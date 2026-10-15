@@ -80,6 +80,12 @@ module "socle" {
   # the socle's default stays.
   kube = merge({
     argocd = { values = { redis = { image = { repository = "docker.io/library/redis" } } } }
+    # floci starts its k3s node in a container whose root is not a shared
+    # mount, so node-exporter's host root, mounted HostToContainer as on
+    # every real node, fails to start ("path / is mounted on / but it is not
+    # a shared or slave mount", measured on run 38256194003). None mounts it
+    # as it is at the pod's start. See floci.tfvars beside this file.
+    monitoring = { values = { prometheus-node-exporter = { hostRootFsMount = { mountPropagation = "None" } } } }
   }, var.kube)
   socle_version        = var.socle_version
   cosign_identity      = var.cosign_identity

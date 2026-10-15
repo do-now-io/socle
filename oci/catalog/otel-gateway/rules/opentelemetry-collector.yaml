@@ -1,0 +1,156 @@
+# Both collectors' health, from their own telemetry, which vmagent scrapes by
+# annotation: job is opentelemetry-collector for both, namespace tells them
+# apart. Written once, here, the agent's included: with otel_gateway off, the
+# agent goes unwatched. Taken as written from awesome-prometheus-alerts
+# (github.com/samber/awesome-prometheus-alerts, _data/rules.yml at 822af1e),
+# but the enqueue-failed rules' _total suffix: the collector's own Prometheus
+# endpoint names its counters without one (otelcol_receiver_refused_metric_points,
+# measured on 0.160.0). Checked in CI with vmalert -dryRun
+# (.github/scripts/check-rules.sh).
+#
+# Not taken: processor refused spans and metric points — the collector no
+# longer reports them (0.160.0 counts items in and out); what the memory
+# limiter refuses, the receivers report as refused.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: opentelemetry-collector
+spec:
+  groups:
+    - name: opentelemetry-collector
+      rules:
+        - alert: OpentelemetryCollectorDown
+          expr: >-
+            up{job=~".*otel.*collector.*|opentelemetry-collector"} == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: >-
+              OpenTelemetry Collector {{ $labels.namespace }}/{{ $labels.pod }} is not
+              responding.
+        - alert: OpentelemetryCollectorHighMemoryUsage
+          expr: >-
+            (otelcol_process_runtime_heap_alloc_bytes
+            / on (instance, job) otelcol_process_runtime_total_sys_memory_bytes) > 0.9
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              OpenTelemetry Collector {{ $labels.namespace }}/{{ $labels.pod }} memory
+              usage is above 90%.
+        - alert: OpentelemetryCollectorReceiverRefusedSpans
+          expr: >-
+            rate(otelcol_receiver_refused_spans[5m]) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: >-
+              OpenTelemetry Collector is refusing {{ $value | humanize }}/s spans on
+              {{ $labels.receiver }}.
+        - alert: OpentelemetryCollectorReceiverRefusedMetricPoints
+          expr: >-
+            rate(otelcol_receiver_refused_metric_points[5m]) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: >-
+              OpenTelemetry Collector is refusing {{ $value | humanize }}/s metric points on
+              {{ $labels.receiver }}.
+        - alert: OpentelemetryCollectorReceiverRefusedLogRecords
+          expr: >-
+            rate(otelcol_receiver_refused_log_records[5m]) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: >-
+              OpenTelemetry Collector is refusing {{ $value | humanize }}/s log records on
+              {{ $labels.receiver }}.
+        - alert: OpentelemetryCollectorOtlpReceiverErrors
+          expr: >-
+            rate(otelcol_receiver_accepted_spans{receiver=~"otlp"}[5m]) == 0
+            and rate(otelcol_receiver_refused_spans{receiver=~"otlp"}[5m]) > 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: >-
+              OpenTelemetry Collector OTLP receiver is completely failing - all spans are
+              being refused.
+        # The send_failed counters exist once a send has failed for good,
+        # after the exporter's retries (5 minutes, measured): a backend
+        # restarting is retried, not counted.
+        - alert: OpentelemetryCollectorExporterFailedSpans
+          expr: >-
+            rate(otelcol_exporter_send_failed_spans[5m]) > 0.05
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              OpenTelemetry Collector failing to send {{ $value | humanize }}/s spans via
+              {{ $labels.exporter }}.
+        - alert: OpentelemetryCollectorExporterFailedMetricPoints
+          expr: >-
+            rate(otelcol_exporter_send_failed_metric_points[5m]) > 0.05
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              OpenTelemetry Collector failing to send {{ $value | humanize }}/s metric points
+              via {{ $labels.exporter }}.
+        - alert: OpentelemetryCollectorExporterFailedLogRecords
+          expr: >-
+            rate(otelcol_exporter_send_failed_log_records[5m]) > 0.05
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              OpenTelemetry Collector failing to send {{ $value | humanize }}/s log records
+              via {{ $labels.exporter }}.
+        - alert: OpentelemetryCollectorExporterQueueNearlyFull
+          expr: >-
+            (otelcol_exporter_queue_size
+            / on (instance, job, exporter) otelcol_exporter_queue_capacity) > 0.8
+            and otelcol_exporter_queue_capacity > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              OpenTelemetry Collector exporter {{ $labels.exporter }} queue is over 80% full.
+        - alert: OpentelemetryCollectorExporterEnqueueFailedSpans
+          expr: >-
+            rate(otelcol_exporter_enqueue_failed_spans[5m]) > 0.05
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              OpenTelemetry Collector exporter {{ $labels.exporter }} is dropping
+              {{ $value | humanize }}/s spans because its sending queue is full.
+        - alert: OpentelemetryCollectorExporterEnqueueFailedMetricPoints
+          expr: >-
+            rate(otelcol_exporter_enqueue_failed_metric_points[5m]) > 0.05
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              OpenTelemetry Collector exporter {{ $labels.exporter }} is dropping
+              {{ $value | humanize }}/s metric points because its sending queue is full.
+        - alert: OpentelemetryCollectorExporterEnqueueFailedLogRecords
+          expr: >-
+            rate(otelcol_exporter_enqueue_failed_log_records[5m]) > 0.05
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              OpenTelemetry Collector exporter {{ $labels.exporter }} is dropping
+              {{ $value | humanize }}/s log records because its sending queue is full.

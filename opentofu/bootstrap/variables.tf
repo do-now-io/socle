@@ -120,6 +120,34 @@ variable "kube" {
     error_message = "kube: an attribute has the wrong type. Each value must have the type of its catalog default: ${jsonencode({ for m, d in local.catalog : m => { for a, x in d : a => lookup(local.json_kinds, substr(jsonencode(x), 0, 1), "number") } })}."
   }
 
+  # The same two checks one level down, for an attribute whose default is a
+  # non-empty object (monitoring.logs, monitoring.alerting…): a misspelt key
+  # inside it is an error at plan, and each key has its default's type. An
+  # empty default ({}, as values or route) is free-form and not looked into.
+  validation {
+    condition = !can(keys(var.kube)) || alltrue(flatten([
+      for m, v in var.kube : [
+        for a in try(keys(v), []) : [
+          for k in try(keys(v[a]), []) : contains(keys(lookup(local.catalog, m, {})[a]), k)
+        ] if contains(keys(lookup(local.catalog, m, {})), a) && length(try(keys(lookup(local.catalog, m, {})[a]), [])) > 0
+      ]
+    ]))
+    error_message = "kube: unknown attribute in a nested block. Allowed: ${jsonencode({ for m, d in local.catalog : m => { for a, x in d : a => keys(x) if length(try(keys(x), [])) > 0 } if anytrue([for a, x in d : length(try(keys(x), [])) > 0]) })}."
+  }
+
+  validation {
+    condition = !can(keys(var.kube)) || alltrue(flatten([
+      for m, v in var.kube : [
+        for a in try(keys(v), []) : [
+          for k in try(keys(v[a]), []) :
+          !contains(keys(lookup(local.catalog, m, {})[a]), k)
+          || lookup(local.json_kinds, substr(jsonencode(v[a][k]), 0, 1), "number") == lookup(local.json_kinds, substr(jsonencode(lookup(local.catalog, m, {})[a][k]), 0, 1), "number")
+        ] if contains(keys(lookup(local.catalog, m, {})), a) && length(try(keys(lookup(local.catalog, m, {})[a]), [])) > 0
+      ]
+    ]))
+    error_message = "kube: an attribute in a nested block has the wrong type. Each value must have the type of its catalog default: ${jsonencode({ for m, d in local.catalog : m => { for a, x in d : a => { for k, y in x : k => lookup(local.json_kinds, substr(jsonencode(y), 0, 1), "number") } if length(try(keys(x), [])) > 0 } if anytrue([for a, x in d : length(try(keys(x), [])) > 0]) })}."
+  }
+
   # values is free-form on purpose, minus one rule: no secret material. What a
   # client writes there ends up in the OpenTofu state and in a ConfigMap on
   # the cluster. The crossplane chart takes no credential of its own; the two
@@ -344,61 +372,6 @@ variable "kube" {
     error_message = "kube.argocd_image_updater.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
   }
 
-  # --- victoria_metrics — docs/catalog/victoria-metrics.md ------------------
-  # A value of the wrong kind is the kind check's to refuse; these rules only
-  # judge strings, so one mistake gives one diagnostic.
-
-  # What -retentionPeriod accepts, minus the forms a client should not need
-  # (bare months, fractions, ms), and never under its own one-day minimum.
-  validation {
-    condition = !can(var.kube.victoria_metrics.retention) || try(
-      lookup(local.json_kinds, substr(jsonencode(var.kube.victoria_metrics.retention), 0, 1), "number") != "string"
-      || can(regex("^[1-9][0-9]*[dwy]$", var.kube.victoria_metrics.retention))
-      || (can(regex("^[1-9][0-9]*h$", var.kube.victoria_metrics.retention)) && tonumber(trimsuffix(var.kube.victoria_metrics.retention, "h")) >= 24),
-      false
-    )
-    error_message = "kube.victoria_metrics.retention must be a whole number of hours, days, weeks or years, such as 15d, 4w or 1y, and at least one day (24h): VictoriaMetrics refuses less."
-  }
-
-  validation {
-    condition = !can(var.kube.victoria_metrics.storage_size) || try(
-      lookup(local.json_kinds, substr(jsonencode(var.kube.victoria_metrics.storage_size), 0, 1), "number") != "string"
-      || var.kube.victoria_metrics.storage_size == ""
-      || can(regex("^[1-9][0-9]*(Gi|Ti)$", var.kube.victoria_metrics.storage_size)),
-      false
-    )
-    error_message = "kube.victoria_metrics.storage_size must be empty (no volume claim, an emptyDir) or a size in Gi or Ti, such as 20Gi."
-  }
-
-  # values is free-form on purpose, minus one rule: no secret material. What a
-  # client writes there ends up in the OpenTofu state and in a ConfigMap on the
-  # cluster. VictoriaMetrics takes its credentials as flags and as VM_*
-  # environment variables (envflag), so those are the paths refused: an
-  # extraArgs flag named like a password or an auth key (httpAuth.password,
-  # deleteAuthKey, snapshotAuthKey…), an env entry with a literal value whose
-  # name looks like a credential (valueFrom is fine), and a Secret among
-  # extraObjects.
-  validation {
-    condition = (
-      !can(var.kube.victoria_metrics.values)
-      || !can(keys(var.kube.victoria_metrics.values))
-      || (
-        !anytrue(try([for o in var.kube.victoria_metrics.values.extraObjects : try(o.kind == "Secret", false)], []))
-        && !anytrue([for k in try(keys(var.kube.victoria_metrics.values.server.extraArgs), []) : can(regex("(?i)(password|passwd|auth_?key|token)", k))])
-        && alltrue([
-          for e in try(tolist(var.kube.victoria_metrics.values.server.env), []) :
-          !(can(e.value) && can(regex("(?i)(secret|password|passwd|token|auth_?key|api_?key|access_?key|private_?key)", try(e.name, ""))))
-        ])
-      )
-    )
-    error_message = "kube.victoria_metrics.values must not carry secrets: an extraArgs flag such as httpAuth.password or deleteAuthKey, an env entry with a literal value named like a credential (VM_httpAuth_password, …), and a Secret in extraObjects are refused. Put them in a Secret in the victoria-metrics namespace and name it in kube.victoria_metrics.values_secret."
-  }
-
-  validation {
-    condition     = !can(var.kube.victoria_metrics.values_secret) || try(var.kube.victoria_metrics.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.victoria_metrics.values_secret)), true)
-    error_message = "kube.victoria_metrics.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
-  }
-
   # --- otel_agent — docs/catalog/otel-agent.md -----------------------------
   # values is free-form on purpose, minus one rule: no secret material. The
   # collector takes credentials in its own config — an authenticator
@@ -481,228 +454,94 @@ variable "kube" {
     error_message = "kube.otel_gateway.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
   }
 
-  # --- grafana — docs/catalog/grafana.md ------------------------------------
-  validation {
-    condition = (
-      !can(var.kube.grafana.domain)
-      || lookup(local.json_kinds, substr(jsonencode(var.kube.grafana.domain), 0, 1), "number") != "string"
-      || var.kube.grafana.domain == ""
-      || can(regex("^([a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$", var.kube.grafana.domain))
-    )
-    error_message = "kube.grafana.domain must be empty or a fully qualified DNS name in lowercase, such as grafana.acme.example: no scheme, no port, no path."
-  }
-
-  # values is free-form on purpose, minus one rule: no secret material. What a
-  # client writes there ends up in the OpenTofu state and in a ConfigMap on the
-  # cluster. The chart's secret-bearing paths are refused: adminPassword (the
-  # admin's goes in admin.existingSecret, or stays the chart's random one),
-  # grafana.ini's security admin_password and secret_key, database and smtp
-  # passwords, an auth.* section's client_secret, a datasource's password or
-  # a secureJsonData value that is not a reference Grafana resolves itself
-  # ($VAR, $${VAR}, $__env{…}, $__file{…}), an env entry named like a
-  # credential (the chart's env is literal; envValueFrom reads a Secret), and
-  # a Secret among extraObjects.
-  validation {
-    condition = (
-      !can(var.kube.grafana.values)
-      || !can(keys(var.kube.grafana.values))
-      || (
-        !can(var.kube.grafana.values.adminPassword)
-        && !can(var.kube.grafana.values["grafana.ini"].security.admin_password)
-        && !can(var.kube.grafana.values["grafana.ini"].security.secret_key)
-        && !can(var.kube.grafana.values["grafana.ini"].database.password)
-        && !can(var.kube.grafana.values["grafana.ini"].smtp.password)
-        && !anytrue([for s, v in try(var.kube.grafana.values["grafana.ini"], {}) : startswith(s, "auth.") && can(v.client_secret)])
-        && !anytrue(flatten([
-          for f, doc in try(var.kube.grafana.values.datasources, {}) : [
-            for ds in try(doc.datasources, []) : concat(
-              [can(ds.password), can(ds.basicAuthPassword)],
-              [for k, v in try(ds.secureJsonData, {}) : !can(regex("^\\$(\\{?[A-Za-z_][A-Za-z0-9_]*\\}?|__(env|file)\\{[^}]+\\})$", v))],
-            )
-          ]
-        ]))
-        && !anytrue([for k, v in try(var.kube.grafana.values.env, {}) : can(regex("(?i)(password|passwd|secret|token|api_?key|private_?key)", k))])
-        && !anytrue(try([for o in var.kube.grafana.values.extraObjects : try(o.kind == "Secret", false)], []))
-      )
-    )
-    error_message = "kube.grafana.values must not carry secrets: adminPassword, grafana.ini security.admin_password and security.secret_key, database.password and smtp.password, an auth.* client_secret, a datasource password or a literal secureJsonData value, an env entry named like a credential, and a Secret in extraObjects are refused. Name a Secret instead — admin.existingSecret, envValueFrom, a datasource's $${VAR} or $__file{…} — or put them in a Secret in the grafana namespace named in kube.grafana.values_secret."
-  }
-
-  validation {
-    condition     = !can(var.kube.grafana.gateway) || try(contains(["private", "public", ""], var.kube.grafana.gateway), true)
-    error_message = "kube.grafana.gateway must be private, public, or empty for no HTTPRoute: the shared Gateway Grafana's route attaches to."
-  }
-
-  validation {
-    condition     = !can(var.kube.grafana.values_secret) || try(var.kube.grafana.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.grafana.values_secret)), true)
-    error_message = "kube.grafana.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
-  }
-
-  # --- victoria_logs — docs/catalog/victoria-logs.md ----------------------
-  # The same flags and the same envflag convention as VictoriaMetrics, so the
-  # same four rules.
-  # A value of the wrong kind is the kind check's to refuse; these rules only
-  # judge strings, so one mistake gives one diagnostic.
-
-  # What -retentionPeriod accepts, minus the forms a client should not need
-  # (bare months, fractions, ms), and never under its own one-day minimum.
-  validation {
-    condition = !can(var.kube.victoria_logs.retention) || try(
-      lookup(local.json_kinds, substr(jsonencode(var.kube.victoria_logs.retention), 0, 1), "number") != "string"
-      || can(regex("^[1-9][0-9]*[dwy]$", var.kube.victoria_logs.retention))
-      || (can(regex("^[1-9][0-9]*h$", var.kube.victoria_logs.retention)) && tonumber(trimsuffix(var.kube.victoria_logs.retention, "h")) >= 24),
-      false
-    )
-    error_message = "kube.victoria_logs.retention must be a whole number of hours, days, weeks or years, such as 15d, 4w or 1y, and at least one day (24h): VictoriaLogs refuses less."
-  }
-
-  validation {
-    condition = !can(var.kube.victoria_logs.storage_size) || try(
-      lookup(local.json_kinds, substr(jsonencode(var.kube.victoria_logs.storage_size), 0, 1), "number") != "string"
-      || var.kube.victoria_logs.storage_size == ""
-      || can(regex("^[1-9][0-9]*(Gi|Ti)$", var.kube.victoria_logs.storage_size)),
-      false
-    )
-    error_message = "kube.victoria_logs.storage_size must be empty (no volume claim, an emptyDir) or a size in Gi or Ti, such as 20Gi."
-  }
-
-  # values is free-form on purpose, minus one rule: no secret material. What a
-  # client writes there ends up in the OpenTofu state and in a ConfigMap on the
-  # cluster. VictoriaLogs takes its credentials as flags and as VM_*
-  # environment variables (envflag), so those are the paths refused: an
-  # extraArgs flag named like a password or an auth key (httpAuth.password,
-  # deleteAuthKey, snapshotAuthKey…), an env entry with a literal value whose
-  # name looks like a credential (valueFrom is fine), and a Secret among
-  # extraObjects.
-  validation {
-    condition = (
-      !can(var.kube.victoria_logs.values)
-      || !can(keys(var.kube.victoria_logs.values))
-      || (
-        !anytrue(try([for o in var.kube.victoria_logs.values.extraObjects : try(o.kind == "Secret", false)], []))
-        && !anytrue([for k in try(keys(var.kube.victoria_logs.values.server.extraArgs), []) : can(regex("(?i)(password|passwd|auth_?key|token)", k))])
-        && alltrue([
-          for e in try(tolist(var.kube.victoria_logs.values.server.env), []) :
-          !(can(e.value) && can(regex("(?i)(secret|password|passwd|token|auth_?key|api_?key|access_?key|private_?key)", try(e.name, ""))))
-        ])
-      )
-    )
-    error_message = "kube.victoria_logs.values must not carry secrets: an extraArgs flag such as httpAuth.password or deleteAuthKey, an env entry with a literal value named like a credential (VM_httpAuth_password, …), and a Secret in extraObjects are refused. Put them in a Secret in the victoria-logs namespace and name it in kube.victoria_logs.values_secret."
-  }
-
-  validation {
-    condition     = !can(var.kube.victoria_logs.values_secret) || try(var.kube.victoria_logs.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.victoria_logs.values_secret)), true)
-    error_message = "kube.victoria_logs.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
-  }
-
-  # --- victoria_traces — docs/catalog/victoria-traces.md --------------------
-  # The same flags and the same envflag convention as VictoriaMetrics, so the
-  # same four rules.
-  # A value of the wrong kind is the kind check's to refuse; these rules only
-  # judge strings, so one mistake gives one diagnostic.
-
-  # What -retentionPeriod accepts, minus the forms a client should not need
-  # (bare months, fractions, ms), and never under its own one-day minimum.
-  validation {
-    condition = !can(var.kube.victoria_traces.retention) || try(
-      lookup(local.json_kinds, substr(jsonencode(var.kube.victoria_traces.retention), 0, 1), "number") != "string"
-      || can(regex("^[1-9][0-9]*[dwy]$", var.kube.victoria_traces.retention))
-      || (can(regex("^[1-9][0-9]*h$", var.kube.victoria_traces.retention)) && tonumber(trimsuffix(var.kube.victoria_traces.retention, "h")) >= 24),
-      false
-    )
-    error_message = "kube.victoria_traces.retention must be a whole number of hours, days, weeks or years, such as 15d, 4w or 1y, and at least one day (24h): VictoriaTraces refuses less."
-  }
-
-  validation {
-    condition = !can(var.kube.victoria_traces.storage_size) || try(
-      lookup(local.json_kinds, substr(jsonencode(var.kube.victoria_traces.storage_size), 0, 1), "number") != "string"
-      || var.kube.victoria_traces.storage_size == ""
-      || can(regex("^[1-9][0-9]*(Gi|Ti)$", var.kube.victoria_traces.storage_size)),
-      false
-    )
-    error_message = "kube.victoria_traces.storage_size must be empty (no volume claim, an emptyDir) or a size in Gi or Ti, such as 20Gi."
-  }
-
-  # values is free-form on purpose, minus one rule: no secret material. What a
-  # client writes there ends up in the OpenTofu state and in a ConfigMap on the
-  # cluster. VictoriaTraces takes its credentials as flags and as VM_*
-  # environment variables (envflag), so those are the paths refused: an
-  # extraArgs flag named like a password or an auth key (httpAuth.password,
-  # deleteAuthKey, snapshotAuthKey…), an env entry with a literal value whose
-  # name looks like a credential (valueFrom is fine), and a Secret among
-  # extraObjects.
-  validation {
-    condition = (
-      !can(var.kube.victoria_traces.values)
-      || !can(keys(var.kube.victoria_traces.values))
-      || (
-        !anytrue(try([for o in var.kube.victoria_traces.values.extraObjects : try(o.kind == "Secret", false)], []))
-        && !anytrue([for k in try(keys(var.kube.victoria_traces.values.server.extraArgs), []) : can(regex("(?i)(password|passwd|auth_?key|token)", k))])
-        && alltrue([
-          for e in try(tolist(var.kube.victoria_traces.values.server.env), []) :
-          !(can(e.value) && can(regex("(?i)(secret|password|passwd|token|auth_?key|api_?key|access_?key|private_?key)", try(e.name, ""))))
-        ])
-      )
-    )
-    error_message = "kube.victoria_traces.values must not carry secrets: an extraArgs flag such as httpAuth.password or deleteAuthKey, an env entry with a literal value named like a credential (VM_httpAuth_password, …), and a Secret in extraObjects are refused. Put them in a Secret in the victoria-traces namespace and name it in kube.victoria_traces.values_secret."
-  }
-
-  validation {
-    condition     = !can(var.kube.victoria_traces.values_secret) || try(var.kube.victoria_traces.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.victoria_traces.values_secret)), true)
-    error_message = "kube.victoria_traces.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
-  }
-
-  # --- alerting — docs/catalog/alerting.md -----------------------------------
+  # --- monitoring — docs/catalog/monitoring.md ------------------------------
   # Each rule reads var.kube with the catalog default as the fallback, as the
-  # rest of this block does. "On" below means kube.alerting.enabled = true.
-  # Never tolist() on receivers or routes: two receivers of different kinds
-  # (Slack, PagerDuty) are a tuple tolist() cannot convert, and under try()
-  # that failure would read as an empty list and let everything through.
+  # rest of this block does. A value of the wrong kind is the kind checks' to
+  # refuse; these rules only judge strings, so one mistake gives one
+  # diagnostic. Never tolist() on receivers or routes: two receivers of
+  # different kinds (Slack, PagerDuty) are a tuple tolist() cannot convert,
+  # and under try() that failure would read as an empty list and let
+  # everything through.
 
-  # vmalert evaluates every rule against VictoriaMetrics: without it no alert
-  # can ever fire, and a silent alerting stack reads as "all is well".
+  # What -retentionPeriod accepts, for each of the three backends, minus the
+  # forms a client should not need (bare months, fractions, ms), and never
+  # under their own one-day minimum.
   validation {
-    condition     = !try(var.kube.alerting.enabled == true, false) || try(var.kube.victoria_metrics.enabled == true, true)
-    error_message = "kube.alerting needs kube.victoria_metrics.enabled = true: vmalert evaluates its rules against VictoriaMetrics, so without it no alert can ever fire."
+    condition = alltrue([
+      for p in ["metrics", "logs", "traces"] : !can(var.kube.monitoring[p].retention) || try(
+        lookup(local.json_kinds, substr(jsonencode(var.kube.monitoring[p].retention), 0, 1), "number") != "string"
+        || can(regex("^[1-9][0-9]*[dwy]$", var.kube.monitoring[p].retention))
+        || (can(regex("^[1-9][0-9]*h$", var.kube.monitoring[p].retention)) && tonumber(trimsuffix(var.kube.monitoring[p].retention, "h")) >= 24),
+        false
+      )
+    ])
+    error_message = "kube.monitoring: metrics, logs and traces retention must be a whole number of hours, days, weeks or years, such as 15d, 4w or 1y, and at least one day (24h): VictoriaMetrics, VictoriaLogs and VictoriaTraces refuse less."
   }
 
-  # On, alerts must go somewhere: a receiver of the client's, named by the
-  # default route. The chart's own default, devnull, drops everything, and
-  # watchdog is the socle's; neither may be the client's.
   validation {
-    condition = !try(var.kube.alerting.enabled == true, false) || try(
-      length(var.kube.alerting.receivers) > 0
-      && alltrue([for r in var.kube.alerting.receivers : can(regex("^[A-Za-z0-9_.-]+$", r.name))])
-      && contains([for r in var.kube.alerting.receivers : r.name], var.kube.alerting.route.receiver),
+    condition = alltrue([
+      for p in ["metrics", "logs", "traces"] : !can(var.kube.monitoring[p].storage_size) || try(
+        lookup(local.json_kinds, substr(jsonencode(var.kube.monitoring[p].storage_size), 0, 1), "number") != "string"
+        || var.kube.monitoring[p].storage_size == ""
+        || can(regex("^[1-9][0-9]*(Gi|Ti)$", var.kube.monitoring[p].storage_size)),
+        false
+      )
+    ])
+    error_message = "kube.monitoring: metrics, logs and traces storage_size must be empty (no volume claim, an emptyDir) or a size in Gi or Ti, such as 20Gi."
+  }
+
+  validation {
+    condition = (
+      !can(var.kube.monitoring.grafana.domain)
+      || lookup(local.json_kinds, substr(jsonencode(var.kube.monitoring.grafana.domain), 0, 1), "number") != "string"
+      || var.kube.monitoring.grafana.domain == ""
+      || can(regex("^([a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$", var.kube.monitoring.grafana.domain))
+    )
+    error_message = "kube.monitoring.grafana.domain must be empty or a fully qualified DNS name in lowercase, such as grafana.acme.example: no scheme, no port, no path."
+  }
+
+  validation {
+    condition     = !can(var.kube.monitoring.grafana.gateway) || try(contains(["private", "public", ""], var.kube.monitoring.grafana.gateway), true)
+    error_message = "kube.monitoring.grafana.gateway must be private, public, or empty for no HTTPRoute: the shared Gateway Grafana's route attaches to."
+  }
+
+  # Alerting on, alerts must go somewhere: a receiver of the client's, named
+  # by the default route. watchdog and null are the socle's; neither may be
+  # the client's.
+  validation {
+    condition = !try(var.kube.monitoring.alerting.enabled == true, false) || try(
+      length(var.kube.monitoring.alerting.receivers) > 0
+      && alltrue([for r in var.kube.monitoring.alerting.receivers : can(regex("^[A-Za-z0-9_.-]+$", r.name))])
+      && contains([for r in var.kube.monitoring.alerting.receivers : r.name], var.kube.monitoring.alerting.route.receiver),
       false
     )
-    error_message = "kube.alerting on needs where alerts go: at least one receiver in receivers, each with a name, and route.receiver naming one of them (Alertmanager's routing tree, docs/catalog/alerting.md)."
+    error_message = "kube.monitoring.alerting on needs where alerts go: at least one receiver in receivers, each with a name, and route.receiver naming one of them (Alertmanager's routing tree, docs/catalog/monitoring.md)."
   }
 
   validation {
-    condition     = alltrue([for r in try(var.kube.alerting.receivers, []) : !contains(["watchdog", "devnull"], try(r.name, ""))])
-    error_message = "kube.alerting.receivers: watchdog is the socle's receiver, and devnull is the chart's, which drops every alert; name yours otherwise."
+    condition     = alltrue([for r in try(var.kube.monitoring.alerting.receivers, []) : !contains(["watchdog", "null"], try(r.name, ""))])
+    error_message = "kube.monitoring.alerting.receivers: watchdog and null are the socle's receivers — the dead man's switch, and the one that drops info alerts; name yours otherwise."
   }
 
   # A sub-route naming a receiver that does not exist stops Alertmanager from
   # loading its configuration at all. Checked two levels down, where routing
-  # trees live in practice.
+  # trees live in practice. null, the socle's, is there to route to.
   validation {
     condition = alltrue(flatten([
       for r in concat(
-        try(var.kube.alerting.route.routes, []),
-        flatten([for c in try(var.kube.alerting.route.routes, []) : try(c.routes, [])])
-      ) : !can(r.receiver) || contains(concat(["watchdog"], [for x in try(var.kube.alerting.receivers, []) : try(x.name, "")]), try(r.receiver, ""))
+        try(var.kube.monitoring.alerting.route.routes, []),
+        flatten([for c in try(var.kube.monitoring.alerting.route.routes, []) : try(c.routes, [])])
+      ) : !can(r.receiver) || contains(concat(["watchdog", "null"], [for x in try(var.kube.monitoring.alerting.receivers, []) : try(x.name, "")]), try(r.receiver, ""))
     ]))
-    error_message = "kube.alerting.route: a sub-route names a receiver that is not in receivers. Alertmanager refuses its whole configuration over it."
+    error_message = "kube.monitoring.alerting.route: a sub-route names a receiver that is not in receivers. Alertmanager refuses its whole configuration over it."
   }
 
   # The watchdog's URL is a key: it lives in receivers_secret, never in the
   # plan. On with the watchdog, that Secret must be named — or the watchdog
   # turned off in the open.
   validation {
-    condition     = !try(var.kube.alerting.enabled == true, false) || try(var.kube.alerting.watchdog == false, false) || try(var.kube.alerting.receivers_secret, "") != ""
-    error_message = "kube.alerting on with the watchdog needs receivers_secret: a Secret you create in the alerting namespace, whose watchdog-url key is your dead man's switch (Healthchecks.io, your on-call platform's heartbeat). Or set watchdog = false, knowing nothing will tell you when alerting itself is down."
+    condition     = !try(var.kube.monitoring.alerting.enabled == true, false) || try(var.kube.monitoring.alerting.watchdog == false, false) || try(var.kube.monitoring.alerting.receivers_secret, "") != ""
+    error_message = "kube.monitoring.alerting on with the watchdog needs receivers_secret: a Secret you create in the monitoring namespace, whose watchdog-url key is your dead man's switch (Healthchecks.io, your on-call platform's heartbeat). Or set watchdog = false, knowing nothing will tell you when alerting itself is down."
   }
 
   # Everything in the plan lands in the OpenTofu state and in a ConfigMap on
@@ -711,7 +550,7 @@ variable "kube" {
   # *_file twin, which Alertmanager has for every one of them.
   validation {
     condition = alltrue(flatten([
-      for r in try(var.kube.alerting.receivers, []) : [
+      for r in try(var.kube.monitoring.alerting.receivers, []) : [
         for k in try(keys(r), []) : [
           for c in try(r[k], []) : (
             length(setintersection(try(keys(c), []), local.alerting_literal_keys)) == 0
@@ -724,50 +563,63 @@ variable "kube" {
         ] if endswith(k, "_configs")
       ]
     ]))
-    error_message = "kube.alerting.receivers must not carry keys in clear: ${join(", ", local.alerting_literal_keys)}, and an http_config password, credentials, client_secret or bearer_token, are refused. Put the key in receivers_secret and use the *_file twin: api_url_file, routing_key_file, url_file… pointing under /etc/alertmanager/secrets/."
+    error_message = "kube.monitoring.alerting.receivers must not carry keys in clear: ${join(", ", local.alerting_literal_keys)}, and an http_config password, credentials, client_secret or bearer_token, are refused. Put the key in receivers_secret and use the *_file twin: api_url_file, routing_key_file, url_file… pointing under /etc/alertmanager/secrets/."
   }
 
-  # values tunes the chart, minus three things. Rules: v1 ships the socle's
-  # only, checked in CI, and vmalert refuses its whole configuration over one
-  # bad file. Alertmanager's configuration: rendered from receivers, route
-  # and the watchdog, which a list in values would silently replace. And the
-  # chart's Alertmanager turned off: the watchdog and the receivers' checks go
-  # with it, and a client's own Alertmanager is not offered in v1.
   validation {
-    condition = !can(keys(var.kube.alerting.values)) || (
-      length(try(var.kube.alerting.values.server.config.alerts.groups, [])) == 0
-      && !can(var.kube.alerting.values.server.extraArgs.rule)
-      && try(var.kube.alerting.values.server.configMap, "") == ""
-      && !can(var.kube.alerting.values.alertmanager.config)
-      && try(var.kube.alerting.values.alertmanager.configMap, "") == ""
-      && try(var.kube.alerting.values.alertmanager.enabled, true) != false
+    condition     = !can(var.kube.monitoring.alerting.receivers_secret) || try(var.kube.monitoring.alerting.receivers_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.monitoring.alerting.receivers_secret)), true)
+    error_message = "kube.monitoring.alerting.receivers_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
+  }
+
+  # values tunes the chart, minus what the socle builds from named
+  # attributes: Alertmanager's configuration, rendered from receivers, route
+  # and the watchdog, which a configuration in values would silently
+  # replace; the rules' sources, pinned to the tags the socle tests; and the
+  # parts the attributes switch, which values would switch behind them.
+  validation {
+    condition = !can(keys(var.kube.monitoring.values)) || (
+      !can(var.kube.monitoring.values.alertmanager.config)
+      && try(var.kube.monitoring.values.alertmanager.spec.configSecret, "") == ""
+      && try(var.kube.monitoring.values.alertmanager.spec.configRawYaml, "") == ""
+      && !try(var.kube.monitoring.values.alertmanager.useManagedConfig, false)
+      && !can(var.kube.monitoring.values.defaultRules.sources)
+      && alltrue([for c in ["vmsingle", "vlsingle", "vtsingle", "vmalert", "alertmanager", "grafana", "defaultRules", "defaultDashboards"] : !can(var.kube.monitoring.values[c].enabled)])
     )
-    error_message = "kube.alerting.values must not set rules (server.config.alerts, server.extraArgs.rule, server.configMap), Alertmanager's configuration (alertmanager.config, alertmanager.configMap) or alertmanager.enabled = false. Rules are the socle's in v1; where alerts go is receivers and route."
+    error_message = "kube.monitoring.values must not set Alertmanager's configuration (alertmanager.config, alertmanager.spec.configSecret or configRawYaml, alertmanager.useManagedConfig), the rules' sources (defaultRules.sources), or the enabled switch of vmsingle, vlsingle, vtsingle, vmalert, alertmanager, grafana, defaultRules and defaultDashboards. Where alerts go is alerting.receivers and route; what runs is the module's attributes."
   }
 
-  # And no secret material in values: the chart takes credentials for its
-  # datasource, remote write and read, and notifier inline.
+  # And no secret material in values. VictoriaMetrics, VictoriaLogs,
+  # VictoriaTraces, vmagent and vmalert take credentials as flags and as
+  # environment variables; Grafana in its own paths. Refused: an extraArgs
+  # flag named like a password or an auth key (httpAuth.password,
+  # deleteAuthKey…), an extraEnvs or env entry with a literal value named like
+  # a credential (valueFrom is fine), Grafana's adminPassword, grafana.ini's
+  # security, database and smtp passwords, an auth.* client_secret, and a
+  # Secret among extraObjects.
   validation {
-    condition = !can(keys(var.kube.alerting.values)) || (
-      !anytrue(try([for o in var.kube.alerting.values.extraObjects : try(o.kind == "Secret", false)], []))
+    condition = !can(keys(var.kube.monitoring.values)) || (
+      !anytrue(try([for o in var.kube.monitoring.values.extraObjects : try(o.kind == "Secret", false)], []))
       && !anytrue(flatten([
-        for e in ["datasource", "remoteWrite", "remoteRead", "notifier"] : [
-          can(var.kube.alerting.values.server[e].basicAuth.password),
-          can(var.kube.alerting.values.server[e].bearerToken),
-        ]
+        for c in ["vmsingle", "vlsingle", "vtsingle", "vmagent", "vmalert", "alertmanager"] : concat(
+          [for k in try(keys(var.kube.monitoring.values[c].spec.extraArgs), []) : can(regex("(?i)(password|passwd|auth_?key|token)", k))],
+          [for e in try(tolist(var.kube.monitoring.values[c].spec.extraEnvs), []) : can(e.value) && can(regex("(?i)(secret|password|passwd|token|auth_?key|api_?key|access_?key|private_?key)", try(e.name, "")))],
+        )
       ]))
+      && !can(var.kube.monitoring.values.grafana.adminPassword)
+      && !can(var.kube.monitoring.values.grafana["grafana.ini"].security.admin_password)
+      && !can(var.kube.monitoring.values.grafana["grafana.ini"].security.secret_key)
+      && !can(var.kube.monitoring.values.grafana["grafana.ini"].database.password)
+      && !can(var.kube.monitoring.values.grafana["grafana.ini"].smtp.password)
+      && !anytrue([for s, v in try(var.kube.monitoring.values.grafana["grafana.ini"], {}) : startswith(s, "auth.") && can(v.client_secret)])
+      && !anytrue([for k, v in try(var.kube.monitoring.values.grafana.env, {}) : can(regex("(?i)(password|passwd|secret|token|api_?key|private_?key)", k))])
+      && !anytrue([for d in try(var.kube.monitoring.values.defaultDatasources.extra, []) : can(d.password) || can(d.basicAuthPassword)])
     )
-    error_message = "kube.alerting.values must not carry secrets: a basicAuth.password or bearerToken under server.datasource, remoteWrite, remoteRead or notifier, and a Secret in extraObjects, are refused. Put them in kube.alerting.values_secret."
+    error_message = "kube.monitoring.values must not carry secrets: an extraArgs flag such as httpAuth.password or deleteAuthKey, an extraEnvs entry with a literal value named like a credential, grafana.adminPassword, grafana.ini security.admin_password and security.secret_key, database.password and smtp.password, an auth.* client_secret, a grafana.env entry named like a credential, a password in defaultDatasources.extra, and a Secret in extraObjects are refused. Name a Secret instead — grafana.admin.existingSecret, envValueFrom, an extraEnvs valueFrom — or put them in a Secret in the monitoring namespace named in kube.monitoring.values_secret."
   }
 
   validation {
-    condition     = !can(var.kube.alerting.receivers_secret) || try(var.kube.alerting.receivers_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.alerting.receivers_secret)), true)
-    error_message = "kube.alerting.receivers_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
-  }
-
-  validation {
-    condition     = !can(var.kube.alerting.values_secret) || try(var.kube.alerting.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.alerting.values_secret)), true)
-    error_message = "kube.alerting.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
+    condition     = !can(var.kube.monitoring.values_secret) || try(var.kube.monitoring.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.monitoring.values_secret)), true)
+    error_message = "kube.monitoring.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
   }
 
   # --- keda — docs/catalog/keda.md -------------------------------------------

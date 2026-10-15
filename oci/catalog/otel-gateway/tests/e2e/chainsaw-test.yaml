@@ -1,18 +1,18 @@
 # The otel_gateway module's proof (docs/catalog/otel-gateway.md): the
-# cluster-level collector, on by default. Selected by label:
-#   health   the ResourceSet Ready, the Deployment Available, and each of its
-#            three inputs reaching VictoriaMetrics (vm.sh): Kubernetes object
-#            state from k8s_cluster, a scraped annotated endpoint (the
-#            victoria-metrics pod its module annotates prometheus.io/scrape),
-#            and an application's OTLP — one gauge posted by podinfo (the
-#            hello module) to the gateway's Service, read back enriched by
-#            k8s_attributes with its sender's workload. Neither the API
-#            server's service proxy nor a port-forward can carry OTLP to the
-#            receivers (measured: a 415 from the proxy; a port-forward dials
-#            localhost, the receivers bind the pod IP): podinfo's own curl does. Then every metric of the workloads dashboard.
+# cluster-level collector, on by default, for what applications push.
+# Selected by label:
+#   health   the ResourceSet Ready, the Deployment Available, its VMRule
+#            shipped; its own telemetry scraped by the monitoring module's
+#            vmagent through its annotation, and an application's OTLP — one
+#            gauge posted by podinfo (the hello module) to the gateway's
+#            Service — read back enriched by k8s_attributes with its sender's
+#            workload (vm.sh). Neither the API server's service proxy nor a
+#            port-forward can carry OTLP to the receivers (measured: a 415
+#            from the proxy; a port-forward dials localhost, the receivers
+#            bind the pod IP): podinfo's own curl does.
 #   module   a client request beats the socle's; off garbage-collects the
-#            release, the dashboards Kustomization and its ConfigMap; on
-#            brings them back.
+#            release, the rules Kustomization and its VMRule; on brings them
+#            back.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -23,13 +23,13 @@ metadata:
     platform: any
 spec:
   description: >-
-    The gateway's three inputs reach VictoriaMetrics, OTLP enriched with its
-    sender, and its dashboard's metrics are all there.
+    The gateway's own telemetry is scraped, and an application's OTLP
+    reaches VictoriaMetrics enriched with its sender.
   timeouts:
     assert: 5m
     exec: 5m
   steps:
-    - name: the ResourceSet is Ready, the Deployment Available, the dashboard shipped
+    - name: the ResourceSet is Ready, the Deployment Available, its VMRule shipped
       try:
         - assert:
             resource:
@@ -53,13 +53,11 @@ spec:
                   - status: 'True'
         - assert:
             resource:
-              apiVersion: v1
-              kind: ConfigMap
+              apiVersion: operator.victoriametrics.com/v1beta1
+              kind: VMRule
               metadata:
-                name: otel-gateway-dashboard-workloads
+                name: opentelemetry-collector
                 namespace: otel-gateway
-                labels:
-                  grafana_dashboard: '1'
       catch:
         - describe:
             apiVersion: helm.toolkit.fluxcd.io/v2
@@ -71,25 +69,25 @@ spec:
         - podLogs:
             namespace: otel-gateway
             tail: 40
-    - name: object state, a scraped endpoint and an application's OTLP reach VictoriaMetrics
+    - name: its telemetry is scraped, and an application's OTLP reaches VictoriaMetrics
       try:
         - script:
             content: |
               . ./vm.sh
-              wait_series k8s_deployment_available
-              wait_series 'vm_app_version{k8s_namespace_name="victoria-metrics"}'
-              scrape_targets
+              # The pod's annotation, read by vmagent: the job the upstream
+              # collector rules select on.
+              wait_series 'otelcol_process_uptime{job="opentelemetry-collector",namespace="otel-gateway"}'
               post_otlp_metric socle.e2e.otlp_probe 7
               wait_series 'socle_e2e_otlp_probe{service_name="socle-e2e"}' 24
               # k8s_attributes matched the sender by its connection IP.
               wait_series 'socle_e2e_otlp_probe{k8s_namespace_name="hello",k8s_deployment_name="podinfo"}' 6
-              check_dashboard otel-gateway otel-gateway-dashboard-workloads workloads.json '\b(?:k8s_[a-z0-9_]+|up)\b'
       catch:
         - podLogs:
             namespace: otel-gateway
             tail: 40
         - podLogs:
-            namespace: victoria-metrics
+            namespace: monitoring
+            selector: app.kubernetes.io/name=vmagent
             tail: 20
 ---
 apiVersion: chainsaw.kyverno.io/v1alpha1
@@ -265,7 +263,7 @@ spec:
             namespace: flux-system
             selector: app=helm-controller
             tail: 40
-    - name: enabled = false garbage-collects the release, the dashboards Kustomization and the dashboard
+    - name: enabled = false garbage-collects the release, the rules Kustomization and its VMRule
       try:
         # The release must be idle before the module goes: helm-controller
         # honours a deletion only once the running action returns, and the
@@ -310,7 +308,7 @@ spec:
               apiVersion: kustomize.toolkit.fluxcd.io/v1
               kind: Kustomization
               metadata:
-                name: otel-gateway-dashboards
+                name: otel-gateway-rules
                 namespace: flux-system
         - error:
             resource:
@@ -328,7 +326,7 @@ spec:
             namespace: flux-system
             selector: app.kubernetes.io/name=flux-operator
             tail: 40
-    - name: back to the defaults, the Deployment is Available and the dashboard is back
+    - name: back to the defaults, the Deployment is Available and the VMRule is back
       try:
         - patch:
             resource:
@@ -344,13 +342,11 @@ spec:
                       enabled: true
         - assert:
             resource:
-              apiVersion: v1
-              kind: ConfigMap
+              apiVersion: operator.victoriametrics.com/v1beta1
+              kind: VMRule
               metadata:
-                name: otel-gateway-dashboard-workloads
+                name: opentelemetry-collector
                 namespace: otel-gateway
-                labels:
-                  grafana_dashboard: '1'
         - assert:
             resource:
               apiVersion: apps/v1

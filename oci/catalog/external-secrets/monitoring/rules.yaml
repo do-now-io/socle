@@ -1,0 +1,34 @@
+# external-secrets's own alert rules: what awesome-prometheus-alerts does
+# not cover for it (it has no External Secrets section), on the metrics it
+# exposes — names read on a live cluster or in its source at the pinned
+# version. Names read on socle-dev (2.11.0).
+# Checked in CI with vmalert -dryRun (.github/scripts/check-rules.sh).
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: socle-external-secrets
+spec:
+  groups:
+    - name: socle-external-secrets
+      rules:
+        - alert: ExternalSecretNotReady
+          expr: >-
+            externalsecret_status_condition{condition="Ready", status="False"} == 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              The ExternalSecret {{ $labels.namespace }}/{{ $labels.name }} is not Ready:
+              its Secret no longer follows the store.
+        - alert: ExternalSecretsStoreNotReady
+          expr: >-
+            clustersecretstore_status_condition{condition="Ready", status="False"} == 1
+            or secretstore_status_condition{condition="Ready", status="False"} == 1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              The secret store {{ $labels.name }} is not Ready: every ExternalSecret
+              reading it stops syncing.

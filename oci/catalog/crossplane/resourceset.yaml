@@ -86,6 +86,11 @@ spec:
             # half a gigabyte before anything is declared.
             # No limits, like every socle module: a memory limit turns a CRD
             # surge into an OOM loop, and a CPU limit throttles reconciliation.
+            # Metrics for the monitoring module's vmagent: the core and the
+            # RBAC manager declare port 8080 and annotate their pods. The
+            # providers' pods Crossplane annotates itself.
+            metrics:
+              enabled: true
             resourcesCrossplane:
               limits: null
               requests:
@@ -158,6 +163,32 @@ spec:
           upgrade:
             remediation:
               retries: 3
+        << $monitored := and inputs.modules.crossplane.enabled inputs.modules.monitoring.enabled ->>
+        ---
+        # The module's monitoring — its alert rules and its dashboard, from
+        # monitoring/ in the socle artifact: VMRules and a ConfigMap Grafana's
+        # sidecar loads. Present only while both this module and the monitoring
+        # module are on: monitoring brings the VMRule CRD, and until it has the
+        # Kustomization fails and retries every minute
+        # (docs/decisions/monitoring.md, MONITORING-12).
+        apiVersion: kustomize.toolkit.fluxcd.io/v1
+        kind: Kustomization
+        metadata:
+          name: crossplane-monitoring
+          namespace: flux-system
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if $monitored >>enabled<< else >>disabled<< end >>
+        spec:
+          interval: 1h
+          retryInterval: 1m
+          sourceRef:
+            kind: OCIRepository
+            name: socle
+          path: ./catalog/crossplane/monitoring
+          targetNamespace: crossplane-system
+          prune: true
+          wait: true
+          timeout: 2m
     - name: providers
       resourcesTemplate: |
         << if eq inputs.cloud "aws" >>

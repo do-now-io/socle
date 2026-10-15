@@ -72,16 +72,16 @@ kube = {
     }
     values_secret = "argocd-values"
   }
-  # Metrics storage, on by default: 15 days on a 20Gi claim of the cluster's
-  # default StorageClass.
-  # victoria_metrics = {
-  #   retention = "30d"
+  # The monitoring stack, on by default: metrics 15 days and logs 7 days,
+  # each on a 20Gi claim of the cluster's default StorageClass. Traces are off
+  # (VictoriaTraces is pre-GA; an upgrade may drop stored traces), and so is
+  # alerting, which needs your receivers (docs/catalog/monitoring.md):
+  # monitoring = {
+  #   metrics = { retention = "30d" }
+  #   traces  = { enabled = true }
   #   # Flag values as strings: Helm renders a number from a million up as 1e+06.
-  #   values    = { server = { extraArgs = { "storage.maxHourlySeries" = "300000" } } }
+  #   values  = { vmsingle = { spec = { extraArgs = { "storage.maxHourlySeries" = "300000" } } } }
   # }
-  # Traces are off by default (VictoriaTraces is pre-GA; an upgrade may drop
-  # stored traces). Turning them on:
-  # victoria_traces = { enabled = true }
   # The admission layer is off by default. The engine and the socle's policy
   # set, every policy reporting (Audit); enforce turns a policy into a refusal
   # the API server applies itself (docs/catalog/kyverno-policies.md):

@@ -317,6 +317,11 @@ spec:
             # Reconcile on change, not only on the interval: a new HTTPRoute is
             # resolvable within seconds rather than within a minute.
             triggerLoopOnEvent: true
+            # Scraped by the monitoring module's vmagent: metrics on the
+            # declared http port, always on.
+            podAnnotations:
+              prometheus.io/scrape: "true"
+              prometheus.io/port: "7979"
             resources:
               requests:
                 cpu: 10m
@@ -382,3 +387,29 @@ spec:
               valuesKey: values.yaml
               optional: true
             << end >>
+    << $monitored := and inputs.modules.external_dns.enabled inputs.modules.monitoring.enabled ->>
+    ---
+    # The module's monitoring — its alert rules and its dashboard, from
+    # monitoring/ in the socle artifact: VMRules and a ConfigMap Grafana's
+    # sidecar loads. Present only while both this module and the monitoring
+    # module are on: monitoring brings the VMRule CRD, and until it has the
+    # Kustomization fails and retries every minute
+    # (docs/decisions/monitoring.md, MONITORING-12).
+    apiVersion: kustomize.toolkit.fluxcd.io/v1
+    kind: Kustomization
+    metadata:
+      name: external-dns-monitoring
+      namespace: flux-system
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if $monitored >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 1h
+      retryInterval: 1m
+      sourceRef:
+        kind: OCIRepository
+        name: socle
+      path: ./catalog/external-dns/monitoring
+      targetNamespace: external-dns
+      prune: true
+      wait: true
+      timeout: 2m

@@ -62,13 +62,9 @@ From each `oci/catalog/<module>/resourceset.yaml`. Offered is not proven: CI app
 | `external_dns` | `external-dns`, `https://kubernetes-sigs.github.io/external-dns/` | `1.22.0` | 0.22.0 | all |
 | `argocd` | `argo-cd`, `oci://ghcr.io/argoproj/argo-helm` | `10.9.2` | v3.5.3 | all |
 | `argocd_image_updater` | `argocd-image-updater`, `oci://ghcr.io/argoproj/argo-helm` | `1.3.1` | v1.3.0 | all (`repositories` on aws only) |
-| `victoria_metrics` | `victoria-metrics-single`, `oci://ghcr.io/victoriametrics/helm-charts` | `0.48.0` | v1.153.0 | all |
+| `monitoring` | `victoria-metrics-k8s-stack`, `oci://ghcr.io/victoriametrics/helm-charts` | `0.95.2` | VictoriaMetrics v1.153.0; operator v0.75.0; VictoriaLogs v1.53.0; VictoriaTraces v0.10.0; Alertmanager v0.34.0; kube-state-metrics 2.20.0; node-exporter 1.12.1; Grafana 13.2.3 | all |
 | `otel_agent` | `opentelemetry-collector`, `oci://ghcr.io/open-telemetry/opentelemetry-helm-charts` | `0.173.1` | 0.160.0 | all |
 | `otel_gateway` | `opentelemetry-collector`, same | `0.173.1` | 0.160.0 | all |
-| `grafana` | `grafana`, `oci://ghcr.io/grafana-community/helm-charts` | `13.2.6` | 13.2.2 | all |
-| `victoria_logs` | `victoria-logs-single`, `oci://ghcr.io/victoriametrics/helm-charts` | `0.13.9` | v1.52.0 | all |
-| `victoria_traces` | `victoria-traces-single`, `oci://ghcr.io/victoriametrics/helm-charts` | `0.1.11` | v0.11.0 | all |
-| `alerting` | `victoria-metrics-alert`, `oci://ghcr.io/victoriametrics/helm-charts` | `0.50.0` | vmalert v1.153.0; Alertmanager v0.34.1 | all |
 | `keda` | `keda`, `https://kedacore.github.io/charts` | `2.21.0` | 2.21.0 | all (`services` on aws only) |
 | `metrics_server` | `metrics-server`, `https://kubernetes-sigs.github.io/metrics-server/` | `3.14.0` | 0.9.0 | aws |
 | `kyverno` | `kyverno`, `oci://ghcr.io/kyverno/charts` | `3.9.1` | v1.19.1 | all |

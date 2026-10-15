@@ -87,8 +87,8 @@ kube = {
 `ClusterSecretStore/secret-manager`.
 
 **What the socle sets**: CRDs kept on removal, `PushSecret` processing off,
-small requests with memory limits, and scrape annotations for
-[otel-gateway](otel-gateway.md). Your `values` are merged over these.
+small requests with memory limits, and, while [monitoring](monitoring.md)
+is on, the metrics Services it scrapes. Your `values` are merged over these.
 
 **Cloud access**: on aws, the role `<cluster>-external-secrets` may only
 `GetSecretValue` and `DescribeSecret` on `secret:<prefix>/*` in the cluster's

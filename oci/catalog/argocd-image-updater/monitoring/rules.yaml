@@ -1,0 +1,34 @@
+# argocd-image-updater's own alert rules: what awesome-prometheus-alerts
+# does not cover for it (it has no Argo CD Image Updater section), on the
+# metrics it exposes — names read on a live cluster or in its source at the
+# pinned version. Names from pkg/metrics/metrics.go at v1.3.0.
+# Checked in CI with vmalert -dryRun (.github/scripts/check-rules.sh).
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: socle-argocd-image-updater
+spec:
+  groups:
+    - name: socle-argocd-image-updater
+      rules:
+        - alert: ArgocdImageUpdaterImageErrors
+          expr: >-
+            sum by (application) (increase(argocd_image_updater_images_errors_total[15m])) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              Argo CD Image Updater fails to update images of the application
+              {{ $labels.application }}: its tags stay where they are.
+        - alert: ArgocdImageUpdaterRegistryErrors
+          expr: >-
+            sum by (registry) (rate(argocd_image_updater_registry_requests_failed_total[10m]))
+            / sum by (registry) (rate(argocd_image_updater_registry_requests_total[10m])) > 0.1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              More than 10% of Argo CD Image Updater's requests to {{ $labels.registry }}
+              fail: check its credentials and reachability.

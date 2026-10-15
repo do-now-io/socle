@@ -58,9 +58,9 @@ oci/
     ├── gateway-api/
     │   ├── resourceset.yaml
     │   └── cilium/                  # a Kustomization applied by the module, from this artifact
-    ├── otel-agent/
+    ├── monitoring/
     │   ├── resourceset.yaml
-    │   └── dashboards/              # the module's Grafana dashboards
+    │   └── rules/                   # the module's own VMRules, applied by a Kustomization
     └── <module>/resourceset.yaml
 ```
 

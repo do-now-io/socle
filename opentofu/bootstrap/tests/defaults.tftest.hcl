@@ -67,12 +67,28 @@ run "defaults_are_the_recommended_position" {
     error_message = "external_dns.txt_owner_id must default to the cluster name, so two clusters never claim each other's records."
   }
   assert {
-    condition     = output.inputs.modules.victoria_metrics.enabled == true && output.inputs.modules.victoria_metrics.retention == "15d" && output.inputs.modules.victoria_metrics.storage_size == "20Gi"
-    error_message = "victoria_metrics must default to on, 15 days of retention on a 20Gi claim (docs/architecture/observability.md#where-the-data-lives)."
+    condition     = output.inputs.modules.monitoring.enabled == true && output.inputs.modules.monitoring.metrics.retention == "15d" && output.inputs.modules.monitoring.metrics.storage_size == "20Gi"
+    error_message = "monitoring must default to on, metrics kept 15 days on a 20Gi claim (docs/architecture/observability.md#where-the-data-lives)."
   }
   assert {
-    condition     = output.inputs.modules.victoria_metrics.values == {} && output.inputs.modules.victoria_metrics.values_secret == ""
-    error_message = "victoria_metrics must default to no client values and no values Secret."
+    condition     = output.inputs.modules.monitoring.logs.enabled == true && output.inputs.modules.monitoring.logs.retention == "7d" && output.inputs.modules.monitoring.logs.storage_size == "20Gi"
+    error_message = "monitoring's logs must default to on, 7 days of retention on a 20Gi claim."
+  }
+  assert {
+    condition     = output.inputs.modules.monitoring.traces.enabled == false && output.inputs.modules.monitoring.traces.retention == "7d" && output.inputs.modules.monitoring.traces.storage_size == "10Gi"
+    error_message = "monitoring's traces must default to OFF (pre-GA, docs/catalog/monitoring.md), 7 days on a 10Gi claim when turned on."
+  }
+  assert {
+    condition     = output.inputs.modules.monitoring.grafana.enabled == true && output.inputs.modules.monitoring.grafana.domain == "" && output.inputs.modules.monitoring.grafana.gateway == "private"
+    error_message = "monitoring's Grafana must default to on, with no domain, behind the private Gateway once it has one."
+  }
+  assert {
+    condition     = output.inputs.modules.monitoring.alerting.enabled == false && output.inputs.modules.monitoring.alerting.watchdog == true && length(output.inputs.modules.monitoring.alerting.receivers) == 0 && output.inputs.modules.monitoring.alerting.receivers_secret == ""
+    error_message = "monitoring's alerting must default to OFF (it needs where alerts go, which only the client knows), the watchdog on when it is turned on."
+  }
+  assert {
+    condition     = output.inputs.modules.monitoring.values == {} && output.inputs.modules.monitoring.values_secret == ""
+    error_message = "monitoring must default to no client values and no values Secret."
   }
   assert {
     condition     = output.inputs.modules.otel_agent.enabled == true && output.inputs.modules.otel_agent.values == {} && output.inputs.modules.otel_agent.values_secret == ""
@@ -83,28 +99,8 @@ run "defaults_are_the_recommended_position" {
     error_message = "otel_gateway must default to on, with no client values and no values Secret (docs/reference/inputs.md#the-catalog-schema)."
   }
   assert {
-    condition     = output.inputs.modules.grafana.enabled == true && output.inputs.modules.grafana.domain == "" && output.inputs.modules.grafana.values == {} && output.inputs.modules.grafana.values_secret == ""
-    error_message = "grafana must default to on, with no domain, no client values and no values Secret (docs/reference/inputs.md#the-catalog-schema)."
-  }
-  assert {
-    condition     = output.inputs.modules.victoria_logs.enabled == true && output.inputs.modules.victoria_logs.retention == "7d" && output.inputs.modules.victoria_logs.storage_size == "20Gi"
-    error_message = "victoria_logs must default to on, 7 days of retention on a 20Gi claim (docs/architecture/observability.md#where-the-data-lives)."
-  }
-  assert {
-    condition     = output.inputs.modules.otel_agent.logs == true
-    error_message = "otel_agent must collect container logs by default, for victoria_logs to store."
-  }
-  assert {
     condition     = output.inputs.modules.metrics_server.enabled == true && output.inputs.modules.metrics_server.ha == false && output.inputs.modules.metrics_server.values == {} && output.inputs.modules.metrics_server.values_secret == ""
     error_message = "metrics_server must default to on, one replica, no client values: without it every HPA on CPU or memory stays blind, and it needs no client input."
-  }
-  assert {
-    condition     = output.inputs.modules.victoria_traces.enabled == false && output.inputs.modules.victoria_traces.retention == "7d" && output.inputs.modules.victoria_traces.storage_size == "10Gi"
-    error_message = "victoria_traces must default to OFF (pre-GA, docs/catalog/victoria-traces.md), 7 days on a 10Gi claim when turned on."
-  }
-  assert {
-    condition     = output.inputs.modules.alerting.enabled == false && output.inputs.modules.alerting.watchdog == true && length(output.inputs.modules.alerting.receivers) == 0 && output.inputs.modules.alerting.receivers_secret == ""
-    error_message = "alerting must default to OFF (it needs where alerts go, which only the client knows), the watchdog on when it is turned on."
   }
   assert {
     condition     = output.inputs.modules.kyverno.enabled == false && output.inputs.modules.kyverno_policies.enabled == false
@@ -814,36 +810,54 @@ run "argocd_image_updater_takes_another_accounts_registry_beside_its_repositorie
   }
 }
 
-run "victoria_metrics_accepts_no_volume_and_a_retention_in_hours" {
+run "monitoring_accepts_no_volume_and_retentions_in_hours_and_weeks" {
   command = plan
   variables {
-    kube = { victoria_metrics = { storage_size = "", retention = "48h" } }
+    kube = { monitoring = { metrics = { storage_size = "", retention = "48h" }, logs = { retention = "2w" } } }
   }
 
   assert {
-    condition     = output.inputs.modules.victoria_metrics.storage_size == "" && output.inputs.modules.victoria_metrics.retention == "48h"
-    error_message = "an empty storage_size (the emptyDir escape) and a retention of at least a day in hours must reach the inputs as set."
+    condition     = output.inputs.modules.monitoring.metrics.storage_size == "" && output.inputs.modules.monitoring.metrics.retention == "48h" && output.inputs.modules.monitoring.logs.retention == "2w"
+    error_message = "an empty storage_size (the emptyDir escape) and a retention of at least a day must reach the inputs as set."
   }
   assert {
-    condition     = output.inputs.modules.victoria_metrics.enabled == true
-    error_message = "attributes the client did not set must keep the catalog default."
+    condition     = output.inputs.modules.monitoring.logs.enabled == true && output.inputs.modules.monitoring.logs.storage_size == "20Gi" && output.inputs.modules.monitoring.enabled == true
+    error_message = "a nested block is merged one level deep: the keys the client did not set inside it keep the catalog default."
   }
 }
 
-run "victoria_metrics_values_flow_through_and_a_credential_from_a_secret_ref_is_fine" {
+run "monitoring_turns_traces_on_with_a_retention_in_days" {
+  command = plan
+  variables {
+    kube = { monitoring = { traces = { enabled = true, retention = "3d" } } }
+  }
+
+  assert {
+    condition     = output.inputs.modules.monitoring.traces.enabled == true && output.inputs.modules.monitoring.traces.retention == "3d" && output.inputs.modules.monitoring.traces.storage_size == "10Gi"
+    error_message = "a client turning traces on must get them with his retention and the default claim."
+  }
+}
+
+run "monitoring_values_flow_through_and_credentials_by_reference_are_fine" {
   command = plan
   variables {
     kube = {
-      victoria_metrics = {
-        storage_size  = "1Ti"
-        values_secret = "victoria-metrics-values"
+      monitoring = {
+        grafana       = { domain = "grafana.acme.example" }
+        values_secret = "monitoring-values"
         values = {
-          server = {
-            extraArgs = { "storage.maxHourlySeries" = "50000" }
-            env = [{
-              name      = "VM_httpAuth_password"
-              valueFrom = { secretKeyRef = { name = "vm-auth", key = "password" } }
-            }]
+          vmsingle = {
+            spec = {
+              extraArgs = { "storage.maxHourlySeries" = "50000" }
+              extraEnvs = [{
+                name      = "VM_httpAuth_password"
+                valueFrom = { secretKeyRef = { name = "vm-auth", key = "password" } }
+              }]
+            }
+          }
+          grafana = {
+            admin        = { existingSecret = "grafana-admin" }
+            envValueFrom = { PG_PASSWORD = { secretKeyRef = { name = "pg", key = "password" } } }
           }
         }
       }
@@ -851,12 +865,71 @@ run "victoria_metrics_values_flow_through_and_a_credential_from_a_secret_ref_is_
   }
 
   assert {
-    condition     = output.inputs.modules.victoria_metrics.values.server.extraArgs["storage.maxHourlySeries"] == "50000" && output.inputs.modules.victoria_metrics.values.server.env[0].valueFrom.secretKeyRef.name == "vm-auth"
+    condition     = output.inputs.modules.monitoring.values.vmsingle.spec.extraArgs["storage.maxHourlySeries"] == "50000" && output.inputs.modules.monitoring.values.vmsingle.spec.extraEnvs[0].valueFrom.secretKeyRef.name == "vm-auth"
     error_message = "the client's chart values must reach the inputs as written, a credential read from a Secret included: only a literal value is refused."
   }
   assert {
-    condition     = output.inputs.modules.victoria_metrics.values_secret == "victoria-metrics-values" && output.inputs.modules.victoria_metrics.storage_size == "1Ti"
-    error_message = "the values Secret's name and a size in Ti must flow to the inputs."
+    condition     = output.inputs.modules.monitoring.values.grafana.admin.existingSecret == "grafana-admin" && output.inputs.modules.monitoring.grafana.domain == "grafana.acme.example" && output.inputs.modules.monitoring.grafana.gateway == "private"
+    error_message = "a valid domain, an admin Secret by name, and Grafana's other defaults must reach the inputs."
+  }
+  assert {
+    condition     = output.inputs.modules.monitoring.values_secret == "monitoring-values"
+    error_message = "the name of the client's values Secret must flow to the inputs."
+  }
+}
+
+run "monitoring_alerting_turns_on_with_receivers_a_route_and_the_watchdog" {
+  command = plan
+  variables {
+    kube = {
+      monitoring = {
+        alerting = {
+          enabled          = true
+          receivers_secret = "alerting-keys"
+          receivers = [
+            { name = "team", slack_configs = [{ api_url_file = "/etc/alertmanager/secrets/slack-url", channel = "#alerts" }] },
+            { name = "on-call", pagerduty_configs = [{ routing_key_file = "/etc/alertmanager/secrets/pagerduty-key" }] },
+          ]
+          route = { receiver = "team", routes = [{ receiver = "on-call", matchers = ["severity=\"critical\""] }, { receiver = "null", matchers = ["alertname=\"CPUThrottlingHigh\""] }] }
+        }
+      }
+    }
+  }
+
+  assert {
+    condition     = output.inputs.modules.monitoring.alerting.enabled && output.inputs.modules.monitoring.alerting.watchdog && output.inputs.modules.monitoring.alerting.receivers_secret == "alerting-keys"
+    error_message = "enabled, the watchdog's default and receivers_secret must reach the inputs."
+  }
+  assert {
+    condition     = length(output.inputs.modules.monitoring.alerting.receivers) == 2 && output.inputs.modules.monitoring.alerting.receivers[0].slack_configs[0].api_url_file == "/etc/alertmanager/secrets/slack-url"
+    error_message = "the receivers must reach the inputs as written, their *_file keys included."
+  }
+  assert {
+    condition     = output.inputs.modules.monitoring.alerting.route.receiver == "team" && output.inputs.modules.monitoring.alerting.route.routes[1].receiver == "null"
+    error_message = "the routing tree must reach the inputs as written, a route to the socle's null receiver included."
+  }
+}
+
+# The watchdog turned off in the open: no Secret is needed when no receiver
+# reads a key from one.
+run "monitoring_alerting_turns_on_without_the_watchdog_and_without_a_secret" {
+  command = plan
+  variables {
+    kube = {
+      monitoring = {
+        alerting = {
+          enabled   = true
+          watchdog  = false
+          receivers = [{ name = "team", webhook_configs = [{ url_file = "/etc/alertmanager/secrets/team-url" }] }]
+          route     = { receiver = "team" }
+        }
+      }
+    }
+  }
+
+  assert {
+    condition     = output.inputs.modules.monitoring.alerting.enabled && output.inputs.modules.monitoring.alerting.watchdog == false && output.inputs.modules.monitoring.alerting.receivers_secret == ""
+    error_message = "watchdog = false must reach the inputs, with no Secret named."
   }
 }
 
@@ -1098,66 +1171,6 @@ run "otel_gateway_values_flow_through_and_a_header_read_from_the_environment_is_
   }
 }
 
-run "grafana_accepts_a_domain_and_secrets_grafana_resolves_itself" {
-  command = plan
-  variables {
-    kube = {
-      grafana = {
-        domain = "grafana.acme.example"
-        values = {
-          admin        = { existingSecret = "grafana-admin" }
-          envValueFrom = { PG_PASSWORD = { secretKeyRef = { name = "pg", key = "password" } } }
-          datasources = {
-            "extra.yaml" = {
-              apiVersion = 1
-              datasources = [
-                { name = "pg", type = "postgres", secureJsonData = { password = "$${PG_PASSWORD}" } },
-                { name = "tls", type = "prometheus", secureJsonData = { tlsClientKey = "$__file{/etc/secrets/tls.key}" } },
-              ]
-            }
-          }
-        }
-      }
-    }
-  }
-
-  assert {
-    condition     = output.inputs.modules.grafana.domain == "grafana.acme.example" && output.inputs.modules.grafana.values.admin.existingSecret == "grafana-admin"
-    error_message = "a valid domain and an admin Secret by name must reach the inputs as set."
-  }
-  assert {
-    condition     = output.inputs.modules.grafana.values.datasources["extra.yaml"].datasources[0].secureJsonData.password == "$${PG_PASSWORD}"
-    error_message = "a secureJsonData value Grafana resolves itself ($${VAR}, $__file{…}) must flow through: only a literal is refused."
-  }
-}
-
-run "victoria_logs_accepts_no_volume_and_otel_agent_without_logs" {
-  command = plan
-  variables {
-    kube = {
-      victoria_logs = { storage_size = "", retention = "2w" }
-      otel_agent    = { logs = false }
-    }
-  }
-
-  assert {
-    condition     = output.inputs.modules.victoria_logs.storage_size == "" && output.inputs.modules.victoria_logs.retention == "2w" && output.inputs.modules.otel_agent.logs == false
-    error_message = "an empty storage_size, a retention in weeks and an agent without logs must reach the inputs as set."
-  }
-}
-
-run "victoria_traces_turns_on_with_a_retention_in_days" {
-  command = plan
-  variables {
-    kube = { victoria_traces = { enabled = true, retention = "3d" } }
-  }
-
-  assert {
-    condition     = output.inputs.modules.victoria_traces.enabled == true && output.inputs.modules.victoria_traces.retention == "3d" && output.inputs.modules.victoria_traces.storage_size == "10Gi"
-    error_message = "a client turning traces on must get them with his retention and the default claim."
-  }
-}
-
 run "kyverno_policies_turn_on_with_enforce_and_an_allow_list" {
   command = plan
   variables {
@@ -1382,58 +1395,3 @@ run "metrics_server_values_flow_through_untouched_and_honest_kubelet_flags_are_a
   }
 }
 
-run "alerting_turns_on_with_receivers_a_route_and_the_watchdog" {
-  command = plan
-  variables {
-    kube = {
-      alerting = {
-        enabled          = true
-        receivers_secret = "alerting-keys"
-        receivers = [
-          { name = "team", slack_configs = [{ api_url_file = "/etc/alertmanager/secrets/slack-url", channel = "#alerts" }] },
-          { name = "on-call", pagerduty_configs = [{ routing_key_file = "/etc/alertmanager/secrets/pagerduty-key" }] },
-        ]
-        route  = { receiver = "team", routes = [{ receiver = "on-call", matchers = ["severity=\"critical\""] }] }
-        values = { server = { resources = { requests = { memory = "96Mi" } } } }
-      }
-    }
-  }
-
-  assert {
-    condition     = output.inputs.modules.alerting.enabled && output.inputs.modules.alerting.watchdog && output.inputs.modules.alerting.receivers_secret == "alerting-keys"
-    error_message = "enabled, the watchdog's default and receivers_secret must reach the inputs."
-  }
-  assert {
-    condition     = length(output.inputs.modules.alerting.receivers) == 2 && output.inputs.modules.alerting.receivers[0].slack_configs[0].api_url_file == "/etc/alertmanager/secrets/slack-url"
-    error_message = "the receivers must reach the inputs as written, their *_file keys included."
-  }
-  assert {
-    condition     = output.inputs.modules.alerting.route.receiver == "team" && output.inputs.modules.alerting.route.routes[0].receiver == "on-call"
-    error_message = "the routing tree must reach the inputs as written."
-  }
-  assert {
-    condition     = output.inputs.modules.alerting.values.server.resources.requests.memory == "96Mi"
-    error_message = "the client's chart values must reach the inputs as written."
-  }
-}
-
-# The watchdog turned off in the open: no Secret is needed when no receiver
-# reads a key from one.
-run "alerting_turns_on_without_the_watchdog_and_without_a_secret" {
-  command = plan
-  variables {
-    kube = {
-      alerting = {
-        enabled   = true
-        watchdog  = false
-        receivers = [{ name = "team", webhook_configs = [{ url_file = "/etc/alertmanager/secrets/team-url" }] }]
-        route     = { receiver = "team" }
-      }
-    }
-  }
-
-  assert {
-    condition     = output.inputs.modules.alerting.enabled && output.inputs.modules.alerting.watchdog == false && output.inputs.modules.alerting.receivers_secret == ""
-    error_message = "watchdog = false must reach the inputs, with no Secret named."
-  }
-}

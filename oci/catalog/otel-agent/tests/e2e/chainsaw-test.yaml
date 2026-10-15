@@ -1,14 +1,13 @@
 # The otel_agent module's proof (docs/catalog/otel-agent.md): the node-level
-# collector, on by default. Selected by label:
-#   health   the ResourceSet Ready, the DaemonSet rolled out on every node, a
-#            kubelet metric queryable in VictoriaMetrics by its stored name,
-#            and every metric the nodes and pods dashboard reads present there
-#            (vm.sh): the dashboard is written on the names VictoriaMetrics
-#            stores, and this is what keeps it honest.
+# collector, on by default, for the containers' logs. Selected by label:
+#   health   the ResourceSet Ready, the DaemonSet rolled out on every node,
+#            reading /var/log/pods as root with every capability dropped, and
+#            its own telemetry scraped by the monitoring module's vmagent
+#            through its annotation (vm.sh). The logs reaching VictoriaLogs
+#            are the monitoring module's proof.
 #   module   a client request beats the socle's on the live DaemonSet, the
-#            socle's siblings kept; logs = false takes the agent back to
-#            non-root with no hostPath; off garbage-collects the release, the
-#            dashboards Kustomization and its ConfigMap; on brings them back.
+#            socle's siblings kept; off garbage-collects the release; on
+#            brings it back.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -19,13 +18,13 @@ metadata:
     platform: any
 spec:
   description: >-
-    The agent runs on every node; its kubelet metrics, and every metric its
-    dashboard reads, are in VictoriaMetrics.
+    The agent runs on every node, reads the containers' logs, and its own
+    telemetry is scraped.
   timeouts:
     assert: 5m
     exec: 5m
   steps:
-    - name: the ResourceSet is Ready, the DaemonSet rolled out, the dashboard shipped
+    - name: the ResourceSet is Ready, the DaemonSet rolled out, reading the logs as root without capabilities
       try:
         - assert:
             resource:
@@ -48,43 +47,44 @@ spec:
                 (desiredNumberScheduled > `0` && numberReady == desiredNumberScheduled): true
         - assert:
             resource:
-              apiVersion: v1
-              kind: ConfigMap
+              apiVersion: apps/v1
+              kind: DaemonSet
               metadata:
-                name: otel-agent-dashboard-nodes-pods
+                name: otel-agent-agent
                 namespace: otel-agent
-                labels:
-                  grafana_dashboard: '1'
+              spec:
+                template:
+                  spec:
+                    (containers[0].securityContext):
+                      runAsUser: 0
+                      readOnlyRootFilesystem: true
+                      capabilities:
+                        drop: [ALL]
+                    (length(volumes[?hostPath] || `[]`) > `0`): true
       catch:
         - describe:
             apiVersion: helm.toolkit.fluxcd.io/v2
             kind: HelmRelease
             namespace: otel-agent
             name: otel-agent
-        - describe:
-            apiVersion: kustomize.toolkit.fluxcd.io/v1
-            kind: Kustomization
-            namespace: flux-system
-            name: otel-agent-dashboards
         - events:
             namespace: otel-agent
         - podLogs:
             namespace: otel-agent
             tail: 40
-    - name: a kubelet metric is in VictoriaMetrics, and every metric of the dashboard has series
+    - name: its own telemetry is scraped through its annotation
       try:
         - script:
             content: |
               . ./vm.sh
-              wait_series k8s_pod_cpu_usage
-              stored_names k8s_ container_
-              check_dashboard otel-agent otel-agent-dashboard-nodes-pods nodes-pods.json '\b(?:k8s|container)_[a-z0-9_]+\b'
+              wait_series 'otelcol_process_uptime{job="opentelemetry-collector",namespace="otel-agent"}'
       catch:
         - podLogs:
             namespace: otel-agent
             tail: 40
         - podLogs:
-            namespace: victoria-metrics
+            namespace: monitoring
+            selector: app.kubernetes.io/name=vmagent
             tail: 20
 ---
 apiVersion: chainsaw.kyverno.io/v1alpha1
@@ -263,79 +263,7 @@ spec:
             namespace: flux-system
             selector: app=helm-controller
             tail: 40
-    # logs = false: no logs exporter, and the agent back to the image's
-    # non-root user with no hostPath on /var/log/pods (docs/decisions/otel-agent.md, OTEL-AGENT-03).
-    - name: logs = false takes the agent back to non-root with no hostPath
-      try:
-        - patch:
-            resource:
-              apiVersion: fluxcd.controlplane.io/v1
-              kind: ResourceSetInputProvider
-              metadata:
-                name: socle
-                namespace: flux-system
-              spec:
-                defaultValues:
-                  modules:
-                    otel_agent:
-                      logs: false
-        - assert:
-            resource:
-              apiVersion: v1
-              kind: ConfigMap
-              metadata:
-                name: otel-agent-agent
-                namespace: otel-agent
-              data:
-                (contains(relay, 'otlp_http/victoria-logs')): false
-        - assert:
-            resource:
-              apiVersion: apps/v1
-              kind: DaemonSet
-              metadata:
-                name: otel-agent-agent
-                namespace: otel-agent
-              spec:
-                template:
-                  spec:
-                    (containers[0].securityContext.runAsUser == null): true
-                    (length(volumes[?hostPath] || `[]`)): 0
-              status:
-                (desiredNumberScheduled > `0` && updatedNumberScheduled == desiredNumberScheduled): true
-                (numberReady == desiredNumberScheduled): true
-        - patch:
-            resource:
-              apiVersion: fluxcd.controlplane.io/v1
-              kind: ResourceSetInputProvider
-              metadata:
-                name: socle
-                namespace: flux-system
-              spec:
-                defaultValues:
-                  modules:
-                    otel_agent:
-                      logs: true
-        - assert:
-            resource:
-              apiVersion: v1
-              kind: ConfigMap
-              metadata:
-                name: otel-agent-agent
-                namespace: otel-agent
-              data:
-                (contains(relay, 'otlp_http/victoria-logs')): true
-      catch:
-        - describe:
-            apiVersion: apps/v1
-            kind: DaemonSet
-            namespace: otel-agent
-            name: otel-agent-agent
-        - podLogs:
-            namespace: flux-system
-            selector: app=helm-controller
-            tail: 40
-    # Each Kustomization's finalizer prunes its dashboard ConfigMap first.
-    - name: enabled = false garbage-collects the release, the dashboards Kustomization and the dashboard
+    - name: enabled = false garbage-collects the release and the namespace
       try:
         # The release must be idle before the module goes: helm-controller
         # honours a deletion only once the running action returns, and the
@@ -377,13 +305,6 @@ spec:
                 namespace: otel-agent
         - error:
             resource:
-              apiVersion: kustomize.toolkit.fluxcd.io/v1
-              kind: Kustomization
-              metadata:
-                name: otel-agent-dashboards
-                namespace: flux-system
-        - error:
-            resource:
               apiVersion: v1
               kind: Namespace
               metadata:
@@ -398,7 +319,7 @@ spec:
             namespace: flux-system
             selector: app.kubernetes.io/name=flux-operator
             tail: 40
-    - name: back to the defaults, the DaemonSet rolls out and the dashboard is back
+    - name: back to the defaults, the DaemonSet rolls out
       try:
         - patch:
             resource:
@@ -412,15 +333,6 @@ spec:
                   modules:
                     otel_agent:
                       enabled: true
-        - assert:
-            resource:
-              apiVersion: v1
-              kind: ConfigMap
-              metadata:
-                name: otel-agent-dashboard-nodes-pods
-                namespace: otel-agent
-                labels:
-                  grafana_dashboard: '1'
         - assert:
             resource:
               apiVersion: apps/v1

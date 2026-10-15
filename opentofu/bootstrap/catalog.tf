@@ -130,113 +130,80 @@ locals {
       values        = {}
       values_secret = ""
     }
-    # The monitoring stack's metrics storage (docs/architecture/observability.md):
-    # VictoriaMetrics single-node, OTLP in from the collectors, PromQL out to
-    # Grafana, no cloud access. On by default, like every monitoring module but
-    # traces. retention is a VictoriaMetrics duration, at least a day.
-    # storage_size sizes the PVC on the cluster's default StorageClass; empty
-    # means no claim at all, an emptyDir (docs/catalog/victoria-metrics.md).
-    # values and values_secret as every module: the client's chart values, his
-    # winning, secrets refused there and put in a Secret he creates in
-    # victoria-metrics instead.
-    victoria_metrics = {
-      enabled       = true
-      retention     = "15d"
-      storage_size  = "20Gi"
-      values        = {}
-      values_secret = ""
-    }
-    # The node-level collector of the monitoring stack (docs/architecture/observability.md):
-    # the OpenTelemetry Collector as a DaemonSet, kubelet metrics for every
-    # node, pod and container, exported to victoria_metrics when it is on —
-    # nowhere otherwise. Ships the nodes and pods dashboard. No port on the
-    # node: applications speak to otel_gateway. No named attribute yet; the
-    # logs switch arrives with victoria_logs. values and values_secret as every
-    # module, secrets refused there (docs/catalog/otel-agent.md).
-    otel_agent = {
+    # The monitoring stack (docs/architecture/observability.md), the
+    # official victoria-metrics-k8s-stack chart as one release: the
+    # VictoriaMetrics operator, vmagent scraping the cluster (kubelets,
+    # cAdvisor, kube-state-metrics, node-exporter, every annotated pod), and
+    # the parts below, each in the monitoring namespace (docs/catalog/monitoring.md).
+    # metrics is VictoriaMetrics single-node, always there while the module
+    # is: retention a VictoriaMetrics duration, at least a day; storage_size
+    # the PVC on the default StorageClass, empty for an emptyDir — the escape
+    # for a cluster with no default class. logs is VictoriaLogs and traces
+    # VictoriaTraces, the same shape; traces OFF by default, pre-GA, its
+    # storage format not yet committed. grafana reads them all; domain is the
+    # host it is served at, gateway the shared Gateway its HTTPRoute attaches
+    # to, as argocd's. alerting is vmalert and Alertmanager with the rules
+    # kube-prometheus-stack installs, OFF by default: on, it needs where
+    # alerts go, which only the client knows — receivers and route, as
+    # Alertmanager writes them, keys only as *_file paths under
+    # /etc/alertmanager/secrets/, where receivers_secret (a Secret the client
+    # creates in monitoring) is mounted — and, unless watchdog = false, a dead
+    # man's switch whose URL is that Secret's watchdog-url key. values and
+    # values_secret as every module, for the one chart; the rules' sources,
+    # Alertmanager's configuration and secrets refused there.
+    monitoring = {
       enabled = true
-      # Container logs to victoria_logs while it is on; false keeps the
-      # agent to metrics, for a cluster whose logs go elsewhere, or where the
-      # read-only hostPath on /var/log/pods is refused (Baseline Pod Security).
-      logs          = true
+      metrics = {
+        retention    = "15d"
+        storage_size = "20Gi"
+      }
+      logs = {
+        enabled      = true
+        retention    = "7d"
+        storage_size = "20Gi"
+      }
+      traces = {
+        enabled      = false
+        retention    = "7d"
+        storage_size = "10Gi"
+      }
+      grafana = {
+        enabled = true
+        domain  = ""
+        gateway = "private"
+      }
+      alerting = {
+        enabled          = false
+        watchdog         = true
+        receivers        = []
+        route            = {}
+        receivers_secret = ""
+      }
       values        = {}
       values_secret = ""
     }
-    # The cluster-level collector of the monitoring stack: the OpenTelemetry
-    # Collector as a one-replica Deployment — Kubernetes object state
-    # (k8s_cluster), the Prometheus endpoints of pods annotated
-    # prometheus.io/scrape, and the applications' OTLP on
-    # otel-gateway.otel-gateway.svc:4317/4318 — exported to victoria_metrics
-    # when it is on. Ships the workloads dashboard. No named attribute: every
+    # The node-level collector (docs/architecture/observability.md): the
+    # OpenTelemetry Collector as a DaemonSet, every container's log to
+    # monitoring's VictoriaLogs, with its pod's metadata. Deployed only while
+    # monitoring runs its logs; no metric of its own, vmagent scrapes the
+    # nodes. No port on the node: applications speak to otel_gateway. values
+    # and values_secret as every module, secrets refused there
+    # (docs/catalog/otel-agent.md).
+    otel_agent = {
+      enabled       = true
+      values        = {}
+      values_secret = ""
+    }
+    # The cluster-level collector: the OpenTelemetry Collector as a
+    # one-replica Deployment, the applications' OTLP on
+    # otel-gateway.otel-gateway.svc:4317/4318, and the Kubernetes events as
+    # logs, to the monitoring module's backends. No named attribute: every
     # knob is chart configuration, which values is for; secrets refused there
     # as in otel_agent (docs/catalog/otel-gateway.md).
     otel_gateway = {
       enabled       = true
       values        = {}
       values_secret = ""
-    }
-    # The monitoring stack's one place to read (docs/architecture/observability.md#reading):
-    # Grafana from the grafana-community chart, a read-only datasource for
-    # each backend that is on, and every dashboard a module ships as a
-    # ConfigMap labelled grafana_dashboard. ClusterIP, no persistence, the
-    # chart's random admin password. domain is the host Grafana believes it is
-    # served at (grafana.ini server.root_url, later the HTTPRoute), validated as
-    # argocd's; empty means none. values and values_secret as every module,
-    # secrets refused there (docs/catalog/grafana.md).
-    grafana = {
-      enabled = true
-      domain  = ""
-      # The shared Gateway its HTTPRoute attaches to, as argocd's: private by
-      # default, public, or "" for no route. The route exists only with a
-      # domain and the shared Gateways (inputs.gateway.shared).
-      gateway       = "private"
-      values        = {}
-      values_secret = ""
-    }
-    # The monitoring stack's logs storage (docs/architecture/observability.md):
-    # VictoriaLogs single-node, OTLP in from both collectors — container logs from
-    # otel_agent, Kubernetes events and the applications' logs from
-    # otel_gateway — LogsQL out to Grafana. Same shape as victoria_metrics:
-    # retention (7 days) and storage_size (20Gi, empty for an emptyDir), values
-    # and values_secret, secrets refused there (docs/catalog/victoria-logs.md).
-    victoria_logs = {
-      enabled       = true
-      retention     = "7d"
-      storage_size  = "20Gi"
-      values        = {}
-      values_secret = ""
-    }
-    # The monitoring stack's traces storage (docs/architecture/observability.md):
-    # VictoriaTraces single-node, the applications' OTLP traces in through otel_gateway, the
-    # Jaeger query API out to Grafana. OFF by default: pre-GA, its storage
-    # format not yet committed, so an upgrade may drop stored traces — turning
-    # it on accepts that. Same shape as victoria_logs, 10Gi by default
-    # (docs/catalog/victoria-traces.md).
-    victoria_traces = {
-      enabled       = false
-      retention     = "7d"
-      storage_size  = "10Gi"
-      values        = {}
-      values_secret = ""
-    }
-    # Alerting for the monitoring stack (docs/catalog/alerting.md): vmalert
-    # evaluates the socle's rules against victoria_metrics, which it needs,
-    # and Alertmanager routes what fires. v1 ships the socle's rules only; a
-    # client writes none. OFF by default: on, it needs where alerts go, which
-    # only the client knows — receivers and route, as Alertmanager writes
-    # them, keys only as *_file paths under /etc/alertmanager/secrets/, where
-    # receivers_secret (a Secret the client creates in alerting) is mounted —
-    # and, unless watchdog = false, a dead man's switch whose URL is that
-    # Secret's watchdog-url key. values and values_secret as every module;
-    # rules and Alertmanager's config are refused there.
-    alerting = {
-      enabled          = false
-      watchdog         = true
-      receivers        = []
-      route            = {}
-      receivers_secret = ""
-      values           = {}
-      values_secret    = ""
     }
     # KEDA: event-driven autoscaling — a ScaledObject scales a Deployment on a
     # queue's depth, a cron window or a PromQL query, and down to zero. Off
@@ -382,8 +349,8 @@ locals {
   # resourceset.yaml). Adding one is a statement there and a word here.
   keda_services = ["sqs", "cloudwatch", "kinesis", "dynamodb"]
   # The keys an Alertmanager receiver takes in clear, each with a *_file twin
-  # that reads it from a file: kube.alerting.receivers refuses these, so no
-  # webhook URL, token or password lands in the state (docs/catalog/alerting.md).
+  # that reads it from a file: kube.monitoring.alerting.receivers refuses these, so no
+  # webhook URL, token or password lands in the state (docs/catalog/monitoring.md).
   alerting_literal_keys = [
     "api_url", "api_key", "app_token", "routing_key", "service_key", "auth_password",
     "auth_secret", "url", "webhook_url", "token", "token_id", "bot_token", "user_key",
@@ -409,7 +376,18 @@ locals {
     registries = ["restrict-image-registries"]
   }
 
-  modules = { for m, d in local.catalog : m => merge(d, try(var.kube[m], {})) }
+  # One level deeper for an attribute whose default is itself a non-empty
+  # object (monitoring.logs, monitoring.alerting…): a client who writes
+  # logs = { retention = "30d" } keeps the other keys at their default. An
+  # empty default ({}, as values or route) is free-form and taken whole.
+  # A list of one-key objects spread into merge(), not a map: a map would
+  # unify its values to one type, and turn every bool in them into a string.
+  modules = {
+    for m, d in local.catalog : m => merge(d, try(var.kube[m], {}), [
+      for a, x in try(var.kube[m], {}) : { (a) = merge(d[a], x) }
+      if length(try(keys(lookup(d, a, null)), [])) > 0 && can(keys(x))
+    ]...)
+  }
 
   # jsonencode's first character tells a value's kind without a type()
   # function: `"` string, `[` list, `{` object, t/f bool, n null, else number.

@@ -1,0 +1,645 @@
+# The monitoring module: the official victoria-metrics-k8s-stack chart, one
+# release for the whole stack — the VictoriaMetrics operator, and through its
+# objects VictoriaMetrics, VictoriaLogs, VictoriaTraces, vmagent, vmalert,
+# Alertmanager, plus kube-state-metrics, node-exporter and Grafana. The
+# rules and the dashboards are the stack's own, the ones kube-prometheus-stack
+# installs, fetched at pinned tags. The stack: docs/architecture/observability.md;
+# this module: docs/catalog/monitoring.md.
+#
+# resourcesTemplate rather than resources: the storage, the Alertmanager
+# configuration and the Secrets only exist under a condition, and the
+# operator's block `<< if >>`/`<< end >>` is text templating, which the
+# structured resources list cannot carry.
+#
+# Values: no spec.values on the HelmRelease. The socle's defaults are a
+# ConfigMap listed first in valuesFrom, the client's second, the client's
+# Secret last — later wins (docs/architecture/flux-catalog.md). OpenTofu
+# refuses the rules' sources and Alertmanager's configuration in the
+# client's values.
+#
+# Every other rule is the hello module's: inputsFrom the one provider, the
+# reconcile toggle on each resource, values tested never presence.
+apiVersion: fluxcd.controlplane.io/v1
+kind: ResourceSet
+metadata:
+  name: monitoring
+  namespace: flux-system
+spec:
+  inputsFrom:
+    - apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSetInputProvider
+      name: socle
+  wait: true
+  resourcesTemplate: |
+    << $grafana := and inputs.modules.monitoring.enabled inputs.modules.monitoring.grafana.enabled ->>
+    << $route := and $grafana inputs.modules.monitoring.grafana.domain inputs.modules.monitoring.grafana.gateway inputs.gateway.shared ->>
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: monitoring
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.monitoring.enabled >>enabled<< else >>disabled<< end >>
+    ---
+    # What Grafana's sidecars may read: ConfigMaps, in every namespace, and
+    # nothing else. The chart's own ClusterRole grants configmaps AND secrets
+    # cluster-wide — every Secret of every client — with no value to narrow
+    # it; so the socle brings this one and the chart binds to it
+    # (grafana.rbac.useExistingClusterRole below).
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata:
+      name: monitoring-grafana
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if $grafana >>enabled<< else >>disabled<< end >>
+    rules:
+      - apiGroups: [""]
+        resources: ["configmaps"]
+        verbs: ["get", "watch", "list"]
+    ---
+    apiVersion: source.toolkit.fluxcd.io/v1
+    kind: OCIRepository
+    metadata:
+      name: victoria-metrics-k8s-stack-chart
+      namespace: monitoring
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.monitoring.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 1h
+      url: oci://ghcr.io/victoriametrics/helm-charts/victoria-metrics-k8s-stack
+      layerSelector:
+        mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+        operation: copy
+      ref:
+        tag: 0.95.2  # VictoriaMetrics v1.153.0, operator v0.75.0
+    ---
+    # The socle's own chart values, listed first in valuesFrom. (No template
+    # delimiters in these comments: the operator templates them too.)
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: monitoring-socle-values
+      namespace: monitoring
+      # helm-controller watches a valuesFrom ConfigMap only with this label;
+      # without it, a change here waits for the next interval (10m).
+      labels:
+        reconcile.fluxcd.io/watch: Enabled
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.monitoring.enabled >>enabled<< else >>disabled<< end >>
+    data:
+      values.yaml: |
+        # Constant names, everything in this namespace: vmsingle-monitoring
+        # (8428), vlsingle-monitoring (9428), vtsingle-monitoring (10428),
+        # vmagent-monitoring (8429), vmalert-monitoring (8080),
+        # vmalertmanager-monitoring (9093), grafana (80). The collectors
+        # write to the first three.
+        fullnameOverride: monitoring
+        victoria-metrics-operator:
+          # The CRDs are the chart's templates: kept on uninstall, so turning
+          # the module off never deletes a client's VMRule or VMServiceScrape
+          # (docs/architecture/flux-catalog.md, CRDs when a module is off).
+          crds:
+            annotations:
+              helm.sh/resource-policy: keep
+          resources:
+            requests:
+              cpu: 20m
+              memory: 96Mi
+
+        # The metrics: VictoriaMetrics single-node, and vmagent scraping the
+        # cluster — the kubelets and cAdvisor, kube-state-metrics,
+        # node-exporter, the stack itself, and every pod annotated
+        # prometheus.io/scrape. The one place metrics are collected: the
+        # collectors only carry OTLP (docs/decisions/monitoring.md).
+        vmsingle:
+          enabled: true
+          spec:
+            retentionPeriod: << inputs.modules.monitoring.metrics.retention | quote >>
+            << if inputs.modules.monitoring.metrics.storage_size >>
+            storage:
+              resources:
+                requests:
+                  storage: << inputs.modules.monitoring.metrics.storage_size | quote >>
+            << else >>
+            # storage_size empty: no claim, an emptyDir. For a cluster with
+            # no default StorageClass; the data goes with the pod.
+            storage: null
+            << end >>
+            extraArgs:
+              # OTLP names become the Prometheus ones (dots to underscores,
+              # unit and _total suffixes), for what applications push.
+              opentelemetry.usePrometheusNaming: "true"
+              # The cardinality guard: past this many new series in an hour,
+              # new series are dropped with a log line instead of filling
+              # memory and disk. A string: Helm renders a number from a
+              # million up as 1e+06, which the flag refuses.
+              storage.maxHourlySeries: "100000"
+              # The guard counts a series by its labels in the order they
+              # arrive; sorted first, a series counts once (measured,
+              # docs/catalog/monitoring.md).
+              sortLabels: "true"
+              << if inputs.modules.monitoring.alerting.enabled >>
+              # Grafana lists the rules of its datasource by asking
+              # VictoriaMetrics, which runs none: forwarded to vmalert.
+              vmalert.proxyURL: http://vmalert-monitoring.monitoring.svc:8080
+              << end >>
+            # Requests only: without them the operator sets its own, 500Mi
+            # and a limit. Measured on k3s at 53m and 355Mi with the cluster
+            # scraped (docs/catalog/monitoring.md).
+            resources:
+              requests:
+                cpu: 50m
+                memory: 384Mi
+        vmagent:
+          enabled: true
+          spec:
+            scrapeInterval: 30s
+            # Every series carries the cluster's name, so alerts from many
+            # clusters in one on-call tell where they come from.
+            externalLabels:
+              cluster: << inputs.cluster.name | quote >>
+            # Every running pod annotated prometheus.io/scrape: "true", on the
+            # port and path its annotations name: how Cilium, Flux and the
+            # collectors expose their metrics when no ServiceMonitor exists.
+            inlineScrapeConfig: |
+              - job_name: kubernetes-pods
+                kubernetes_sd_configs:
+                  - role: pod
+                relabel_configs:
+                  - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+                    action: keep
+                    regex: "true"
+                  - source_labels: [__meta_kubernetes_pod_phase]
+                    action: drop
+                    regex: Pending|Succeeded|Failed|Unknown
+                  # One target per pod: discovery yields one per declared
+                  # container port, and once rewritten to the annotated port
+                  # they are identical — vmagent logs each duplicate as an
+                  # error, every cycle (TooManyErrorLogs, measured on
+                  # socle-dev). So the annotated port must be one the pod
+                  # declares, when it declares any.
+                  - action: keep_if_equal
+                    if: '{__meta_kubernetes_pod_container_port_number!="", __meta_kubernetes_pod_annotation_prometheus_io_port!=""}'
+                    source_labels: [__meta_kubernetes_pod_container_port_number, __meta_kubernetes_pod_annotation_prometheus_io_port]
+                  - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scheme]
+                    regex: (https?)
+                    target_label: __scheme__
+                  - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+                    regex: (.+)
+                    target_label: __metrics_path__
+                  - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+                    regex: ([^:]+)(?::[0-9]+)?;([0-9]+)
+                    replacement: $1:$2
+                    target_label: __address__
+                  - source_labels: [__meta_kubernetes_namespace]
+                    target_label: namespace
+                  - source_labels: [__meta_kubernetes_pod_name]
+                    target_label: pod
+                  - source_labels: [__meta_kubernetes_pod_node_name]
+                    target_label: node
+                  # job: the pod's app.kubernetes.io/name, else its app
+                  # label (Flux's controllers carry only that one), else
+                  # the job name above. (.+), so a missing label never
+                  # blanks it (measured: Flux and Crossplane with job="").
+                  - source_labels: [__meta_kubernetes_pod_label_app]
+                    regex: (.+)
+                    target_label: job
+                  - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+                    regex: (.+)
+                    target_label: job
+            # Measured on k3s at 20m and 141Mi.
+            resources:
+              requests:
+                cpu: 20m
+                memory: 160Mi
+        kube-state-metrics:
+          enabled: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+        prometheus-node-exporter:
+          enabled: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+        # The kubelets, without what the managed control plane would add:
+        # on k3s the kubelet's endpoint carries the API server's and etcd's
+        # histograms, 25 000 series on an empty cluster (measured), which no
+        # rule reads once those groups are off below.
+        kubelet:
+          # Not /metrics/resource: what it serves — container, pod and node
+          # CPU and working set — cAdvisor already does, twice the series for
+          # no rule or dashboard of the stack (measured on socle-dev, 617
+          # series); kube-prometheus-stack leaves it off too.
+          vmScrapes:
+            resources:
+              enabled: false
+          vmScrape:
+            spec:
+              metricRelabelConfigs:
+                - action: labeldrop
+                  regex: (uid)
+                - action: labeldrop
+                  regex: (id|name)
+                - action: drop
+                  source_labels: [__name__]
+                  regex: (rest_client|apiserver|etcd|scheduler|workqueue|authentication|authorization|aggregator)_.*
+                - action: drop
+                  source_labels: [__name__]
+                  regex: (watch_cache|storage_operation|kube_apiserver|field_validation|apiextensions|cardinality_enforcement)_.*
+                - action: drop
+                  source_labels: [__name__]
+                  regex: kubernetes_feature_enabled|registered_metrics_total
+        # The control plane is the cloud's: not scraped, its rules off.
+        kubeApiServer:
+          enabled: false
+        kubeControllerManager:
+          enabled: false
+        kubeScheduler:
+          enabled: false
+        kubeEtcd:
+          enabled: false
+        kubeProxy:
+          enabled: false
+        coreDns:
+          enabled: false
+
+        # The logs and the traces.
+        vlsingle:
+          enabled: << inputs.modules.monitoring.logs.enabled >>
+          spec:
+            retentionPeriod: << inputs.modules.monitoring.logs.retention | quote >>
+            << if inputs.modules.monitoring.logs.storage_size >>
+            storage:
+              resources:
+                requests:
+                  storage: << inputs.modules.monitoring.logs.storage_size | quote >>
+            << else >>
+            storage: null
+            << end >>
+            # Never empty: the chart adds -vmalert.proxyURL here while
+            # alerting is on, and turned off, an empty extraArgs reaches the
+            # API server as null and the upgrade is refused (measured on
+            # floci). The level is VictoriaLogs' own default.
+            extraArgs:
+              loggerLevel: INFO
+            resources:
+              requests:
+                cpu: 50m
+                memory: 128Mi
+        vtsingle:
+          enabled: << inputs.modules.monitoring.traces.enabled >>
+          spec:
+            retentionPeriod: << inputs.modules.monitoring.traces.retention | quote >>
+            << if inputs.modules.monitoring.traces.storage_size >>
+            storage:
+              resources:
+                requests:
+                  storage: << inputs.modules.monitoring.traces.storage_size | quote >>
+            << else >>
+            storage: null
+            << end >>
+            resources:
+              requests:
+                cpu: 50m
+                memory: 128Mi
+
+        # Alerting: vmalert evaluates every VMRule in the cluster against
+        # VictoriaMetrics, Alertmanager routes what fires to the client's
+        # receivers, and the watchdog to a dead man's switch outside it.
+        vmalert:
+          enabled: << inputs.modules.monitoring.alerting.enabled >>
+          spec:
+            # Every VMRule, every namespace: the socle's, the stack's, and a
+            # client's. The operator checks each before vmalert reads it, so
+            # one bad rule is refused alone rather than freezing them all.
+            selectAllByDefault: true
+            # Measured on k3s at 11m and 59Mi with the stack's 211 rules.
+            resources:
+              requests:
+                cpu: 20m
+                memory: 96Mi
+        alertmanager:
+          enabled: << inputs.modules.monitoring.alerting.enabled >>
+          spec:
+            resources:
+              requests:
+                cpu: 10m
+                memory: 48Mi
+            << if inputs.modules.monitoring.alerting.receivers_secret >>
+            # The client's keys, as files the receivers' *_file fields read.
+            # Not optional: a missing Secret keeps Alertmanager from
+            # starting, rather than the watchdog going silently.
+            volumes:
+              - name: receivers
+                secret:
+                  secretName: << inputs.modules.monitoring.alerting.receivers_secret | quote >>
+            volumeMounts:
+              - name: receivers
+                mountPath: /etc/alertmanager/secrets
+                readOnly: true
+            << end >>
+          << if inputs.modules.monitoring.alerting.enabled >>
+          # The client's routing tree and receivers, with the socle's routes
+          # put first. OpenTofu checked that the default route names one of
+          # the client's receivers.
+          config:
+            route:<< toYaml (omit inputs.modules.monitoring.alerting.route "routes") | nindent 10 >>
+              routes:
+                # Every few minutes to the dead man's switch, never to the
+                # client's receivers: matched first, it stops here.
+                - receiver: watchdog
+                  matchers:
+                    - alertname="Watchdog"
+                  group_by: [alertname]
+                  group_wait: 0s
+                  group_interval: 1m
+                  repeat_interval: 5m
+                # info is context, never a page: the upstream rules mark
+                # with it what only helps read a warning, and InfoInhibitor
+                # exists to mute them.
+                - receiver: "null"
+                  matchers:
+                    - severity=~"info|none"
+                # Looked up with get: a route with no sub-routes has no such
+                # key, and a missing key fails the whole render.
+                << with get inputs.modules.monitoring.alerting.route "routes" >><< toYaml . | nindent 12 >><< end >>
+            # A critical alert holds back the warning of the same name and
+            # namespace: one page, not two.
+            inhibit_rules:
+              - source_matchers:
+                  - severity="critical"
+                target_matchers:
+                  - severity="warning"
+                equal: [cluster, namespace, alertname]
+            receivers:
+              - name: "null"
+              # With watchdog off, a receiver with no integration: the
+              # Watchdog alert is dropped rather than sent to the client's.
+              - name: watchdog
+                << if inputs.modules.monitoring.alerting.watchdog >>
+                webhook_configs:
+                  - url_file: /etc/alertmanager/secrets/watchdog-url
+                    send_resolved: false
+                << end >>
+              << with inputs.modules.monitoring.alerting.receivers >><< toYaml . | nindent 10 >><< end >>
+          << end >>
+        # The proxy vmalert queries through, VictoriaMetrics for metrics and
+        # VictoriaLogs for LogsQL rules. Measured on k3s at 10m and 33Mi.
+        internal:
+          vmauth:
+            spec:
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 48Mi
+        # The rules: kube-prometheus' — the ones kube-prometheus-stack
+        # installs — and VictoriaMetrics' for the stack itself, fetched by the
+        # chart's sync job at the tags below rather than the branches it
+        # defaults to, so a release always loads the same rules. Bumped with
+        # the chart (docs/decisions/monitoring.md). The groups that read the
+        # control plane are off with it, above.
+        defaultRules:
+          enabled: << inputs.modules.monitoring.alerting.enabled >>
+          sources:
+            alertmanager:
+              url: https://raw.githubusercontent.com/prometheus-operator/kube-prometheus/v0.19.0/manifests/alertmanager-prometheusRule.yaml
+            kubernetes-control-plane:
+              url: "https://raw.githubusercontent.com/prometheus-operator/kube-prometheus/v0.19.0/\
+                manifests/kubernetesControlPlane-prometheusRule.yaml"
+            kubernetes:
+              url: "https://raw.githubusercontent.com/prometheus-operator/kube-prometheus/v0.19.0/\
+                manifests/kubePrometheus-prometheusRule.yaml"
+            kube-state-metrics:
+              url: "https://raw.githubusercontent.com/prometheus-operator/kube-prometheus/v0.19.0/\
+                manifests/kubeStateMetrics-prometheusRule.yaml"
+            node-exporter:
+              url: https://raw.githubusercontent.com/prometheus-operator/kube-prometheus/v0.19.0/manifests/nodeExporter-prometheusRule.yaml
+            vmhealth:
+              url: https://raw.githubusercontent.com/VictoriaMetrics/VictoriaMetrics/v1.153.0/deployment/docker/rules/alerts-health.yml
+            vmagent:
+              url: https://raw.githubusercontent.com/VictoriaMetrics/VictoriaMetrics/v1.153.0/deployment/docker/rules/alerts-vmagent.yml
+            vmalert:
+              url: https://raw.githubusercontent.com/VictoriaMetrics/VictoriaMetrics/v1.153.0/deployment/docker/rules/alerts-vmalert.yml
+            vmsingle:
+              url: https://raw.githubusercontent.com/VictoriaMetrics/VictoriaMetrics/v1.153.0/deployment/docker/rules/alerts-single-node.yml
+            vmoperator:
+              url: https://raw.githubusercontent.com/VictoriaMetrics/operator/v0.75.0/config/alerting/vmoperator-rules.yaml
+            vlhealth:
+              url: https://raw.githubusercontent.com/VictoriaMetrics/VictoriaLogs/v1.53.0/deployment/docker/rules/alerts-health.yml
+            victorialogs:
+              url: https://raw.githubusercontent.com/VictoriaMetrics/VictoriaLogs/v1.53.0/deployment/docker/rules/alerts-vlogs.yml
+            victoriatraces:
+              url: https://raw.githubusercontent.com/VictoriaMetrics/VictoriaTraces/v0.10.0/deployment/docker/rules/alerts-vtraces.yml
+            vthealth:
+              url: https://raw.githubusercontent.com/VictoriaMetrics/VictoriaTraces/v0.10.0/deployment/docker/rules/alerts-health.yml
+          groups:
+            kube-apiserver-availability.rules:
+              enabled: false
+        # The dashboards, the stack's own, fetched by the same job as
+        # ConfigMaps Grafana's sidecar loads.
+        defaultDashboards:
+          enabled: << inputs.modules.monitoring.grafana.enabled >>
+        syncJob:
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+
+        # Grafana, the one place to read: a datasource for each backend that
+        # is on, provisioned by the chart.
+        defaultDatasources:
+          victoriametrics:
+            # The built-in Prometheus type only: nothing to download, and
+            # PromQL is what the dashboards speak.
+            datasources:
+              - name: VictoriaMetrics
+                type: prometheus
+                access: proxy
+                uid: VictoriaMetrics
+                isDefault: true
+                jsonData:
+                  # The scrape cadence.
+                  timeInterval: 30s
+          alertmanager:
+            datasources:
+              - name: Alertmanager
+                access: proxy
+                uid: Alertmanager
+                jsonData:
+                  implementation: prometheus
+                  # Half of what sends a rule made in Grafana's UI through the
+                  # client's route; the other half, alertmanagersChoice, lives
+                  # in Grafana's database and is not set (#82).
+                  handleGrafanaManagedAlerts: true
+        grafana:
+          enabled: << inputs.modules.monitoring.grafana.enabled >>
+          # A constant name: the Service is grafana.monitoring.svc, port 80.
+          # The admin password is the chart's: random, in Secret/grafana, key
+          # admin-password. A client who wants his own names a Secret in
+          # grafana.admin.existingSecret; OpenTofu refuses it in values.
+          fullnameOverride: grafana
+          rbac:
+            useExistingClusterRole: monitoring-grafana
+          # No persistence: everything shown is provisioned, so a restarted
+          # pod loses only what someone clicked together by hand.
+          persistence:
+            enabled: false
+          testFramework:
+            enabled: false
+          grafana.ini:
+            analytics:
+              check_for_updates: false
+              reporting_enabled: false
+            << if inputs.modules.monitoring.grafana.domain >>
+            # The host Grafana is served at, for its redirects and links; the
+            # HTTPRoute below, monitoring-grafana-route, serves it there.
+            server:
+              domain: << inputs.modules.monitoring.grafana.domain | quote >>
+              root_url: << printf "https://%s" inputs.modules.monitoring.grafana.domain | quote >>
+            << end >>
+          << if inputs.modules.monitoring.logs.enabled >>
+          # The VictoriaLogs datasource plugin, pinned, signed by Grafana, and
+          # downloaded from grafana.com when the pod starts: a cluster with no
+          # egress to it gets Grafana without its logs. Listing it is also
+          # what makes the chart provision the VictoriaLogs datasource.
+          plugins:
+            - victoriametrics-logs-datasource@0.32.0
+          << end >>
+          # Every ConfigMap labelled grafana_dashboard "1", in any namespace,
+          # is a dashboard: the stack's, the modules', a client's. ConfigMaps
+          # only, which is all the ClusterRole above lets the sidecars read.
+          sidecar:
+            dashboards:
+              searchNamespace: ALL
+              resource: configmap
+            datasources:
+              resource: configmap
+            resources:
+              requests:
+                cpu: 10m
+                memory: 64Mi
+          service:
+            type: ClusterIP
+          # Measured on k3s at 22m and 517Mi with the stack's 40 dashboards.
+          resources:
+            requests:
+              cpu: 50m
+              memory: 512Mi
+    ---
+    # The client's own chart values, as written in kube.monitoring.values,
+    # merged over the socle's document above — the client wins wherever the
+    # two meet. OpenTofu refuses secrets in there.
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: monitoring-client-values
+      namespace: monitoring
+      labels:
+        reconcile.fluxcd.io/watch: Enabled
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.monitoring.enabled >>enabled<< else >>disabled<< end >>
+    data:
+      values.yaml: |<< toYaml inputs.modules.monitoring.values | nindent 4 >>
+    ---
+    apiVersion: helm.toolkit.fluxcd.io/v2
+    kind: HelmRelease
+    metadata:
+      name: monitoring
+      namespace: monitoring
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.monitoring.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 10m
+      releaseName: monitoring
+      chartRef:
+        kind: OCIRepository
+        name: victoria-metrics-k8s-stack-chart
+      # No spec.values, on purpose: it would be merged last and win. The order
+      # below is the precedence, later wins — the socle's defaults, the
+      # client's values, then the client's Secret when named, created by him
+      # in monitoring, never read by OpenTofu, optional so the release does
+      # not wait for it.
+      valuesFrom:
+        - kind: ConfigMap
+          name: monitoring-socle-values
+          valuesKey: values.yaml
+        - kind: ConfigMap
+          name: monitoring-client-values
+          valuesKey: values.yaml
+        << if inputs.modules.monitoring.values_secret >>
+        - kind: Secret
+          name: << inputs.modules.monitoring.values_secret | quote >>
+          valuesKey: values.yaml
+          optional: true
+        << end >>
+      install:
+        remediation:
+          retries: 3
+      upgrade:
+        remediation:
+          retries: 3
+    ---
+    # The socle's own rules, for what no upstream source covers: Flux and
+    # the catalog's modules converging. VMRules, so applied once the chart
+    # has installed their CRD: until then the Kustomization fails and
+    # retries every minute.
+    apiVersion: kustomize.toolkit.fluxcd.io/v1
+    kind: Kustomization
+    metadata:
+      name: monitoring-rules
+      namespace: flux-system
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.monitoring.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 1h
+      retryInterval: 1m
+      sourceRef:
+        kind: OCIRepository
+        name: socle
+      path: ./catalog/monitoring/rules
+      targetNamespace: monitoring
+      prune: true
+      wait: true
+      timeout: 2m
+    << if $route >>
+    ---
+    # Exposure, argocd's shape: an HTTPRoute of the socle's own on the shared
+    # Gateway kube.monitoring.grafana.gateway names, for the domain, in a
+    # child ResourceSet that waits for that Gateway to be Accepted. TLS is
+    # the Gateway's; Grafana speaks plain HTTP behind it.
+    apiVersion: fluxcd.controlplane.io/v1
+    kind: ResourceSet
+    metadata:
+      name: monitoring-grafana-route
+      namespace: flux-system
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if inputs.modules.monitoring.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      dependsOn:
+        - apiVersion: gateway.networking.k8s.io/v1
+          kind: Gateway
+          name: << inputs.modules.monitoring.grafana.gateway >>
+          namespace: << inputs.gateway.namespace >>
+          ready: true
+          readyExpr: status.conditions.exists(c, c.type == 'Accepted' && c.status == 'True')
+      wait: true
+      resources:
+        - apiVersion: gateway.networking.k8s.io/v1
+          kind: HTTPRoute
+          metadata:
+            name: grafana
+            namespace: monitoring
+          spec:
+            parentRefs:
+              - name: << inputs.modules.monitoring.grafana.gateway >>
+                namespace: << inputs.gateway.namespace >>
+                sectionName: https
+            hostnames:
+              - << inputs.modules.monitoring.grafana.domain | quote >>
+            rules:
+              - backendRefs:
+                  - name: grafana
+                    port: 80
+    << end >>

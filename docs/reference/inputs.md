@@ -31,6 +31,8 @@ Sources: [`catalog.tf`](../../opentofu/bootstrap/catalog.tf) (the schema),
 Every module but `gateway_api` and `hello` also takes `values` (`{}`, any
 chart value, yours winning) and `values_secret` (`""`, a Secret in the
 module's namespace with a `values.yaml` key, merged last); not repeated below.
+An attribute whose default is a block (`monitoring.logs`…) is merged one
+level deep: a key written alone keeps its siblings at their default.
 
 | Module | Attribute | Default | Meaning |
 | --- | --- | --- | --- |
@@ -53,26 +55,14 @@ module's namespace with a `values.yaml` key, merged last); not repeated below.
 | `argocd_image_updater` | `enabled` | `false` | Argo CD Image Updater, watching `argocd`; refused while `argocd` is off |
 | `argocd_image_updater` | `repositories` | `[]` | aws only: the ECR repositories of the cluster's account and region its own read-only role may read, globs allowed, never `*` alone. Needs `crossplane` on and `ecr` in `aws.crossplane.allowed_services`. `[]`: no role, no registry entry |
 | `argocd_image_updater` | `registries` | `[]` | the client's other registries, as Image Updater's `registries.conf` writes them, after the socle's ECR entry; `credentials` a `secret:`, `pullsecret:`, `env:` or `ext:` reference. `config.registries` is refused in `values` |
-| `victoria_metrics` | `enabled` | `true` | VictoriaMetrics single-node, the metrics storage |
-| `victoria_metrics` | `retention` | `"15d"` | whole hours, days, weeks or years (`15d`, `4w`, `1y`), at least a day |
-| `victoria_metrics` | `storage_size` | `"20Gi"` | the claim on the default StorageClass, in `Gi` or `Ti`; `""` means no claim, an `emptyDir` |
-| `otel_agent` | `enabled` | `true` | the OpenTelemetry Collector as a DaemonSet: kubelet metrics, container logs, the nodes and pods dashboard |
-| `otel_agent` | `logs` | `true` | container logs from `/var/log/pods` to `victoria_logs` while it is on; `false` keeps the agent to metrics |
-| `otel_gateway` | `enabled` | `true` | the OpenTelemetry Collector as a one-replica Deployment: object state, scraping, the applications' OTLP, the workloads dashboard |
-| `grafana` | `enabled` | `true` | Grafana, a datasource per backend that is on, every dashboard a module ships |
-| `grafana` | `domain` | `""` | the host Grafana is served at (`server.root_url` and the HTTPRoute); empty means none |
-| `grafana` | `gateway` | `"private"` | the shared Gateway its HTTPRoute attaches to: `private`, `public`, or `""` for none |
-| `victoria_logs` | `enabled` | `true` | VictoriaLogs single-node, the logs storage |
-| `victoria_logs` | `retention` | `"7d"` | as `victoria_metrics` |
-| `victoria_logs` | `storage_size` | `"20Gi"` | as `victoria_metrics` |
-| `victoria_traces` | `enabled` | `false` | VictoriaTraces single-node, the traces storage. Off: pre-GA, an upgrade may drop stored traces |
-| `victoria_traces` | `retention` | `"7d"` | as `victoria_metrics` |
-| `victoria_traces` | `storage_size` | `"10Gi"` | as `victoria_metrics` |
-| `alerting` | `enabled` | `false` | vmalert and Alertmanager: the socle's rules, routed to your receivers. Needs `victoria_metrics`, a receiver and, with `watchdog`, `receivers_secret` |
-| `alerting` | `watchdog` | `true` | an always-firing alert to the URL in the `watchdog-url` key of `receivers_secret` |
-| `alerting` | `receivers` | `[]` | Alertmanager receivers as Alertmanager writes them; keys only through `*_file` fields |
-| `alerting` | `route` | `{}` | Alertmanager's routing tree; `route.receiver` names one of `receivers` |
-| `alerting` | `receivers_secret` | `""` | a Secret in `alerting` with the keys, mounted under `/etc/alertmanager/secrets/` |
+| `monitoring` | `enabled` | `true` | the victoria-metrics-k8s-stack chart as one release: the operator, VictoriaMetrics, vmagent scraping the cluster, kube-state-metrics, node-exporter, and the parts below |
+| `monitoring` | `metrics` | `{ retention = "15d", storage_size = "20Gi" }` | VictoriaMetrics single-node. `retention`: whole hours, days, weeks or years (`15d`, `4w`, `1y`), at least a day; `storage_size`: the claim on the default StorageClass, in `Gi` or `Ti`, `""` for an `emptyDir` |
+| `monitoring` | `logs` | `{ enabled = true, retention = "7d", storage_size = "20Gi" }` | VictoriaLogs single-node, the same shape; off also stops `otel_agent` |
+| `monitoring` | `traces` | `{ enabled = false, retention = "7d", storage_size = "10Gi" }` | VictoriaTraces single-node, the same shape. Off: pre-GA, an upgrade may drop stored traces |
+| `monitoring` | `grafana` | `{ enabled = true, domain = "", gateway = "private" }` | Grafana with the stack's datasources and dashboards; `domain` the host it is served at (`server.root_url` and the HTTPRoute), empty for none; `gateway` the shared Gateway its HTTPRoute attaches to: `private`, `public`, or `""` |
+| `monitoring` | `alerting` | `{ enabled = false, watchdog = true, receivers = [], route = {}, receivers_secret = "" }` | vmalert and Alertmanager with kube-prometheus-stack's rules. `receivers` and `route` as Alertmanager writes them, keys only through `*_file` fields; `receivers_secret` a Secret in `monitoring`, mounted under `/etc/alertmanager/secrets/`; `watchdog` an always-firing alert to its `watchdog-url` key. On needs a receiver and, with `watchdog`, `receivers_secret` |
+| `otel_agent` | `enabled` | `true` | the OpenTelemetry Collector as a DaemonSet: container logs to VictoriaLogs, while `monitoring.logs` is on |
+| `otel_gateway` | `enabled` | `true` | the OpenTelemetry Collector as a one-replica Deployment: the applications' OTLP and the Kubernetes events |
 | `keda` | `enabled` | `false` | KEDA, event-driven autoscaling down to zero |
 | `keda` | `services` | `[]` | aws only: the services KEDA's own role may read, from `sqs`, `cloudwatch`, `kinesis`, `dynamodb`. Needs `crossplane` on and each service in `aws.crossplane.allowed_services` |
 | `metrics_server` | `enabled` | `true` | the `metrics.k8s.io` API behind `kubectl top` and HPAs on CPU or memory. aws only |

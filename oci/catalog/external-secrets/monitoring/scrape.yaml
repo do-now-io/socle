@@ -1,0 +1,14 @@
+# External Secrets' metrics, the way its chart's ServiceMonitor scrapes them:
+# through the controller's, the webhook's and the cert controller's metrics
+# Services (on while the monitoring module is), so the series carry service,
+# which the chart's dashboard filters on.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: external-secrets
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: external-secrets
+  endpoints:
+    - port: metrics

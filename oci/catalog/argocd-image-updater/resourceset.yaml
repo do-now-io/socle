@@ -295,6 +295,24 @@ spec:
                   aws ecr get-authorization-token --region << inputs.cluster.region >> \
                     --output text --query 'authorizationData[0].authorizationToken' | base64 -d
             << end >>
+            # Metrics for the monitoring module's vmagent, which scrapes the
+            # annotated pod over plain HTTP: the controller serves them over
+            # HTTPS with Kubernetes authentication by default
+            # (--metrics-secure). metrics.enabled declares the port the
+            # annotation names; it also adds a Service and a NetworkPolicy
+            # letting only that port in, which closes nothing the socle uses
+            # (the webhook port serves only with ingress.enabled).
+            extraArgs:
+              - --metrics-secure=false
+            containerPorts:
+              metrics: 8080
+            metrics:
+              enabled: true
+              service:
+                servicePort: 8080
+            podAnnotations:
+              prometheus.io/scrape: "true"
+              prometheus.io/port: "8080"
             # The chart sets none. Measured on EKS with one Application watched:
             # 2m CPU, 25Mi; the memory request leaves twice that.
             resources:
@@ -352,3 +370,29 @@ spec:
               valuesKey: values.yaml
               optional: true
             << end >>
+    << $monitored := and $m.enabled inputs.modules.monitoring.enabled ->>
+    ---
+    # The module's monitoring — its alert rules and its dashboard, from
+    # monitoring/ in the socle artifact: VMRules and a ConfigMap Grafana's
+    # sidecar loads. Present only while both this module and the monitoring
+    # module are on: monitoring brings the VMRule CRD, and until it has the
+    # Kustomization fails and retries every minute
+    # (docs/decisions/monitoring.md, MONITORING-12).
+    apiVersion: kustomize.toolkit.fluxcd.io/v1
+    kind: Kustomization
+    metadata:
+      name: argocd-image-updater-monitoring
+      namespace: flux-system
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if $monitored >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 1h
+      retryInterval: 1m
+      sourceRef:
+        kind: OCIRepository
+        name: socle
+      path: ./catalog/argocd-image-updater/monitoring
+      targetNamespace: argocd-image-updater
+      prune: true
+      wait: true
+      timeout: 2m

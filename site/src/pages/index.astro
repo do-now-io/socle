@@ -58,8 +58,8 @@ aws = {
 }
 
 kube = {
-  argocd          = { domain = <span class="s">"argocd.acme.example"</span> }
-  victoria_traces = { enabled = <span class="k">true</span> }
+  argocd     = { domain = <span class="s">"argocd.acme.example"</span> }
+  monitoring = { traces = { enabled = <span class="k">true</span> } }
 }`;
 // The plinth: what the catalog installs stands on the socle, and the socle
 // stands on the four clouds. Modules without a logo of their own are left
@@ -71,8 +71,8 @@ const standing = [
   { svg: kyverno, name: 'Kyverno', page: 'catalog/kyverno/' },
   { svg: keda, name: 'KEDA', page: 'catalog/keda/' },
   { svg: opentelemetry, name: 'OpenTelemetry', page: 'catalog/otel-gateway/' },
-  { svg: victoriametrics, name: 'VictoriaMetrics', page: 'catalog/victoria-metrics/' },
-  { svg: grafana, name: 'Grafana', page: 'catalog/grafana/' },
+  { svg: victoriametrics, name: 'VictoriaMetrics', page: 'catalog/monitoring/' },
+  { svg: grafana, name: 'Grafana', page: 'catalog/monitoring/' },
 ];
 const foundations = [
   { svg: aws, name: 'AWS', page: 'clouds/aws/' },

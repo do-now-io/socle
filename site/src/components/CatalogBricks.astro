@@ -7,7 +7,6 @@
 import { modules } from '../catalog.mjs';
 import argo from '../logos/argo.svg?raw';
 import crossplane from '../logos/crossplane.svg?raw';
-import grafana from '../logos/grafana.svg?raw';
 import keda from '../logos/keda.svg?raw';
 import kubernetes from '../logos/kubernetes.svg?raw';
 import kyverno from '../logos/kyverno.svg?raw';
@@ -32,13 +31,9 @@ const marks: Record<string, string> = {
   keda,
   'otel-agent': opentelemetry,
   'otel-gateway': opentelemetry,
-  'victoria-metrics': victoriametrics,
-  'victoria-logs': victoriametrics,
-  'victoria-traces': victoriametrics,
-  // vmalert is VictoriaMetrics'; metrics-server is a kubernetes-sigs project.
-  alerting: victoriametrics,
+  monitoring: victoriametrics,
+  // metrics-server is a kubernetes-sigs project.
   'metrics-server': kubernetes,
-  grafana,
 };
 const monogram: Record<string, string> = { 'external-dns': 'DNS', 'external-secrets': 'ES', reloader: 'R', velero: 'V', hello: 'H' };
 const categories = ['gitops', 'networking', 'security', 'secrets', 'autoscaling', 'observability', 'backup', 'platform'];

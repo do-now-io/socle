@@ -96,8 +96,8 @@ module "socle" {
   }
 
   kube = {
-    argocd          = { domain = "argocd.acme.example" }
-    victoria_traces = { enabled = true }
+    argocd     = { domain = "argocd.acme.example" }
+    monitoring = { traces = { enabled = true } }
   }
 }
 ```
@@ -129,13 +129,9 @@ The stack's design: [Observability](docs/architecture/observability.md).
 
 | Module | What it does | Version | Default | Clouds | Notes |
 | --- | --- | --- | :---: | --- | --- |
-| [`victoria_metrics`](docs/catalog/victoria-metrics.md) | Metrics storage | 1.153.0 | on | All | |
-| [`victoria_logs`](docs/catalog/victoria-logs.md) | Logs storage | 1.52.0 | on | All | |
-| [`victoria_traces`](docs/catalog/victoria-traces.md) | Traces storage | 0.11.0 | off | All | Pre-GA upstream |
-| [`otel_agent`](docs/catalog/otel-agent.md) | Node-level OpenTelemetry collector: kubelet metrics and container logs | 0.160.0 | on | All | |
-| [`otel_gateway`](docs/catalog/otel-gateway.md) | Cluster-level collector: object state, Prometheus scraping, OTLP | 0.160.0 | on | All | |
-| [`grafana`](docs/catalog/grafana.md) | One place to read every signal, with each module's dashboards loaded | 13.2.2 | on | All | |
-| [`alerting`](docs/catalog/alerting.md) | vmalert evaluates the socle's rules, and Alertmanager routes what fires to your receivers | 1.153.0 · 0.34.1 | off | All | Needs `victoria_metrics` |
+| [`monitoring`](docs/catalog/monitoring.md) | The stack in one release: metrics, logs and traces storage, the cluster scraped, Grafana, and kube-prometheus-stack's alert rules | 0.95.2 | on | All | Traces and alerting off by default |
+| [`otel_agent`](docs/catalog/otel-agent.md) | Node-level OpenTelemetry collector: container logs | 0.160.0 | on | All | Runs while monitoring's logs are on |
+| [`otel_gateway`](docs/catalog/otel-gateway.md) | Cluster-level collector: your applications' OTLP and the Kubernetes events | 0.160.0 | on | All | |
 | [`metrics_server`](docs/catalog/metrics-server.md) | The resource metrics API behind `kubectl top` and CPU or memory autoscaling | 0.9.0 | on | AWS | GKE, AKS and Kapsule ship their own |
 
 ### Security

@@ -5,8 +5,11 @@ sidebar:
   order: 10
 ---
 
-The node-level collector. While it collects container logs it runs as root,
-with nothing else ([OTEL-AGENT-03](#otel-agent-03-root-to-read-container-logs-with-nothing-else)).
+The node-level collector ships the containers' logs, and nothing else; it
+runs as root to read them, with nothing else
+([OTEL-AGENT-06](#otel-agent-06-the-containers-logs-only-while-monitoring-stores-them)).
+The node's metrics are vmagent's
+([MONITORING-02](monitoring.md#monitoring-02-vmagent-is-the-one-place-metrics-are-scraped)).
 The stack-wide decisions are [SOCLE-03](socle.md#socle-03-one-in-cluster-monitoring-stack-on-every-cloud).
 
 ## OTEL-AGENT-01: A memory limit, so GOMEMLIMIT applies
@@ -27,7 +30,7 @@ busy node loses data rather than memory; the client raises the limit through
 
 ## OTEL-AGENT-02: The kubelet call skips certificate verification
 
-**accepted** · 2026-09-29 · [`oci/catalog/otel-agent/resourceset.yaml`](../../oci/catalog/otel-agent/resourceset.yaml)
+**superseded by [MONITORING-02](monitoring.md#monitoring-02-vmagent-is-the-one-place-metrics-are-scraped)** · 2026-09-29 · [`oci/catalog/otel-agent/resourceset.yaml`](../../oci/catalog/otel-agent/resourceset.yaml)
 
 **Decision.** `insecure_skip_verify: true` on the `kubeletstats` receiver; the
 call still carries the ServiceAccount token, authorized for `nodes/stats`.
@@ -44,7 +47,7 @@ from inside the node.
 
 ## OTEL-AGENT-03: Root to read container logs, with nothing else
 
-**accepted** · 2026-09-30 · [`oci/catalog/otel-agent/resourceset.yaml`](../../oci/catalog/otel-agent/resourceset.yaml)
+**superseded by [OTEL-AGENT-06](#otel-agent-06-the-containers-logs-only-while-monitoring-stores-them)** · 2026-09-30 · [`oci/catalog/otel-agent/resourceset.yaml`](../../oci/catalog/otel-agent/resourceset.yaml)
 
 **Decision.** While container logs are collected (`victoria_logs` on and
 `kube.otel_agent.logs` true), the agent runs as `runAsUser: 0`, every
@@ -77,3 +80,55 @@ Service.
 `otel-gateway.otel-gateway.svc`, one hop further than a node-local agent.
 
 **Sources.** The `opentelemetry-collector` chart 0.173.1 values.
+
+## OTEL-AGENT-05: Volume metrics for the claims only, their name from the kubelet's pod list
+
+**superseded by [MONITORING-02](monitoring.md#monitoring-02-vmagent-is-the-one-place-metrics-are-scraped)** · 2026-10-12 · [`oci/catalog/otel-agent/resourceset.yaml`](../../oci/catalog/otel-agent/resourceset.yaml), [`oci/catalog/otel-agent/rules/otel-agent.yaml`](../../oci/catalog/otel-agent/rules/otel-agent.yaml)
+
+**Context.** The PersistentVolumeClaim rules (#91) need how full each claim
+is. kubeletstats' `volume` group reports every volume of every pod; it labels
+a volume's type and claim only through `extra_metadata_labels`, which reads
+the kubelet's pod list. The receiver documents `nodes/pods` for it: the
+kubelet's fine-grained authorization, on by default since Kubernetes 1.33,
+grants that list alone, where older kubelets asked for `nodes/proxy`, which
+also opens exec into the node's pods.
+
+**Decision.** The `volume` group with `extra_metadata_labels:
+[k8s.volume.type]`, `get` on `nodes/pods`, and a filter that keeps the
+`persistentVolumeClaim` volumes only.
+
+**Consequences.** Each claim's fill reaches VictoriaMetrics under its own
+name (`k8s_persistentvolumeclaim_name`), nothing else's: a pod's token,
+ConfigMap and emptyDir volumes would be five series each. On a kubelet before
+1.33 the pod list is refused and the volume rules have nothing to read. The
+inode counts are stored as `*_ratio`: kubeletstats gives them the unit `1`.
+
+**Sources.** kubeletstats receiver 0.160.0 README (Role-based access
+control); measured on floci k3s 1.34, 2026-10-12: the claim named, no
+refusal.
+
+## OTEL-AGENT-06: The containers' logs only, while monitoring stores them
+
+**accepted** · 2026-10-12 · [`oci/catalog/otel-agent/resourceset.yaml`](../../oci/catalog/otel-agent/resourceset.yaml)
+
+**Context.** vmagent now scrapes the kubelets, cAdvisor and node-exporter
+([MONITORING-02](monitoring.md#monitoring-02-vmagent-is-the-one-place-metrics-are-scraped)):
+`kubeletstats` would collect the same twice, under names no upstream rule
+reads. What only a node-local agent does is read `/var/log/pods`, which
+containerd writes as root, mode 0640.
+
+**Decision.** No metrics pipeline and no `kubeletstats`; `file_log` with
+`k8s_attributes` to the monitoring module's VictoriaLogs. The release is
+rendered only while `monitoring` and its `logs` are on. The agent runs as
+`runAsUser: 0`, every capability dropped, no privilege escalation, read-only
+root filesystem, `/var/log/pods` mounted read-only, no checkpoints. Its own
+telemetry is scraped by vmagent through its `prometheus.io/scrape`
+annotation. `kube.otel_agent.logs` is gone: off is `enabled = false`, or
+`monitoring.logs.enabled = false`.
+
+**Consequences.** Under the Baseline Pod Security Standard, the agent is
+turned off rather than run without logs. A restarted agent loses the lines
+written while it was down.
+
+**Sources.** Measured on floci, 2026-09-30 (a line in VictoriaLogs 6 s
+after the pod's creation); #91.

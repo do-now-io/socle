@@ -57,7 +57,7 @@ kube = {
 ## Good to know
 
 - **Not a monitoring system**: one value per node and pod, refreshed every
-  15 s, no history. History is [victoria_metrics](victoria-metrics.md)'.
+  15 s, no history. History is [monitoring](monitoring.md)'s.
 - **When it is down, HPAs hold** at their current replica count, and every
   namespace deletion in the cluster waits until it answers again (the
   namespace stays `Terminating`). With one replica that lasts about a minute

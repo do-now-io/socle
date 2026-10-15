@@ -228,6 +228,18 @@ spec:
                 (conditions[?type == 'Ready'] || `[]`):
                   - status: 'True'
                 (length(inventory.entries || `[]`) > `0`): true
+        # The module's monitoring — rules and dashboard — applied with it,
+        # the monitoring module being on.
+        - assert:
+            resource:
+              apiVersion: kustomize.toolkit.fluxcd.io/v1
+              kind: Kustomization
+              metadata:
+                name: crossplane-monitoring
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
       # Once in five runs (36828601604) both AWS providers stayed Healthy=False
       # — "Deployment does not have minimum availability" — for eight minutes
       # while their pods were Running and Ready: the package manager's stale

@@ -12,13 +12,9 @@ resources:
   - ../../catalog/external-dns/resourceset.yaml
   - ../../catalog/argocd/resourceset.yaml
   - ../../catalog/argocd-image-updater/resourceset.yaml
-  - ../../catalog/victoria-metrics/resourceset.yaml
+  - ../../catalog/monitoring/resourceset.yaml
   - ../../catalog/otel-agent/resourceset.yaml
   - ../../catalog/otel-gateway/resourceset.yaml
-  - ../../catalog/grafana/resourceset.yaml
-  - ../../catalog/victoria-logs/resourceset.yaml
-  - ../../catalog/victoria-traces/resourceset.yaml
-  - ../../catalog/alerting/resourceset.yaml
   - ../../catalog/keda/resourceset.yaml
   - ../../catalog/kyverno/resourceset.yaml
   - ../../catalog/kyverno-policies/resourceset.yaml

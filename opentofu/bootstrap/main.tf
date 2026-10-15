@@ -177,7 +177,12 @@ resource "helm_release" "instance" {
         size          = var.instance_size
         networkPolicy = var.network_policy
       }
-      commonMetadata = { labels = local.common_labels }
+      # The socle's labels on every Flux object, but part-of: the operator
+      # finds Flux's CRDs by app.kubernetes.io/part-of = the instance's name,
+      # and with "socle" there the FluxReport fails ("no Flux CRDs found")
+      # and the operator never exports flux_resource_info, which the Flux
+      # alert rules read (oci/catalog/monitoring/rules/flux.yaml).
+      commonMetadata = { labels = { for k, v in local.common_labels : k => v if k != "app.kubernetes.io/part-of" } }
       storage        = { class = var.storage_class }
     }
     healthcheck = {
