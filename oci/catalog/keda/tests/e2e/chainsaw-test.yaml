@@ -179,7 +179,14 @@ spec:
               status:
                 (conditions[?type == 'Ready'] || `[]`):
                   - status: 'True'
-                (length(inventory.entries[?contains(id, 'Role')] || `[]`)): 0
+        # No service named: aws's cloud step renders no access, so no Role.
+        - error:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: keda-access
+                namespace: flux-system
         # The module's monitoring — rules and dashboard — applied with it,
         # the monitoring module being on.
         - assert:
@@ -771,8 +778,8 @@ spec:
             selector: pkg.crossplane.io/provider=provider-aws-iam
             tail: 40
     # floci seam, second half: the association never syncs (floci 2.1.0 has
-    # no association API), so the workload's dependsOn is never met and the
-    # chart must never have been applied. Asserted as such so that the day
+    # no association API), so keda-access is never Ready, the cloud step
+    # never healthy, and the workload step — the chart — never applied. Asserted as such so that the day
     # it syncs this step fails and goes with the seam above.
     - name: 'floci seam: the association cannot sync, so the workload is withheld'
       try:
@@ -800,17 +807,34 @@ spec:
               apiVersion: fluxcd.controlplane.io/v1
               kind: ResourceSet
               metadata:
-                name: keda-workload
+                name: keda-access
                 namespace: flux-system
               status:
                 (conditions[?type == 'Ready'] || `[]`):
                   - status: 'False'
+        # Waiting on its cloud step: Ready is Unknown while the step's health
+        # check runs and False once it times out — never True.
+        - error:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: keda
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
       catch:
         - describe:
             apiVersion: fluxcd.controlplane.io/v1
             kind: ResourceSet
             namespace: flux-system
-            name: keda-workload
+            name: keda-access
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: keda
         - describe:
             apiVersion: eks.aws.m.upbound.io/v1beta1
             kind: PodIdentityAssociation

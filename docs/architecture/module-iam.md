@@ -40,9 +40,10 @@ change. The root wires the boundary into `kube.crossplane.permissions_boundary`.
 ```text
 foundations: cluster, Crossplane's role and boundary
   └▶ bootstrap: Cilium, CoreDNS, Pod Identity Agent, then Flux
-       └▶ crossplane module: core, providers, provider config
-            └▶ <module>: its role and Pod Identity association
-                 └▶ <module>-workload: the chart, once the role is Ready
+       └▶ crossplane module: core, then the cloud's providers and provider config
+            └▶ <module>, step cloud: its role and Pod Identity association,
+               healthy once <module>-access sees them Ready
+                 └▶ <module>, step workload: the chart
 ```
 
 On AWS the role must exist before the pod: Pod Identity injects credentials
@@ -52,10 +53,15 @@ recreated.
 <details>
 <summary>Under the hood</summary>
 
-The child waits on an explicit `readyExpr`, because a managed resource not
-yet created has no Ready condition, which kstatus reads as healthy. The
-module's own `ResourceSet` `dependsOn` the `crossplane` one, which always
-exists and is Ready at once when Crossplane is off.
+A module's cloud resources are what that cloud adds to it:
+`oci/clusters/<cloud>/<module>/patch.yaml` inserts a step `cloud` before the
+module's `workload` step and makes the module `dependsOn` the `crossplane`
+`ResourceSet`, which always exists and is Ready at once when Crossplane is
+off ([SOCLE-32](../decisions/socle.md#socle-32-what-only-one-cloud-has-that-cloud-adds-to-the-module-as-steps)). The step also renders
+`<module>-access`, an empty `ResourceSet` that waits on the role and the
+association with an explicit `readyExpr`, because a managed resource not yet
+created has no Ready condition, which the step's health check reads as
+healthy; the `workload` step starts once it is Ready.
 
 What runs before Crossplane takes its access elsewhere: Cilium's operator
 from the bootstrap nodes' role; the EBS and EFS CSI drivers from roles the

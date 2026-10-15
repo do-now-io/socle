@@ -98,9 +98,14 @@ read-only statement per service named, the exact calls each scaler makes, on
 every resource: depths, never messages; `dynamodb` grants `Query` on every
 table.
 
-**Ordering**: waits for the `crossplane` ResourceSet; on aws the chart waits
-for the role and its association. Turn the module off before crossplane,
-never in the same apply.
+**Ordering**: on aws the role is a step of its own, `cloud`, which aws adds
+to the module
+([`oci/clusters/aws/keda/patch.yaml`](../../oci/clusters/aws/keda/patch.yaml),
+[SOCLE-32](../decisions/socle.md#socle-32-what-only-one-cloud-has-that-cloud-adds-to-the-module-as-steps)): the module waits for the `crossplane`
+ResourceSet, and the chart's step starts only once the role and its
+association are Ready (`keda-access`), since Pod Identity hands credentials
+at admission only. Turn the module off before crossplane, never in the same
+apply.
 
 **Measured** on floci, 2026-09-30: 10 messages with `queueLength: 5` scaled
 a Deployment from 0 to 2 in 12 s, and a purge back to 0 in 12 s.

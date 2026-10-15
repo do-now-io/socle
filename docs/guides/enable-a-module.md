@@ -58,14 +58,17 @@ off aws.
 
 ```sh
 tofu apply
-kubectl -n flux-system get resourceset keda keda-workload   # Ready=True
+kubectl -n flux-system get resourceset keda                 # Ready=True
 kubectl -n flux-system get resourceset socle-root           # Ready=True: everything converged
 kubectl -n keda get helmrelease                             # the chart, Ready
 ```
 
-A green apply is not convergence. A module with cloud access has two
-`ResourceSet`s: `keda` holds the role, `keda-workload` the chart, which waits
-for the role. If one stays not Ready, see [Troubleshooting](troubleshooting.md).
+A green apply is not convergence. A module with cloud access applies it in
+a step before the chart: on aws, `keda`'s `cloud` step holds
+the role, and its `workload` step, the chart, starts once the role is Ready
+— `kubectl -n flux-system describe resourceset keda` names the step it
+waits on. If it stays not Ready, see
+[Troubleshooting](troubleshooting.md).
 
 ## 5. Turn it off
 

@@ -1,0 +1,24 @@
+# The hello module on scaleway: podinfo's page in scaleway's colour, and scaleway named in its
+# message (docs/catalog/hello.md).
+- op: test
+  path: /spec/steps/1/name
+  value: workload
+- op: add
+  path: /spec/steps/1
+  value:
+    name: cloud
+    resourcesTemplate: |
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: hello-cloud-values
+        namespace: hello
+        labels:
+          reconcile.fluxcd.io/watch: Enabled
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.hello.enabled >>enabled<< else >>disabled<< end >>
+      data:
+        values.yaml: |
+          ui:
+            color: "#4F0599"
+            message: << printf "%s — %s on scaleway" inputs.modules.hello.message inputs.cluster.name | quote >>

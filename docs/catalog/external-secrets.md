@@ -95,9 +95,14 @@ is on, the metrics Services it scrapes. Your `values` are merged over these.
 region.
 Elsewhere, none.
 
-**Ordering**: waits for the `crossplane` ResourceSet; the chart waits for the
-role and its association, the store for the chart. Turn the module off before
-crossplane, never in the same apply.
+**Ordering**: the module's `ResourceSet` applies its steps in order,
+each once the one before is healthy: the namespace, then the chart. On aws,
+[`oci/clusters/aws/external-secrets/patch.yaml`](../../oci/clusters/aws/external-secrets/patch.yaml)
+adds what only aws has: the module waits for the `crossplane` ResourceSet, a
+`cloud` step before the chart holds the role and its association and is
+healthy only once both are Ready, and a `store` step after the chart holds
+the `ClusterSecretStore`. Turn the module off before crossplane, never in
+the same apply.
 
 **Measured** on floci, 2026-10-02: a rotation reached the `Secret` and
 Reloader rolled the Deployment in 25 s (`refreshInterval: 10s`).

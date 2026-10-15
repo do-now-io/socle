@@ -75,7 +75,10 @@ commit `8bb74df`, through `GitRepository/gateway-api` in `flux-system`; then
 **What the socle sets**: once the CRDs exist, a Job restarts the Cilium
 operator once per cluster, since it looks for them only at start.
 The Gateways' annotations ask the cloud for a load balancer, internal for
-`private`.
+`private`. Their shape is each cloud's own, a step the cloud appends in
+`oci/clusters/<cloud>/gateway-api/patch.yaml`; the CRDs and the class are
+the module's, the same everywhere. Scaleway has none: without the `cilium`
+class there, the socle never creates the shared Gateways.
 
 **Cloud access**: none. The cloud's own controller creates the load balancers.
 

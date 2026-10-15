@@ -35,7 +35,7 @@ metadata:
     cloud: any
     platform: any
 spec:
-  description: Off by default, the ResourceSet renders nothing.
+  description: Off by default, the ResourceSet is Ready and renders nothing.
   timeouts:
     assert: 3m
     error: 1m
@@ -180,7 +180,14 @@ spec:
               status:
                 (conditions[?type == 'Ready'] || `[]`):
                   - status: 'True'
-                (length(inventory.entries[?contains(id, 'iam.aws')] || `[]`)): 0
+        # No repository named: aws's cloud step renders nothing, so no IAM role.
+        - error:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: argocd-image-updater-access
+                namespace: flux-system
         # The module's monitoring — rules and dashboard — applied with it,
         # the monitoring module being on.
         - assert:
@@ -803,9 +810,10 @@ spec:
             selector: pkg.crossplane.io/provider=provider-aws-iam
             tail: 40
     # floci seam, second half: the association never syncs (floci has no
-    # association API), so the workload's dependsOn is never met and the
-    # chart must never have been applied. Asserted as such so that the day
-    # it syncs this step fails and goes with the seam above.
+    # association API), so argocd-image-updater-access, which waits on it,
+    # is never Ready, aws's cloud step never healthy, the workload step never
+    # applied and the chart never installed. Asserted as such so that the
+    # day it syncs this step fails and goes with the seam above.
     - name: 'floci seam: the association cannot sync, so the workload is withheld'
       try:
         - assert:
@@ -832,17 +840,33 @@ spec:
               apiVersion: fluxcd.controlplane.io/v1
               kind: ResourceSet
               metadata:
-                name: argocd-image-updater-workload
+                name: argocd-image-updater-access
                 namespace: flux-system
               status:
                 (conditions[?type == 'Ready'] || `[]`):
                   - status: 'False'
+        # Waiting on the cloud step: Unknown while its health check runs,
+        # False once it times out — never True.
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: argocd-image-updater
+                namespace: flux-system
+              status:
+                (length(conditions[?type == 'Ready' && status == 'True'] || `[]`)): 0
       catch:
         - describe:
             apiVersion: fluxcd.controlplane.io/v1
             kind: ResourceSet
             namespace: flux-system
-            name: argocd-image-updater-workload
+            name: argocd-image-updater
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: argocd-image-updater-access
         - describe:
             apiVersion: eks.aws.m.upbound.io/v1beta1
             kind: PodIdentityAssociation

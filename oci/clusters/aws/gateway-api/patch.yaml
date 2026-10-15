@@ -1,0 +1,76 @@
+# The gateway_api module on aws: the shape of the two shared Gateways
+# behind aws's NLB.
+# docs/catalog/gateway-api.md is the module's page.
+#
+# Where inputs.gateway.shared says so, the two shared Gateways every module
+# and the client route through: `public`, internet-facing, and `private`,
+# internal, in gateway-system (docs/catalog/gateway-api.md). A child
+# ResourceSet, because a Gateway can only be applied once its CRD and class
+# exist: it dependsOn gateway-api-cilium, from the module's crds step,
+# being Ready. Routes attach to `https` on 443. Unlike the CRDs, the
+# Gateways are the socle's own: disabling the module or
+# kube.gateway_api.gateways deletes them, and their load balancers with them.
+#
+# On aws the NLB in front of each Gateway terminates TLS with the
+# foundations' ACM certificate and forwards plain HTTP, so `https` is an
+# HTTP listener on 443 and no key exists in the cluster — and there is no
+# port 80: Cilium serves every HTTP listener of a Gateway from one Envoy
+# route table whatever the port, so a redirect on 80 would also answer on
+# 443 and loop, and the routes on 443 would answer in clear on 80 (measured
+# on EKS, docs/catalog/gateway-api.md).
+- op: add
+  path: /spec/steps/-
+  value:
+    name: gateways
+    resourcesTemplate: |
+      << if inputs.gateway.shared >>
+      apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSet
+      metadata:
+        name: gateway-api-gateways
+        namespace: flux-system
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.gateway_api.enabled >>enabled<< else >>disabled<< end >>
+      spec:
+        dependsOn:
+          - apiVersion: kustomize.toolkit.fluxcd.io/v1
+            kind: Kustomization
+            name: gateway-api-cilium
+            namespace: flux-system
+            ready: true
+        wait: true
+        resources:
+          - apiVersion: v1
+            kind: Namespace
+            metadata:
+              name: << inputs.gateway.namespace >>
+          << range $gw := list "public" "private" >>
+          - apiVersion: gateway.networking.k8s.io/v1
+            kind: Gateway
+            metadata:
+              name: << $gw >>
+              namespace: << inputs.gateway.namespace >>
+            spec:
+              gatewayClassName: << inputs.gateway.className >>
+              # Carried by Cilium onto the LoadBalancer Service it creates for
+              # the Gateway, where the cloud's own service controller reads it.
+              infrastructure:
+                annotations:
+                  service.beta.kubernetes.io/aws-load-balancer-type: nlb
+                  service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+                  service.beta.kubernetes.io/aws-load-balancer-ssl-cert: << inputs.gateway.certificateArn | quote >>
+                  service.beta.kubernetes.io/aws-load-balancer-ssl-ports: "443"
+                  << if eq $gw "private" >>
+                  service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+                  << end >>
+                  socle.do-now.io/gateway: << $gw >>
+              listeners:
+                - name: https
+                  port: 443
+                  # TLS is the NLB's; Envoy receives plain HTTP on 443.
+                  protocol: HTTP
+                  allowedRoutes:
+                    namespaces:
+                      from: All
+          << end >>
+      << end >>

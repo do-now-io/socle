@@ -1,30 +1,20 @@
 # The crossplane module: the tooling through which every catalog module
-# carries its own cloud IAM. It installs Crossplane and, per cloud, the IAM
-# providers and their ProviderConfig — and nothing that belongs to a module.
-# A module that needs a cloud service declares its own managed resources
-# (on AWS an IAM Role and a PodIdentityAssociation) in its own ResourceSet,
-# for each cloud it runs on; adding such a module never touches this one.
-# The contract those resources follow and the ordering chain:
-# docs/architecture/module-iam.md; the module: docs/catalog/crossplane.md.
+# carries its own cloud IAM. It installs Crossplane here and, in the steps
+# each cloud adds, that cloud's providers and their ProviderConfig — and
+# nothing that belongs to a module. A module that needs a cloud service
+# declares its own managed resources (on AWS an IAM Role and a
+# PodIdentityAssociation) in the step its cloud adds to it,
+# oci/clusters/<cloud>/<module>/patch.yaml; adding such a module never
+# touches this one. The contract those resources follow and the
+# ordering chain: docs/architecture/module-iam.md; the module:
+# docs/catalog/crossplane.md.
 #
-# Three steps, applied and health-checked in order by the operator:
-# 1. core — Crossplane and its RBAC manager, the official chart. From
-#    Crossplane's Helm repository over HTTPS, not OCI like the other modules:
-#    upstream publishes the chart to charts.crossplane.io only (its promote
-#    workflow pushes images to OCI registries, never the chart).
-# 2. providers — per cloud, the provider packages. They need the core's
-#    CRDs, which the core applies itself at start: hence a step.
-# 3. config — the ProviderConfig. It needs the providers' own CRDs, which
-#    only exist once they are Healthy — a condition the operator's health
-#    check does not read (Crossplane packages report Healthy, not Ready). So
-#    the step is a child ResourceSet that dependsOn the packages with a
-#    readyExpr on Healthy; this step waits for the child to be Ready. When
-#    the module is off the child goes with everything else, so a dependency
-#    on an absent Provider can never wedge socle-root.
-#
-# Only AWS has providers yet (`if eq inputs.cloud "aws"`); GCP, Azure and
-# Scaleway each add their branch in their own PR, and until then those two
-# steps render nothing there.
+# One step here, core: Crossplane and its RBAC manager, the official chart.
+# From Crossplane's Helm repository over HTTPS, not OCI like the other
+# modules: upstream publishes the chart to charts.crossplane.io only (its
+# promote workflow pushes images to OCI registries, never the chart). A cloud
+# with Crossplane providers appends its own steps after it — on aws,
+# oci/clusters/aws/crossplane/patch.yaml (docs/decisions/socle.md, SOCLE-32).
 #
 # resourcesTemplate rather than resources: the values Secret is listed only
 # when the client names one, and the operator's block `<< if >>`/`<< end >>`
@@ -189,154 +179,3 @@ spec:
           prune: true
           wait: true
           timeout: 2m
-    - name: providers
-      resourcesTemplate: |
-        << if eq inputs.cloud "aws" >>
-        # IAM for the modules' roles, EKS for their Pod Identity
-        # associations: what every module's AWS access is made of; S3 for
-        # the buckets a module owns. One
-        # ServiceAccount name for every AWS provider pod, so the foundations
-        # can write its Pod Identity association before the cluster has a
-        # node: Crossplane otherwise names it after the ProviderRevision, a
-        # hash.
-        #
-        # The module creates that ServiceAccount, and the runtime config only
-        # points the pods at it (deploymentTemplate's serviceAccountName).
-        # Named through serviceAccountTemplate instead, Crossplane creates it
-        # and makes each ProviderRevision its controller owner in turn: every
-        # provider sharing the name takes it back from the last, the write
-        # wakes the others, and every reconcile succeeds, so nothing backs
-        # off — ~25 writes a second, forever, each one a billed line of the
-        # EKS audit log (#80, crossplane/crossplane#7769). Pointed at, it is
-        # used and never owned. Crossplane's RBAC manager binds the providers'
-        # permissions to whatever ServiceAccount their Deployment runs as.
-        apiVersion: v1
-        kind: ServiceAccount
-        metadata:
-          name: provider-aws
-          namespace: crossplane-system
-          annotations:
-            fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
-        ---
-        # Requests from what was measured on k3s: 306Mi to 441Mi per provider
-        # once its CRDs are loaded.
-        apiVersion: pkg.crossplane.io/v1beta1
-        kind: DeploymentRuntimeConfig
-        metadata:
-          name: provider-aws
-          annotations:
-            fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
-        spec:
-          deploymentTemplate:
-            spec:
-              selector: {}
-              template:
-                spec:
-                  serviceAccountName: provider-aws
-                  containers:
-                    - name: package-runtime
-                      resources:
-                        requests:
-                          cpu: 50m
-                          memory: 320Mi
-        ---
-        # The family provider is a dependency of the other two; declared so
-        # that its version is pinned here and not resolved by Crossplane.
-        # Named exactly as Crossplane names a dependency it installs itself
-        # (the package path, slashes as dashes): under any other name, when
-        # the other two are resolved first, Crossplane installs the family a
-        # second time, the lock holds one package twice, and every provider
-        # stays unhealthy on "node … already exists" — measured on EKS.
-        apiVersion: pkg.crossplane.io/v1
-        kind: Provider
-        metadata:
-          name: crossplane-contrib-provider-family-aws
-          annotations:
-            fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
-        spec:
-          package: xpkg.crossplane.io/crossplane-contrib/provider-family-aws:v2.8.1
-          runtimeConfigRef:
-            name: provider-aws
-        ---
-        apiVersion: pkg.crossplane.io/v1
-        kind: Provider
-        metadata:
-          name: provider-aws-iam
-          annotations:
-            fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
-        spec:
-          package: xpkg.crossplane.io/crossplane-contrib/provider-aws-iam:v2.8.1
-          runtimeConfigRef:
-            name: provider-aws
-        ---
-        apiVersion: pkg.crossplane.io/v1
-        kind: Provider
-        metadata:
-          name: provider-aws-eks
-          annotations:
-            fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
-        spec:
-          package: xpkg.crossplane.io/crossplane-contrib/provider-aws-eks:v2.8.1
-          runtimeConfigRef:
-            name: provider-aws
-        ---
-        # S3 for the buckets a module owns, as it owns its role: the velero
-        # module's (docs/catalog/velero.md). Crossplane's own identity may
-        # create and configure buckets under the cluster's name prefix, and
-        # never delete one (opentofu/aws/iam.tf).
-        apiVersion: pkg.crossplane.io/v1
-        kind: Provider
-        metadata:
-          name: provider-aws-s3
-          annotations:
-            fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
-        spec:
-          package: xpkg.crossplane.io/crossplane-contrib/provider-aws-s3:v2.8.1
-          runtimeConfigRef:
-            name: provider-aws
-        << end >>
-    - name: config
-      resourcesTemplate: |
-        << if eq inputs.cloud "aws" >>
-        apiVersion: fluxcd.controlplane.io/v1
-        kind: ResourceSet
-        metadata:
-          name: crossplane-provider-config
-          namespace: flux-system
-          annotations:
-            fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
-        spec:
-          dependsOn:
-            - apiVersion: pkg.crossplane.io/v1
-              kind: Provider
-              name: crossplane-contrib-provider-family-aws
-              ready: true
-              readyExpr: status.conditions.exists(c, c.type == 'Healthy' && c.status == 'True')
-            - apiVersion: pkg.crossplane.io/v1
-              kind: Provider
-              name: provider-aws-iam
-              ready: true
-              readyExpr: status.conditions.exists(c, c.type == 'Healthy' && c.status == 'True')
-            - apiVersion: pkg.crossplane.io/v1
-              kind: Provider
-              name: provider-aws-eks
-              ready: true
-              readyExpr: status.conditions.exists(c, c.type == 'Healthy' && c.status == 'True')
-            - apiVersion: pkg.crossplane.io/v1
-              kind: Provider
-              name: provider-aws-s3
-              ready: true
-              readyExpr: status.conditions.exists(c, c.type == 'Healthy' && c.status == 'True')
-          wait: true
-          resources:
-            # The provider's credentials: EKS Pod Identity, through the
-            # association the foundations wrote for crossplane-system/
-            # provider-aws. No key anywhere.
-            - apiVersion: aws.m.upbound.io/v1beta1
-              kind: ClusterProviderConfig
-              metadata:
-                name: default
-              spec:
-                credentials:
-                  source: PodIdentity
-        << end >>

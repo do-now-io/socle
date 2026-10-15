@@ -1,0 +1,148 @@
+# The keda module on aws: with Crossplane on and a service named in
+# kube.keda.services, the operator's own IAM role — one read-only statement
+# per named service — and its Pod Identity association
+# (docs/catalog/keda.md, docs/architecture/module-iam.md); and the
+# annotation that rolls the operator when that role changes.
+- op: add
+  path: /spec/dependsOn
+  value:
+    # The Role's kinds come from Crossplane's providers.
+    - apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSet
+      name: crossplane
+      namespace: flux-system
+      ready: true
+- op: test
+  path: /spec/steps/1/name
+  value: workload
+- op: add
+  path: /spec/steps/1
+  value:
+    name: cloud
+    resourcesTemplate: |
+      << if and inputs.modules.crossplane.enabled inputs.modules.keda.services >>
+      # The module's own AWS access, docs/architecture/module-iam.md. Under
+      # /socle/<cluster>/ and carrying Crossplane's boundary when the root wired
+      # one: Crossplane's own policy refuses any other role. Inline policy only.
+      #
+      # One statement per service the client named, read-only, the exact API
+      # calls KEDA's scalers make (pkg/scalers/aws_*_scaler.go, v2.21.0):
+      #   sqs        GetQueueAttributes             the aws-sqs-queue scaler
+      #   cloudwatch GetMetricData                  the aws-cloudwatch scaler
+      #   kinesis    DescribeStreamSummary          the aws-kinesis-stream scaler
+      #   dynamodb   Query; DescribeTable and       the aws-dynamodb and
+      #              DescribeStream                 aws-dynamodb-streams scalers
+      # Resource "*" within each: the queues and tables are named in the
+      # client's ScaledObjects, which the socle does not read, and the account
+      # id is not among the inputs (docs/catalog/keda.md). The boundary's
+      # allowlist must name each service too — the client's tfvars, reviewed.
+      << $s := list ->>
+      << if has "sqs" inputs.modules.keda.services ->>
+      << $a := list "sqs:GetQueueAttributes" ->>
+      << $s = append $s (dict "Sid" "ReadSqsQueueAttributes" "Effect" "Allow" "Action" $a "Resource" "*") ->>
+      << end ->>
+      << if has "cloudwatch" inputs.modules.keda.services ->>
+      << $a := list "cloudwatch:GetMetricData" ->>
+      << $s = append $s (dict "Sid" "ReadCloudWatchMetrics" "Effect" "Allow" "Action" $a "Resource" "*") ->>
+      << end ->>
+      << if has "kinesis" inputs.modules.keda.services ->>
+      << $a := list "kinesis:DescribeStreamSummary" ->>
+      << $s = append $s (dict "Sid" "ReadKinesisStreamSummary" "Effect" "Allow" "Action" $a "Resource" "*") ->>
+      << end ->>
+      << if has "dynamodb" inputs.modules.keda.services ->>
+      << $a := list "dynamodb:Query" "dynamodb:DescribeTable" "dynamodb:DescribeStream" ->>
+      << $s = append $s (dict "Sid" "ReadDynamoDbTablesAndStreams" "Effect" "Allow" "Action" $a "Resource" "*") ->>
+      << end ->>
+      apiVersion: iam.aws.m.upbound.io/v1beta1
+      kind: Role
+      metadata:
+        name: keda-operator
+        namespace: keda
+        annotations:
+          # IAM names are account-wide and two clusters may share an account.
+          crossplane.io/external-name: << inputs.cluster.name >>-keda-operator
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.keda.enabled >>enabled<< else >>disabled<< end >>
+      spec:
+        forProvider:
+          path: /socle/<< inputs.cluster.name >>/
+          << if inputs.modules.crossplane.permissions_boundary >>
+          permissionsBoundary: << inputs.modules.crossplane.permissions_boundary | quote >>
+          << end >>
+          assumeRolePolicy: |
+            {
+              "Version": "2012-10-17",
+              "Statement": [{
+                "Effect": "Allow",
+                "Principal": {"Service": "pods.eks.amazonaws.com"},
+                "Action": ["sts:AssumeRole", "sts:TagSession"]
+              }]
+            }
+          inlinePolicy:
+            - name: scalers
+              policy: << dict "Version" "2012-10-17" "Statement" $s | toJson | quote >>
+      ---
+      apiVersion: eks.aws.m.upbound.io/v1beta1
+      kind: PodIdentityAssociation
+      metadata:
+        name: keda-operator
+        namespace: keda
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.keda.enabled >>enabled<< else >>disabled<< end >>
+      spec:
+        forProvider:
+          # Required: the socle's ClusterProviderConfig names no region, and
+          # OpenTofu refuses this combination with an empty one.
+          region: << inputs.cluster.region >>
+          clusterName: << inputs.cluster.name >>
+          namespace: keda
+          serviceAccount: keda-operator
+          roleArnRef:
+            name: keda-operator
+      ---
+      # Healthy only once the Role and the association are Ready, so the
+      # workload step starts after them: EKS Pod Identity injects the credentials
+      # at pod admission, and a pod admitted before its association never gets
+      # them. A dependsOn with a readyExpr, because a managed resource not yet
+      # created carries no Ready condition at all, which the step's own health
+      # check reads as healthy (measured on floci by external-dns).
+      apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSet
+      metadata:
+        name: keda-access
+        namespace: flux-system
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.keda.enabled >>enabled<< else >>disabled<< end >>
+      spec:
+        dependsOn:
+          - apiVersion: iam.aws.m.upbound.io/v1beta1
+            kind: Role
+            name: keda-operator
+            namespace: keda
+            ready: true
+            readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
+          - apiVersion: eks.aws.m.upbound.io/v1beta1
+            kind: PodIdentityAssociation
+            name: keda-operator
+            namespace: keda
+            ready: true
+            readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
+        resources: []
+      ---
+      << end >>
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: keda-cloud-values
+        namespace: keda
+        labels:
+          reconcile.fluxcd.io/watch: Enabled
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.keda.enabled >>enabled<< else >>disabled<< end >>
+      data:
+        values.yaml: |
+          podAnnotations:
+            keda:
+              # The services the operator's role may read, so that a change
+              # rolls the operator: EKS Pod Identity hands a pod its
+              # credentials at admission only. Empty when it has no role.
+              socle.do-now.io/cloud-access: << inputs.modules.keda.services | sortAlpha | join "," | quote >>

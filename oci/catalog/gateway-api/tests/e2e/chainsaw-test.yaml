@@ -12,8 +12,9 @@
 # and the two shared Gateways (inputs.gateway.shared) need the socle's
 # Cilium, which no floci root installs: not provable here. What floci does
 # prove is the negative, in a Test of its own (`platform: floci`): shared is
-# false, and the template renders no Gateway — the child ResourceSet and
-# gateway-system are absent. The sandbox (M4) runs the positive.
+# false, and the cloud's gateways step (oci/clusters/<cloud>/gateway-api/)
+# renders no Gateway — the child ResourceSet and gateway-system are absent.
+# The sandbox (M4) runs the positive.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:

@@ -86,8 +86,12 @@ Each rule was measured on a live cluster; the checklist is the
 - **The toggle is on each resource**:
   `fluxcd.controlplane.io/reconcile: << if inputs.modules.<m>.enabled >>enabled<< else >>disabled<< end >>`
   on every object's own annotations. In `commonMetadata` it is not templated.
-- **Cloud-specific values come from `inputs.cloud`**, or a Kustomize patch in
-  the overlay, never from OpenTofu (`hello` shows both).
+- **What is a cloud's, that cloud adds**: the module in `oci/catalog/` never
+  reads `inputs.cloud` and is written as steps, `namespace` then `workload`;
+  a DNS provider, a credential, a role, a Gateway's shape is
+  `oci/clusters/<cloud>/<module>/patch.yaml`, which inserts a step `cloud`
+  between them or appends one ([SOCLE-32](../decisions/socle.md#socle-32-what-only-one-cloud-has-that-cloud-adds-to-the-module-as-steps)). Never
+  from OpenTofu (`hello` shows it).
 - **A module carries its own cloud access** as Crossplane resources
   ([Module IAM](module-iam.md)).
 - **Deleting a `ResourceSet` uninstalls everything it rendered.**
@@ -97,8 +101,10 @@ Each rule was measured on a live cluster; the checklist is the
 The `HelmRelease` has no inline `values:`; its `valuesFrom` reads, in order:
 
 1. `<module>-socle-values`, a ConfigMap with the socle's defaults;
-2. `<module>-client-values`, a ConfigMap from `kube.<module>.values`;
-3. the Secret named in `values_secret`, `optional: true`.
+2. `<module>-cloud-values`, a ConfigMap with the cloud's, from the cloud's
+   step, when it has values for the chart (`optional: true`);
+3. `<module>-client-values`, a ConfigMap from `kube.<module>.values`;
+4. the Secret named in `values_secret`, `optional: true`.
 
 Later entries win, so yours beat the socle's, and `values` beats a named
 attribute on the same key. Secrets are refused in `values`, which reaches the
@@ -109,10 +115,10 @@ state and a ConfigMap.
 
 helm-controller merges `spec.values` over `valuesFrom`, so a socle default
 written inline would beat you; moved into the first reference, it loses.
-Both ConfigMaps carry the module's toggle and `reconcile.fluxcd.io/watch:
+Every ConfigMap carries the module's toggle and `reconcile.fluxcd.io/watch:
 Enabled`, so a change reconciles at once. An overlay cannot JSON-patch one
-value by path any more: per-cloud values go in the socle-values document,
-under `<< if eq inputs.cloud "aws" >>`.
+value inside a values document, so the cloud's values are a ConfigMap of
+their own, rendered by the step the cloud adds before the chart's.
 
 </details>
 

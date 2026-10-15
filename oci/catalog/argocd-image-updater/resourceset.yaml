@@ -6,9 +6,15 @@
 # the one provider, the reconcile toggle on EACH resource, values tested
 # never presence.
 #
+# What is the same on every cloud. On aws, the module's own IAM role and the
+# socle's ECR registry entry are aws's, in
+# oci/clusters/aws/argocd-image-updater/patch.yaml: a step named cloud that
+# the cloud inserts before workload (docs/decisions/socle.md, SOCLE-32).
+#
 # Values, in the order helm-controller merges them, later winning
 # (docs/decisions/socle.md#socle-06-the-clients-values-win):
 # argocd-image-updater-socle-values, the socle's defaults below;
+# argocd-image-updater-cloud-values, the cloud step's;
 # argocd-image-updater-client-values, kube.argocd_image_updater.values; then
 # the client's Secret when they name one. No inline `values:` on the
 # HelmRelease — helm-controller merges it last, so it would beat the client.
@@ -20,33 +26,21 @@
 # Secrets and ConfigMaps, for git write-back credentials; reading and
 # patching Applications is the chart's ClusterRole.
 #
-# Two layers, so that the pod is admitted only after its AWS access exists
-# (docs/architecture/module-iam.md): EKS Pod Identity injects credentials at
-# pod admission only, and a pod admitted before its association runs
-# without them, Running, until it is recreated.
-# - this ResourceSet: the Namespace, the Role in argocd and, on aws with
-#   Crossplane on and repositories named, the module's own IAM Role and the
-#   Pod Identity association binding it to
-#   argocd-image-updater/argocd-image-updater;
-# - argocd-image-updater-workload, a child ResourceSet holding the chart,
-#   which dependsOn the Role and the association being Ready — an explicit
-#   readyExpr, since a managed resource not yet created carries no Ready
-#   condition at all and kstatus reads that as healthy.
-# This ResourceSet dependsOn argocd's, which renders the argocd namespace
-# the Role lives in, and crossplane's, Ready trivially when Crossplane is off.
+# Steps, each applied once the one before is healthy: namespace — the
+# Namespace and the Role in argocd, whose namespace argocd's ResourceSet
+# renders (hence the dependsOn) — then workload, the chart. A cloud's step
+# between them is healthy only once what the pod needs from the cloud is
+# there (docs/architecture/module-iam.md).
 #
-# The registry entries (ARGOCD-IMAGE-UPDATER-04, -07): with the role, the
-# socle's entry for the ECR registry of the cluster's account and region
-# comes first — its credentials a login script the controller re-runs every
-# 11 hours, ECR tokens lasting 12 — then the client's registries, as
-# written. They are one list, the chart's config.registries, which a list in
-# the client's values would replace whole: OpenTofu refuses it there.
-# Adding that entry changes the chart's ConfigMap, whose checksum rolls the
-# pod: a pod admitted before the association gets its credentials that way.
+# The registry entries (ARGOCD-IMAGE-UPDATER-04, -07): the client's
+# registries, as written, are config.registries here. They are one list,
+# which a list in the client's values would replace whole: OpenTofu refuses
+# it there. A cloud step that adds the socle's own entry — aws's, for the
+# ECR registry of the cluster's account and region — sets the whole list,
+# its entry first and the client's after it, and replaces this one.
 #
-# resourcesTemplate rather than resources: the role block, the registry
-# list and the optional Secret entry are conditional text, which the
-# structured resources list cannot carry.
+# resourcesTemplate rather than resources: the optional Secret entry is
+# conditional text, which the structured resources list cannot carry.
 #
 # Fixed by decision, not exposed through a named attribute (values can
 # still override any of it):
@@ -67,164 +61,65 @@ spec:
     - apiVersion: fluxcd.controlplane.io/v1
       kind: ResourceSetInputProvider
       name: socle
-  # argocd's ResourceSet renders the argocd namespace; crossplane's exists
-  # on every cloud, Ready when Crossplane is off and once its providers and
-  # their CRDs are Healthy when it is on.
+  # argocd's ResourceSet renders the argocd namespace the Role lives in.
   dependsOn:
     - apiVersion: fluxcd.controlplane.io/v1
       kind: ResourceSet
       name: argocd
       namespace: flux-system
       ready: true
-    - apiVersion: fluxcd.controlplane.io/v1
-      kind: ResourceSet
-      name: crossplane
-      namespace: flux-system
-      ready: true
   wait: true
-  resourcesTemplate: |
-    << $m := inputs.modules.argocd_image_updater ->>
-    << $ecr := and (eq inputs.cloud "aws") inputs.modules.crossplane.enabled $m.repositories ->>
-    apiVersion: v1
-    kind: Namespace
-    metadata:
-      name: argocd-image-updater
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if $m.enabled >>enabled<< else >>disabled<< end >>
-      labels:
-        # The chart's pod runs non-root, read-only, no capabilities, default
-        # seccomp: restricted holds, and pins it.
-        pod-security.kubernetes.io/enforce: restricted
-    ---
-    # Read access to argocd's Secrets and ConfigMaps: the git write-back's
-    # credentials — ArgoCD's repository credentials for git:repocreds, or a
-    # Secret the client names in an ImageUpdater — live there, beside the
-    # Applications. The same access the chart's own Role would give it, had
-    # it been installed in argocd.
-    apiVersion: rbac.authorization.k8s.io/v1
-    kind: Role
-    metadata:
-      name: argocd-image-updater
-      namespace: argocd
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if $m.enabled >>enabled<< else >>disabled<< end >>
-    rules:
-      - apiGroups: [""]
-        resources: [secrets, configmaps]
-        verbs: [get, list, watch]
-    ---
-    apiVersion: rbac.authorization.k8s.io/v1
-    kind: RoleBinding
-    metadata:
-      name: argocd-image-updater
-      namespace: argocd
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if $m.enabled >>enabled<< else >>disabled<< end >>
-    roleRef:
-      apiGroup: rbac.authorization.k8s.io
-      kind: Role
-      name: argocd-image-updater
-    subjects:
-      - kind: ServiceAccount
-        name: argocd-image-updater
-        namespace: argocd-image-updater
-    << if $ecr >>
-    ---
-    # The module's own AWS access, docs/architecture/module-iam.md. Under
-    # /socle/<cluster>/ and carrying Crossplane's boundary when the root wired
-    # one: Crossplane's own policy refuses any other role. Inline policy only.
-    #
-    # Read-only. GetAuthorizationToken takes no resource, so it is on *; the
-    # token it returns reaches only what the role may read. The reads are on
-    # the repositories the client named, in the registry of the cluster's
-    # account and region, globs as written — never every repository.
-    # GetDownloadUrlForLayer reads an image's config blob, where the
-    # newest-build strategy finds its creation date: without it, that
-    # strategy skips every image, its summary line still saying errors=0
-    # (measured on EKS; docs/decisions/argocd-image-updater.md).
-    << $arns := list ->>
-    << range $m.repositories ->>
-    << $arns = append $arns (printf "arn:aws:ecr:%s:%s:repository/%s" inputs.cluster.region inputs.cluster.accountId .) ->>
-    << end ->>
-    << $tokenCalls := list "ecr:GetAuthorizationToken" ->>
-    << $token := dict "Sid" "GetTheRegistryToken" "Effect" "Allow" "Action" $tokenCalls "Resource" "*" ->>
-    << $readCalls := list "ecr:ListImages" "ecr:DescribeImages" "ecr:BatchGetImage" "ecr:GetDownloadUrlForLayer" ->>
-    << $read := dict "Sid" "ReadTheRepositoriesNamed" "Effect" "Allow" "Action" $readCalls "Resource" $arns ->>
-    apiVersion: iam.aws.m.upbound.io/v1beta1
-    kind: Role
-    metadata:
-      name: argocd-image-updater
-      namespace: argocd-image-updater
-      annotations:
-        # IAM names are account-wide and two clusters may share an account.
-        crossplane.io/external-name: << inputs.cluster.name >>-argocd-image-updater
-        fluxcd.controlplane.io/reconcile: << if $m.enabled >>enabled<< else >>disabled<< end >>
-    spec:
-      forProvider:
-        path: /socle/<< inputs.cluster.name >>/
-        << if inputs.modules.crossplane.permissions_boundary >>
-        permissionsBoundary: << inputs.modules.crossplane.permissions_boundary | quote >>
-        << end >>
-        assumeRolePolicy: |
-          {
-            "Version": "2012-10-17",
-            "Statement": [{
-              "Effect": "Allow",
-              "Principal": {"Service": "pods.eks.amazonaws.com"},
-              "Action": ["sts:AssumeRole", "sts:TagSession"]
-            }]
-          }
-        inlinePolicy:
-          - name: ecr
-            policy: << dict "Version" "2012-10-17" "Statement" (list $token $read) | toJson | quote >>
-    ---
-    apiVersion: eks.aws.m.upbound.io/v1beta1
-    kind: PodIdentityAssociation
-    metadata:
-      name: argocd-image-updater
-      namespace: argocd-image-updater
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if $m.enabled >>enabled<< else >>disabled<< end >>
-    spec:
-      forProvider:
-        # Required: the socle's ClusterProviderConfig names no region, and
-        # OpenTofu refuses repositories with an empty one.
-        region: << inputs.cluster.region >>
-        clusterName: << inputs.cluster.name >>
-        namespace: argocd-image-updater
-        serviceAccount: argocd-image-updater
-        roleArnRef:
+  steps:
+    - name: namespace
+      resourcesTemplate: |
+        << $m := inputs.modules.argocd_image_updater ->>
+        apiVersion: v1
+        kind: Namespace
+        metadata:
           name: argocd-image-updater
-    << end >>
-    ---
-    # The workload, in a child ResourceSet so that it can wait on the
-    # association explicitly (see the header).
-    apiVersion: fluxcd.controlplane.io/v1
-    kind: ResourceSet
-    metadata:
-      name: argocd-image-updater-workload
-      namespace: flux-system
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if $m.enabled >>enabled<< else >>disabled<< end >>
-    spec:
-      << if $ecr >>
-      dependsOn:
-        - apiVersion: iam.aws.m.upbound.io/v1beta1
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if $m.enabled >>enabled<< else >>disabled<< end >>
+          labels:
+            # The chart's pod runs non-root, read-only, no capabilities, default
+            # seccomp: restricted holds, and pins it.
+            pod-security.kubernetes.io/enforce: restricted
+        ---
+        # Read access to argocd's Secrets and ConfigMaps: the git write-back's
+        # credentials — ArgoCD's repository credentials for git:repocreds, or a
+        # Secret the client names in an ImageUpdater — live there, beside the
+        # Applications. The same access the chart's own Role would give it, had
+        # it been installed in argocd.
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: Role
+        metadata:
+          name: argocd-image-updater
+          namespace: argocd
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if $m.enabled >>enabled<< else >>disabled<< end >>
+        rules:
+          - apiGroups: [""]
+            resources: [secrets, configmaps]
+            verbs: [get, list, watch]
+        ---
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: RoleBinding
+        metadata:
+          name: argocd-image-updater
+          namespace: argocd
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if $m.enabled >>enabled<< else >>disabled<< end >>
+        roleRef:
+          apiGroup: rbac.authorization.k8s.io
           kind: Role
           name: argocd-image-updater
-          namespace: argocd-image-updater
-          ready: true
-          readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
-        - apiVersion: eks.aws.m.upbound.io/v1beta1
-          kind: PodIdentityAssociation
-          name: argocd-image-updater
-          namespace: argocd-image-updater
-          ready: true
-          readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
-      << end >>
-      wait: true
-      resources:
-      - apiVersion: source.toolkit.fluxcd.io/v1
+        subjects:
+          - kind: ServiceAccount
+            name: argocd-image-updater
+            namespace: argocd-image-updater
+    - name: workload
+      resourcesTemplate: |
+        << $m := inputs.modules.argocd_image_updater ->>
+        apiVersion: source.toolkit.fluxcd.io/v1
         kind: OCIRepository
         metadata:
           name: argocd-image-updater-chart
@@ -239,19 +134,10 @@ spec:
             operation: copy
           ref:
             tag: 1.3.1  # appVersion v1.3.0
-      # The socle's defaults. Everything the client may override through values,
-      # except the registry list, which is the socle's entry then theirs.
-      << $registries := list ->>
-      << if $ecr ->>
-      << $host := printf "%s.dkr.ecr.%s.amazonaws.com" inputs.cluster.accountId inputs.cluster.region ->>
-      << $api := printf "https://%s" $host ->>
-      << $entry := dict "name" "ecr" "prefix" $host "api_url" $api "credentials" "ext:/scripts/ecr-login.sh" "credsexpire" "11h" ->>
-      << $registries = append $registries $entry ->>
-      << end ->>
-      << range $m.registries ->>
-      << $registries = append $registries . ->>
-      << end ->>
-      - apiVersion: v1
+        ---
+        # The socle's defaults. Everything the client may override through values,
+        # except the registry list: theirs, or the cloud step's entry then theirs.
+        apiVersion: v1
         kind: ConfigMap
         metadata:
           name: argocd-image-updater-socle-values
@@ -282,19 +168,7 @@ spec:
               # objects — are in argocd, not in this namespace.
               argocd.namespace: argocd
               watch.namespaces: argocd
-              registries: << $registries | toJson >>
-            << if $ecr >>
-            # Prints AWS:<token> for the registry entry above; the controller
-            # re-runs it every 11 hours. The aws CLI ships in the image and
-            # takes the Pod Identity credentials of the module's role.
-            authScripts:
-              enabled: true
-              scripts:
-                ecr-login.sh: |
-                  #!/bin/sh
-                  aws ecr get-authorization-token --region << inputs.cluster.region >> \
-                    --output text --query 'authorizationData[0].authorizationToken' | base64 -d
-            << end >>
+              registries: << $m.registries | toJson >>
             # Metrics for the monitoring module's vmagent, which scrapes the
             # annotated pod over plain HTTP: the controller serves them over
             # HTTPS with Kubernetes authentication by default
@@ -319,10 +193,11 @@ spec:
               requests:
                 cpu: 50m
                 memory: 64Mi
-      # The client's own chart values, as written in
-      # kube.argocd_image_updater.values. OpenTofu refuses secrets and
-      # config.registries in there.
-      - apiVersion: v1
+        ---
+        # The client's own chart values, as written in
+        # kube.argocd_image_updater.values. OpenTofu refuses secrets and
+        # config.registries in there.
+        apiVersion: v1
         kind: ConfigMap
         metadata:
           name: argocd-image-updater-client-values
@@ -335,7 +210,8 @@ spec:
             fluxcd.controlplane.io/reconcile: << if $m.enabled >>enabled<< else >>disabled<< end >>
         data:
           values.yaml: |<< toYaml $m.values | nindent 8 >>
-      - apiVersion: helm.toolkit.fluxcd.io/v2
+        ---
+        apiVersion: helm.toolkit.fluxcd.io/v2
         kind: HelmRelease
         metadata:
           name: argocd-image-updater
@@ -361,6 +237,11 @@ spec:
             - kind: ConfigMap
               name: argocd-image-updater-socle-values
               valuesKey: values.yaml
+            # The cloud step's, when the cloud has values for the chart.
+            - kind: ConfigMap
+              name: argocd-image-updater-cloud-values
+              valuesKey: values.yaml
+              optional: true
             - kind: ConfigMap
               name: argocd-image-updater-client-values
               valuesKey: values.yaml
@@ -370,29 +251,29 @@ spec:
               valuesKey: values.yaml
               optional: true
             << end >>
-    << $monitored := and $m.enabled inputs.modules.monitoring.enabled ->>
-    ---
-    # The module's monitoring — its alert rules and its dashboard, from
-    # monitoring/ in the socle artifact: VMRules and a ConfigMap Grafana's
-    # sidecar loads. Present only while both this module and the monitoring
-    # module are on: monitoring brings the VMRule CRD, and until it has the
-    # Kustomization fails and retries every minute
-    # (docs/decisions/monitoring.md, MONITORING-12).
-    apiVersion: kustomize.toolkit.fluxcd.io/v1
-    kind: Kustomization
-    metadata:
-      name: argocd-image-updater-monitoring
-      namespace: flux-system
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if $monitored >>enabled<< else >>disabled<< end >>
-    spec:
-      interval: 1h
-      retryInterval: 1m
-      sourceRef:
-        kind: OCIRepository
-        name: socle
-      path: ./catalog/argocd-image-updater/monitoring
-      targetNamespace: argocd-image-updater
-      prune: true
-      wait: true
-      timeout: 2m
+        << $monitored := and $m.enabled inputs.modules.monitoring.enabled ->>
+        ---
+        # The module's monitoring — its alert rules and its dashboard, from
+        # monitoring/ in the socle artifact: VMRules and a ConfigMap Grafana's
+        # sidecar loads. Present only while both this module and the monitoring
+        # module are on: monitoring brings the VMRule CRD, and until it has the
+        # Kustomization fails and retries every minute
+        # (docs/decisions/monitoring.md, MONITORING-12).
+        apiVersion: kustomize.toolkit.fluxcd.io/v1
+        kind: Kustomization
+        metadata:
+          name: argocd-image-updater-monitoring
+          namespace: flux-system
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if $monitored >>enabled<< else >>disabled<< end >>
+        spec:
+          interval: 1h
+          retryInterval: 1m
+          sourceRef:
+            kind: OCIRepository
+            name: socle
+          path: ./catalog/argocd-image-updater/monitoring
+          targetNamespace: argocd-image-updater
+          prune: true
+          wait: true
+          timeout: 2m

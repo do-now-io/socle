@@ -30,6 +30,7 @@ opentofu/
 oci/
 ├── catalog/<module>/               # one ResourceSet + its Chainsaw suite (tests/e2e)
 ├── clusters/<cloud>/               # which modules each cloud offers
+│   └── <module>/patch.yaml         #   what only this cloud adds to that module: its steps
 ├── tests/e2e/                      # the socle's own suites: root, disabled, destroyed
 └── .ci/                            # fixtures CI renders the catalog and the envelope with
 docs/                               # the documentation, rendered by site/

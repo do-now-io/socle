@@ -1,0 +1,38 @@
+# The external-dns module on azure: Azure DNS, and the azure.json the
+# client's Secret carries (docs/catalog/external-dns.md).
+- op: test
+  path: /spec/steps/1/name
+  value: workload
+- op: add
+  path: /spec/steps/1
+  value:
+    name: cloud
+    resourcesTemplate: |
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: external-dns-cloud-values
+        namespace: external-dns
+        labels:
+          reconcile.fluxcd.io/watch: Enabled
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.external_dns.enabled >>enabled<< else >>disabled<< end >>
+      data:
+        values.yaml: |
+          # Azure DNS. azure.json — tenant, subscription, resource group, and
+          # either a service principal or useWorkloadIdentityExtension — comes
+          # from the Secret external-dns-azure the client creates
+          # (docs/catalog/external-dns.md). Workload ID also needs the
+          # ServiceAccount annotation and the pod label, set through values.
+          provider:
+            name: azure
+          extraVolumes:
+            - name: azure-config-file
+              secret:
+                secretName: external-dns-azure
+                items:
+                  - { key: azure.json, path: azure.json }
+          extraVolumeMounts:
+            - name: azure-config-file
+              mountPath: /etc/kubernetes
+              readOnly: true

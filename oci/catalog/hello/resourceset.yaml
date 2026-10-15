@@ -6,6 +6,18 @@
 # - the on/off toggle is the reconcile annotation on EACH resource's own
 #   metadata — commonMetadata is not templated by the operator.
 # - templates test values, never presence: OpenTofu normalised the inputs.
+# - what is the same on every cloud is here; what is one cloud's — for hello,
+#   the page's colour and the cloud named in its message — is that cloud's
+#   oci/clusters/<cloud>/hello/patch.yaml: a step named cloud, inserted
+#   before workload, publishing the ConfigMap hello-cloud-values
+#   (docs/decisions/socle.md, SOCLE-32). Never a test on the cloud's name.
+#
+# Steps, each applied once the one before is healthy: namespace, then
+# workload. The HelmRelease reads hello-cloud-values, optional, and its own
+# inline values merge over it. hello has no client values and no Secret; a
+# module that has them merges, later winning, the socle's values, the
+# cloud's, the client's, then the client's Secret (SOCLE-06), and takes none
+# inline.
 apiVersion: fluxcd.controlplane.io/v1
 kind: ResourceSet
 metadata:
@@ -17,42 +29,50 @@ spec:
       kind: ResourceSetInputProvider
       name: socle
   wait: true
-  resources:
-    - apiVersion: v1
-      kind: Namespace
-      metadata:
-        name: hello
-        annotations:
-          fluxcd.controlplane.io/reconcile: << if inputs.modules.hello.enabled >>enabled<< else >>disabled<< end >>
-    - apiVersion: source.toolkit.fluxcd.io/v1
-      kind: OCIRepository
-      metadata:
-        name: podinfo-chart
-        namespace: hello
-        annotations:
-          fluxcd.controlplane.io/reconcile: << if inputs.modules.hello.enabled >>enabled<< else >>disabled<< end >>
-      spec:
-        interval: 1h
-        url: oci://ghcr.io/stefanprodan/charts/podinfo
-        layerSelector:
-          mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
-          operation: copy
-        ref:
-          tag: 6.15.0
-    - apiVersion: helm.toolkit.fluxcd.io/v2
-      kind: HelmRelease
-      metadata:
-        name: podinfo
-        namespace: hello
-        annotations:
-          fluxcd.controlplane.io/reconcile: << if inputs.modules.hello.enabled >>enabled<< else >>disabled<< end >>
-      spec:
-        interval: 10m
-        releaseName: podinfo
-        chartRef:
+  steps:
+    - name: namespace
+      resources:
+        - apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: hello
+            annotations:
+              fluxcd.controlplane.io/reconcile: << if inputs.modules.hello.enabled >>enabled<< else >>disabled<< end >>
+    - name: workload
+      resources:
+        - apiVersion: source.toolkit.fluxcd.io/v1
           kind: OCIRepository
-          name: podinfo-chart
-        values:
-          replicaCount: << inputs.modules.hello.replicas | int >>
-          ui:
-            message: << printf "%s — %s on %s" inputs.modules.hello.message inputs.cluster.name inputs.cloud | quote >>
+          metadata:
+            name: podinfo-chart
+            namespace: hello
+            annotations:
+              fluxcd.controlplane.io/reconcile: << if inputs.modules.hello.enabled >>enabled<< else >>disabled<< end >>
+          spec:
+            interval: 1h
+            url: oci://ghcr.io/stefanprodan/charts/podinfo
+            layerSelector:
+              mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+              operation: copy
+            ref:
+              tag: 6.15.0
+        - apiVersion: helm.toolkit.fluxcd.io/v2
+          kind: HelmRelease
+          metadata:
+            name: podinfo
+            namespace: hello
+            annotations:
+              fluxcd.controlplane.io/reconcile: << if inputs.modules.hello.enabled >>enabled<< else >>disabled<< end >>
+          spec:
+            interval: 10m
+            releaseName: podinfo
+            chartRef:
+              kind: OCIRepository
+              name: podinfo-chart
+            valuesFrom:
+              # The cloud step's.
+              - kind: ConfigMap
+                name: hello-cloud-values
+                valuesKey: values.yaml
+                optional: true
+            values:
+              replicaCount: << inputs.modules.hello.replicas | int >>

@@ -100,11 +100,16 @@ kube = {
 **Installed**: chart `velero` 12.2.0 (Velero 1.18.2) from
 `https://vmware-tanzu.github.io/helm-charts`, with
 `velero-plugin-for-aws:v1.14.4`, in the `velero` namespace (Pod Security
-`restricted`, `privileged` with the node-agent). A child ResourceSet
-`velero-workload` holds the chart, one `Schedule` per policy, the
-`VolumeSnapshotClass` `velero-ebs` and the warning admission policy. The
-bucket `<cluster>-velero-<account id>` is versioned, SSE-S3 encrypted and
-private, and never deleted by the socle.
+`restricted`, `privileged` with the node-agent). The module
+([`oci/catalog/velero`](../../oci/catalog/velero/resourceset.yaml)) is what
+every cloud shares: the chart, one `Schedule` per policy and the warning
+admission policy. What is aws's
+([`oci/clusters/aws/velero/patch.yaml`](../../oci/clusters/aws/velero/patch.yaml),
+[SOCLE-32](../decisions/socle.md#socle-32-what-only-one-cloud-has-that-cloud-adds-to-the-module-as-steps)) is a step of its own: the bucket, the role, the AWS
+plugin, the backup storage location, the EBS and EFS volume policy and the
+`VolumeSnapshotClass` `velero-ebs`. The bucket
+`<cluster>-velero-<account id>` is versioned, SSE-S3 encrypted and private,
+and never deleted by the socle.
 
 **What the socle sets**: a non-root, read-only server; `upgradeCRDs: true`
 and `cleanUpCRDs: false`, so a re-enabled module re-reads its backups from
@@ -115,8 +120,10 @@ Crossplane under the permissions boundary, bound to `velero/velero-server`
 by Pod Identity, with object access to its own bucket only
 ([Module IAM](../architecture/module-iam.md)).
 
-**Ordering**: the module `dependsOn` crossplane; the server starts once the
-bucket, role and Pod Identity association are `Ready`.
+**Ordering**: the module waits for the `crossplane` ResourceSet; its steps
+run in order — the namespace, aws's step, then the chart — and aws's step is
+healthy only once the bucket, the role and the Pod Identity association are
+`Ready`, so the server starts with its credentials.
 
 **Measured** on floci k3s, 2026-10-02: a labelled claim backed up, its
 namespace deleted and restored in 10 s, the file read back unchanged; off,

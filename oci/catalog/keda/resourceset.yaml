@@ -4,39 +4,30 @@
 # docs/reference/catalog-module-standard.md apply: inputsFrom the one provider, the reconcile
 # toggle on EACH resource, values tested never presence.
 #
+# What is the same on every cloud. On aws, the operator's own IAM role is
+# aws's, in oci/clusters/aws/keda/patch.yaml: a step named cloud that aws
+# inserts before workload (docs/decisions/socle.md, SOCLE-32).
+#
 # Values, in the order helm-controller merges them, later winning
 # (docs/decisions/socle.md#socle-06-the-clients-values-win): keda-socle-values, the socle's defaults below;
-# keda-client-values, kube.keda.values; then the client's Secret when they
-# name one. No inline `values:` on the HelmRelease — helm-controller merges
-# it last, so it would beat the client on every key.
+# keda-cloud-values, the cloud step's; keda-client-values, kube.keda.values;
+# then the client's Secret when they name one. No inline `values:` on the
+# HelmRelease — helm-controller merges it last, so it would beat the client
+# on every key.
 #
 # Cloud access — the one decision this module makes (docs/catalog/keda.md):
 # KEDA's operator reads queue metrics on behalf of the client's workloads, so
 # by default it has no cloud role at all: KEDA does nothing until a client
 # writes a ScaledObject, and a cron or Prometheus trigger needs no cloud.
 # kube.keda.services names the AWS services the operator's own role may READ
-# — sqs, cloudwatch, kinesis, dynamodb — and only those: one read-only
-# statement per named service, the exact calls each scaler makes (measured
-# in the scalers' source, docs/catalog/keda.md), nothing for a service not
-# named, no role when the list is empty. Never `*`. The role is declared
-# here as Crossplane managed resources (docs/architecture/module-iam.md), on
-# AWS with Crossplane on; the foundations never create it.
+# — sqs, cloudwatch, kinesis, dynamodb — and only those, never `*`.
 #
-# Two layers, so that the operator pod is admitted only after its AWS access
-# exists — EKS Pod Identity injects the credentials at pod admission, a pod
-# admitted before its association never gets them (docs/architecture/module-iam.md):
-# - this ResourceSet: the Namespace and, when a service is named, the
-#   module's own IAM Role and the Pod Identity association binding it to
-#   keda/keda-operator;
-# - keda-workload, a child ResourceSet holding the chart, which dependsOn
-#   the Role and the association being Ready — an explicit readyExpr, since
-#   a managed resource not yet created carries no Ready condition at all
-#   and kstatus reads that as healthy (measured on floci by external-dns).
-# This ResourceSet dependsOn the crossplane one, which always exists and is
-# Ready trivially when Crossplane is off.
+# Steps, each applied once the one before is healthy: namespace, then
+# workload — the chart. A cloud's step between them is healthy only once
+# what the operator pod needs from the cloud is there.
 #
-# resourcesTemplate rather than resources: the role block and the optional
-# Secret entry are conditional text, which the structured list cannot carry.
+# resourcesTemplate rather than resources: the optional Secret entry is
+# conditional text, which the structured list cannot carry.
 #
 # Fixed by decision, not exposed through a named attribute (values can still
 # override any of it):
@@ -62,135 +53,23 @@ spec:
     - apiVersion: fluxcd.controlplane.io/v1
       kind: ResourceSetInputProvider
       name: socle
-  # The crossplane ResourceSet exists on every cloud; Ready when Crossplane
-  # is off, and once its providers and their CRDs are Healthy when it is on.
-  dependsOn:
-    - apiVersion: fluxcd.controlplane.io/v1
-      kind: ResourceSet
-      name: crossplane
-      namespace: flux-system
-      ready: true
   wait: true
-  resourcesTemplate: |
-    apiVersion: v1
-    kind: Namespace
-    metadata:
-      name: keda
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if inputs.modules.keda.enabled >>enabled<< else >>disabled<< end >>
-      labels:
-        # The chart's three pods run non-root, read-only, no capabilities,
-        # default seccomp: restricted holds, and pins it.
-        pod-security.kubernetes.io/enforce: restricted
-    << if and (eq inputs.cloud "aws") inputs.modules.crossplane.enabled inputs.modules.keda.services >>
-    ---
-    # The module's own AWS access, docs/architecture/module-iam.md. Under
-    # /socle/<cluster>/ and carrying Crossplane's boundary when the root wired
-    # one: Crossplane's own policy refuses any other role. Inline policy only.
-    #
-    # One statement per service the client named, read-only, the exact API
-    # calls KEDA's scalers make (pkg/scalers/aws_*_scaler.go, v2.21.0):
-    #   sqs        GetQueueAttributes             the aws-sqs-queue scaler
-    #   cloudwatch GetMetricData                  the aws-cloudwatch scaler
-    #   kinesis    DescribeStreamSummary          the aws-kinesis-stream scaler
-    #   dynamodb   Query; DescribeTable and       the aws-dynamodb and
-    #              DescribeStream                 aws-dynamodb-streams scalers
-    # Resource "*" within each: the queues and tables are named in the
-    # client's ScaledObjects, which the socle does not read, and the account
-    # id is not among the inputs (docs/catalog/keda.md). The boundary's
-    # allowlist must name each service too — the client's tfvars, reviewed.
-    << $s := list ->>
-    << if has "sqs" inputs.modules.keda.services ->>
-    << $a := list "sqs:GetQueueAttributes" ->>
-    << $s = append $s (dict "Sid" "ReadSqsQueueAttributes" "Effect" "Allow" "Action" $a "Resource" "*") ->>
-    << end ->>
-    << if has "cloudwatch" inputs.modules.keda.services ->>
-    << $a := list "cloudwatch:GetMetricData" ->>
-    << $s = append $s (dict "Sid" "ReadCloudWatchMetrics" "Effect" "Allow" "Action" $a "Resource" "*") ->>
-    << end ->>
-    << if has "kinesis" inputs.modules.keda.services ->>
-    << $a := list "kinesis:DescribeStreamSummary" ->>
-    << $s = append $s (dict "Sid" "ReadKinesisStreamSummary" "Effect" "Allow" "Action" $a "Resource" "*") ->>
-    << end ->>
-    << if has "dynamodb" inputs.modules.keda.services ->>
-    << $a := list "dynamodb:Query" "dynamodb:DescribeTable" "dynamodb:DescribeStream" ->>
-    << $s = append $s (dict "Sid" "ReadDynamoDbTablesAndStreams" "Effect" "Allow" "Action" $a "Resource" "*") ->>
-    << end ->>
-    apiVersion: iam.aws.m.upbound.io/v1beta1
-    kind: Role
-    metadata:
-      name: keda-operator
-      namespace: keda
-      annotations:
-        # IAM names are account-wide and two clusters may share an account.
-        crossplane.io/external-name: << inputs.cluster.name >>-keda-operator
-        fluxcd.controlplane.io/reconcile: << if inputs.modules.keda.enabled >>enabled<< else >>disabled<< end >>
-    spec:
-      forProvider:
-        path: /socle/<< inputs.cluster.name >>/
-        << if inputs.modules.crossplane.permissions_boundary >>
-        permissionsBoundary: << inputs.modules.crossplane.permissions_boundary | quote >>
-        << end >>
-        assumeRolePolicy: |
-          {
-            "Version": "2012-10-17",
-            "Statement": [{
-              "Effect": "Allow",
-              "Principal": {"Service": "pods.eks.amazonaws.com"},
-              "Action": ["sts:AssumeRole", "sts:TagSession"]
-            }]
-          }
-        inlinePolicy:
-          - name: scalers
-            policy: << dict "Version" "2012-10-17" "Statement" $s | toJson | quote >>
-    ---
-    apiVersion: eks.aws.m.upbound.io/v1beta1
-    kind: PodIdentityAssociation
-    metadata:
-      name: keda-operator
-      namespace: keda
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if inputs.modules.keda.enabled >>enabled<< else >>disabled<< end >>
-    spec:
-      forProvider:
-        # Required: the socle's ClusterProviderConfig names no region, and
-        # OpenTofu refuses this combination with an empty one.
-        region: << inputs.cluster.region >>
-        clusterName: << inputs.cluster.name >>
-        namespace: keda
-        serviceAccount: keda-operator
-        roleArnRef:
-          name: keda-operator
-    << end >>
-    ---
-    # The workload, in a child ResourceSet so that it can wait on the
-    # association explicitly (see the header).
-    apiVersion: fluxcd.controlplane.io/v1
-    kind: ResourceSet
-    metadata:
-      name: keda-workload
-      namespace: flux-system
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if inputs.modules.keda.enabled >>enabled<< else >>disabled<< end >>
-    spec:
-      << if and (eq inputs.cloud "aws") inputs.modules.crossplane.enabled inputs.modules.keda.services >>
-      dependsOn:
-        - apiVersion: iam.aws.m.upbound.io/v1beta1
-          kind: Role
-          name: keda-operator
-          namespace: keda
-          ready: true
-          readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
-        - apiVersion: eks.aws.m.upbound.io/v1beta1
-          kind: PodIdentityAssociation
-          name: keda-operator
-          namespace: keda
-          ready: true
-          readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
-      << end >>
-      wait: true
-      resources:
-      - apiVersion: source.toolkit.fluxcd.io/v1
+  steps:
+    - name: namespace
+      resourcesTemplate: |
+        apiVersion: v1
+        kind: Namespace
+        metadata:
+          name: keda
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if inputs.modules.keda.enabled >>enabled<< else >>disabled<< end >>
+          labels:
+            # The chart's three pods run non-root, read-only, no capabilities,
+            # default seccomp: restricted holds, and pins it.
+            pod-security.kubernetes.io/enforce: restricted
+    - name: workload
+      resourcesTemplate: |
+        apiVersion: source.toolkit.fluxcd.io/v1
         kind: HelmRepository
         metadata:
           name: kedacore
@@ -200,8 +79,9 @@ spec:
         spec:
           interval: 1h
           url: https://kedacore.github.io/charts
-      # The socle's defaults. Everything the client may override through values.
-      - apiVersion: v1
+        ---
+        # The socle's defaults. Everything the client may override through values.
+        apiVersion: v1
         kind: ConfigMap
         metadata:
           name: keda-socle-values
@@ -241,10 +121,6 @@ spec:
                 enabled: true
             podAnnotations:
               keda:
-                # The services the operator's role may read, so that a change
-                # rolls the operator: EKS Pod Identity hands a pod its
-                # credentials at admission only. Empty when it has no role.
-                socle.do-now.io/cloud-access: << inputs.modules.keda.services | sortAlpha | join "," | quote >>
                 prometheus.io/scrape: "true"
                 prometheus.io/port: "8080"
               webhooks:
@@ -265,9 +141,10 @@ spec:
                 requests:
                   cpu: 10m
                   memory: 32Mi
-      # The client's own chart values, as written in kube.keda.values.
-      # OpenTofu refuses secrets in there.
-      - apiVersion: v1
+        ---
+        # The client's own chart values, as written in kube.keda.values.
+        # OpenTofu refuses secrets in there.
+        apiVersion: v1
         kind: ConfigMap
         metadata:
           name: keda-client-values
@@ -280,7 +157,8 @@ spec:
             fluxcd.controlplane.io/reconcile: << if inputs.modules.keda.enabled >>enabled<< else >>disabled<< end >>
         data:
           values.yaml: |<< toYaml inputs.modules.keda.values | nindent 8 >>
-      - apiVersion: helm.toolkit.fluxcd.io/v2
+        ---
+        apiVersion: helm.toolkit.fluxcd.io/v2
         kind: HelmRelease
         metadata:
           name: keda
@@ -310,6 +188,11 @@ spec:
             - kind: ConfigMap
               name: keda-socle-values
               valuesKey: values.yaml
+            # The cloud step's, when the cloud has values for the chart.
+            - kind: ConfigMap
+              name: keda-cloud-values
+              valuesKey: values.yaml
+              optional: true
             - kind: ConfigMap
               name: keda-client-values
               valuesKey: values.yaml
@@ -319,29 +202,29 @@ spec:
               valuesKey: values.yaml
               optional: true
             << end >>
-    << $monitored := and inputs.modules.keda.enabled inputs.modules.monitoring.enabled ->>
-    ---
-    # The module's monitoring — its alert rules and its dashboard, from
-    # monitoring/ in the socle artifact: VMRules and a ConfigMap Grafana's
-    # sidecar loads. Present only while both this module and the monitoring
-    # module are on: monitoring brings the VMRule CRD, and until it has the
-    # Kustomization fails and retries every minute
-    # (docs/decisions/monitoring.md, MONITORING-12).
-    apiVersion: kustomize.toolkit.fluxcd.io/v1
-    kind: Kustomization
-    metadata:
-      name: keda-monitoring
-      namespace: flux-system
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if $monitored >>enabled<< else >>disabled<< end >>
-    spec:
-      interval: 1h
-      retryInterval: 1m
-      sourceRef:
-        kind: OCIRepository
-        name: socle
-      path: ./catalog/keda/monitoring
-      targetNamespace: keda
-      prune: true
-      wait: true
-      timeout: 2m
+        << $monitored := and inputs.modules.keda.enabled inputs.modules.monitoring.enabled ->>
+        ---
+        # The module's monitoring — its alert rules and its dashboard, from
+        # monitoring/ in the socle artifact: VMRules and a ConfigMap Grafana's
+        # sidecar loads. Present only while both this module and the monitoring
+        # module are on: monitoring brings the VMRule CRD, and until it has the
+        # Kustomization fails and retries every minute
+        # (docs/decisions/monitoring.md, MONITORING-12).
+        apiVersion: kustomize.toolkit.fluxcd.io/v1
+        kind: Kustomization
+        metadata:
+          name: keda-monitoring
+          namespace: flux-system
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if $monitored >>enabled<< else >>disabled<< end >>
+        spec:
+          interval: 1h
+          retryInterval: 1m
+          sourceRef:
+            kind: OCIRepository
+            name: socle
+          path: ./catalog/keda/monitoring
+          targetNamespace: keda
+          prune: true
+          wait: true
+          timeout: 2m

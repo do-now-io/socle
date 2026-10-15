@@ -1,26 +1,31 @@
 # The velero module: backup and restore of what GitOps cannot restore — the
-# data in the applications' EBS and EFS volumes, with their objects — into the
-# module's own bucket. docs/catalog/velero.md and docs/decisions/velero.md
-# hold the design; the rules of docs/architecture/flux-catalog.md apply:
+# data in the applications' volumes, with their objects — into the module's
+# own bucket. docs/catalog/velero.md and docs/decisions/velero.md hold the
+# design; the rules of docs/reference/catalog-module-standard.md apply:
 # inputsFrom the one provider, the reconcile toggle on EACH resource, values
 # tested never presence.
 #
-# Values, in the order helm-controller merges them, later winning: the
-# socle's velero-socle-values, the client's velero-client-values
-# (kube.velero.values), then the client's Secret when they name one. No
-# inline `values:` on the HelmRelease.
+# What is the same on every cloud. velero is offered on aws only
+# (catalog_clouds); what is aws's is oci/clusters/aws/velero/patch.yaml, a
+# step named cloud inserted before workload (docs/decisions/socle.md,
+# SOCLE-32). A cloud step provides, in the ConfigMap velero-cloud-values:
+# the object-store plugin, the backupStorageLocation named default that
+# every Schedule below writes to, and configMaps.volume-policy — the
+# velero-volume-policy every Schedule references, which says how each of
+# that cloud's CSI drivers is backed up. With them, the bucket and the
+# module's own access to it, and the VolumeSnapshotClass Velero snapshots
+# with.
 #
-# Two layers, as external-dns (docs/catalog/external-dns.md, Ordering):
-# - this ResourceSet: the Namespace and, on AWS with Crossplane on, the
-#   module's bucket and its settings, its IAM Role and the Pod Identity
-#   association binding it to velero/velero-server
-#   (docs/architecture/module-iam.md);
-# - velero-workload, a child ResourceSet holding the chart, the
-#   VolumeSnapshotClass and the admission policy, which dependsOn the bucket,
-#   the Role and the association being Ready: EKS Pod Identity injects the
-#   credentials at pod admission only.
-# This ResourceSet dependsOn the crossplane one, which always exists and is
-# Ready trivially when Crossplane is off.
+# Values, in the order helm-controller merges them, later winning
+# (docs/decisions/socle.md#socle-06-the-clients-values-win): the socle's
+# velero-socle-values, the cloud step's velero-cloud-values, the client's
+# velero-client-values (kube.velero.values), then the client's Secret when
+# they name one. No inline `values:` on the HelmRelease.
+#
+# Steps, each applied once the one before is healthy: namespace, then
+# workload — the chart, the Schedules and the admission policy. The cloud's
+# step between them is healthy only once the bucket and the module's access
+# are ready: EKS Pod Identity injects the credentials at pod admission only.
 #
 # What an application does: its chart labels every object of its release
 # with socle.do-now.io/backup-frequency and socle.do-now.io/backup-retention.
@@ -28,13 +33,6 @@
 # it. An application never writes into the velero namespace: Velero runs with
 # cluster-admin rights, and a Schedule or a Restore there reads or rewrites
 # any namespace.
-#
-# The bucket is never deleted by the socle: its managed resources carry
-# managementPolicies without Delete (namespaced managed resources have no
-# deletionPolicy in Crossplane v2), and Crossplane's own identity has no
-# s3:Delete* action at all (opentofu/aws/iam.tf). Turning the module off, or
-# uninstalling the socle, leaves the bucket and every backup in it; a cluster
-# rebuilt under the same name adopts it by its external name.
 apiVersion: fluxcd.controlplane.io/v1
 kind: ResourceSet
 metadata:
@@ -45,232 +43,26 @@ spec:
     - apiVersion: fluxcd.controlplane.io/v1
       kind: ResourceSetInputProvider
       name: socle
-  dependsOn:
-    - apiVersion: fluxcd.controlplane.io/v1
-      kind: ResourceSet
-      name: crossplane
-      namespace: flux-system
-      ready: true
   wait: true
-  resourcesTemplate: |
-    << $on := inputs.modules.velero.enabled >>
-    << $bucket := printf "%s-velero-%s" inputs.cluster.name inputs.cluster.accountId >>
-    << $access := and (eq inputs.cloud "aws") inputs.modules.crossplane.enabled >>
-    apiVersion: v1
-    kind: Namespace
-    metadata:
-      name: velero
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if $on >>enabled<< else >>disabled<< end >>
-      labels:
-        # The server and its jobs run non-root, read-only, no capabilities:
-        # restricted holds. The node-agent mounts the kubelet's pod volumes
-        # from the host to read them, so with it the namespace is privileged.
-        pod-security.kubernetes.io/enforce: << if inputs.modules.velero.node_agent >>privileged<< else >>restricted<< end >>
-    << if $access >>
-    ---
-    # The module's bucket. External name = the S3 name: global, so it carries
-    # the account; under the cluster's prefix, the only one Crossplane's own
-    # identity may create. Observe, Create, Update, LateInitialize — no
-    # Delete: deleting this object releases it and leaves the bucket.
-    apiVersion: s3.aws.m.upbound.io/v1beta1
-    kind: Bucket
-    metadata:
-      name: velero
-      namespace: velero
-      annotations:
-        crossplane.io/external-name: << $bucket >>
-        fluxcd.controlplane.io/reconcile: << if $on >>enabled<< else >>disabled<< end >>
-    spec:
-      managementPolicies: [Observe, Create, Update, LateInitialize]
-      forProvider:
-        region: << inputs.cluster.region >>
-        tags:
-          socle-cluster: << inputs.cluster.name | quote >>
-          socle-module: velero
-    ---
-    # Versioning: Velero deleting a backup at its TTL leaves its objects as
-    # noncurrent versions, expired 30 days later by the lifecycle below — a
-    # deletion, by mistake or by whoever got the role, is recoverable for a
-    # month.
-    apiVersion: s3.aws.m.upbound.io/v1beta1
-    kind: BucketVersioning
-    metadata:
-      name: velero
-      namespace: velero
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if $on >>enabled<< else >>disabled<< end >>
-    spec:
-      managementPolicies: [Observe, Create, Update, LateInitialize]
-      forProvider:
-        region: << inputs.cluster.region >>
-        bucketRef:
+  steps:
+    - name: namespace
+      resourcesTemplate: |
+        << $on := inputs.modules.velero.enabled >>
+        apiVersion: v1
+        kind: Namespace
+        metadata:
           name: velero
-        versioningConfiguration:
-          status: Enabled
-    ---
-    apiVersion: s3.aws.m.upbound.io/v1beta1
-    kind: BucketServerSideEncryptionConfiguration
-    metadata:
-      name: velero
-      namespace: velero
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if $on >>enabled<< else >>disabled<< end >>
-    spec:
-      managementPolicies: [Observe, Create, Update, LateInitialize]
-      forProvider:
-        region: << inputs.cluster.region >>
-        bucketRef:
-          name: velero
-        rule:
-          - applyServerSideEncryptionByDefault:
-              sseAlgorithm: AES256
-    ---
-    apiVersion: s3.aws.m.upbound.io/v1beta1
-    kind: BucketPublicAccessBlock
-    metadata:
-      name: velero
-      namespace: velero
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if $on >>enabled<< else >>disabled<< end >>
-    spec:
-      managementPolicies: [Observe, Create, Update, LateInitialize]
-      forProvider:
-        region: << inputs.cluster.region >>
-        bucketRef:
-          name: velero
-        blockPublicAcls: true
-        blockPublicPolicy: true
-        ignorePublicAcls: true
-        restrictPublicBuckets: true
-    ---
-    apiVersion: s3.aws.m.upbound.io/v1beta1
-    kind: BucketLifecycleConfiguration
-    metadata:
-      name: velero
-      namespace: velero
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if $on >>enabled<< else >>disabled<< end >>
-    spec:
-      managementPolicies: [Observe, Create, Update, LateInitialize]
-      forProvider:
-        region: << inputs.cluster.region >>
-        bucketRef:
-          name: velero
-        rule:
-          - id: noncurrent-30d
-            status: Enabled
-            filter:
-              - prefix: ""
-            noncurrentVersionExpiration:
-              - noncurrentDays: 30
-            abortIncompleteMultipartUpload:
-              - daysAfterInitiation: 7
-    ---
-    # The module's own AWS access, docs/architecture/module-iam.md: S3 object
-    # actions on its bucket, nothing else. No EC2: in CSI mode Velero creates
-    # VolumeSnapshot objects and the EBS CSI driver takes the snapshots with
-    # its own role (opentofu/bootstrap/eks_addons.tf).
-    apiVersion: iam.aws.m.upbound.io/v1beta1
-    kind: Role
-    metadata:
-      name: velero-server
-      namespace: velero
-      annotations:
-        crossplane.io/external-name: << inputs.cluster.name >>-velero
-        fluxcd.controlplane.io/reconcile: << if $on >>enabled<< else >>disabled<< end >>
-    spec:
-      forProvider:
-        path: /socle/<< inputs.cluster.name >>/
-        << if inputs.modules.crossplane.permissions_boundary >>
-        permissionsBoundary: << inputs.modules.crossplane.permissions_boundary | quote >>
-        << end >>
-        assumeRolePolicy: |
-          {
-            "Version": "2012-10-17",
-            "Statement": [{
-              "Effect": "Allow",
-              "Principal": {"Service": "pods.eks.amazonaws.com"},
-              "Action": ["sts:AssumeRole", "sts:TagSession"]
-            }]
-          }
-        inlinePolicy:
-          - name: bucket
-            policy: |
-              {
-                "Version": "2012-10-17",
-                "Statement": [
-                  {
-                    "Sid": "ListTheBucket",
-                    "Effect": "Allow",
-                    "Action": ["s3:ListBucket", "s3:GetBucketLocation"],
-                    "Resource": "arn:aws:s3:::<< $bucket >>"
-                  },
-                  {
-                    "Sid": "ObjectsInTheBucket",
-                    "Effect": "Allow",
-                    "Action": [
-                      "s3:GetObject",
-                      "s3:PutObject",
-                      "s3:DeleteObject",
-                      "s3:PutObjectTagging",
-                      "s3:AbortMultipartUpload",
-                      "s3:ListMultipartUploadParts"
-                    ],
-                    "Resource": "arn:aws:s3:::<< $bucket >>/*"
-                  }
-                ]
-              }
-    ---
-    apiVersion: eks.aws.m.upbound.io/v1beta1
-    kind: PodIdentityAssociation
-    metadata:
-      name: velero-server
-      namespace: velero
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if $on >>enabled<< else >>disabled<< end >>
-    spec:
-      forProvider:
-        region: << inputs.cluster.region >>
-        clusterName: << inputs.cluster.name >>
-        namespace: velero
-        serviceAccount: velero-server
-        roleArnRef:
-          name: velero-server
-    << end >>
-    ---
-    apiVersion: fluxcd.controlplane.io/v1
-    kind: ResourceSet
-    metadata:
-      name: velero-workload
-      namespace: flux-system
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if $on >>enabled<< else >>disabled<< end >>
-    spec:
-      << if $access >>
-      dependsOn:
-        - apiVersion: s3.aws.m.upbound.io/v1beta1
-          kind: Bucket
-          name: velero
-          namespace: velero
-          ready: true
-          readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
-        - apiVersion: iam.aws.m.upbound.io/v1beta1
-          kind: Role
-          name: velero-server
-          namespace: velero
-          ready: true
-          readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
-        - apiVersion: eks.aws.m.upbound.io/v1beta1
-          kind: PodIdentityAssociation
-          name: velero-server
-          namespace: velero
-          ready: true
-          readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
-      << end >>
-      wait: true
-      resources:
-      - apiVersion: source.toolkit.fluxcd.io/v1
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if $on >>enabled<< else >>disabled<< end >>
+          labels:
+            # The server and its jobs run non-root, read-only, no capabilities:
+            # restricted holds. The node-agent mounts the kubelet's pod volumes
+            # from the host to read them, so with it the namespace is privileged.
+            pod-security.kubernetes.io/enforce: << if inputs.modules.velero.node_agent >>privileged<< else >>restricted<< end >>
+    - name: workload
+      resourcesTemplate: |
+        << $on := inputs.modules.velero.enabled >>
+        apiVersion: source.toolkit.fluxcd.io/v1
         kind: HelmRepository
         metadata:
           name: vmware-tanzu
@@ -280,8 +72,9 @@ spec:
         spec:
           interval: 1h
           url: https://vmware-tanzu.github.io/helm-charts
-      # The socle's defaults. Everything the client may override through values.
-      - apiVersion: v1
+        ---
+        # The socle's defaults. Everything the client may override through values.
+        apiVersion: v1
         kind: ConfigMap
         metadata:
           name: velero-socle-values
@@ -298,29 +91,12 @@ spec:
                 create: true
                 # The subject the module's Pod Identity association binds.
                 name: velero-server
-            # The AWS SDK's default chain: the Pod Identity credentials of
-            # the module's own role. No key anywhere.
-            credentials:
-              useSecret: false
-            # Pinned with the chart: 1.14.x is the line for Velero 1.18.
-            initContainers:
-              - name: velero-plugin-for-aws
-                image: docker.io/velero/velero-plugin-for-aws:v1.14.4
-                imagePullPolicy: IfNotPresent
-                volumeMounts:
-                  - mountPath: /target
-                    name: plugins
-                securityContext:
-                  allowPrivilegeEscalation: false
-                  readOnlyRootFilesystem: true
-                  capabilities:
-                    drop: [ALL]
             # Turning the module off keeps the CRDs: a re-enable re-syncs the
             # Backup objects from the bucket, and they need their kind.
             upgradeCRDs: true
             cleanUpCRDs: false
             # CSI snapshots need no VolumeSnapshotLocation: the
-            # VolumeSnapshotClass of the workload ResourceSet is what Velero
+            # VolumeSnapshotClass the cloud's step renders is what Velero
             # picks, by its label.
             snapshotsEnabled: false
             deployNodeAgent: << inputs.modules.velero.node_agent >>
@@ -333,13 +109,6 @@ spec:
               << end >>
               uploaderType: kopia
               defaultVolumesToFsBackup: false
-              backupStorageLocation:
-                - name: default
-                  provider: aws
-                  bucket: << $bucket >>
-                  default: true
-                  config:
-                    region: << inputs.cluster.region | quote >>
             # One Schedule per (frequency, retention) pair, named after it,
             # selecting the two labels across every namespace. The volume
             # policy decides each volume's method.
@@ -362,27 +131,6 @@ spec:
                     kind: configmap
                     name: velero-volume-policy
               << end >>
-            # The volume policy every Schedule references: EBS by CSI
-            # snapshot, EFS by file-system backup (its driver has no
-            # snapshots). Any other volume gets Velero's fallback: no
-            # snapshot location and no fs-backup annotation, so it is
-            # skipped.
-            configMaps:
-              volume-policy:
-                data:
-                  policy.yaml: |
-                    version: v1
-                    volumePolicies:
-                      - conditions:
-                          csi:
-                            driver: ebs.csi.aws.com
-                        action:
-                          type: snapshot
-                      - conditions:
-                          csi:
-                            driver: efs.csi.aws.com
-                        action:
-                          type: fs-backup
             # Pod Security restricted, for the server, the CRD upgrade job
             # and the repository maintenance jobs it starts.
             podSecurityContext:
@@ -430,9 +178,10 @@ spec:
                   memory: 128Mi
                 limits:
                   memory: 1Gi
-      # The client's own chart values, as written in kube.velero.values.
-      # OpenTofu refuses secrets in there.
-      - apiVersion: v1
+        ---
+        # The client's own chart values, as written in kube.velero.values.
+        # OpenTofu refuses secrets in there.
+        apiVersion: v1
         kind: ConfigMap
         metadata:
           name: velero-client-values
@@ -443,7 +192,8 @@ spec:
             fluxcd.controlplane.io/reconcile: << if $on >>enabled<< else >>disabled<< end >>
         data:
           values.yaml: |<< toYaml inputs.modules.velero.values | nindent 8 >>
-      - apiVersion: helm.toolkit.fluxcd.io/v2
+        ---
+        apiVersion: helm.toolkit.fluxcd.io/v2
         kind: HelmRelease
         metadata:
           name: velero
@@ -472,6 +222,12 @@ spec:
             - kind: ConfigMap
               name: velero-socle-values
               valuesKey: values.yaml
+            # The cloud step's: the plugin, the storage location, the volume
+            # policy.
+            - kind: ConfigMap
+              name: velero-cloud-values
+              valuesKey: values.yaml
+              optional: true
             - kind: ConfigMap
               name: velero-client-values
               valuesKey: values.yaml
@@ -481,26 +237,12 @@ spec:
               valuesKey: values.yaml
               optional: true
             << end >>
-      << if inputs.storage.snapshots >>
-      # The class Velero takes EBS CSI snapshots with, by its label. Retain:
-      # a snapshot outlives its VolumeSnapshot objects — Velero deletes it
-      # when the backup expires, nothing else does.
-      - apiVersion: snapshot.storage.k8s.io/v1
-        kind: VolumeSnapshotClass
-        metadata:
-          name: velero-ebs
-          labels:
-            velero.io/csi-volumesnapshot-class: "true"
-          annotations:
-            fluxcd.controlplane.io/reconcile: << if $on >>enabled<< else >>disabled<< end >>
-        driver: ebs.csi.aws.com
-        deletionPolicy: Retain
-      << end >>
-      # A pair that is not one of kube.velero.policies backs nothing up, in
-      # silence. Warned at admission — never refused: a backup label must not
-      # be able to block a deployment. Matched on the objects a chart writes
-      # (workloads, claims) that carry the frequency label.
-      - apiVersion: admissionregistration.k8s.io/v1
+        ---
+        # A pair that is not one of kube.velero.policies backs nothing up, in
+        # silence. Warned at admission — never refused: a backup label must not
+        # be able to block a deployment. Matched on the objects a chart writes
+        # (workloads, claims) that carry the frequency label.
+        apiVersion: admissionregistration.k8s.io/v1
         kind: ValidatingAdmissionPolicy
         metadata:
           name: velero-backup-labels
@@ -540,7 +282,8 @@ spec:
                 'socle.do-now.io/backup-frequency and -retention name ' + variables.pair +
                 ', which is not a backup policy of this cluster: this object is not backed up' +
                 ' (docs/catalog/velero.md)'
-      - apiVersion: admissionregistration.k8s.io/v1
+        ---
+        apiVersion: admissionregistration.k8s.io/v1
         kind: ValidatingAdmissionPolicyBinding
         metadata:
           name: velero-backup-labels
@@ -549,29 +292,29 @@ spec:
         spec:
           policyName: velero-backup-labels
           validationActions: [Warn, Audit]
-    << $monitored := and inputs.modules.velero.enabled inputs.modules.monitoring.enabled ->>
-    ---
-    # The module's monitoring — its alert rules and its dashboard, from
-    # monitoring/ in the socle artifact: VMRules and a ConfigMap Grafana's
-    # sidecar loads. Present only while both this module and the monitoring
-    # module are on: monitoring brings the VMRule CRD, and until it has the
-    # Kustomization fails and retries every minute
-    # (docs/decisions/monitoring.md, MONITORING-12).
-    apiVersion: kustomize.toolkit.fluxcd.io/v1
-    kind: Kustomization
-    metadata:
-      name: velero-monitoring
-      namespace: flux-system
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if $monitored >>enabled<< else >>disabled<< end >>
-    spec:
-      interval: 1h
-      retryInterval: 1m
-      sourceRef:
-        kind: OCIRepository
-        name: socle
-      path: ./catalog/velero/monitoring
-      targetNamespace: velero
-      prune: true
-      wait: true
-      timeout: 2m
+        << $monitored := and inputs.modules.velero.enabled inputs.modules.monitoring.enabled ->>
+        ---
+        # The module's monitoring — its alert rules and its dashboard, from
+        # monitoring/ in the socle artifact: VMRules and a ConfigMap Grafana's
+        # sidecar loads. Present only while both this module and the monitoring
+        # module are on: monitoring brings the VMRule CRD, and until it has the
+        # Kustomization fails and retries every minute
+        # (docs/decisions/monitoring.md, MONITORING-12).
+        apiVersion: kustomize.toolkit.fluxcd.io/v1
+        kind: Kustomization
+        metadata:
+          name: velero-monitoring
+          namespace: flux-system
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if $monitored >>enabled<< else >>disabled<< end >>
+        spec:
+          interval: 1h
+          retryInterval: 1m
+          sourceRef:
+            kind: OCIRepository
+            name: socle
+          path: ./catalog/velero/monitoring
+          targetNamespace: velero
+          prune: true
+          wait: true
+          timeout: 2m

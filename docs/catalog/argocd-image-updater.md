@@ -168,8 +168,10 @@ kube = {
 `oci://ghcr.io/argoproj/argo-helm/argocd-image-updater`, in
 `argocd-image-updater`, watching `argocd`; a Role and RoleBinding in `argocd`
 reading Secrets and ConfigMaps, for `git` write-back. On aws with
-`repositories`, `Role/argocd-image-updater` and
-`PodIdentityAssociation/argocd-image-updater`.
+`repositories`, aws's step
+([`oci/clusters/aws/argocd-image-updater/patch.yaml`](../../oci/clusters/aws/argocd-image-updater/patch.yaml))
+adds `Role/argocd-image-updater`, `PodIdentityAssociation/argocd-image-updater`
+and the ConfigMap `argocd-image-updater-cloud-values`.
 
 **What the socle sets**: the CRD kept on removal, one replica, and on aws
 with `repositories` the login script and the registry entry for
@@ -181,8 +183,9 @@ registry token on `*`, which reaches only what the role may read, and
 `ListImages`, `DescribeImages`, `BatchGetImage` and `GetDownloadUrlForLayer`
 on the repositories named. Read-only.
 
-**Ordering**: waits for the `argocd` and `crossplane` ResourceSets; on aws
-the chart waits for the role and its association.
+**Ordering**: waits for the `argocd` ResourceSet, and on aws for
+`crossplane`; the chart is applied after aws's step, which is healthy only
+once the role and its association are Ready.
 
 **Measured** on the sandbox EKS, 2026-10-13: an `ImageUpdater` moved an
 `Application` to a new tag pushed to ECR within one 2-minute cycle, Git

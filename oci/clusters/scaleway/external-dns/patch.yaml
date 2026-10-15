@@ -1,0 +1,32 @@
+# The external-dns module on scaleway: Scaleway DNS, and the API key the
+# client's Secret carries (docs/catalog/external-dns.md).
+- op: test
+  path: /spec/steps/1/name
+  value: workload
+- op: add
+  path: /spec/steps/1
+  value:
+    name: cloud
+    resourcesTemplate: |
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: external-dns-cloud-values
+        namespace: external-dns
+        labels:
+          reconcile.fluxcd.io/watch: Enabled
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.external_dns.enabled >>enabled<< else >>disabled<< end >>
+      data:
+        values.yaml: |
+          # Scaleway DNS, through an API key: Scaleway has no workload identity.
+          # The client creates the Secret external-dns-scaleway in this namespace
+          # with SCW_ACCESS_KEY and SCW_SECRET_KEY, the variables the scaleway
+          # provider reads (docs/tutorials/scaleway.md, v0.22.0).
+          provider:
+            name: scaleway
+          env:
+            - name: SCW_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: external-dns-scaleway, key: SCW_ACCESS_KEY } }
+            - name: SCW_SECRET_KEY
+              valueFrom: { secretKeyRef: { name: external-dns-scaleway, key: SCW_SECRET_KEY } }

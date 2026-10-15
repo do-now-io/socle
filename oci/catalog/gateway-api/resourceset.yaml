@@ -3,6 +3,12 @@
 # Cilium's Gateway API turned on. docs/catalog/gateway-api.md,
 # docs/decisions/gateway-api.md.
 #
+# One step here, crds, the same on every cloud. The two shared Gateways take
+# the shape of the load balancer in front of them, which is the cloud's: a
+# step named gateways that the cloud appends, in
+# oci/clusters/<cloud>/gateway-api/patch.yaml (docs/decisions/socle.md,
+# SOCLE-32).
+#
 # Nothing is vendored. The CRDs come from upstream, kubernetes-sigs/
 # gateway-api, pinned by commit: the release tag's commit is content-
 # addressed, so what reaches the cluster cannot change under the socle. Only
@@ -13,28 +19,11 @@
 # operator is Ready and switches its Gateway controller off, and it never
 # looks again. So once the CRDs are established, on the Cilium clouds only,
 # a second Kustomization creates the `cilium` GatewayClass and restarts the
-# operator once (cilium/). Measured on Cilium 1.20.2.
+# operator once (cilium/). Measured on Cilium 1.20.2. The cloud's Gateways
+# dependsOn that Kustomization being Ready.
 #
 # The CRDs are orphaned, not deleted, when the module is disabled: deleting a
 # CRD deletes every Gateway and route of every client with it.
-#
-# Then, where inputs.gateway.shared says so, the two shared Gateways every
-# module and the client route through: `public`, internet-facing, and
-# `private`, internal, in gateway-system (docs/catalog/gateway-api.md). A
-# child ResourceSet, because a Gateway can only be applied once its CRD and
-# class exist: it dependsOn gateway-api-cilium being Ready. Routes attach to
-# `https` on 443. On aws the NLB in front of each Gateway terminates TLS
-# with the foundations' ACM certificate and forwards plain HTTP, so `https`
-# is an HTTP listener on 443 and no key exists in the cluster — and there is
-# no port 80: Cilium serves every HTTP listener of a Gateway from one Envoy
-# route table whatever the port, so a redirect on 80 would also answer on
-# 443 and loop, and the routes on 443 would answer in clear on 80 (measured
-# on EKS, docs/catalog/gateway-api.md). On azure, whose load balancer is L4
-# only, Envoy terminates with the certificate in the Secret
-# gateway-system/gateway-tls, which the client creates; 443 is HTTPS there,
-# a separate route table, so `http` on 80 redirects everything to https. Unlike the CRDs, the Gateways are the socle's
-# own: disabling the module or kube.gateway_api.gateways deletes them, and
-# their load balancers with them.
 apiVersion: fluxcd.controlplane.io/v1
 kind: ResourceSet
 metadata:
@@ -46,154 +35,62 @@ spec:
       kind: ResourceSetInputProvider
       name: socle
   wait: true
-  resourcesTemplate: |
-    apiVersion: source.toolkit.fluxcd.io/v1
-    kind: GitRepository
-    metadata:
-      name: gateway-api
-      namespace: flux-system
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if inputs.modules.gateway_api.enabled >>enabled<< else >>disabled<< end >>
-    spec:
-      interval: 24h
-      url: https://github.com/kubernetes-sigs/gateway-api
-      ref:
-        # v1.6.1 — the Gateway API release Cilium 1.20 documents. The commit
-        # is the pin; the branch only keeps the clone to one branch.
-        branch: release-1.6
-        commit: 8bb74df00e56ec8f944d48c25e6c1c9c2f6848e3
-      sparseCheckout:
-        - config/crd/standard
-    ---
-    apiVersion: kustomize.toolkit.fluxcd.io/v1
-    kind: Kustomization
-    metadata:
-      name: gateway-api-crds
-      namespace: flux-system
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if inputs.modules.gateway_api.enabled >>enabled<< else >>disabled<< end >>
-    spec:
-      interval: 1h
-      sourceRef:
+  steps:
+    - name: crds
+      resourcesTemplate: |
+        apiVersion: source.toolkit.fluxcd.io/v1
         kind: GitRepository
-        name: gateway-api
-      path: ./config/crd/standard
-      prune: true
-      deletionPolicy: Orphan
-      wait: true
-      timeout: 5m
-    << if inputs.cilium.gatewayApi >>
-    ---
-    apiVersion: kustomize.toolkit.fluxcd.io/v1
-    kind: Kustomization
-    metadata:
-      name: gateway-api-cilium
-      namespace: flux-system
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if inputs.modules.gateway_api.enabled >>enabled<< else >>disabled<< end >>
-    spec:
-      interval: 1h
-      dependsOn:
-        - name: gateway-api-crds
-      sourceRef:
-        kind: OCIRepository
-        name: socle
-      path: ./catalog/gateway-api/cilium
-      prune: true
-      wait: true
-      timeout: 5m
-    << end >>
-    << if inputs.gateway.shared >>
-    ---
-    apiVersion: fluxcd.controlplane.io/v1
-    kind: ResourceSet
-    metadata:
-      name: gateway-api-gateways
-      namespace: flux-system
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if inputs.modules.gateway_api.enabled >>enabled<< else >>disabled<< end >>
-    spec:
-      dependsOn:
-        - apiVersion: kustomize.toolkit.fluxcd.io/v1
-          kind: Kustomization
+        metadata:
+          name: gateway-api
+          namespace: flux-system
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if inputs.modules.gateway_api.enabled >>enabled<< else >>disabled<< end >>
+        spec:
+          interval: 24h
+          url: https://github.com/kubernetes-sigs/gateway-api
+          ref:
+            # v1.6.1 — the Gateway API release Cilium 1.20 documents. The commit
+            # is the pin; the branch only keeps the clone to one branch.
+            branch: release-1.6
+            commit: 8bb74df00e56ec8f944d48c25e6c1c9c2f6848e3
+          sparseCheckout:
+            - config/crd/standard
+        ---
+        apiVersion: kustomize.toolkit.fluxcd.io/v1
+        kind: Kustomization
+        metadata:
+          name: gateway-api-crds
+          namespace: flux-system
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if inputs.modules.gateway_api.enabled >>enabled<< else >>disabled<< end >>
+        spec:
+          interval: 1h
+          sourceRef:
+            kind: GitRepository
+            name: gateway-api
+          path: ./config/crd/standard
+          prune: true
+          deletionPolicy: Orphan
+          wait: true
+          timeout: 5m
+        << if inputs.cilium.gatewayApi >>
+        ---
+        apiVersion: kustomize.toolkit.fluxcd.io/v1
+        kind: Kustomization
+        metadata:
           name: gateway-api-cilium
           namespace: flux-system
-          ready: true
-      wait: true
-      resources:
-        - apiVersion: v1
-          kind: Namespace
-          metadata:
-            name: << inputs.gateway.namespace >>
-        << range $gw := list "public" "private" >>
-        - apiVersion: gateway.networking.k8s.io/v1
-          kind: Gateway
-          metadata:
-            name: << $gw >>
-            namespace: << inputs.gateway.namespace >>
-          spec:
-            gatewayClassName: << inputs.gateway.className >>
-            # Carried by Cilium onto the LoadBalancer Service it creates for
-            # the Gateway, where the cloud's own service controller reads it.
-            infrastructure:
-              annotations:
-                << if eq inputs.cloud "aws" >>
-                service.beta.kubernetes.io/aws-load-balancer-type: nlb
-                service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
-                service.beta.kubernetes.io/aws-load-balancer-ssl-cert: << inputs.gateway.certificateArn | quote >>
-                service.beta.kubernetes.io/aws-load-balancer-ssl-ports: "443"
-                << if eq $gw "private" >>
-                service.beta.kubernetes.io/aws-load-balancer-internal: "true"
-                << end >>
-                << end >>
-                << if and (eq inputs.cloud "azure") (eq $gw "private") >>
-                service.beta.kubernetes.io/azure-load-balancer-internal: "true"
-                << end >>
-                socle.do-now.io/gateway: << $gw >>
-            listeners:
-              << if ne inputs.cloud "aws" >>
-              # Only the redirect below attaches here.
-              - name: http
-                protocol: HTTP
-                port: 80
-                allowedRoutes:
-                  namespaces:
-                    from: Same
-              << end >>
-              - name: https
-                port: 443
-                << if eq inputs.cloud "aws" >>
-                # TLS is the NLB's; Envoy receives plain HTTP on 443.
-                protocol: HTTP
-                << else >>
-                protocol: HTTPS
-                tls:
-                  mode: Terminate
-                  certificateRefs:
-                    - kind: Secret
-                      name: gateway-tls
-                << end >>
-                allowedRoutes:
-                  namespaces:
-                    from: All
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if inputs.modules.gateway_api.enabled >>enabled<< else >>disabled<< end >>
+        spec:
+          interval: 1h
+          dependsOn:
+            - name: gateway-api-crds
+          sourceRef:
+            kind: OCIRepository
+            name: socle
+          path: ./catalog/gateway-api/cilium
+          prune: true
+          wait: true
+          timeout: 5m
         << end >>
-        << if ne inputs.cloud "aws" >>
-        - apiVersion: gateway.networking.k8s.io/v1
-          kind: HTTPRoute
-          metadata:
-            name: https-redirect
-            namespace: << inputs.gateway.namespace >>
-          spec:
-            parentRefs:
-              - name: public
-                sectionName: http
-              - name: private
-                sectionName: http
-            rules:
-              - filters:
-                  - type: RequestRedirect
-                    requestRedirect:
-                      scheme: https
-                      statusCode: 301
-        << end >>
-    << end >>

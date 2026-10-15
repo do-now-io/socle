@@ -50,9 +50,11 @@ kube = {
 
 ## Good to know
 
-- **The page's colour is the cloud's**, set by each cloud's overlay: it shows
-  a per-cloud detail carried by an overlay, as the message shows one carried
-  by the inputs.
+- **The page's colour is the cloud's**, and so is the cloud named in the
+  message: both come from the cloud's own step,
+  `oci/clusters/<cloud>/hello/patch.yaml`, which the cloud inserts into the
+  module before its workload. A module shows there what only that cloud
+  has, and nothing else.
 - **Turning it off removes the release and its namespace**: the quickest
   proof that garbage collection works.
 - **Upgrades**: nothing to adapt; the chart moves with `socle_version`.
@@ -63,8 +65,9 @@ kube = {
 **Installed**: chart `podinfo` 6.15.0 from
 `oci://ghcr.io/stefanprodan/charts/podinfo`, in the `hello` namespace.
 
-**What the socle sets**: `replicaCount` from `replicas`, and `ui.message` from
-`message` with the cluster name and the cloud appended.
+**What the socle sets**: `replicaCount` from `replicas`; from the cloud step's
+`hello-cloud-values` ConfigMap, `ui.color` and `ui.message` — `message` with
+the cluster name and the cloud appended.
 
 **Cloud access**: none.
 
