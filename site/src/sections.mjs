@@ -16,6 +16,7 @@ const sidebar = [
     items: clouds.map(([cloud, label]) => ({ label, collapsed: true, items: [{ autogenerate: { directory: `clouds/${cloud}` } }] })),
   },
   { label: 'Catalog', items: [{ autogenerate: { directory: 'catalog' } }] },
+  { label: 'Charts', items: [{ autogenerate: { directory: 'charts' } }] },
   { label: 'Guides', items: [{ autogenerate: { directory: 'guides' } }] },
   { label: 'Architecture', items: [{ autogenerate: { directory: 'architecture' } }] },
   { label: 'Reference', items: [{ autogenerate: { directory: 'reference' } }] },
@@ -24,7 +25,7 @@ const sidebar = [
 
 // The landing page is not one of them: it is site/src/pages/index.astro.
 const pages = ['contributing.md'];
-const directories = ['getting-started', 'clouds', 'catalog', 'guides', 'architecture', 'reference'];
+const directories = ['getting-started', 'clouds', 'catalog', 'charts', 'guides', 'architecture', 'reference'];
 // In docs/ for contributors, read on GitHub; the site does not publish them,
 // and no published page links to them.
 const unpublished = ['decisions'];
