@@ -1,0 +1,24 @@
+{{- $a := .Values.autoscaling -}}
+{{- if $a.enabled }}
+{{- if gt (int $a.minReplicas) (int $a.maxReplicas) }}
+{{- fail (printf "autoscaling: minReplicas %d is above maxReplicas %d" (int $a.minReplicas) (int $a.maxReplicas)) }}
+{{- end }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  {{- include "socle-lib.metadata" (dict "root" . "name" (include "socle-lib.fullname" .)) | nindent 2 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "socle-lib.fullname" . }}
+  minReplicas: {{ $a.minReplicas }}
+  maxReplicas: {{ $a.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $a.targetCPUUtilizationPercentage }}
+{{- end }}
