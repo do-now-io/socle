@@ -278,8 +278,8 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # webapp and cronjob (#83): their values schemas, written from one set of
-  # definitions, and their helm-unittest suites. The suites come before the
-  # templates (values, failing tests, then templates): red until they land.
+  # definitions, and their helm-unittest suites, which came before the
+  # templates (values, failing tests, then templates).
   charts:
     name: Helm charts — schemas, helm-unittest
     runs-on: ubuntu-24.04
