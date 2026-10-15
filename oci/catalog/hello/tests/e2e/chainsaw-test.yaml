@@ -45,9 +45,9 @@ spec:
               status:
                 (conditions[?type == 'Available'] || `[]`):
                   - status: 'True'
-        # The catalog's default message, inputs.cluster.name and inputs.cloud,
-        # rendered into one value — exactly. An array in an assertion is
-        # matched by index, so a list is filtered.
+        # The catalog's default message, inputs.cluster.name and the cloud its
+        # cloud step names, rendered into one value — exactly. An array in an
+        # assertion is matched by index, so a list is filtered.
         - assert:
             resource:
               apiVersion: apps/v1
@@ -73,8 +73,9 @@ spec:
             namespace: hello
             tail: 40
 ---
-# The per-cloud overlay: oci/clusters/aws/hello-color.patch.yaml paints
-# podinfo in the cloud's colour. Asserted where the colour is known.
+# The cloud step: oci/clusters/aws/hello/patch.yaml paints podinfo in the
+# cloud's colour through hello-cloud-values. Asserted where the colour is
+# known.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -84,7 +85,7 @@ metadata:
     cloud: aws
     platform: any
 spec:
-  description: The aws overlay's colour reaches podinfo.
+  description: The aws cloud step's colour reaches podinfo.
   timeouts:
     assert: 1m
   steps:
@@ -258,6 +259,14 @@ spec:
                 (conditions[?type == 'Ready'] || `[]`):
                   - status: 'True'
                 (length(inventory.entries || `[]`)): 0
+        # The cloud step's ConfigMap goes with the rest.
+        - error:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: hello-cloud-values
+                namespace: hello
       catch:
         - describe:
             apiVersion: fluxcd.controlplane.io/v1

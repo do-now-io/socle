@@ -63,9 +63,11 @@ spec:
     # MergeMaps(result, values)), so an inline socle default would beat the
     # client on every key both set. Listed first in valuesFrom, it is the base
     # the client's values and Secret are merged over. The if blocks are text
-    # templating and work inside the block scalar as anywhere else; per-cloud
-    # values go here too, under an if on eq inputs.cloud. (No template
-    # delimiters in these comments: the operator templates them too.)
+    # templating and work inside the block scalar as anywhere else. Nothing
+    # here depends on the cloud: a value that did would go in that cloud's
+    # oci/clusters/<cloud>/argocd/patch.yaml (docs/decisions/socle.md,
+    # SOCLE-32). (No template delimiters in these
+    # comments: the operator templates them too.)
     apiVersion: v1
     kind: ConfigMap
     metadata:

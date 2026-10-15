@@ -4,33 +4,24 @@
 # docs/reference/catalog-module-standard.md apply: inputsFrom the one provider, the reconcile toggle on EACH resource,
 # values tested never presence.
 #
+# What is the same on every cloud. The DNS provider, its credentials and,
+# on aws, the module's own IAM role are each cloud's, in
+# oci/clusters/<cloud>/external-dns/patch.yaml: a step named cloud that the
+# cloud inserts before workload (docs/decisions/socle.md, SOCLE-32).
+#
 # Values, in the order helm-controller merges them, later winning
 # (docs/decisions/socle.md#socle-06-the-clients-values-win): external-dns-socle-values, the socle's defaults
-# below; external-dns-client-values, kube.external_dns.values; then the
-# client's Secret when they name one. No inline `values:` on the HelmRelease —
-# helm-controller merges it last, so it would beat the client on every key.
+# below; external-dns-cloud-values, the cloud step's; external-dns-client-values,
+# kube.external_dns.values; then the client's Secret when they name one. No
+# inline `values:` on the HelmRelease — helm-controller merges it last, so it
+# would beat the client on every key.
 #
-# The cloud is chosen here, under `<< if eq inputs.cloud … >>` inside the
-# socle-values document, not by a clusters/<cloud>/ patch: the values are a
-# YAML document inside a ConfigMap string, which a JSON 6902 patch cannot
-# reach by path, and one place reads better than five.
+# Steps, each applied once the one before is healthy: namespace, then
+# workload — the chart. A cloud's step between them is healthy only once
+# what the pod needs from the cloud is there (docs/catalog/external-dns.md).
 #
-# Two layers, so that the pod is admitted only after its AWS access exists
-# (docs/catalog/external-dns.md):
-# - this ResourceSet: the Namespace and, on AWS with Crossplane on, the
-#   module's own IAM Role and the Pod Identity association binding it to
-#   external-dns/external-dns (docs/architecture/module-iam.md);
-# - external-dns-workload, a child ResourceSet holding the chart, which
-#   dependsOn the Role and the association being Ready. EKS Pod Identity
-#   injects the credentials at pod admission: a pod admitted before its
-#   association never gets them.
-# This ResourceSet dependsOn the crossplane one, which always exists and is
-# Ready trivially when Crossplane is off: the providers' CRDs are there
-# before a Role is applied, and nothing waits when there are none.
-#
-# resourcesTemplate rather than resources: the per-cloud blocks and the
-# optional Secret entry are conditional text, which the structured resources
-# list cannot carry.
+# resourcesTemplate rather than resources: the optional Secret entry is
+# conditional text, which the structured resources list cannot carry.
 #
 # Fixed by decision, not exposed through a named attribute (values can still
 # override any of it):
@@ -42,11 +33,6 @@
 #   The prefix moves the ownership record next to it instead of on it.
 # - the ServiceAccount is named external-dns in namespace external-dns, on
 #   every cloud: the subject the module's own cloud identity is bound to.
-#
-# Cloud access: on AWS the module declares its own role through Crossplane,
-# the foundations never do (docs/decisions/socle.md, SOCLE-04). With Crossplane off,
-# and on the other clouds until their Crossplane providers land, each cloud
-# block below reads a credential the client brings.
 # - the Gateway API source is added only when the gateway_api module is on.
 #   external-dns builds an informer per source at start-up and exits when the
 #   Gateway CRDs are absent (source/gateway.go WaitForCacheSync → log.Fatal in
@@ -62,158 +48,23 @@ spec:
     - apiVersion: fluxcd.controlplane.io/v1
       kind: ResourceSetInputProvider
       name: socle
-  # The crossplane ResourceSet exists on every cloud; Ready when Crossplane
-  # is off, and once its providers and their CRDs are Healthy when it is on.
-  dependsOn:
-    - apiVersion: fluxcd.controlplane.io/v1
-      kind: ResourceSet
-      name: crossplane
-      namespace: flux-system
-      ready: true
   wait: true
-  resourcesTemplate: |
-    apiVersion: v1
-    kind: Namespace
-    metadata:
-      name: external-dns
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if inputs.modules.external_dns.enabled >>enabled<< else >>disabled<< end >>
-      labels:
-        # The chart's pod runs non-root, read-only, no capabilities, default
-        # seccomp: restricted holds, and pins it.
-        pod-security.kubernetes.io/enforce: restricted
-    << if and (eq inputs.cloud "aws") inputs.modules.crossplane.enabled >>
-    ---
-    # The module's own AWS access, docs/architecture/module-iam.md. Under
-    # /socle/<cluster>/ and carrying Crossplane's boundary when the root wired
-    # one: Crossplane's own policy refuses any other role. Inline policy only.
-    #
-    # Scoped by record name, not by zone: ChangeResourceRecordSets is allowed
-    # on every hosted zone, but only when every name in the change batch is a
-    # domain_filters entry or under one (route53:
-    # ChangeResourceRecordSetsNormalizedRecordNames). A zone id cannot be
-    # derived from a name, and the names are what domain_filters already says;
-    # the argument is in docs/decisions/external-dns.md
-    # (EXTERNAL-DNS-01). The reads have no
-    # condition key and stay on every zone.
-    apiVersion: iam.aws.m.upbound.io/v1beta1
-    kind: Role
-    metadata:
-      name: external-dns
-      namespace: external-dns
-      annotations:
-        # IAM names are account-wide and two clusters may share an account.
-        crossplane.io/external-name: << inputs.cluster.name >>-external-dns
-        fluxcd.controlplane.io/reconcile: << if inputs.modules.external_dns.enabled >>enabled<< else >>disabled<< end >>
-    spec:
-      forProvider:
-        path: /socle/<< inputs.cluster.name >>/
-        << if inputs.modules.crossplane.permissions_boundary >>
-        permissionsBoundary: << inputs.modules.crossplane.permissions_boundary | quote >>
-        << end >>
-        assumeRolePolicy: |
-          {
-            "Version": "2012-10-17",
-            "Statement": [{
-              "Effect": "Allow",
-              "Principal": {"Service": "pods.eks.amazonaws.com"},
-              "Action": ["sts:AssumeRole", "sts:TagSession"]
-            }]
-          }
-        inlinePolicy:
-          - name: route53
-            policy: |
-              {
-                "Version": "2012-10-17",
-                "Statement": [
-                  {
-                    "Sid": "WriteUnderTheDomainFilters",
-                    "Effect": "Allow",
-                    "Action": "route53:ChangeResourceRecordSets",
-                    "Resource": "arn:aws:route53:::hostedzone/*",
-                    "Condition": {
-                      "ForAllValues:StringLike": {
-                        "route53:ChangeResourceRecordSetsNormalizedRecordNames": [
-                          << range $i, $d := inputs.modules.external_dns.domain_filters ->>
-                          << $n := $d | trimSuffix "." | lower ->>
-                          << if $i >>,<< end >><< $n | quote >>, << printf "*.%s" $n | quote >>
-                          << end ->>
-                        ]
-                      }
-                    }
-                  },
-                  {
-                    "Sid": "ReadTheZones",
-                    "Effect": "Allow",
-                    "Action": [
-                      "route53:GetHostedZone",
-                      "route53:ListResourceRecordSets",
-                      "route53:ListTagsForResource",
-                      "route53:ListTagsForResources"
-                    ],
-                    "Resource": "arn:aws:route53:::hostedzone/*"
-                  },
-                  {
-                    "Sid": "ListTheZones",
-                    "Effect": "Allow",
-                    "Action": ["route53:ListHostedZones", "route53:ListHostedZonesByName"],
-                    "Resource": "*"
-                  }
-                ]
-              }
-    ---
-    apiVersion: eks.aws.m.upbound.io/v1beta1
-    kind: PodIdentityAssociation
-    metadata:
-      name: external-dns
-      namespace: external-dns
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if inputs.modules.external_dns.enabled >>enabled<< else >>disabled<< end >>
-    spec:
-      forProvider:
-        # Required: the socle's ClusterProviderConfig names no region, and
-        # OpenTofu refuses this combination with an empty one.
-        region: << inputs.cluster.region >>
-        clusterName: << inputs.cluster.name >>
-        namespace: external-dns
-        serviceAccount: external-dns
-        roleArnRef:
+  steps:
+    - name: namespace
+      resourcesTemplate: |
+        apiVersion: v1
+        kind: Namespace
+        metadata:
           name: external-dns
-    << end >>
-    ---
-    # The workload, in a child ResourceSet so that it can wait on the
-    # association explicitly. A step's health check does not: a Crossplane
-    # managed resource that has not been created yet carries no Ready condition
-    # at all, which kstatus reads as healthy — measured on floci, where the
-    # chart was applied beside an association that never synced. dependsOn with
-    # a readyExpr on Ready is what the crossplane module does for its
-    # ProviderConfig.
-    apiVersion: fluxcd.controlplane.io/v1
-    kind: ResourceSet
-    metadata:
-      name: external-dns-workload
-      namespace: flux-system
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if inputs.modules.external_dns.enabled >>enabled<< else >>disabled<< end >>
-    spec:
-      << if and (eq inputs.cloud "aws") inputs.modules.crossplane.enabled >>
-      dependsOn:
-        - apiVersion: iam.aws.m.upbound.io/v1beta1
-          kind: Role
-          name: external-dns
-          namespace: external-dns
-          ready: true
-          readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
-        - apiVersion: eks.aws.m.upbound.io/v1beta1
-          kind: PodIdentityAssociation
-          name: external-dns
-          namespace: external-dns
-          ready: true
-          readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
-      << end >>
-      wait: true
-      resources:
-      - apiVersion: source.toolkit.fluxcd.io/v1
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if inputs.modules.external_dns.enabled >>enabled<< else >>disabled<< end >>
+          labels:
+            # The chart's pod runs non-root, read-only, no capabilities, default
+            # seccomp: restricted holds, and pins it.
+            pod-security.kubernetes.io/enforce: restricted
+    - name: workload
+      resourcesTemplate: |
+        apiVersion: source.toolkit.fluxcd.io/v1
         kind: HelmRepository
         metadata:
           name: external-dns
@@ -223,8 +74,9 @@ spec:
         spec:
           interval: 1h
           url: https://kubernetes-sigs.github.io/external-dns/
-      # The socle's defaults. Everything the client may override through values.
-      - apiVersion: v1
+        ---
+        # The socle's defaults. Everything the client may override through values.
+        apiVersion: v1
         kind: ConfigMap
         metadata:
           name: external-dns-socle-values
@@ -241,68 +93,6 @@ spec:
             serviceAccount:
               create: true
               name: external-dns
-            << if eq inputs.cloud "aws" >>
-            # Route 53, served from us-east-1 in the aws partition whatever the
-            # cluster's region.
-            #
-            # The three optional entries read a Secret named external-dns-aws that
-            # the client creates: static keys, and AWS_ENDPOINT_URL for a Route
-            # 53-compatible endpoint — the e2e runs external-dns against floci that
-            # way (tests/e2e/chainsaw-test.yaml). An optional secretKeyRef
-            # whose Secret is absent sets no variable, and the SDK falls through to
-            # its default chain: with Crossplane on, the Pod Identity association
-            # the access step made for the module's own role.
-            provider:
-              name: aws
-            env:
-              - name: AWS_REGION
-                value: us-east-1
-              - name: AWS_ACCESS_KEY_ID
-                valueFrom: { secretKeyRef: { name: external-dns-aws, key: AWS_ACCESS_KEY_ID, optional: true } }
-              - name: AWS_SECRET_ACCESS_KEY
-                valueFrom: { secretKeyRef: { name: external-dns-aws, key: AWS_SECRET_ACCESS_KEY, optional: true } }
-              - name: AWS_ENDPOINT_URL
-                valueFrom: { secretKeyRef: { name: external-dns-aws, key: AWS_ENDPOINT_URL, optional: true } }
-            << else if eq inputs.cloud "gcp" >>
-            # Cloud DNS, through the metadata server's Workload Identity
-            # credentials: the ServiceAccount's own principal, or a Google service
-            # account the client binds and names through values
-            # (serviceAccount.annotations, iam.gke.io/gcp-service-account). The
-            # project comes from the metadata server when --google-project is
-            # absent (provider/google/google.go, v0.22.0).
-            provider:
-              name: google
-            << else if eq inputs.cloud "azure" >>
-            # Azure DNS. azure.json — tenant, subscription, resource group, and
-            # either a service principal or useWorkloadIdentityExtension — comes
-            # from the Secret external-dns-azure the client creates
-            # (docs/catalog/external-dns.md). Workload ID also needs the
-            # ServiceAccount annotation and the pod label, set through values.
-            provider:
-              name: azure
-            extraVolumes:
-              - name: azure-config-file
-                secret:
-                  secretName: external-dns-azure
-                  items:
-                    - { key: azure.json, path: azure.json }
-            extraVolumeMounts:
-              - name: azure-config-file
-                mountPath: /etc/kubernetes
-                readOnly: true
-            << else if eq inputs.cloud "scaleway" >>
-            # Scaleway DNS, through an API key: Scaleway has no workload identity.
-            # The client creates the Secret external-dns-scaleway in this namespace
-            # with SCW_ACCESS_KEY and SCW_SECRET_KEY, the variables the scaleway
-            # provider reads (docs/tutorials/scaleway.md, v0.22.0).
-            provider:
-              name: scaleway
-            env:
-              - name: SCW_ACCESS_KEY
-                valueFrom: { secretKeyRef: { name: external-dns-scaleway, key: SCW_ACCESS_KEY } }
-              - name: SCW_SECRET_KEY
-                valueFrom: { secretKeyRef: { name: external-dns-scaleway, key: SCW_SECRET_KEY } }
-            << end >>
             sources:
               - service
               - ingress
@@ -328,9 +118,10 @@ spec:
                 memory: 64Mi
               limits:
                 memory: 128Mi
-      # The client's own chart values, as written in kube.external_dns.values.
-      # OpenTofu refuses secrets in there.
-      - apiVersion: v1
+        ---
+        # The client's own chart values, as written in kube.external_dns.values.
+        # OpenTofu refuses secrets in there.
+        apiVersion: v1
         kind: ConfigMap
         metadata:
           name: external-dns-client-values
@@ -343,7 +134,8 @@ spec:
             fluxcd.controlplane.io/reconcile: << if inputs.modules.external_dns.enabled >>enabled<< else >>disabled<< end >>
         data:
           values.yaml: |<< toYaml inputs.modules.external_dns.values | nindent 8 >>
-      - apiVersion: helm.toolkit.fluxcd.io/v2
+        ---
+        apiVersion: helm.toolkit.fluxcd.io/v2
         kind: HelmRelease
         metadata:
           name: external-dns
@@ -353,9 +145,10 @@ spec:
         spec:
           interval: 10m
           releaseName: external-dns
-          # A failed install is retried, not left stalled: on azure and scaleway the
-          # pod cannot start until the client creates its Secret, which only
-          # happens once this module has created the namespace.
+          # A failed install is retried, not left stalled: where the cloud's step
+          # reads a credential the client brings, the pod cannot start until the
+          # client creates its Secret, which only happens once this module has
+          # created the namespace.
           install:
             strategy:
               name: RetryOnFailure
@@ -378,6 +171,11 @@ spec:
             - kind: ConfigMap
               name: external-dns-socle-values
               valuesKey: values.yaml
+            # The cloud step's, when the cloud has values for the chart.
+            - kind: ConfigMap
+              name: external-dns-cloud-values
+              valuesKey: values.yaml
+              optional: true
             - kind: ConfigMap
               name: external-dns-client-values
               valuesKey: values.yaml
@@ -387,29 +185,29 @@ spec:
               valuesKey: values.yaml
               optional: true
             << end >>
-    << $monitored := and inputs.modules.external_dns.enabled inputs.modules.monitoring.enabled ->>
-    ---
-    # The module's monitoring — its alert rules and its dashboard, from
-    # monitoring/ in the socle artifact: VMRules and a ConfigMap Grafana's
-    # sidecar loads. Present only while both this module and the monitoring
-    # module are on: monitoring brings the VMRule CRD, and until it has the
-    # Kustomization fails and retries every minute
-    # (docs/decisions/monitoring.md, MONITORING-12).
-    apiVersion: kustomize.toolkit.fluxcd.io/v1
-    kind: Kustomization
-    metadata:
-      name: external-dns-monitoring
-      namespace: flux-system
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if $monitored >>enabled<< else >>disabled<< end >>
-    spec:
-      interval: 1h
-      retryInterval: 1m
-      sourceRef:
-        kind: OCIRepository
-        name: socle
-      path: ./catalog/external-dns/monitoring
-      targetNamespace: external-dns
-      prune: true
-      wait: true
-      timeout: 2m
+        << $monitored := and inputs.modules.external_dns.enabled inputs.modules.monitoring.enabled ->>
+        ---
+        # The module's monitoring — its alert rules and its dashboard, from
+        # monitoring/ in the socle artifact: VMRules and a ConfigMap Grafana's
+        # sidecar loads. Present only while both this module and the monitoring
+        # module are on: monitoring brings the VMRule CRD, and until it has the
+        # Kustomization fails and retries every minute
+        # (docs/decisions/monitoring.md, MONITORING-12).
+        apiVersion: kustomize.toolkit.fluxcd.io/v1
+        kind: Kustomization
+        metadata:
+          name: external-dns-monitoring
+          namespace: flux-system
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if $monitored >>enabled<< else >>disabled<< end >>
+        spec:
+          interval: 1h
+          retryInterval: 1m
+          sourceRef:
+            kind: OCIRepository
+            name: socle
+          path: ./catalog/external-dns/monitoring
+          targetNamespace: external-dns
+          prune: true
+          wait: true
+          timeout: 2m

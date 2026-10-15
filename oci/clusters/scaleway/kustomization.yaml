@@ -2,9 +2,9 @@
 # turns each on or off through kube.<module>.enabled; this list is the catalog,
 # and .github/scripts/check-catalog-clouds.sh keeps it in step with catalog.tf.
 #
-# A cloud-specific detail that is not a value the client sets lives here as a
-# Kustomize patch on the module's ResourceSet — the template stays the shared
-# case. hello-color.patch.yaml paints podinfo in this cloud's colour.
+# What a module needs that only scaleway has is scaleway/<module>/patch.yaml: steps the
+# cloud adds to the module's ResourceSet, nothing else. A module with nothing
+# of scaleway's has no folder here (docs/decisions/socle.md, SOCLE-32).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
@@ -23,7 +23,11 @@ resources:
   - ../../catalog/reloader/resourceset.yaml
   - ../../catalog/hello/resourceset.yaml
 patches:
-  - path: hello-color.patch.yaml
+  - path: external-dns/patch.yaml
+    target:
+      kind: ResourceSet
+      name: external-dns
+  - path: hello/patch.yaml
     target:
       kind: ResourceSet
       name: hello

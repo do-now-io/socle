@@ -100,9 +100,12 @@ Your `values` are merged over these.
 may change records only when every name is under a `domain_filters` entry,
 and read every zone of the account. Elsewhere, the credential is yours.
 
-**Ordering**: waits for the `crossplane` ResourceSet; on aws the chart is
-applied only once the role and its association are Ready, since Pod Identity
-hands credentials at admission only.
+**Ordering**: the module is the same on every cloud; each cloud's patch
+([`oci/clusters/<cloud>/external-dns`](../../oci/clusters/aws/external-dns/patch.yaml),
+[SOCLE-32](../decisions/socle.md#socle-32-what-only-one-cloud-has-that-cloud-adds-to-the-module-as-steps)) inserts a step with the provider and, on
+aws with crossplane on, the role, before the chart's. On aws the module
+waits for `crossplane`, and the chart for the role and its association to be
+Ready, since Pod Identity hands credentials at admission only.
 
 **Measured** on floci, 2026-09-24: an Ingress became an A record with its
 `socle-` TXT; with `sync`, both went when the Ingress did.

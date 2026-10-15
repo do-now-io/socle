@@ -511,3 +511,48 @@ the collectors.
 under its module's toggle. Community dashboards do not work unmodified.
 
 **Sources.** [Observability](../architecture/observability.md#reading).
+
+## SOCLE-32: What only one cloud has, that cloud adds to the module as steps
+
+**accepted** · 2026-10-15 · [`oci/catalog/external-dns/resourceset.yaml`](../../oci/catalog/external-dns/resourceset.yaml), [`oci/clusters/aws/external-dns/patch.yaml`](../../oci/clusters/aws/external-dns/patch.yaml), [`oci/clusters/aws/kustomization.yaml`](../../oci/clusters/aws/kustomization.yaml), [`.github/scripts/check-catalog-clouds.sh`](../../.github/scripts/check-catalog-clouds.sh)
+
+**Decision.** A module's `ResourceSet` in `oci/catalog/<module>/` holds
+everything that is not one cloud's, never reads `inputs.cloud`, and is
+written as steps: `namespace`, then `workload`. What only one cloud has — a
+DNS provider, a credential, an IAM role, a bucket, a Gateway's shape — is
+`oci/clusters/<cloud>/<module>/patch.yaml`, a JSON 6902 patch the overlay
+applies to the module's `ResourceSet`: a step `cloud` inserted before
+`workload` (a `test` op names the step it expects there), steps appended
+after it, a `dependsOn`. A cloud with nothing of its own for a module has no
+file for it. A chart module reads the cloud's values as
+`<module>-cloud-values`, between `<module>-socle-values` and
+`<module>-client-values`, `optional: true`: the client still wins
+([SOCLE-06](#socle-06-the-clients-values-win)). This replaces SOCLE-06's
+"per-cloud values go in the template" and
+[EXTERNAL-DNS-02](external-dns.md#external-dns-02-the-cloud-is-chosen-in-the-template-not-by-overlay-patches).
+
+**Context.** Every cloud difference was an `<< if eq inputs.cloud … >>` in
+the module's template: 22 across 9 modules, the Route 53 policy, four DNS
+providers and three Gateway shapes interleaved in one file. A patch cannot
+reach a value inside `resourcesTemplate`, a string, but `spec.steps` is a
+list, and a patch can add a whole step to it. The operator applies the steps
+in order, each once the one before is healthy, interrupts that wait when an
+input changes, and collects garbage once every step is healthy (flux-operator
+v0.60.0). A first cut gave each cloud a `ResourceSet` of its own; every cloud
+file then repeated the module's plumbing — a wrapper, the namespace to wait
+for, the values ConfigMap's envelope — and existed, empty, on clouds with
+nothing to add.
+
+**Consequences.** A module reads the same on every cloud; a cloud's file
+holds only what that cloud adds. The module's steps are a contract: a
+renamed or reordered step fails the overlay's build on the `test` op, and
+the check script refuses a cloud file the overlay does not apply. A step's
+health check reads a Crossplane managed resource not yet created as healthy,
+so an aws step that creates a role for the pod adds `<module>-access`, an
+empty `ResourceSet` that `dependsOn` the role and the association with a
+`readyExpr`: the workload step starts once they are Ready, Pod Identity
+being injected at admission. A value shared by three clouds is written three
+times. `inputs.cloud` keeps one reader: the root `Kustomization`'s path,
+`./clusters/<cloud>`.
+
+**Sources.** flux-operator v0.60.0 `internal/controller/resourceset_controller.go` (`apply`, `waitForStep`) · kustomize JSON 6902 patches (`add`, `test`) · [Module IAM](../architecture/module-iam.md) · [Catalog module standard](../reference/catalog-module-standard.md).

@@ -2,9 +2,9 @@
 # turns each on or off through kube.<module>.enabled; this list is the catalog,
 # and .github/scripts/check-catalog-clouds.sh keeps it in step with catalog.tf.
 #
-# A cloud-specific detail that is not a value the client sets lives here as a
-# Kustomize patch on the module's ResourceSet — the template stays the shared
-# case. hello-color.patch.yaml paints podinfo in this cloud's colour.
+# What a module needs that only aws has is aws/<module>/patch.yaml: steps the
+# cloud adds to the module's ResourceSet, nothing else. A module with nothing
+# of aws's has no folder here (docs/decisions/socle.md, SOCLE-32).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
@@ -25,7 +25,35 @@ resources:
   - ../../catalog/hello/resourceset.yaml
   - ../../catalog/metrics-server/resourceset.yaml
 patches:
-  - path: hello-color.patch.yaml
+  - path: gateway-api/patch.yaml
+    target:
+      kind: ResourceSet
+      name: gateway-api
+  - path: crossplane/patch.yaml
+    target:
+      kind: ResourceSet
+      name: crossplane
+  - path: external-dns/patch.yaml
+    target:
+      kind: ResourceSet
+      name: external-dns
+  - path: argocd-image-updater/patch.yaml
+    target:
+      kind: ResourceSet
+      name: argocd-image-updater
+  - path: keda/patch.yaml
+    target:
+      kind: ResourceSet
+      name: keda
+  - path: external-secrets/patch.yaml
+    target:
+      kind: ResourceSet
+      name: external-secrets
+  - path: velero/patch.yaml
+    target:
+      kind: ResourceSet
+      name: velero
+  - path: hello/patch.yaml
     target:
       kind: ResourceSet
       name: hello

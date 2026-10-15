@@ -1,0 +1,151 @@
+# The external-secrets module on aws: with Crossplane on and at least one
+# prefix in kube.external_secrets.prefixes, the module's own read-only IAM
+# role, its Pod Identity association (docs/architecture/module-iam.md) and
+# the socle's ClusterSecretStore on AWS Secrets Manager
+# (docs/catalog/external-secrets.md).
+- op: add
+  path: /spec/dependsOn
+  value:
+    # The Role's kinds come from Crossplane's providers.
+    - apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSet
+      name: crossplane
+      namespace: flux-system
+      ready: true
+- op: test
+  path: /spec/steps/1/name
+  value: workload
+- op: add
+  path: /spec/steps/1
+  value:
+    name: cloud
+    resourcesTemplate: |
+      << if and inputs.modules.crossplane.enabled inputs.modules.external_secrets.prefixes >>
+      # The module's own AWS access, docs/architecture/module-iam.md. Under
+      # /socle/<cluster>/ and carrying Crossplane's boundary when the root wired
+      # one: Crossplane's own policy refuses any other role. Inline policy only.
+      #
+      # Read-only and scoped by name: the two calls an ExternalSecret's
+      # remoteRef makes (GetSecretValue for the value, DescribeSecret for the
+      # version and the metadata), on the secrets under each prefix in the
+      # cluster's region. The account id is not among the inputs, so the ARN
+      # names any account: the role can only ever be used in the account it
+      # lives in. ListSecrets and BatchGetSecretValue are left out — they take
+      # no resource scope, so they would list every secret of the account —
+      # and with them dataFrom.find.
+      << $arns := list ->>
+      << range $p := inputs.modules.external_secrets.prefixes ->>
+      << $arns = append $arns (printf "arn:aws:secretsmanager:%s:*:secret:%s/*" inputs.cluster.region $p) ->>
+      << end ->>
+      << $actions := list "secretsmanager:GetSecretValue" "secretsmanager:DescribeSecret" ->>
+      << $read := dict "Sid" "ReadSecretsUnderThePrefixes" "Effect" "Allow" "Action" $actions "Resource" $arns ->>
+      apiVersion: iam.aws.m.upbound.io/v1beta1
+      kind: Role
+      metadata:
+        name: external-secrets
+        namespace: external-secrets
+        annotations:
+          # IAM names are account-wide and two clusters may share an account.
+          crossplane.io/external-name: << inputs.cluster.name >>-external-secrets
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.external_secrets.enabled >>enabled<< else >>disabled<< end >>
+      spec:
+        forProvider:
+          path: /socle/<< inputs.cluster.name >>/
+          << if inputs.modules.crossplane.permissions_boundary >>
+          permissionsBoundary: << inputs.modules.crossplane.permissions_boundary | quote >>
+          << end >>
+          assumeRolePolicy: |
+            {
+              "Version": "2012-10-17",
+              "Statement": [{
+                "Effect": "Allow",
+                "Principal": {"Service": "pods.eks.amazonaws.com"},
+                "Action": ["sts:AssumeRole", "sts:TagSession"]
+              }]
+            }
+          inlinePolicy:
+            - name: secretsmanager
+              policy: << dict "Version" "2012-10-17" "Statement" (list $read) | toJson | quote >>
+      ---
+      apiVersion: eks.aws.m.upbound.io/v1beta1
+      kind: PodIdentityAssociation
+      metadata:
+        name: external-secrets
+        namespace: external-secrets
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.external_secrets.enabled >>enabled<< else >>disabled<< end >>
+      spec:
+        forProvider:
+          # Required: the socle's ClusterProviderConfig names no region, and
+          # OpenTofu refuses this combination with an empty one.
+          region: << inputs.cluster.region >>
+          clusterName: << inputs.cluster.name >>
+          namespace: external-secrets
+          serviceAccount: external-secrets
+          roleArnRef:
+            name: external-secrets
+      ---
+      # Healthy only once the Role and the association are Ready, so the
+      # workload step starts after them: EKS Pod Identity injects the
+      # credentials at pod admission, and a pod admitted before its
+      # association never gets them. A dependsOn with a readyExpr, because a
+      # managed resource not yet created carries no Ready condition at all,
+      # which the step's own health check reads as healthy (measured on floci).
+      apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSet
+      metadata:
+        name: external-secrets-access
+        namespace: flux-system
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.external_secrets.enabled >>enabled<< else >>disabled<< end >>
+      spec:
+        dependsOn:
+          - apiVersion: iam.aws.m.upbound.io/v1beta1
+            kind: Role
+            name: external-secrets
+            namespace: external-secrets
+            ready: true
+            readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
+          - apiVersion: eks.aws.m.upbound.io/v1beta1
+            kind: PodIdentityAssociation
+            name: external-secrets
+            namespace: external-secrets
+            ready: true
+            readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
+        resources: []
+      << end >>
+- op: add
+  path: /spec/steps/-
+  value:
+    name: store
+    resourcesTemplate: |
+      << if and inputs.modules.crossplane.enabled inputs.modules.external_secrets.prefixes >>
+      # The socle's one store, on the module's own role: no auth block, so the
+      # controller's default credential chain — the Pod Identity association
+      # of the cloud step. A ClusterSecretStore, so every namespace may
+      # reference it: the IAM prefixes, not the store, bound what it reads
+      # (docs/decisions/external-secrets.md). Per-namespace SecretStores, and
+      # stores on other backends, are the client's. A step after workload: the
+      # store's CRD is one the chart installs, and ESO's validating webhook
+      # must answer for it to apply — the workload step is healthy once the
+      # HelmRelease is Ready.
+      apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSet
+      metadata:
+        name: external-secrets-store
+        namespace: flux-system
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.external_secrets.enabled >>enabled<< else >>disabled<< end >>
+      spec:
+        wait: true
+        resources:
+        - apiVersion: external-secrets.io/v1
+          kind: ClusterSecretStore
+          metadata:
+            name: secret-manager
+          spec:
+            provider:
+              aws:
+                service: SecretsManager
+                region: << inputs.cluster.region >>
+      << end >>

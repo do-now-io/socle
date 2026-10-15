@@ -1,0 +1,180 @@
+# The external-dns module on aws: Route 53, the credentials external-dns
+# reads it with and, with Crossplane on, the module's own IAM role and its
+# Pod Identity association (docs/catalog/external-dns.md,
+# docs/architecture/module-iam.md).
+- op: add
+  path: /spec/dependsOn
+  value:
+    # The Role's kinds come from Crossplane's providers.
+    - apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSet
+      name: crossplane
+      namespace: flux-system
+      ready: true
+- op: test
+  path: /spec/steps/1/name
+  value: workload
+- op: add
+  path: /spec/steps/1
+  value:
+    name: cloud
+    resourcesTemplate: |
+      << if inputs.modules.crossplane.enabled >>
+      # The module's own AWS access, docs/architecture/module-iam.md. Under
+      # /socle/<cluster>/ and carrying Crossplane's boundary when the root wired
+      # one: Crossplane's own policy refuses any other role. Inline policy only.
+      #
+      # Scoped by record name, not by zone: ChangeResourceRecordSets is allowed
+      # on every hosted zone, but only when every name in the change batch is a
+      # domain_filters entry or under one (route53:
+      # ChangeResourceRecordSetsNormalizedRecordNames). A zone id cannot be
+      # derived from a name, and the names are what domain_filters already says;
+      # the argument is in docs/decisions/external-dns.md
+      # (EXTERNAL-DNS-01). The reads have no
+      # condition key and stay on every zone.
+      apiVersion: iam.aws.m.upbound.io/v1beta1
+      kind: Role
+      metadata:
+        name: external-dns
+        namespace: external-dns
+        annotations:
+          # IAM names are account-wide and two clusters may share an account.
+          crossplane.io/external-name: << inputs.cluster.name >>-external-dns
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.external_dns.enabled >>enabled<< else >>disabled<< end >>
+      spec:
+        forProvider:
+          path: /socle/<< inputs.cluster.name >>/
+          << if inputs.modules.crossplane.permissions_boundary >>
+          permissionsBoundary: << inputs.modules.crossplane.permissions_boundary | quote >>
+          << end >>
+          assumeRolePolicy: |
+            {
+              "Version": "2012-10-17",
+              "Statement": [{
+                "Effect": "Allow",
+                "Principal": {"Service": "pods.eks.amazonaws.com"},
+                "Action": ["sts:AssumeRole", "sts:TagSession"]
+              }]
+            }
+          inlinePolicy:
+            - name: route53
+              policy: |
+                {
+                  "Version": "2012-10-17",
+                  "Statement": [
+                    {
+                      "Sid": "WriteUnderTheDomainFilters",
+                      "Effect": "Allow",
+                      "Action": "route53:ChangeResourceRecordSets",
+                      "Resource": "arn:aws:route53:::hostedzone/*",
+                      "Condition": {
+                        "ForAllValues:StringLike": {
+                          "route53:ChangeResourceRecordSetsNormalizedRecordNames": [
+                            << range $i, $d := inputs.modules.external_dns.domain_filters ->>
+                            << $n := $d | trimSuffix "." | lower ->>
+                            << if $i >>,<< end >><< $n | quote >>, << printf "*.%s" $n | quote >>
+                            << end ->>
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "Sid": "ReadTheZones",
+                      "Effect": "Allow",
+                      "Action": [
+                        "route53:GetHostedZone",
+                        "route53:ListResourceRecordSets",
+                        "route53:ListTagsForResource",
+                        "route53:ListTagsForResources"
+                      ],
+                      "Resource": "arn:aws:route53:::hostedzone/*"
+                    },
+                    {
+                      "Sid": "ListTheZones",
+                      "Effect": "Allow",
+                      "Action": ["route53:ListHostedZones", "route53:ListHostedZonesByName"],
+                      "Resource": "*"
+                    }
+                  ]
+                }
+      ---
+      apiVersion: eks.aws.m.upbound.io/v1beta1
+      kind: PodIdentityAssociation
+      metadata:
+        name: external-dns
+        namespace: external-dns
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.external_dns.enabled >>enabled<< else >>disabled<< end >>
+      spec:
+        forProvider:
+          # Required: the socle's ClusterProviderConfig names no region, and
+          # OpenTofu refuses this combination with an empty one.
+          region: << inputs.cluster.region >>
+          clusterName: << inputs.cluster.name >>
+          namespace: external-dns
+          serviceAccount: external-dns
+          roleArnRef:
+            name: external-dns
+      ---
+      # Healthy only once the Role and the association are Ready, so the
+      # workload step starts after them: EKS Pod Identity injects the credentials
+      # at pod admission, and a pod admitted before its association never gets
+      # them. A dependsOn with a readyExpr, because a managed resource not yet
+      # created carries no Ready condition at all, which the step's own health
+      # check reads as healthy (measured on floci).
+      apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSet
+      metadata:
+        name: external-dns-access
+        namespace: flux-system
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.external_dns.enabled >>enabled<< else >>disabled<< end >>
+      spec:
+        dependsOn:
+          - apiVersion: iam.aws.m.upbound.io/v1beta1
+            kind: Role
+            name: external-dns
+            namespace: external-dns
+            ready: true
+            readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
+          - apiVersion: eks.aws.m.upbound.io/v1beta1
+            kind: PodIdentityAssociation
+            name: external-dns
+            namespace: external-dns
+            ready: true
+            readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
+        resources: []
+      ---
+      << end >>
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: external-dns-cloud-values
+        namespace: external-dns
+        labels:
+          reconcile.fluxcd.io/watch: Enabled
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.external_dns.enabled >>enabled<< else >>disabled<< end >>
+      data:
+        values.yaml: |
+          # Route 53, served from us-east-1 in the aws partition whatever the
+          # cluster's region.
+          #
+          # The three optional entries read a Secret named external-dns-aws that
+          # the client creates: static keys, and AWS_ENDPOINT_URL for a Route
+          # 53-compatible endpoint — the e2e runs external-dns against floci that
+          # way (tests/e2e/chainsaw-test.yaml). An optional secretKeyRef
+          # whose Secret is absent sets no variable, and the SDK falls through to
+          # its default chain: with Crossplane on, the Pod Identity association
+          # above, for the module's own role.
+          provider:
+            name: aws
+          env:
+            - name: AWS_REGION
+              value: us-east-1
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom: { secretKeyRef: { name: external-dns-aws, key: AWS_ACCESS_KEY_ID, optional: true } }
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: external-dns-aws, key: AWS_SECRET_ACCESS_KEY, optional: true } }
+            - name: AWS_ENDPOINT_URL
+              valueFrom: { secretKeyRef: { name: external-dns-aws, key: AWS_ENDPOINT_URL, optional: true } }

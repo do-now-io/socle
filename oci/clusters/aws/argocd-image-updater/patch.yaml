@@ -1,0 +1,154 @@
+# The argocd-image-updater module on aws: with Crossplane on and
+# repositories named, the module's own IAM role, read-only on those ECR
+# repositories, its Pod Identity association, and the socle's entry for the
+# ECR registry of the cluster's account and region
+# (docs/catalog/argocd-image-updater.md, docs/architecture/module-iam.md).
+- op: add
+  path: /spec/dependsOn/-
+  value:
+    # The Role's kinds come from Crossplane's providers.
+    apiVersion: fluxcd.controlplane.io/v1
+    kind: ResourceSet
+    name: crossplane
+    namespace: flux-system
+    ready: true
+- op: test
+  path: /spec/steps/1/name
+  value: workload
+- op: add
+  path: /spec/steps/1
+  value:
+    name: cloud
+    resourcesTemplate: |
+      << $m := inputs.modules.argocd_image_updater ->>
+      << if and inputs.modules.crossplane.enabled $m.repositories >>
+      # The module's own AWS access, docs/architecture/module-iam.md. Under
+      # /socle/<cluster>/ and carrying Crossplane's boundary when the root wired
+      # one: Crossplane's own policy refuses any other role. Inline policy only.
+      #
+      # Read-only. GetAuthorizationToken takes no resource, so it is on *; the
+      # token it returns reaches only what the role may read. The reads are on
+      # the repositories the client named, in the registry of the cluster's
+      # account and region, globs as written — never every repository.
+      # GetDownloadUrlForLayer reads an image's config blob, where the
+      # newest-build strategy finds its creation date: without it, that
+      # strategy skips every image, its summary line still saying errors=0
+      # (measured on EKS; docs/decisions/argocd-image-updater.md).
+      << $arns := list ->>
+      << range $m.repositories ->>
+      << $arns = append $arns (printf "arn:aws:ecr:%s:%s:repository/%s" inputs.cluster.region inputs.cluster.accountId .) ->>
+      << end ->>
+      << $tokenCalls := list "ecr:GetAuthorizationToken" ->>
+      << $token := dict "Sid" "GetTheRegistryToken" "Effect" "Allow" "Action" $tokenCalls "Resource" "*" ->>
+      << $readCalls := list "ecr:ListImages" "ecr:DescribeImages" "ecr:BatchGetImage" "ecr:GetDownloadUrlForLayer" ->>
+      << $read := dict "Sid" "ReadTheRepositoriesNamed" "Effect" "Allow" "Action" $readCalls "Resource" $arns ->>
+      apiVersion: iam.aws.m.upbound.io/v1beta1
+      kind: Role
+      metadata:
+        name: argocd-image-updater
+        namespace: argocd-image-updater
+        annotations:
+          # IAM names are account-wide and two clusters may share an account.
+          crossplane.io/external-name: << inputs.cluster.name >>-argocd-image-updater
+          fluxcd.controlplane.io/reconcile: << if $m.enabled >>enabled<< else >>disabled<< end >>
+      spec:
+        forProvider:
+          path: /socle/<< inputs.cluster.name >>/
+          << if inputs.modules.crossplane.permissions_boundary >>
+          permissionsBoundary: << inputs.modules.crossplane.permissions_boundary | quote >>
+          << end >>
+          assumeRolePolicy: |
+            {
+              "Version": "2012-10-17",
+              "Statement": [{
+                "Effect": "Allow",
+                "Principal": {"Service": "pods.eks.amazonaws.com"},
+                "Action": ["sts:AssumeRole", "sts:TagSession"]
+              }]
+            }
+          inlinePolicy:
+            - name: ecr
+              policy: << dict "Version" "2012-10-17" "Statement" (list $token $read) | toJson | quote >>
+      ---
+      apiVersion: eks.aws.m.upbound.io/v1beta1
+      kind: PodIdentityAssociation
+      metadata:
+        name: argocd-image-updater
+        namespace: argocd-image-updater
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if $m.enabled >>enabled<< else >>disabled<< end >>
+      spec:
+        forProvider:
+          # Required: the socle's ClusterProviderConfig names no region, and
+          # OpenTofu refuses repositories with an empty one.
+          region: << inputs.cluster.region >>
+          clusterName: << inputs.cluster.name >>
+          namespace: argocd-image-updater
+          serviceAccount: argocd-image-updater
+          roleArnRef:
+            name: argocd-image-updater
+      ---
+      # Healthy only once the Role and the association are Ready, so the
+      # workload step starts after them: EKS Pod Identity injects credentials at
+      # pod admission only, and a pod admitted before its association runs
+      # without them, Running, until it is recreated. A dependsOn with a
+      # readyExpr, because a managed resource not yet created carries no Ready
+      # condition at all, which the step's own health check reads as healthy.
+      apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSet
+      metadata:
+        name: argocd-image-updater-access
+        namespace: flux-system
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if $m.enabled >>enabled<< else >>disabled<< end >>
+      spec:
+        dependsOn:
+          - apiVersion: iam.aws.m.upbound.io/v1beta1
+            kind: Role
+            name: argocd-image-updater
+            namespace: argocd-image-updater
+            ready: true
+            readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
+          - apiVersion: eks.aws.m.upbound.io/v1beta1
+            kind: PodIdentityAssociation
+            name: argocd-image-updater
+            namespace: argocd-image-updater
+            ready: true
+            readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
+        resources: []
+      ---
+      # The socle's entry for the ECR registry, then the client's registries: one
+      # list, which a later values document replaces whole, so this one is
+      # complete (ARGOCD-IMAGE-UPDATER-04, -07).
+      << $host := printf "%s.dkr.ecr.%s.amazonaws.com" inputs.cluster.accountId inputs.cluster.region ->>
+      << $api := printf "https://%s" $host ->>
+      << $entry := dict "name" "ecr" "prefix" $host "api_url" $api "credentials" "ext:/scripts/ecr-login.sh" "credsexpire" "11h" ->>
+      << $registries := list $entry ->>
+      << range $m.registries ->>
+      << $registries = append $registries . ->>
+      << end ->>
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: argocd-image-updater-cloud-values
+        namespace: argocd-image-updater
+        labels:
+          reconcile.fluxcd.io/watch: Enabled
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if $m.enabled >>enabled<< else >>disabled<< end >>
+      data:
+        values.yaml: |
+          # The whole list, the ECR entry first (above).
+          config:
+            registries: << $registries | toJson >>
+          # Prints AWS:<token> for the registry entry above; the controller
+          # re-runs it every 11 hours. The aws CLI ships in the image and
+          # takes the Pod Identity credentials of the module's role.
+          authScripts:
+            enabled: true
+            scripts:
+              ecr-login.sh: |
+                #!/bin/sh
+                aws ecr get-authorization-token --region << inputs.cluster.region >> \
+                  --output text --query 'authorizationData[0].authorizationToken' | base64 -d
+      << end >>

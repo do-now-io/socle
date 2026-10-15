@@ -831,7 +831,7 @@ spec:
             selector: pkg.crossplane.io/provider=provider-aws-iam
             tail: 40
     # floci seam, second half: the association never syncs (floci 2.1.0 has
-    # no association API), so the workload's dependsOn is never met and the
+    # no association API), so the aws step's gate is never Ready and the
     # chart must never have been applied: one full minute after the Role
     # turned into IAM, still no HelmRelease. Asserted as such so that the day
     # it syncs this step fails and goes with the seam above.
@@ -856,22 +856,36 @@ spec:
               metadata:
                 name: external-dns
                 namespace: external-dns
+        # The aws step holds the module at the association: its gate is not
+        # Ready, so neither is the module, and the workload step never ran.
         - assert:
             resource:
               apiVersion: fluxcd.controlplane.io/v1
               kind: ResourceSet
               metadata:
-                name: external-dns-workload
+                name: external-dns-access
                 namespace: flux-system
               status:
                 (conditions[?type == 'Ready'] || `[]`):
                   - status: 'False'
+        # Not Ready: Unknown while the step's health check waits, False once it
+        # times out.
+        - error:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: external-dns
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
       catch:
         - describe:
             apiVersion: fluxcd.controlplane.io/v1
             kind: ResourceSet
             namespace: flux-system
-            name: external-dns-workload
+            name: external-dns-access
         - describe:
             apiVersion: eks.aws.m.upbound.io/v1beta1
             kind: PodIdentityAssociation

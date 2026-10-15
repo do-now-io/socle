@@ -6,7 +6,8 @@
 #    floci's S3 versioned, encrypted, public access blocked, with its
 #    lifecycle — read from what Crossplane reports and from S3 itself — its
 #    Role floci's IAM under /socle/<cluster>/ with the bucket policy only, and
-#    the workload is withheld while the association is not Ready. Then off:
+#    the workload step is withheld while the association is not Ready, the
+#    aws cloud step never healthy. Then off:
 #    the role goes, the bucket stays. The floci seams (providerConfigRef:
 #    floci, the association never syncing) are steps of their own, to delete
 #    the day floci serves Pod Identity.
@@ -146,8 +147,8 @@ spec:
         # A Provider is Healthy before every CRD it brings is served, and
         # an assert on a kind not served yet fails at once instead of
         # retrying (run 36869780420): the S3 CRDs Established first, then
-        # the crossplane ResourceSet Ready — what the velero ResourceSet
-        # waits for before it renders anything.
+        # the provider config Ready — what the velero ResourceSet waits for
+        # (its aws dependsOn on crossplane) before it renders anything.
         - assert:
             resource:
               apiVersion: apiextensions.k8s.io/v1
@@ -305,18 +306,6 @@ spec:
                 name: velero
                 labels:
                   pod-security.kubernetes.io/enforce: restricted
-        # The module's monitoring — rules and dashboard — applied with it,
-        # the monitoring module being on.
-        - assert:
-            resource:
-              apiVersion: kustomize.toolkit.fluxcd.io/v1
-              kind: Kustomization
-              metadata:
-                name: velero-monitoring
-                namespace: flux-system
-              status:
-                (conditions[?type == 'Ready'] || `[]`):
-                  - status: 'True'
       catch:
         - describe:
             apiVersion: fluxcd.controlplane.io/v1
@@ -600,9 +589,11 @@ spec:
             selector: pkg.crossplane.io/provider=provider-aws-iam
             tail: 40
     # floci seam, second half: the association never syncs (floci 2.1.0 has
-    # no association API), so the workload's dependsOn is never met: one full
-    # minute after the bucket and the role turned Ready, still no
-    # HelmRelease. The day it syncs this step fails and goes with the seam.
+    # no association API), so velero-access, which waits for it, is never
+    # Ready, the aws cloud step never healthy, and the workload step never
+    # applied: one full minute after the bucket and the role turned Ready,
+    # still no HelmRelease. The day it syncs this step fails and goes with
+    # the seam.
     - name: 'floci seam: the association cannot sync, so the workload is withheld'
       try:
         - assert:
@@ -629,17 +620,34 @@ spec:
               apiVersion: fluxcd.controlplane.io/v1
               kind: ResourceSet
               metadata:
-                name: velero-workload
+                name: velero-access
                 namespace: flux-system
               status:
                 (conditions[?type == 'Ready'] || `[]`):
                   - status: 'False'
+        # Not Ready: Unknown while the step's health check waits, False once it
+        # times out.
+        - error:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: velero
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
       catch:
         - describe:
             apiVersion: fluxcd.controlplane.io/v1
             kind: ResourceSet
             namespace: flux-system
-            name: velero-workload
+            name: velero
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: velero-access
     # The association's finalizer waits on an API floci does not have:
     # released by hand. Then the module off: the IAM role is deleted, the
     # namespace goes — and the bucket stays, its managed resources having no
@@ -905,6 +913,18 @@ spec:
               metadata:
                 name: node-agent
                 namespace: velero
+        # The module's monitoring — rules and dashboard — applied with the
+        # workload step, the monitoring module being on.
+        - assert:
+            resource:
+              apiVersion: kustomize.toolkit.fluxcd.io/v1
+              kind: Kustomization
+              metadata:
+                name: velero-monitoring
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
       catch:
         - describe:
             apiVersion: helm.toolkit.fluxcd.io/v2

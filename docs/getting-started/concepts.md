@@ -35,7 +35,7 @@ Operator, and your configuration. Then OpenTofu steps away.
 
 Each catalog module (ArgoCD, Gateway API, DNS, secrets, autoscaling,
 policies, backups, monitoring) is one Flux `ResourceSet` in a signed OCI
-artifact. You list only what differs from the defaults:
+artifact; what only one cloud needs, that cloud's overlay adds to it. You list only what differs from the defaults:
 
 ```hcl
 kube = {

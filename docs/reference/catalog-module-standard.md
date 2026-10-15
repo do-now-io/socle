@@ -17,6 +17,7 @@ Models: `hello` for structure and tests, `argocd` for chart values.
 | The schema entry | `local.catalog` in `opentofu/bootstrap/catalog.tf`, key `<snake_name>`, every attribute with its default, `enabled` included | `check-catalog-clouds.sh`; the `kube` validations |
 | Per-attribute rules | `kube` validations in `opentofu/bootstrap/variables.tf`, each failing case in `tests/validations.tftest.hcl` | `tofu test` |
 | The overlays | `../../catalog/<kebab-name>/resourceset.yaml` in each offering `oci/clusters/<cloud>/kustomization.yaml` | `check-catalog-clouds.sh`, both directions |
+| What a cloud adds | `oci/clusters/<cloud>/<kebab-name>/patch.yaml`, applied by that cloud's overlay to the module's `ResourceSet`: a step `cloud` inserted before `workload` behind a `test` op, steps appended after it, a `dependsOn`; no file on a cloud with nothing of its own ([SOCLE-32](../decisions/socle.md#socle-32-what-only-one-cloud-has-that-cloud-adds-to-the-module-as-steps)) | `check-catalog-clouds.sh`: applied, aimed at its module, nothing else in the folder, no `inputs.cloud` under `oci/catalog/`; `pr-static.yaml` renders each patched module |
 | Cloud binding | `<snake_name> = ["aws", …]` in `catalog_clouds`, one per line, when not on every cloud | `check-catalog-clouds.sh`; refused at plan elsewhere |
 | Monitoring, for every module with a workload | Its pods annotated `prometheus.io/scrape` on a declared port (vmagent's scrape of annotated pods), or a `VMServiceScrape` when it serves HTTPS only; `oci/catalog/<kebab-name>/monitoring/`: awesome-prometheus-alerts' file when it has one, the project's dashboard, and the socle's `rules.yaml` for what awesome-prometheus-alerts lacks; applied by a `Kustomization` `<kebab-name>-monitoring` with `retryInterval: 1m`, on only while the module and `monitoring` both are ([MONITORING-12](../decisions/monitoring.md)) | `upstream-monitoring.sh check` (copies unchanged), `check-rules.sh` (`vmalert -dryRun`), both in `pr-static.yaml`; the module's e2e asserts the `Kustomization` Ready |
 | The e2e proof | `oci/catalog/<kebab-name>/tests/e2e/chainsaw-test.yaml`, optional `values.yaml` | `check-catalog-clouds.sh`; `e2e.yaml` runs it |
@@ -30,14 +31,19 @@ Models: `hello` for structure and tests, `argocd` for chart values.
       on each object's own annotations, never in `commonMetadata`.
 - [ ] One namespace, rendered by the module, carrying the toggle.
 - [ ] Templates test values, never presence.
-- [ ] Cloud-specific values from `inputs.cloud` or an overlay patch; never a new OpenTofu input.
+- [ ] Nothing that is one cloud's under `oci/catalog/`, no `inputs.cloud` there: it goes in the cloud's
+      `patch.yaml`; never a new OpenTofu input.
+- [ ] Steps `namespace`, then `workload` (the chart, its values, its monitoring), so a cloud can insert
+      `cloud` between them.
 - [ ] The chart pinned exactly (OCI tag, or `HelmRepository` `version`), listed in [Compatibility](compatibility.md).
-- [ ] No inline `spec.values`; `valuesFrom`: `<module>-socle-values`, `<module>-client-values`, then the
-      `values_secret` Secret (`optional: true`); ConfigMaps labelled `reconcile.fluxcd.io/watch: Enabled`.
+- [ ] No inline `spec.values`; `valuesFrom`: `<module>-socle-values`, `<module>-cloud-values` (`optional: true`,
+      when a cloud has values for the chart), `<module>-client-values`, then the `values_secret` Secret
+      (`optional: true`); ConfigMaps labelled `reconcile.fluxcd.io/watch: Enabled`.
 - [ ] `values` and `values_secret` in the schema; secret-bearing paths refused at plan, each with a failing `tofu test`.
 - [ ] `resourcesTemplate` when a block appears under a condition.
-- [ ] Cloud access as Crossplane resources in this `ResourceSet`, the chart in a child `<module>-workload`
-      that `dependsOn` the role with a `readyExpr`; nothing under `opentofu/<cloud>/`.
+- [ ] Cloud access as Crossplane resources in the cloud's `cloud` step, with a `dependsOn` on `crossplane`
+      and an empty `<module>-access` `ResourceSet` that `dependsOn` the role with a `readyExpr`, so the
+      `workload` step waits for it; nothing under `opentofu/<cloud>/`.
 - [ ] CRDs that hold your objects kept when off, or the page says not
       ([CRDs when a module is off](../architecture/flux-catalog.md#crds-when-a-module-is-off)).
 - [ ] New attributes in `oci/.ci/inputs-sample.yaml`; `flux-operator build rset` renders, kubeconform `-strict` passes.
@@ -89,9 +95,9 @@ Identity, today) is a step of its own, named as such.
 - [ ] `.github/scripts/check-catalog-clouds.sh` passes.
 - [ ] Every object, the namespace included, carries the toggle.
 - [ ] The chart pinned exactly, its version in `docs/reference/compatibility.md`.
-- [ ] `valuesFrom` socle, client, Secret; the watch label on both ConfigMaps.
+- [ ] `valuesFrom` socle, cloud, client, Secret; the watch label on every ConfigMap.
 - [ ] Every refusal and validation has a failing `tofu test` case.
-- [ ] Cloud access in this `ResourceSet`, before the workload.
+- [ ] No `inputs.cloud` under `oci/catalog/`; a cloud's additions in its `patch.yaml`, its access before the workload.
 - [ ] Kept CRDs, or the page says they go.
 - [ ] `oci/.ci/inputs-sample.yaml` updated; the render kubeconforms strictly.
 - [ ] `health` and `module` tests, a `catch` on every step, an idle-release gate on off.

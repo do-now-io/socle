@@ -32,7 +32,7 @@ only on a real account.
 
 ## EXTERNAL-DNS-02: The cloud is chosen in the template, not by overlay patches
 
-**accepted** · 2026-09-24 · [`oci/catalog/external-dns/resourceset.yaml`](../../oci/catalog/external-dns/resourceset.yaml), [`oci/clusters/aws/kustomization.yaml`](../../oci/clusters/aws/kustomization.yaml)
+**superseded by [SOCLE-32](socle.md#socle-32-what-only-one-cloud-has-that-cloud-adds-to-the-module-as-steps)** · 2026-09-24 · [`oci/catalog/external-dns/resourceset.yaml`](../../oci/catalog/external-dns/resourceset.yaml), [`oci/clusters/aws/kustomization.yaml`](../../oci/clusters/aws/kustomization.yaml)
 
 **Decision.** Each cloud is one `<< if eq inputs.cloud … >>` block inside the
 socle-values document; the overlays list the module and patch nothing.

@@ -1,0 +1,29 @@
+# The external-dns module on gcp: Cloud DNS, read with the metadata
+# server's Workload Identity credentials (docs/catalog/external-dns.md).
+- op: test
+  path: /spec/steps/1/name
+  value: workload
+- op: add
+  path: /spec/steps/1
+  value:
+    name: cloud
+    resourcesTemplate: |
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: external-dns-cloud-values
+        namespace: external-dns
+        labels:
+          reconcile.fluxcd.io/watch: Enabled
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.external_dns.enabled >>enabled<< else >>disabled<< end >>
+      data:
+        values.yaml: |
+          # Cloud DNS, through the metadata server's Workload Identity
+          # credentials: the ServiceAccount's own principal, or a Google service
+          # account the client binds and names through values
+          # (serviceAccount.annotations, iam.gke.io/gcp-service-account). The
+          # project comes from the metadata server when --google-project is
+          # absent (provider/google/google.go, v0.22.0).
+          provider:
+            name: google

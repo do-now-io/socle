@@ -103,8 +103,11 @@ allows `allowed_services` and always denies `iam`, `sts` and the account
 services.
 The whole chain: [Module-owned cloud access](../architecture/module-iam.md).
 
-**Ordering**: every module that declares a role waits for the `crossplane`
-ResourceSet, Ready trivially when the module is off.
+**Ordering**: the `crossplane` ResourceSet installs the core; on aws, its
+patch ([`oci/clusters/aws/crossplane/patch.yaml`](../../oci/clusters/aws/crossplane/patch.yaml),
+[SOCLE-32](../decisions/socle.md#socle-32-what-only-one-cloud-has-that-cloud-adds-to-the-module-as-steps)) appends the providers and the
+ProviderConfig as two more steps. Every module that declares a role waits
+for `crossplane`, Ready trivially when the module is off.
 
 **Measured** on floci 2.1.0, GitHub runner, 2026-09-30: on, providers and
 ProviderConfig converged, a module role in IAM, and off again in under 4 min.
