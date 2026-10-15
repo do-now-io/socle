@@ -163,6 +163,18 @@ spec:
               status:
                 (conditions[?type == 'Available'] || `[]`):
                   - status: 'True'
+        # The module's monitoring — rules and dashboard — applied with it,
+        # the monitoring module being on.
+        - assert:
+            resource:
+              apiVersion: kustomize.toolkit.fluxcd.io/v1
+              kind: Kustomization
+              metadata:
+                name: external-dns-monitoring
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
       catch:
         - describe:
             apiVersion: helm.toolkit.fluxcd.io/v2

@@ -26,10 +26,10 @@ deposited. `socle-root` is Ready only when every module is.
 
 ```text
 kube = { external_dsn = { enabled = true } }
-→ kube: unknown module(s) external_dsn. Catalog: alerting, argocd, crossplane, external_dns, …
+→ kube: unknown module(s) external_dsn. Catalog: argocd, crossplane, external_dns, gateway_api, …
 
 kube = { argocd = { domian = "argocd.acme.example" } }
-→ kube: unknown attribute. Allowed per module: {"alerting":[…],"argocd":["admin_enabled","domain",…],…}
+→ kube: unknown attribute. Allowed per module: {"argocd":["admin_enabled","domain",…],…}
 
 kube = { hello = { replicas = "three" } }
 → kube: an attribute has the wrong type. Each value must have the type of its catalog default: …

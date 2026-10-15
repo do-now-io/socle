@@ -117,12 +117,20 @@ spec:
         << end >>
         controller:
           replicas: 1
+          # Each component's metrics Service, scraped by monitoring/scrape.yaml
+          # while the monitoring module is on: job is the Service's name,
+          # argocd-server-metrics and the like, what the project's dashboard
+          # and rules expect.
+          metrics:
+            enabled: << inputs.modules.monitoring.enabled >>
           resources:
             requests:
               cpu: 250m
               memory: 256Mi
         server:
           replicas: << if inputs.modules.argocd.ha >>2<< else >>1<< end >>
+          metrics:
+            enabled: << inputs.modules.monitoring.enabled >>
           service:
             type: ClusterIP
           resources:
@@ -131,12 +139,16 @@ spec:
               memory: 64Mi
         repoServer:
           replicas: << if inputs.modules.argocd.ha >>2<< else >>1<< end >>
+          metrics:
+            enabled: << inputs.modules.monitoring.enabled >>
           resources:
             requests:
               cpu: 100m
               memory: 128Mi
         applicationSet:
           replicas: << if inputs.modules.argocd.ha >>2<< else >>1<< end >>
+          metrics:
+            enabled: << inputs.modules.monitoring.enabled >>
           resources:
             requests:
               cpu: 50m
@@ -210,6 +222,32 @@ spec:
       upgrade:
         remediation:
           retries: 3
+    << $monitored := and inputs.modules.argocd.enabled inputs.modules.monitoring.enabled ->>
+    ---
+    # The module's monitoring — its alert rules and its dashboard, from
+    # monitoring/ in the socle artifact: VMRules and a ConfigMap Grafana's
+    # sidecar loads. Present only while both this module and the monitoring
+    # module are on: monitoring brings the VMRule CRD, and until it has the
+    # Kustomization fails and retries every minute
+    # (docs/decisions/monitoring.md, MONITORING-12).
+    apiVersion: kustomize.toolkit.fluxcd.io/v1
+    kind: Kustomization
+    metadata:
+      name: argocd-monitoring
+      namespace: flux-system
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if $monitored >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 1h
+      retryInterval: 1m
+      sourceRef:
+        kind: OCIRepository
+        name: socle
+      path: ./catalog/argocd/monitoring
+      targetNamespace: argocd
+      prune: true
+      wait: true
+      timeout: 2m
     << if and inputs.modules.argocd.domain inputs.modules.argocd.gateway inputs.gateway.shared >>
     ---
     apiVersion: fluxcd.controlplane.io/v1

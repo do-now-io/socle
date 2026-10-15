@@ -223,11 +223,23 @@ spec:
                 memory: 64Mi
               limits:
                 memory: 256Mi
-            # Scraped by the otel_gateway module, which reads these annotations.
-            podAnnotations:
-              prometheus.io/scrape: "true"
-              prometheus.io/port: "8080"
+            # The controller's, the webhook's and the cert controller's metrics
+            # Services, scraped by monitoring/scrape.yaml while the monitoring
+            # module is on: the series carry service, which the chart's
+            # dashboard filters on.
+            metrics:
+              service:
+                enabled: << inputs.modules.monitoring.enabled >>
+            # The chart's own dashboard, a ConfigMap labelled for Grafana's
+            # sidecar; only while Grafana runs to read it.
+            grafanaDashboard:
+              enabled: << and inputs.modules.monitoring.enabled inputs.modules.monitoring.grafana.enabled >>
+              sidecarLabel: grafana_dashboard
+              sidecarLabelValue: "1"
             webhook:
+              metrics:
+                service:
+                  enabled: << inputs.modules.monitoring.enabled >>
               resources:
                 requests:
                   cpu: 10m
@@ -235,6 +247,9 @@ spec:
                 limits:
                   memory: 128Mi
             certController:
+              metrics:
+                service:
+                  enabled: << inputs.modules.monitoring.enabled >>
               resources:
                 requests:
                   cpu: 10m
@@ -323,3 +338,29 @@ spec:
               service: SecretsManager
               region: << inputs.cluster.region >>
     << end >>
+    << $monitored := and inputs.modules.external_secrets.enabled inputs.modules.monitoring.enabled ->>
+    ---
+    # The module's monitoring — its alert rules and its dashboard, from
+    # monitoring/ in the socle artifact: VMRules and a ConfigMap Grafana's
+    # sidecar loads. Present only while both this module and the monitoring
+    # module are on: monitoring brings the VMRule CRD, and until it has the
+    # Kustomization fails and retries every minute
+    # (docs/decisions/monitoring.md, MONITORING-12).
+    apiVersion: kustomize.toolkit.fluxcd.io/v1
+    kind: Kustomization
+    metadata:
+      name: external-secrets-monitoring
+      namespace: flux-system
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if $monitored >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 1h
+      retryInterval: 1m
+      sourceRef:
+        kind: OCIRepository
+        name: socle
+      path: ./catalog/external-secrets/monitoring
+      targetNamespace: external-secrets
+      prune: true
+      wait: true
+      timeout: 2m

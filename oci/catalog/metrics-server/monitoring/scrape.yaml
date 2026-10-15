@@ -1,0 +1,19 @@
+# metrics-server serves its metrics on its secure port only, with a
+# self-signed certificate: out of reach of the scrape of annotated pods, which
+# speaks plain HTTP. With metrics.enabled, /metrics skips authorization; the
+# request still authenticates, as vmagent's ServiceAccount.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: metrics-server
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: metrics-server
+  endpoints:
+    - port: https
+      scheme: https
+      path: /metrics
+      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      tlsConfig:
+        insecureSkipVerify: true

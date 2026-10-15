@@ -66,6 +66,11 @@ spec:
     data:
       values.yaml: |
         replicas: << if inputs.modules.metrics_server.ha >>2<< else >>1<< end >>
+        # /metrics without authorization (TLS and authentication stay), for
+        # the monitoring module's vmagent, which scrapes it over HTTPS with
+        # its ServiceAccount's token (monitoring/scrape.yaml).
+        metrics:
+          enabled: true
         # So it can follow CoreDNS if the bootstrap nodes are tainted once
         # Karpenter provisions the workload nodes.
         tolerations:
@@ -147,3 +152,29 @@ spec:
       upgrade:
         remediation:
           retries: 3
+    << $monitored := and inputs.modules.metrics_server.enabled inputs.modules.monitoring.enabled ->>
+    ---
+    # The module's monitoring — its alert rules and its dashboard, from
+    # monitoring/ in the socle artifact: VMRules and a ConfigMap Grafana's
+    # sidecar loads. Present only while both this module and the monitoring
+    # module are on: monitoring brings the VMRule CRD, and until it has the
+    # Kustomization fails and retries every minute
+    # (docs/decisions/monitoring.md, MONITORING-12).
+    apiVersion: kustomize.toolkit.fluxcd.io/v1
+    kind: Kustomization
+    metadata:
+      name: metrics-server-monitoring
+      namespace: flux-system
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if $monitored >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 1h
+      retryInterval: 1m
+      sourceRef:
+        kind: OCIRepository
+        name: socle
+      path: ./catalog/metrics-server/monitoring
+      targetNamespace: metrics-server
+      prune: true
+      wait: true
+      timeout: 2m

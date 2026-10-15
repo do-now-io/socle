@@ -305,6 +305,18 @@ spec:
                 name: velero
                 labels:
                   pod-security.kubernetes.io/enforce: restricted
+        # The module's monitoring — rules and dashboard — applied with it,
+        # the monitoring module being on.
+        - assert:
+            resource:
+              apiVersion: kustomize.toolkit.fluxcd.io/v1
+              kind: Kustomization
+              metadata:
+                name: velero-monitoring
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
       catch:
         - describe:
             apiVersion: fluxcd.controlplane.io/v1

@@ -1,0 +1,33 @@
+# crossplane's own alert rules: what awesome-prometheus-alerts does not
+# cover for it (it has no Crossplane section), on the metrics it exposes —
+# names read on a live cluster or in its source at the pinned version. Names
+# from crossplane-runtime, read on socle-dev's providers.
+# Checked in CI with vmalert -dryRun (.github/scripts/check-rules.sh).
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: socle-crossplane
+spec:
+  groups:
+    - name: socle-crossplane
+      rules:
+        # A managed resource that exists but is not Ready: the cloud object
+        # it stands for is missing or wrong — a module's role, a bucket.
+        - alert: CrossplaneManagedResourcesNotReady
+          expr: >-
+            sum by (gvk) (crossplane_managed_resource_exists - crossplane_managed_resource_ready) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              {{ $value }} {{ $labels.gvk }} managed resource(s) are not Ready.
+        - alert: CrossplaneManagedResourcesNotSynced
+          expr: >-
+            sum by (gvk) (crossplane_managed_resource_exists - crossplane_managed_resource_synced) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              {{ $value }} {{ $labels.gvk }} managed resource(s) fail to sync with the cloud.

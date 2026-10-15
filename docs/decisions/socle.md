@@ -53,7 +53,7 @@ node group for it. Not proven on a real EKS or AKS: the e2e roots set
 
 ## SOCLE-03: One in-cluster monitoring stack on every cloud
 
-**accepted** · 2026-09-28 · [`opentofu/bootstrap/catalog.tf`](../../opentofu/bootstrap/catalog.tf), [`oci/catalog/victoria-metrics/`](../../oci/catalog/victoria-metrics/), [`oci/catalog/otel-agent/`](../../oci/catalog/otel-agent/), [`oci/catalog/grafana/`](../../oci/catalog/grafana/)
+**accepted** · 2026-09-28 · [`opentofu/bootstrap/catalog.tf`](../../opentofu/bootstrap/catalog.tf), [`oci/catalog/monitoring/`](../../oci/catalog/monitoring/), [`oci/catalog/otel-agent/`](../../oci/catalog/otel-agent/)
 
 **Decision.** The same templates on every cloud: OpenTelemetry collects,
 VictoriaMetrics, VictoriaLogs and VictoriaTraces store on PVCs, Grafana reads.
@@ -436,7 +436,7 @@ measured 200 on 2026-10-01); the e2e pulls it with no secret.
 
 ## SOCLE-27: One module per chart release, two collector modules
 
-**accepted** · 2026-09-28 · [`opentofu/bootstrap/catalog.tf`](../../opentofu/bootstrap/catalog.tf)
+**superseded by [MONITORING-01](monitoring.md#monitoring-01-one-stack-chart-one-module)** · 2026-09-28 · [`opentofu/bootstrap/catalog.tf`](../../opentofu/bootstrap/catalog.tf)
 
 **Decision.** Six modules, one chart release and namespace each: `otel_agent`,
 `otel_gateway`, `victoria_metrics`, `victoria_logs`, `victoria_traces`, `grafana`.
@@ -451,7 +451,7 @@ alone; a disabled module removes only its own namespace.
 
 ## SOCLE-28: OTLP everywhere, the otelcol-k8s collector, no remote-write
 
-**accepted** · 2026-09-28 · [`oci/catalog/otel-agent/resourceset.yaml`](../../oci/catalog/otel-agent/resourceset.yaml), [`oci/catalog/otel-gateway/resourceset.yaml`](../../oci/catalog/otel-gateway/resourceset.yaml)
+**superseded by [MONITORING-02](monitoring.md#monitoring-02-vmagent-is-the-one-place-metrics-are-scraped)** · 2026-09-28 · [`oci/catalog/otel-agent/resourceset.yaml`](../../oci/catalog/otel-agent/resourceset.yaml), [`oci/catalog/otel-gateway/resourceset.yaml`](../../oci/catalog/otel-gateway/resourceset.yaml)
 
 **Decision.** Every signal crosses as OTLP over HTTP, from the plain
 `opentelemetry-collector` chart (`otelcol-k8s`) in two releases, to
@@ -468,7 +468,7 @@ later module.
 
 ## SOCLE-29: No dependsOn between the monitoring modules
 
-**accepted** · 2026-09-28 · [`oci/catalog/otel-agent/resourceset.yaml`](../../oci/catalog/otel-agent/resourceset.yaml), [`oci/catalog/grafana/resourceset.yaml`](../../oci/catalog/grafana/resourceset.yaml)
+**superseded by [MONITORING-01](monitoring.md#monitoring-01-one-stack-chart-one-module)** · 2026-09-28 · [`oci/catalog/otel-agent/resourceset.yaml`](../../oci/catalog/otel-agent/resourceset.yaml)
 
 **Decision.** No `dependsOn` between the six; a collector exporter or Grafana
 datasource exists only when its backend is `enabled`.
@@ -498,7 +498,7 @@ claim stays `Pending` there.
 
 ## SOCLE-31: The socle's dashboards, on OpenTelemetry names
 
-**accepted** · 2026-09-29 · [`oci/catalog/otel-agent/dashboards/`](../../oci/catalog/otel-agent/dashboards/), [`oci/catalog/otel-gateway/dashboards/`](../../oci/catalog/otel-gateway/dashboards/)
+**superseded by [MONITORING-02](monitoring.md#monitoring-02-vmagent-is-the-one-place-metrics-are-scraped)** · 2026-09-29 · `oci/catalog/otel-agent/dashboards/`, `oci/catalog/otel-gateway/dashboards/` (removed)
 
 **Decision.** The socle writes its dashboards on the OpenTelemetry names
 VictoriaMetrics stores, each shipped by the module whose metrics it shows. No

@@ -718,81 +718,271 @@ run "argocd_image_updater_refuses_an_invalid_values_secret_name" {
   expect_failures = [var.kube]
 }
 
-run "kube_refuses_victoria_metrics_enabled_that_is_not_a_bool" {
+run "kube_refuses_monitoring_enabled_that_is_not_a_bool" {
   command = plan
-  variables { kube = { victoria_metrics = { enabled = "true" } } }
+  variables { kube = { monitoring = { enabled = "true" } } }
   expect_failures = [var.kube]
 }
 
-run "kube_refuses_victoria_metrics_retention_that_is_not_a_string" {
+# A nested block is checked as a module is: a misspelt key, a wrong type.
+run "kube_refuses_monitoring_an_unknown_key_in_a_nested_block" {
   command = plan
-  variables { kube = { victoria_metrics = { retention = 15 } } }
+  variables { kube = { monitoring = { logs = { retention_days = 7 } } } }
   expect_failures = [var.kube]
 }
 
-run "kube_refuses_victoria_metrics_retention_spelt_out" {
+run "kube_refuses_monitoring_a_nested_block_that_is_not_an_object" {
   command = plan
-  variables { kube = { victoria_metrics = { retention = "15days" } } }
+  variables { kube = { monitoring = { logs = true } } }
   expect_failures = [var.kube]
 }
 
-run "kube_refuses_victoria_metrics_retention_under_a_day" {
+run "kube_refuses_monitoring_logs_enabled_that_is_not_a_bool" {
   command = plan
-  variables { kube = { victoria_metrics = { retention = "12h" } } }
+  variables { kube = { monitoring = { logs = { enabled = "false" } } } }
   expect_failures = [var.kube]
 }
 
-run "kube_refuses_victoria_metrics_retention_of_zero" {
+run "kube_refuses_monitoring_metrics_retention_that_is_not_a_string" {
   command = plan
-  variables { kube = { victoria_metrics = { retention = "0d" } } }
+  variables { kube = { monitoring = { metrics = { retention = 15 } } } }
   expect_failures = [var.kube]
 }
 
-run "kube_refuses_victoria_metrics_storage_size_that_is_not_a_string" {
+run "kube_refuses_monitoring_metrics_retention_spelt_out" {
   command = plan
-  variables { kube = { victoria_metrics = { storage_size = 20 } } }
+  variables { kube = { monitoring = { metrics = { retention = "15days" } } } }
   expect_failures = [var.kube]
 }
 
-run "kube_refuses_victoria_metrics_storage_size_in_decimal_units" {
+run "kube_refuses_monitoring_metrics_retention_under_a_day" {
   command = plan
-  variables { kube = { victoria_metrics = { storage_size = "20GB" } } }
+  variables { kube = { monitoring = { metrics = { retention = "12h" } } } }
   expect_failures = [var.kube]
 }
 
-run "kube_refuses_victoria_metrics_values_that_are_not_an_object" {
+run "kube_refuses_monitoring_logs_retention_of_zero" {
   command = plan
-  variables { kube = { victoria_metrics = { values = "server: {}" } } }
+  variables { kube = { monitoring = { logs = { retention = "0d" } } } }
   expect_failures = [var.kube]
 }
 
-run "kube_refuses_victoria_metrics_values_carrying_an_auth_password_flag" {
+run "kube_refuses_monitoring_traces_retention_spelt_out" {
   command = plan
-  variables { kube = { victoria_metrics = { values = { server = { extraArgs = { "httpAuth.password" = "x" } } } } } }
+  variables { kube = { monitoring = { traces = { retention = "a week" } } } }
   expect_failures = [var.kube]
 }
 
-run "kube_refuses_victoria_metrics_values_carrying_an_auth_key_flag" {
+run "kube_refuses_monitoring_metrics_storage_size_in_decimal_units" {
   command = plan
-  variables { kube = { victoria_metrics = { values = { server = { extraArgs = { deleteAuthKey = "x" } } } } } }
+  variables { kube = { monitoring = { metrics = { storage_size = "20GB" } } } }
   expect_failures = [var.kube]
 }
 
-run "kube_refuses_victoria_metrics_values_carrying_a_literal_credential_env" {
+run "kube_refuses_monitoring_logs_storage_size_that_is_not_a_string" {
   command = plan
-  variables { kube = { victoria_metrics = { values = { server = { env = [{ name = "VM_httpAuth_password", value = "x" }] } } } } }
+  variables { kube = { monitoring = { logs = { storage_size = 20 } } } }
   expect_failures = [var.kube]
 }
 
-run "kube_refuses_victoria_metrics_values_carrying_a_secret_among_extra_objects" {
+run "kube_refuses_monitoring_traces_storage_size_without_a_unit" {
   command = plan
-  variables { kube = { victoria_metrics = { values = { extraObjects = [{ apiVersion = "v1", kind = "Secret", metadata = { name = "vm-auth" } }] } } } }
+  variables { kube = { monitoring = { traces = { storage_size = "10" } } } }
   expect_failures = [var.kube]
 }
 
-run "kube_refuses_victoria_metrics_values_secret_that_is_not_a_secret_name" {
+run "kube_refuses_monitoring_grafana_domain_with_a_scheme" {
   command = plan
-  variables { kube = { victoria_metrics = { values_secret = "VM_Values" } } }
+  variables { kube = { monitoring = { grafana = { domain = "https://grafana.acme.example" } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_monitoring_grafana_domain_that_is_a_bare_label" {
+  command = plan
+  variables { kube = { monitoring = { grafana = { domain = "grafana" } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_monitoring_grafana_gateway_that_is_not_one_of_ours" {
+  command = plan
+  variables { kube = { monitoring = { grafana = { gateway = "internal" } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_monitoring_alerting_watchdog_that_is_not_a_bool" {
+  command = plan
+  variables { kube = { monitoring = { alerting = { watchdog = "yes" } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_monitoring_alerting_receivers_that_are_not_a_list" {
+  command = plan
+  variables { kube = { monitoring = { alerting = { receivers = { team = {} } } } } }
+  expect_failures = [var.kube]
+}
+
+# On, alerts must go somewhere the client named.
+run "kube_refuses_monitoring_alerting_on_without_a_receiver" {
+  command = plan
+  variables { kube = { monitoring = { alerting = { enabled = true, receivers_secret = "alerting-keys" } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_monitoring_alerting_a_route_to_a_receiver_that_does_not_exist" {
+  command = plan
+  variables { kube = { monitoring = { alerting = { enabled = true, receivers_secret = "alerting-keys", receivers = [{ name = "team", webhook_configs = [{ url_file = "/etc/alertmanager/secrets/team-url" }] }], route = { receiver = "on-call" } } } } }
+  expect_failures = [var.kube]
+}
+
+# null is the socle's receiver, the one that drops info alerts.
+run "kube_refuses_monitoring_alerting_a_receiver_named_null" {
+  command = plan
+  variables { kube = { monitoring = { alerting = { enabled = true, receivers_secret = "alerting-keys", receivers = [{ name = "null" }], route = { receiver = "null" } } } } }
+  expect_failures = [var.kube]
+}
+
+# Alertmanager refuses its whole configuration over a route to a receiver it does not have.
+run "kube_refuses_monitoring_alerting_a_sub_route_to_an_unknown_receiver" {
+  command = plan
+  variables { kube = { monitoring = { alerting = { enabled = true, receivers_secret = "alerting-keys", receivers = [{ name = "team", webhook_configs = [{ url_file = "/etc/alertmanager/secrets/team-url" }] }], route = { receiver = "team", routes = [{ receiver = "on-call", matchers = ["severity=\"critical\""] }] } } } } }
+  expect_failures = [var.kube]
+}
+
+# The watchdog's URL is a key: it is read from receivers_secret, which must be named.
+run "kube_refuses_monitoring_alerting_on_without_receivers_secret_for_the_watchdog" {
+  command = plan
+  variables { kube = { monitoring = { alerting = { enabled = true, receivers = [{ name = "team", webhook_configs = [{ url_file = "/etc/alertmanager/secrets/team-url" }] }], route = { receiver = "team" } } } } }
+  expect_failures = [var.kube]
+}
+
+# A Slack webhook URL is a key: whoever holds it posts in the channel.
+run "kube_refuses_monitoring_alerting_a_slack_api_url_in_clear" {
+  command = plan
+  variables { kube = { monitoring = { alerting = { receivers = [{ name = "team", slack_configs = [{ api_url = "https://hooks.slack.com/services/T0/B0/x" }] }] } } } }
+  expect_failures = [var.kube]
+}
+
+# Receivers of different kinds are a tuple, not a list: the key in clear in
+# the second one must still be found.
+run "kube_refuses_monitoring_alerting_a_key_in_clear_beside_a_receiver_of_another_kind" {
+  command = plan
+  variables {
+    kube = {
+      monitoring = {
+        alerting = {
+          receivers = [
+            { name = "team", slack_configs = [{ api_url_file = "/etc/alertmanager/secrets/slack-url", channel = "#alerts" }] },
+            { name = "on-call", pagerduty_configs = [{ routing_key = "R0123456789" }] },
+          ]
+        }
+      }
+    }
+  }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_monitoring_alerting_an_http_config_password_in_clear" {
+  command = plan
+  variables { kube = { monitoring = { alerting = { receivers = [{ name = "team", webhook_configs = [{ url_file = "/x", http_config = { basic_auth = { username = "a", password = "b" } } }] }] } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_monitoring_alerting_receivers_secret_that_is_not_a_secret_name" {
+  command = plan
+  variables { kube = { monitoring = { alerting = { receivers_secret = "Alerting_Keys" } } } }
+  expect_failures = [var.kube]
+}
+
+# Rendered from receivers, route and the watchdog; values would replace it.
+run "kube_refuses_monitoring_alertmanager_config_in_values" {
+  command = plan
+  variables { kube = { monitoring = { values = { alertmanager = { config = { route = { receiver = "x" } } } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_monitoring_an_alertmanager_config_secret_in_values" {
+  command = plan
+  variables { kube = { monitoring = { values = { alertmanager = { spec = { configSecret = "mine" } } } } } }
+  expect_failures = [var.kube]
+}
+
+# Pinned to the tags the socle tests.
+run "kube_refuses_monitoring_rule_sources_in_values" {
+  command = plan
+  variables { kube = { monitoring = { values = { defaultRules = { sources = { kubernetes = { url = "https://example.com/rules.yaml" } } } } } } }
+  expect_failures = [var.kube]
+}
+
+# What runs is the module's attributes, not a switch in values behind them.
+run "kube_refuses_monitoring_a_part_switched_off_in_values" {
+  command = plan
+  variables { kube = { monitoring = { values = { vmalert = { enabled = false } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_monitoring_values_that_are_not_an_object" {
+  command = plan
+  variables { kube = { monitoring = { values = "vmsingle: {}" } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_monitoring_values_carrying_an_auth_password_flag" {
+  command = plan
+  variables { kube = { monitoring = { values = { vmsingle = { spec = { extraArgs = { "httpAuth.password" = "x" } } } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_monitoring_values_carrying_an_auth_key_flag" {
+  command = plan
+  variables { kube = { monitoring = { values = { vlsingle = { spec = { extraArgs = { deleteAuthKey = "x" } } } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_monitoring_values_carrying_a_literal_credential_env" {
+  command = plan
+  variables { kube = { monitoring = { values = { vmagent = { spec = { extraEnvs = [{ name = "VM_httpAuth_password", value = "x" }] } } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_monitoring_values_carrying_a_secret_among_extra_objects" {
+  command = plan
+  variables { kube = { monitoring = { values = { extraObjects = [{ apiVersion = "v1", kind = "Secret", metadata = { name = "vm-auth" } }] } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_monitoring_values_carrying_grafana_admin_password" {
+  command = plan
+  variables { kube = { monitoring = { values = { grafana = { adminPassword = "x" } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_monitoring_values_carrying_grafana_secret_key" {
+  command = plan
+  variables { kube = { monitoring = { values = { grafana = { "grafana.ini" = { security = { secret_key = "x" } } } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_monitoring_values_carrying_an_oauth_client_secret" {
+  command = plan
+  variables { kube = { monitoring = { values = { grafana = { "grafana.ini" = { "auth.generic_oauth" = { client_secret = "x" } } } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_monitoring_values_carrying_a_grafana_credential_env" {
+  command = plan
+  variables { kube = { monitoring = { values = { grafana = { env = { GF_SMTP_PASSWORD = "x" } } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_monitoring_values_carrying_a_datasource_password" {
+  command = plan
+  variables { kube = { monitoring = { values = { defaultDatasources = { extra = [{ name = "x", basicAuthPassword = "y" }] } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_monitoring_values_secret_that_is_not_a_secret_name" {
+  command = plan
+  variables { kube = { monitoring = { values_secret = "Monitoring_Values" } } }
   expect_failures = [var.kube]
 }
 
@@ -919,136 +1109,6 @@ run "kube_refuses_otel_gateway_values_secret_that_is_not_a_secret_name" {
   variables { kube = { otel_gateway = { values_secret = "gateway values" } } }
   expect_failures = [var.kube]
 }
-
-run "kube_refuses_grafana_enabled_that_is_not_a_bool" {
-  command = plan
-  variables { kube = { grafana = { enabled = "on" } } }
-  expect_failures = [var.kube]
-}
-
-run "kube_refuses_grafana_domain_with_a_scheme" {
-  command = plan
-  variables { kube = { grafana = { domain = "https://grafana.acme.example" } } }
-  expect_failures = [var.kube]
-}
-
-run "kube_refuses_grafana_domain_that_is_a_bare_label" {
-  command = plan
-  variables { kube = { grafana = { domain = "grafana" } } }
-  expect_failures = [var.kube]
-}
-
-run "kube_refuses_grafana_values_carrying_the_admin_password" {
-  command = plan
-  variables { kube = { grafana = { values = { adminPassword = "hunter2" } } } }
-  expect_failures = [var.kube]
-}
-
-run "kube_refuses_grafana_values_carrying_the_secret_key" {
-  command = plan
-  variables { kube = { grafana = { values = { "grafana.ini" = { security = { secret_key = "x" } } } } } }
-  expect_failures = [var.kube]
-}
-
-run "kube_refuses_grafana_values_carrying_an_oauth_client_secret" {
-  command = plan
-  variables { kube = { grafana = { values = { "grafana.ini" = { "auth.generic_oauth" = { enabled = true, client_id = "id", client_secret = "s3cr3t" } } } } } }
-  expect_failures = [var.kube]
-}
-
-run "kube_refuses_grafana_values_carrying_a_literal_datasource_secret" {
-  command = plan
-  variables {
-    kube = { grafana = { values = { datasources = { "extra.yaml" = { apiVersion = 1, datasources = [{ name = "pg", type = "postgres", secureJsonData = { password = "hunter2" } }] } } } } }
-  }
-  expect_failures = [var.kube]
-}
-
-run "kube_refuses_grafana_values_carrying_a_credential_env" {
-  command = plan
-  variables { kube = { grafana = { values = { env = { GF_SECURITY_ADMIN_PASSWORD = "hunter2" } } } } }
-  expect_failures = [var.kube]
-}
-
-run "kube_refuses_grafana_values_carrying_a_secret_among_extra_objects" {
-  command = plan
-  variables { kube = { grafana = { values = { extraObjects = [{ apiVersion = "v1", kind = "Secret", metadata = { name = "x" } }] } } } }
-  expect_failures = [var.kube]
-}
-
-run "kube_refuses_grafana_values_secret_that_is_not_a_secret_name" {
-  command = plan
-  variables { kube = { grafana = { values_secret = "Grafana_Values" } } }
-  expect_failures = [var.kube]
-}
-
-run "kube_refuses_otel_agent_logs_that_is_not_a_bool" {
-  command = plan
-  variables { kube = { otel_agent = { logs = "yes" } } }
-  expect_failures = [var.kube]
-}
-
-run "kube_refuses_victoria_logs_retention_under_a_day" {
-  command = plan
-  variables { kube = { victoria_logs = { retention = "6h" } } }
-  expect_failures = [var.kube]
-}
-
-run "kube_refuses_victoria_logs_retention_that_is_not_a_string" {
-  command = plan
-  variables { kube = { victoria_logs = { retention = 7 } } }
-  expect_failures = [var.kube]
-}
-
-run "kube_refuses_victoria_logs_storage_size_in_decimal_units" {
-  command = plan
-  variables { kube = { victoria_logs = { storage_size = "20G" } } }
-  expect_failures = [var.kube]
-}
-
-run "kube_refuses_victoria_logs_values_carrying_an_auth_password_flag" {
-  command = plan
-  variables { kube = { victoria_logs = { values = { server = { extraArgs = { "httpAuth.password" = "x" } } } } } }
-  expect_failures = [var.kube]
-}
-
-run "kube_refuses_victoria_logs_values_secret_that_is_not_a_secret_name" {
-  command = plan
-  variables { kube = { victoria_logs = { values_secret = "VL_Values" } } }
-  expect_failures = [var.kube]
-}
-
-run "kube_refuses_victoria_traces_enabled_that_is_not_a_bool" {
-  command = plan
-  variables { kube = { victoria_traces = { enabled = 1 } } }
-  expect_failures = [var.kube]
-}
-
-run "kube_refuses_victoria_traces_retention_spelt_out" {
-  command = plan
-  variables { kube = { victoria_traces = { retention = "one week" } } }
-  expect_failures = [var.kube]
-}
-
-run "kube_refuses_victoria_traces_storage_size_without_a_unit" {
-  command = plan
-  variables { kube = { victoria_traces = { storage_size = "10" } } }
-  expect_failures = [var.kube]
-}
-
-run "kube_refuses_victoria_traces_values_carrying_a_literal_credential_env" {
-  command = plan
-  variables { kube = { victoria_traces = { values = { server = { env = [{ name = "VM_httpAuth_password", value = "x" }] } } } } }
-  expect_failures = [var.kube]
-}
-
-run "kube_refuses_victoria_traces_values_secret_that_is_not_a_secret_name" {
-  command = plan
-  variables { kube = { victoria_traces = { values_secret = "VT_Values" } } }
-  expect_failures = [var.kube]
-}
-
-# --- keda — docs/catalog/keda.md -------------------------------------------
 
 run "keda_refuses_a_service_it_cannot_scope" {
   command = plan
@@ -1481,129 +1541,13 @@ run "kube_refuses_metrics_server_on_scaleway" {
   expect_failures = [var.kube]
 }
 
-run "kube_refuses_alerting_watchdog_that_is_not_a_bool" {
-  command = plan
-  variables { kube = { alerting = { watchdog = "yes" } } }
-  expect_failures = [var.kube]
-}
-
-run "kube_refuses_alerting_receivers_that_are_not_a_list" {
-  command = plan
-  variables { kube = { alerting = { receivers = { team = {} } } } }
-  expect_failures = [var.kube]
-}
-
 # vmalert evaluates every rule against VictoriaMetrics: without it, nothing can fire.
-run "kube_refuses_alerting_without_victoria_metrics" {
-  command = plan
-  variables { kube = { alerting = { enabled = true, receivers_secret = "alerting-keys", receivers = [{ name = "team", webhook_configs = [{ url_file = "/etc/alertmanager/secrets/team-url" }] }], route = { receiver = "team" } }, victoria_metrics = { enabled = false } } }
-  expect_failures = [var.kube]
-}
-
 # On, alerts must go somewhere the client named.
-run "kube_refuses_alerting_on_without_a_receiver" {
-  command = plan
-  variables { kube = { alerting = { enabled = true, receivers_secret = "alerting-keys" } } }
-  expect_failures = [var.kube]
-}
-
-run "kube_refuses_alerting_a_route_to_a_receiver_that_does_not_exist" {
-  command = plan
-  variables { kube = { alerting = { enabled = true, receivers_secret = "alerting-keys", receivers = [{ name = "team", webhook_configs = [{ url_file = "/etc/alertmanager/secrets/team-url" }] }], route = { receiver = "on-call" } } } }
-  expect_failures = [var.kube]
-}
-
 # The chart's default receiver drops every alert.
-run "kube_refuses_alerting_a_receiver_named_devnull" {
-  command = plan
-  variables { kube = { alerting = { enabled = true, receivers_secret = "alerting-keys", receivers = [{ name = "devnull" }], route = { receiver = "devnull" } } } }
-  expect_failures = [var.kube]
-}
-
 # Alertmanager refuses its whole configuration over a route to a receiver it does not have.
-run "kube_refuses_alerting_a_sub_route_to_an_unknown_receiver" {
-  command = plan
-  variables { kube = { alerting = { enabled = true, receivers_secret = "alerting-keys", receivers = [{ name = "team", webhook_configs = [{ url_file = "/etc/alertmanager/secrets/team-url" }] }], route = { receiver = "team", routes = [{ receiver = "on-call", matchers = ["severity=\"critical\""] }] } } } }
-  expect_failures = [var.kube]
-}
-
 # The watchdog's URL is a key: it is read from receivers_secret, which must be named.
-run "kube_refuses_alerting_on_without_receivers_secret_for_the_watchdog" {
-  command = plan
-  variables { kube = { alerting = { enabled = true, receivers = [{ name = "team", webhook_configs = [{ url_file = "/etc/alertmanager/secrets/team-url" }] }], route = { receiver = "team" } } } }
-  expect_failures = [var.kube]
-}
-
 # A Slack webhook URL is a key: whoever holds it posts in the channel.
-run "kube_refuses_alerting_a_slack_api_url_in_clear" {
-  command = plan
-  variables { kube = { alerting = { receivers = [{ name = "team", slack_configs = [{ api_url = "https://hooks.slack.com/services/T0/B0/x" }] }] } } }
-  expect_failures = [var.kube]
-}
-
 # Receivers of different kinds are a tuple, not a list: the key in clear in
 # the second one must still be found.
-run "kube_refuses_alerting_a_key_in_clear_beside_a_receiver_of_another_kind" {
-  command = plan
-  variables {
-    kube = {
-      alerting = {
-        receivers = [
-          { name = "team", slack_configs = [{ api_url_file = "/etc/alertmanager/secrets/slack-url", channel = "#alerts" }] },
-          { name = "on-call", pagerduty_configs = [{ routing_key = "R0123456789" }] },
-        ]
-      }
-    }
-  }
-  expect_failures = [var.kube]
-}
-
-run "kube_refuses_alerting_an_http_config_password_in_clear" {
-  command = plan
-  variables { kube = { alerting = { receivers = [{ name = "team", webhook_configs = [{ url_file = "/x", http_config = { basic_auth = { username = "a", password = "b" } } }] }] } } }
-  expect_failures = [var.kube]
-}
-
 # v1 ships the socle's rules only, checked in CI.
-run "kube_refuses_alerting_rules_in_values" {
-  command = plan
-  variables { kube = { alerting = { values = { server = { config = { alerts = { groups = [{ name = "mine", rules = [] }] } } } } } } }
-  expect_failures = [var.kube]
-}
-
-run "kube_refuses_alerting_a_rule_path_in_values" {
-  command = plan
-  variables { kube = { alerting = { values = { server = { extraArgs = { rule = ["/etc/mine/*.yaml"] } } } } } }
-  expect_failures = [var.kube]
-}
-
 # Rendered from receivers, route and the watchdog; values would replace its lists.
-run "kube_refuses_alerting_alertmanager_config_in_values" {
-  command = plan
-  variables { kube = { alerting = { values = { alertmanager = { config = { route = { receiver = "x" } } } } } } }
-  expect_failures = [var.kube]
-}
-
-run "kube_refuses_alerting_alertmanager_turned_off" {
-  command = plan
-  variables { kube = { alerting = { values = { alertmanager = { enabled = false } } } } }
-  expect_failures = [var.kube]
-}
-
-run "kube_refuses_alerting_a_datasource_password_in_values" {
-  command = plan
-  variables { kube = { alerting = { values = { server = { datasource = { basicAuth = { password = "x" } } } } } } }
-  expect_failures = [var.kube]
-}
-
-run "kube_refuses_alerting_receivers_secret_that_is_not_a_secret_name" {
-  command = plan
-  variables { kube = { alerting = { receivers_secret = "Alerting_Keys" } } }
-  expect_failures = [var.kube]
-}
-
-run "kube_refuses_alerting_values_secret_that_is_not_a_secret_name" {
-  command = plan
-  variables { kube = { alerting = { values_secret = "Alerting_Values" } } }
-  expect_failures = [var.kube]
-}

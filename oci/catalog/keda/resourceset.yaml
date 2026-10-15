@@ -229,12 +229,27 @@ spec:
             webhooks:
               enabled: true
               failurePolicy: Ignore
+            # Metrics for the monitoring module's vmagent, over plain HTTP on
+            # 8080: the operator (scalers and ScaledObjects), the metrics
+            # adapter (which annotates its own pod) and the webhooks.
+            prometheus:
+              operator:
+                enabled: true
+              metricServer:
+                enabled: true
+              webhooks:
+                enabled: true
             podAnnotations:
               keda:
                 # The services the operator's role may read, so that a change
                 # rolls the operator: EKS Pod Identity hands a pod its
                 # credentials at admission only. Empty when it has no role.
                 socle.do-now.io/cloud-access: << inputs.modules.keda.services | sortAlpha | join "," | quote >>
+                prometheus.io/scrape: "true"
+                prometheus.io/port: "8080"
+              webhooks:
+                prometheus.io/scrape: "true"
+                prometheus.io/port: "8080"
             # Requests sized for an idle KEDA; the chart's limits (1 CPU, 1000Mi
             # each) are kept as a ceiling.
             resources:
@@ -304,3 +319,29 @@ spec:
               valuesKey: values.yaml
               optional: true
             << end >>
+    << $monitored := and inputs.modules.keda.enabled inputs.modules.monitoring.enabled ->>
+    ---
+    # The module's monitoring — its alert rules and its dashboard, from
+    # monitoring/ in the socle artifact: VMRules and a ConfigMap Grafana's
+    # sidecar loads. Present only while both this module and the monitoring
+    # module are on: monitoring brings the VMRule CRD, and until it has the
+    # Kustomization fails and retries every minute
+    # (docs/decisions/monitoring.md, MONITORING-12).
+    apiVersion: kustomize.toolkit.fluxcd.io/v1
+    kind: Kustomization
+    metadata:
+      name: keda-monitoring
+      namespace: flux-system
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if $monitored >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 1h
+      retryInterval: 1m
+      sourceRef:
+        kind: OCIRepository
+        name: socle
+      path: ./catalog/keda/monitoring
+      targetNamespace: keda
+      prune: true
+      wait: true
+      timeout: 2m

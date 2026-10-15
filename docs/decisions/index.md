@@ -37,13 +37,11 @@ section gives its **status**, **date** and implementing code, then the
 
 [argocd](argocd.md) · [crossplane](crossplane.md) ·
 [external-dns](external-dns.md) · [external-secrets](external-secrets.md) ·
-[gateway-api](gateway-api.md) · [grafana](grafana.md) ·
-[keda](keda.md) · [kyverno](kyverno.md) ·
-[kyverno-policies](kyverno-policies.md) · [otel-agent](otel-agent.md) ·
-[otel-gateway](otel-gateway.md) · [reloader](reloader.md) ·
-[velero](velero.md) · [victoria-logs](victoria-logs.md) ·
-[victoria-metrics](victoria-metrics.md) ·
-[victoria-traces](victoria-traces.md)
+[gateway-api](gateway-api.md) · [keda](keda.md) ·
+[kyverno](kyverno.md) · [kyverno-policies](kyverno-policies.md) ·
+[metrics-server](metrics-server.md) · [monitoring](monitoring.md) ·
+[otel-agent](otel-agent.md) · [otel-gateway](otel-gateway.md) ·
+[reloader](reloader.md) · [velero](velero.md)
 
 ## Status, and how a decision changes
 

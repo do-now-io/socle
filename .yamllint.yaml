@@ -11,6 +11,10 @@ ignore:
   # ... }}) that is not a YAML node. They are checked by rendering them —
   # helm template + kubeconform in pr-static.yaml. Chart.yaml stays linted.
   - opentofu/*/manifests/templates/
+  # Upstream rules and dashboards, copied as they are: their lines are the
+  # upstream's, and .github/scripts/upstream-monitoring.sh checks they stay so.
+  - oci/catalog/*/monitoring/awesome-prometheus-alerts.yaml
+  - oci/catalog/*/monitoring/dashboard-*.yaml
   # The same for the StorageClass chart; tofu test checks its values.
   - opentofu/bootstrap/storage-class/templates/
 

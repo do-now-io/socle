@@ -59,18 +59,53 @@
         config:
           log.level: debug
       values_secret: argocd-image-updater-values
-    victoria_metrics:
+    monitoring:
       enabled: true
-      retention: 15d
-      storage_size: 20Gi
+      metrics:
+        retention: 15d
+        storage_size: 20Gi
+      logs:
+        enabled: true
+        retention: 7d
+        storage_size: 20Gi
+      traces:
+        enabled: true
+        retention: 7d
+        storage_size: 10Gi
+      grafana:
+        enabled: true
+        domain: grafana.example.com
+        gateway: public
+      alerting:
+        enabled: true
+        watchdog: true
+        receivers:
+          - name: team
+            slack_configs:
+              - api_url_file: /etc/alertmanager/secrets/slack-url
+                channel: "#alerts"
+          - name: on-call
+            pagerduty_configs:
+              - routing_key_file: /etc/alertmanager/secrets/pagerduty-key
+        route:
+          receiver: team
+          group_by: [alertname, namespace]
+          routes:
+            - receiver: on-call
+              matchers: ['severity="critical"']
+        receivers_secret: alerting-keys
       values:
-        server:
-          extraArgs:
-            storage.maxHourlySeries: "50000"
-      values_secret: victoria-metrics-values
+        vmsingle:
+          spec:
+            extraArgs:
+              storage.maxHourlySeries: "50000"
+        grafana:
+          resources:
+            requests:
+              memory: 160Mi
+      values_secret: monitoring-values
     otel_agent:
       enabled: true
-      logs: true
       values:
         resources:
           requests:
@@ -83,55 +118,6 @@
           requests:
             memory: 320Mi
       values_secret: otel-gateway-values
-    grafana:
-      enabled: true
-      domain: grafana.example.com
-      gateway: public
-      values:
-        resources:
-          requests:
-            memory: 160Mi
-      values_secret: grafana-values
-    victoria_logs:
-      enabled: true
-      retention: 7d
-      storage_size: 20Gi
-      values:
-        server:
-          resources:
-            requests:
-              memory: 160Mi
-      values_secret: victoria-logs-values
-    victoria_traces:
-      enabled: true
-      retention: 7d
-      storage_size: 10Gi
-      values: {}
-      values_secret: ""
-    alerting:
-      enabled: true
-      watchdog: true
-      receivers:
-        - name: team
-          slack_configs:
-            - api_url_file: /etc/alertmanager/secrets/slack-url
-              channel: "#alerts"
-        - name: on-call
-          pagerduty_configs:
-            - routing_key_file: /etc/alertmanager/secrets/pagerduty-key
-      route:
-        receiver: team
-        group_by: [alertname, k8s_namespace_name]
-        routes:
-          - receiver: on-call
-            matchers: ['severity="critical"']
-      receivers_secret: alerting-keys
-      values:
-        server:
-          resources:
-            requests:
-              memory: 96Mi
-      values_secret: alerting-values
     keda:
       enabled: true
       services: [sqs, cloudwatch]

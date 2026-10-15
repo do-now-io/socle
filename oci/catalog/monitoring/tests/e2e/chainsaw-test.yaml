@@ -1,0 +1,1069 @@
+# The monitoring module's proof (docs/catalog/monitoring.md): the
+# victoria-metrics-k8s-stack release, on by default with its metrics, logs and
+# Grafana; traces and alerting off. Selected by label:
+#   health   the ResourceSet and the release Ready, every part Available on
+#            its Bound claim, the socle's own flags live; then what no object
+#            shows (monitoring.sh): vmagent scraping each source the stack's
+#            rules read — kube-state-metrics, node-exporter, cAdvisor, the
+#            collectors and Flux by annotation — an application's OTLP
+#            metric and log through the gateway, a container's line and the
+#            Kubernetes events through the agent, and Grafana serving the
+#            stack's datasources and dashboards.
+#   module   values over the socle, values_secret over both; retention live;
+#            traces on, a span found by its id, off; alerting on, with a
+#            receiver and the watchdog both pointed at podinfo's /echo (the
+#            hello module): every rule loaded and healthy, the socle's VMRules
+#            applied, the Watchdog delivered, a broken VMRule refused alone;
+#            logs off takes the agent with them; off garbage-collects all of
+#            it, keeps the CRDs, and leaves the collectors on nop; on again.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: monitoring-health
+  labels:
+    phase: health
+    cloud: any
+    platform: any
+spec:
+  description: >-
+    The stack converges, scrapes every source its rules read, and stores what
+    applications push.
+  timeouts:
+    assert: 5m
+    error: 1m
+    exec: 6m
+  steps:
+    - name: the ResourceSet and the release are Ready, every part Available, the socle's flags live
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: monitoring
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: monitoring
+                namespace: monitoring
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: vmsingle-monitoring
+                namespace: monitoring
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'vmsingle'] | [0].args || `[]`):
+                      (contains(@, '-opentelemetry.usePrometheusNaming=true')): true
+                      (contains(@, '-retentionPeriod=15d')): true
+                      (contains(@, '-sortLabels=true')): true
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: PersistentVolumeClaim
+              metadata:
+                name: vmsingle-monitoring
+                namespace: monitoring
+              status:
+                phase: Bound
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: vlsingle-monitoring
+                namespace: monitoring
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: PersistentVolumeClaim
+              metadata:
+                name: vlsingle-monitoring
+                namespace: monitoring
+              status:
+                phase: Bound
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: vmagent-monitoring
+                namespace: monitoring
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: monitoring-kube-state-metrics
+                namespace: monitoring
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: monitoring-prometheus-node-exporter
+                namespace: monitoring
+              status:
+                (numberReady == desiredNumberScheduled): true
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: grafana
+                namespace: monitoring
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        # The sidecars read ConfigMaps and nothing else: the chart's own
+        # ClusterRole, which grants Secrets too, is not rendered.
+        - assert:
+            resource:
+              apiVersion: rbac.authorization.k8s.io/v1
+              kind: ClusterRole
+              metadata:
+                name: monitoring-grafana
+              rules:
+                - resources: ["configmaps"]
+                  verbs: ["get", "watch", "list"]
+        - error:
+            resource:
+              apiVersion: rbac.authorization.k8s.io/v1
+              kind: ClusterRole
+              metadata:
+                name: grafana-clusterrole
+        # Off by default: no traces, no alerting.
+        - error:
+            resource:
+              apiVersion: operator.victoriametrics.com/v1
+              kind: VTSingle
+              metadata:
+                name: monitoring
+                namespace: monitoring
+        - error:
+            resource:
+              apiVersion: operator.victoriametrics.com/v1beta1
+              kind: VMAlert
+              metadata:
+                name: monitoring
+                namespace: monitoring
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: monitoring
+            name: monitoring
+        - events:
+            namespace: monitoring
+        - podLogs:
+            namespace: monitoring
+            tail: 40
+    # Each source the upstream rules read, by a metric only it writes, and
+    # with the job label those rules select on; the applications' OTLP
+    # through the gateway; a container's line through the agent.
+    - name: every source the rules read is scraped, and what applications push is stored
+      try:
+        - script:
+            content: |
+              . ./monitoring.sh
+              eventually 180 has_series 'kube_pod_info{job="kube-state-metrics"}'
+              eventually 120 has_series 'node_cpu_seconds_total{job="node-exporter"}'
+              eventually 120 has_series 'container_cpu_usage_seconds_total{job="kubelet", metrics_path="/metrics/cadvisor"}'
+              eventually 120 has_series 'kubelet_running_pods{job="kubelet"}'
+              eventually 120 has_series 'otelcol_process_uptime{job="opentelemetry-collector", namespace="otel-gateway"}'
+              eventually 120 has_series 'flux_resource_info{kind="Kustomization"}'
+              scrape_targets
+              post_otlp_metric socle_e2e_probe 42
+              eventually 120 has_series 'socle_e2e_probe'
+              token="$(date +%s)"
+              kubectl -n hello run "socle-e2e-probe-$token" --restart=Never \
+                --image=ghcr.io/stefanprodan/podinfo:6.15.0 --command -- sh -c "echo socle-e2e-logline-$token"
+              eventually 180 has_hits "\"socle-e2e-logline-$token\""
+              eventually 120 has_hits 'k8s.resource.name:=events'
+              kubectl -n hello delete pod "socle-e2e-probe-$token" --wait=false > /dev/null
+              post_otlp_log "socle-e2e-otlplog-$token"
+              eventually 120 has_hits "\"socle-e2e-otlplog-$token\""
+      catch:
+        - podLogs:
+            namespace: monitoring
+            selector: app.kubernetes.io/name=vmagent
+            tail: 40
+        - podLogs:
+            namespace: otel-gateway
+            tail: 40
+        - podLogs:
+            namespace: otel-agent
+            tail: 40
+    # What a person opening Grafana sees: the stack's datasources, the
+    # stack's dashboards, and a collected metric through its proxy.
+    - name: Grafana serves the datasources, the dashboards and the metrics
+      try:
+        - script:
+            content: |
+              . ./monitoring.sh
+              gf_up
+              datasources VictoriaMetrics 'VictoriaLogs (DS)'
+              eventually 120 dashboards 20
+              n="$(through 'kube_pod_info')"
+              echo "through grafana's datasource: count(kube_pod_info) = $n"
+              [ "$n" != 0 ]
+      catch:
+        - podLogs:
+            namespace: monitoring
+            selector: app.kubernetes.io/name=grafana
+            tail: 60
+---
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: monitoring-floci
+  labels:
+    phase: health
+    cloud: aws
+    platform: floci
+spec:
+  description: Without a shared Gateway, no HTTPRoute is rendered for Grafana.
+  timeouts:
+    assert: 1m
+    error: 1m
+  steps:
+    - name: gateway defaults to private, and no route ResourceSet exists
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    monitoring:
+                      grafana:
+                        gateway: private
+                        domain: ''
+        - error:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: monitoring-grafana-route
+                namespace: flux-system
+---
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: monitoring-module
+  labels:
+    phase: module
+    cloud: any
+    platform: any
+spec:
+  description: >-
+    Values and values_secret over the socle; traces and alerting on and off;
+    logs off with the agent; the module off and on again.
+  timeouts:
+    assert: 6m
+    error: 6m
+    exec: 8m
+  steps:
+    - name: kube.monitoring.values beats the socle's -storage.maxHourlySeries, its siblings kept
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    monitoring:
+                      values:
+                        vmsingle:
+                          spec:
+                            extraArgs:
+                              storage.maxHourlySeries: '50000'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: vmsingle-monitoring
+                namespace: monitoring
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'vmsingle'] | [0].args || `[]`):
+                      (contains(@, '-storage.maxHourlySeries=50000')): true
+                      (contains(@, '-opentelemetry.usePrometheusNaming=true')): true
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    monitoring:
+                      values:
+                        vmsingle: null
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: vmsingle-monitoring
+                namespace: monitoring
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'vmsingle'] | [0].args || `[]`):
+                      (contains(@, '-storage.maxHourlySeries=100000')): true
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: monitoring
+            name: monitoring
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 40
+    # The order of valuesFrom, proven whole (docs/architecture/flux-catalog.md):
+    # the socle's document, then kube.monitoring.values, then the Secret the
+    # client names in values_secret — created by him in monitoring, never read
+    # by OpenTofu, merged last. 400Mi in values and 432Mi in the Secret: the
+    # live object carries the Secret's; both cleared, the socle's 384Mi.
+    - name: kube.monitoring.values_secret is merged last, over values and the socle
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: monitoring-e2e-values
+                namespace: monitoring
+                labels:
+                  reconcile.fluxcd.io/watch: Enabled
+              stringData:
+                values.yaml: |
+                  vmsingle:
+                    spec:
+                      resources:
+                        requests:
+                          memory: 432Mi
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    monitoring:
+                      values_secret: monitoring-e2e-values
+                      values:
+                        vmsingle:
+                          spec:
+                            resources:
+                              requests:
+                                memory: 400Mi
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: vmsingle-monitoring
+                namespace: monitoring
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'vmsingle'] | [0].resources || `{}`):
+                      requests:
+                        memory: 432Mi
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    monitoring:
+                      values_secret: ''
+                      values:
+                        vmsingle: null
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: vmsingle-monitoring
+                namespace: monitoring
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'vmsingle'] | [0].resources || `{}`):
+                      requests:
+                        memory: 384Mi
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Secret
+              name: monitoring-e2e-values
+              namespace: monitoring
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: monitoring
+            name: monitoring
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 40
+    # A nested attribute set alone keeps its siblings: the logs' claim stays.
+    - name: kube.monitoring.metrics.retention and logs.retention reach the live args
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    monitoring:
+                      metrics:
+                        retention: 30d
+                      logs:
+                        retention: 14d
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: vmsingle-monitoring
+                namespace: monitoring
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'vmsingle'] | [0].args || `[]`):
+                      (contains(@, '-retentionPeriod=30d')): true
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: vlsingle-monitoring
+                namespace: monitoring
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'vlsingle'] | [0].args || `[]`):
+                      (contains(@, '-retentionPeriod=14d')): true
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    monitoring:
+                      metrics:
+                        retention: 15d
+                      logs:
+                        retention: 7d
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: vmsingle-monitoring
+                namespace: monitoring
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'vmsingle'] | [0].args || `[]`):
+                      (contains(@, '-retentionPeriod=15d')): true
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: monitoring
+            name: monitoring
+    - name: traces on, the gateway exports them, Grafana reads them, a span is found by its id
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    monitoring:
+                      traces:
+                        enabled: true
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: vtsingle-monitoring
+                namespace: monitoring
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: PersistentVolumeClaim
+              metadata:
+                name: vtsingle-monitoring
+                namespace: monitoring
+              status:
+                phase: Bound
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: otel-gateway
+                namespace: otel-gateway
+              data:
+                (contains(relay, 'http://vtsingle-monitoring.monitoring.svc:10428/insert/opentelemetry/v1/traces')): true
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: monitoring-grafana-ds
+                namespace: monitoring
+              data:
+                (contains("datasource.yaml", 'vtsingle-monitoring')): true
+        - script:
+            content: |
+              . ./monitoring.sh
+              trace_id="$(post_span)"
+              eventually 180 has_trace "$trace_id"
+              echo "trace $trace_id posted by hello/podinfo, found through the Jaeger API"
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    monitoring:
+                      traces:
+                        enabled: false
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: vtsingle-monitoring
+                namespace: monitoring
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: otel-gateway
+                namespace: otel-gateway
+              data:
+                (contains(relay, 'vtsingle-monitoring')): false
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: monitoring
+            name: monitoring
+        - podLogs:
+            namespace: otel-gateway
+            tail: 40
+    # The keys the receivers read as files: the client's Secret, in
+    # monitoring. Both URLs are podinfo's /echo, which answers 202 to any POST.
+    - name: alerting on with a receiver and the watchdog converges, the socle's VMRules applied
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: alerting-keys
+                namespace: monitoring
+              stringData:
+                team-url: http://podinfo.hello.svc:9898/echo
+                watchdog-url: http://podinfo.hello.svc:9898/echo
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    monitoring:
+                      alerting:
+                        enabled: true
+                        receivers_secret: alerting-keys
+                        receivers:
+                          - name: team
+                            webhook_configs:
+                              - url_file: /etc/alertmanager/secrets/team-url
+                        route:
+                          receiver: team
+                          group_wait: 10s
+                          group_interval: 30s
+        - assert:
+            resource:
+              apiVersion: operator.victoriametrics.com/v1beta1
+              kind: VMAlert
+              metadata:
+                name: monitoring
+                namespace: monitoring
+              status:
+                updateStatus: operational
+        - assert:
+            resource:
+              apiVersion: operator.victoriametrics.com/v1beta1
+              kind: VMAlertmanager
+              metadata:
+                name: monitoring
+                namespace: monitoring
+              status:
+                updateStatus: operational
+        - assert:
+            resource:
+              apiVersion: operator.victoriametrics.com/v1beta1
+              kind: VMRule
+              metadata:
+                name: flux
+                namespace: monitoring
+              status:
+                updateStatus: operational
+        - assert:
+            resource:
+              apiVersion: operator.victoriametrics.com/v1beta1
+              kind: VMRule
+              metadata:
+                name: opentelemetry-collector
+                namespace: otel-gateway
+              status:
+                updateStatus: operational
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: monitoring-grafana-ds
+                namespace: monitoring
+              data:
+                (contains("datasource.yaml", 'vmalertmanager-monitoring')): true
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: monitoring
+            name: monitoring
+        - events:
+            namespace: monitoring
+        - podLogs:
+            namespace: monitoring
+            selector: app.kubernetes.io/name=vmalert
+            tail: 40
+    # The stack's rules, fetched by the sync job at the pinned tags, and the
+    # socle's: loaded, and every one evaluated without error. The Watchdog
+    # fires, and Alertmanager delivers it through the webhook — the path a
+    # dead man's switch hears.
+    - name: every rule is loaded and healthy, the Watchdog fires and is delivered
+      try:
+        - script:
+            content: |
+              . ./monitoring.sh
+              eventually 180 has_group kubernetes-apps
+              eventually 60 has_group node-exporter
+              eventually 60 has_group socle-flux
+              eventually 60 has_group opentelemetry-collector
+              echo "rule groups: $(rule_groups | tr '\n' ' ')"
+              eventually 180 rules_healthy 150
+              eventually 120 firing Watchdog
+              eventually 180 delivered
+      catch:
+        - podLogs:
+            namespace: monitoring
+            selector: app.kubernetes.io/name=vmalert
+            tail: 60
+        - podLogs:
+            namespace: monitoring
+            selector: app.kubernetes.io/name=vmalertmanager
+            tail: 60
+    # A client's VMRule that does not parse is refused at admission by the
+    # operator's webhook: it never reaches vmalert, which keeps every other
+    # rule.
+    - name: a broken VMRule is refused alone
+      try:
+        - apply:
+            resource:
+              apiVersion: operator.victoriametrics.com/v1beta1
+              kind: VMRule
+              metadata:
+                name: client-broken
+              spec:
+                groups:
+                  - name: client
+                    rules:
+                      - alert: Broken
+                        expr: rate(x[5m] > 1
+            expect:
+              - check:
+                  ($error != null): true
+        - script:
+            content: |
+              . ./monitoring.sh
+              ! has_group client
+              rules_healthy 150
+      catch:
+        - podLogs:
+            namespace: monitoring
+            selector: app.kubernetes.io/name=victoria-metrics-operator
+            tail: 40
+    - name: alerting off removes vmalert and Alertmanager, the rest stays
+      try:
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: monitoring
+                namespace: monitoring
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (length(conditions[?type == 'Reconciling'] || `[]`)): 0
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    monitoring:
+                      alerting:
+                        enabled: false
+        - error:
+            resource:
+              apiVersion: operator.victoriametrics.com/v1beta1
+              kind: VMAlert
+              metadata:
+                name: monitoring
+                namespace: monitoring
+        - error:
+            resource:
+              apiVersion: operator.victoriametrics.com/v1beta1
+              kind: VMAlertmanager
+              metadata:
+                name: monitoring
+                namespace: monitoring
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: vmsingle-monitoring
+                namespace: monitoring
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Secret
+              name: alerting-keys
+              namespace: monitoring
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: monitoring
+            name: monitoring
+    # The agent's only job is the logs: with nowhere to send them, it goes.
+    - name: logs off removes VictoriaLogs and the agent, and the gateway's logs pipeline
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    monitoring:
+                      logs:
+                        enabled: false
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: vlsingle-monitoring
+                namespace: monitoring
+        - error:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: otel-agent
+                namespace: otel-agent
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: otel-gateway
+                namespace: otel-gateway
+              data:
+                (contains(relay, 'vlsingle-monitoring')): false
+                (contains(relay, 'k8sobjects')): false
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    monitoring:
+                      logs:
+                        enabled: true
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: otel-agent-agent
+                namespace: otel-agent
+              status:
+                (numberReady == desiredNumberScheduled): true
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: vlsingle-monitoring
+                namespace: monitoring
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: otel-agent
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: monitoring
+            name: monitoring
+    - name: enabled = false garbage-collects the module, keeps the CRDs, and leaves the collectors on nop
+      try:
+        # The release must be idle before the module goes: helm-controller
+        # honours a deletion only once the running action returns, and the
+        # steps above have just driven an upgrade (measured on external-dns).
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: monitoring
+                namespace: monitoring
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'Released'] || `[]`):
+                  - status: 'True'
+                (length(conditions[?type == 'Reconciling'] || `[]`)): 0
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    monitoring:
+                      enabled: false
+        - error:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: monitoring
+                namespace: monitoring
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: monitoring
+        - error:
+            resource:
+              apiVersion: rbac.authorization.k8s.io/v1
+              kind: ClusterRole
+              metadata:
+                name: monitoring-grafana
+        # Kept, so turning the module off never deletes a client's VMRule.
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: vmrules.operator.victoriametrics.com
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: otel-gateway
+                namespace: otel-gateway
+              data:
+                (contains(relay, 'vmsingle-monitoring')): false
+                (contains(relay, 'nop')): true
+        - error:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: otel-agent
+                namespace: otel-agent
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 40
+    # Back: the namespace went with the module and its claims with it, so
+    # these are new claims, not the old volumes reattached.
+    - name: back to the defaults, the stack converges again on new claims
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    monitoring:
+                      enabled: true
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: monitoring
+                namespace: monitoring
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: PersistentVolumeClaim
+              metadata:
+                name: vmsingle-monitoring
+                namespace: monitoring
+              status:
+                phase: Bound
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: otel-agent-agent
+                namespace: otel-agent
+              status:
+                (numberReady == desiredNumberScheduled): true
+        - script:
+            content: |
+              . ./monitoring.sh
+              eventually 240 has_series 'kube_pod_info{job="kube-state-metrics"}'
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: monitoring
+            name: monitoring
+        - events:
+            namespace: monitoring

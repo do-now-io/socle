@@ -1,0 +1,23 @@
+# Argo CD's metrics, the way its documentation scrapes them: through each
+# component's metrics Service (the chart's, on while the monitoring module
+# is), so job is the Service's name — argocd-server-metrics,
+# argocd-repo-server-metrics… — which the project's dashboard filters on.
+# The application controller's and the ApplicationSet controller's Services
+# share the name argocd-metrics.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: argocd
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: argocd
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values:
+          - argocd-metrics
+          - argocd-server-metrics
+          - argocd-repo-server-metrics
+  endpoints:
+    - port: http-metrics

@@ -1,13 +1,14 @@
 ---
 title: otel-agent
-description: "Node-level OpenTelemetry collector: kubelet metrics and container logs for every node, pod and container."
+description: "Node-level OpenTelemetry collector: every container's log, with its pod's metadata, to VictoriaLogs."
 category: observability
 ---
 
 The OpenTelemetry Collector as a DaemonSet, one pod per node, for what only a
-node can see: the kubelet's metrics for every node, pod and container, and
-every container's log, written to [victoria-metrics](victoria-metrics.md) and
-[victoria-logs](victoria-logs.md). **On by default**, on every cloud.
+node can read: every container's log, with its pod's workload, labels and
+namespace, written to [monitoring](monitoring.md)'s VictoriaLogs. **On by
+default**, on every cloud, and running while `monitoring.logs` is on. The
+nodes' and pods' metrics are monitoring's vmagent's.
 
 ## Getting started
 
@@ -16,7 +17,6 @@ It is already on. Tolerate your nodes' taints so an agent runs on each:
 ```hcl kube-start="otel_agent"
 kube = {
   otel_agent = {
-    logs = true
     values = {
       tolerations = [{ operator = "Exists" }]
     }
@@ -31,8 +31,7 @@ pods ready as there are nodes.
 
 | Attribute | Default | |
 | --- | --- | --- |
-| `enabled` | `true` | Turns the module on or off, its dashboard with it. |
-| `logs` | `true` | Container logs to victoria-logs while it is on. `false`: metrics only, no `hostPath`, no root. |
+| `enabled` | `true` | Turns the module on or off. It runs only while `monitoring` and its `logs` are on. |
 | `values` | `{}` | Any [`opentelemetry-collector` chart](https://artifacthub.io/packages/helm/opentelemetry-helm/opentelemetry-collector) value; yours win. |
 | `values_secret` | `""` | A Secret in `otel-agent` with a `values.yaml` key, for what must stay out of the OpenTofu state. |
 
@@ -41,8 +40,7 @@ pods ready as there are nodes.
 ```hcl kube-full="otel_agent"
 kube = {
   otel_agent = {
-    enabled = true # on by default; off removes the release and the dashboard
-    logs    = true # container logs to victoria-logs; false: metrics only, no hostPath, no root
+    enabled = true # on by default; runs while monitoring's logs are on
 
     # Any value of the opentelemetry-collector chart 0.173.1; yours win over the socle's.
     values = {
@@ -60,12 +58,13 @@ kube = {
 ## Good to know
 
 - **Reading logs runs the agent as root**, every capability dropped, with a
-  read-only `hostPath` on `/var/log/pods`. With AKS Deployment Safeguards,
-  which forbid that, set `logs = false`.
+  read-only `hostPath` on `/var/log/pods`. Where that is forbidden (AKS
+  Deployment Safeguards, the Baseline Pod Security Standard), turn it off:
+  `enabled = false`.
 - **Lines written while an agent restarts are lost**: it keeps no
   checkpoints and starts again from the end of each file.
 - **Lists in `values` are replaced, not merged**: to add an exporter, write
-  the pipeline's whole `exporters` list, `otlp_http/victoria-metrics`
+  the pipeline's whole `exporters` list, `otlp_http/victoria-logs`
   included.
 - **`tofu plan` refuses** literal credentials in `values` (authenticators,
   exporter headers, `extraEnvs`, a `Secret` in `extraManifests`). Write
@@ -73,8 +72,8 @@ kube = {
   `extraEnvs` `valueFrom`.
 - **On GKE Autopilot each agent is billed** by its requests, 50m CPU and
   128Mi, on every node.
-- **Its alert rule ships with it**: a node's filesystem under 10 % free. It
-  fires once [alerting](alerting.md) is on.
+- **Its health is watched** by otel-gateway's collector rules, once
+  monitoring's alerting is on ([every rule](../reference/alert-rules.md)).
 - **Upgrades**: write the current component names (`otlp_http`,
   `k8s_attributes`) in `values`; a later chart stops rewriting the old ones.
 
@@ -83,19 +82,18 @@ kube = {
 
 **Installed**: chart `opentelemetry-collector` 0.173.1 (collector 0.160.0,
 `otelcol-k8s`) from `oci://ghcr.io/open-telemetry/opentelemetry-helm-charts`,
-in `daemonset` mode, in the `otel-agent` namespace, with the
-*Kubernetes / Nodes and pods* dashboard for Grafana. It receives nothing: no
+in `daemonset` mode, in the `otel-agent` namespace. It receives nothing: no
 port, no `hostPort`.
 
-**What the socle sets**: `kubeletstats` every 20 s over the node IP
-(`insecure_skip_verify`: kubelet certificates are self-signed), `file_log` on
-`/var/log/pods` while logs are on, `k8s_attributes` on both; each exporter
-follows its backend's `enabled`. Host metrics are off. Requests 50m CPU and
-128Mi, a 512Mi memory limit.
+**What the socle sets**: `file_log` on `/var/log/pods` and `k8s_attributes`,
+exported to `vlsingle-monitoring.monitoring.svc:9428`; no metrics pipeline;
+its own telemetry on port 8888, annotated `prometheus.io/scrape` for
+monitoring's vmagent. Requests 50m CPU and 128Mi, a 512Mi memory limit.
 
 **Cloud access**: none.
 
 **Measured** on floci k3s, 2026-09-30: one agent collecting metrics and
-logs at 10–12m CPU and 52Mi.
+logs at 10–12m CPU and 52Mi; a container's line in VictoriaLogs 6 s after
+its pod was created.
 
 </details>

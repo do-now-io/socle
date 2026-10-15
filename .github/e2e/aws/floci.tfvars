@@ -26,13 +26,18 @@ kube = {
     }
   }
   # The same for the monitoring stack, each on a key the socle itself sets:
-  # a flag of victoria_metrics (-storage.maxHourlySeries, 100000 in its
-  # document) and a memory request of each collector, Grafana and
+  # a flag of VictoriaMetrics (-storage.maxHourlySeries, 100000 in the
+  # socle's document) and a memory request of each collector, Grafana and
   # VictoriaLogs. Applied here as a client would; proven on the fixture root
   # by each module's tests/e2e, through a patch of the same inputs.
-  victoria_metrics = {
+  # node-exporter's host root without HostToContainer propagation: floci's
+  # k3s node is a container whose root is not a shared mount (main.tf).
+  monitoring = {
     values = {
-      server = { extraArgs = { "storage.maxHourlySeries" = "50000" } }
+      prometheus-node-exporter = { hostRootFsMount = { mountPropagation = "None" } }
+      vmsingle                 = { spec = { extraArgs = { "storage.maxHourlySeries" = "50000" } } }
+      vlsingle                 = { spec = { resources = { requests = { memory = "160Mi" } } } }
+      grafana                  = { resources = { requests = { memory = "544Mi" } } }
     }
   }
   otel_agent = {
@@ -43,16 +48,6 @@ kube = {
   otel_gateway = {
     values = {
       resources = { requests = { memory = "320Mi" } }
-    }
-  }
-  grafana = {
-    values = {
-      resources = { requests = { memory = "320Mi" } }
-    }
-  }
-  victoria_logs = {
-    values = {
-      server = { resources = { requests = { memory = "160Mi" } } }
     }
   }
   hello = {

@@ -549,3 +549,29 @@ spec:
         spec:
           policyName: velero-backup-labels
           validationActions: [Warn, Audit]
+    << $monitored := and inputs.modules.velero.enabled inputs.modules.monitoring.enabled ->>
+    ---
+    # The module's monitoring — its alert rules and its dashboard, from
+    # monitoring/ in the socle artifact: VMRules and a ConfigMap Grafana's
+    # sidecar loads. Present only while both this module and the monitoring
+    # module are on: monitoring brings the VMRule CRD, and until it has the
+    # Kustomization fails and retries every minute
+    # (docs/decisions/monitoring.md, MONITORING-12).
+    apiVersion: kustomize.toolkit.fluxcd.io/v1
+    kind: Kustomization
+    metadata:
+      name: velero-monitoring
+      namespace: flux-system
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if $monitored >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 1h
+      retryInterval: 1m
+      sourceRef:
+        kind: OCIRepository
+        name: socle
+      path: ./catalog/velero/monitoring
+      targetNamespace: velero
+      prune: true
+      wait: true
+      timeout: 2m

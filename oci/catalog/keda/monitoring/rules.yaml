@@ -1,0 +1,43 @@
+# keda's own alert rules: what awesome-prometheus-alerts does not cover for
+# it (it has no KEDA section), on the metrics it exposes — names read on a
+# live cluster or in its source at the pinned version. Names from
+# pkg/metricscollector/prommetrics.go at v2.21.0; the first rule is the
+# chart's own example (prometheus.operator.prometheusRules), on the metric's
+# current name.
+# Checked in CI with vmalert -dryRun (.github/scripts/check-rules.sh).
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: socle-keda
+spec:
+  groups:
+    - name: socle-keda
+      rules:
+        - alert: KedaScalerErrors
+          expr: >-
+            sum by (namespace, scaledObject, scaler) (rate(keda_scaler_detail_errors_total[2m])) > 0
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              The {{ $labels.scaler }} scaler of {{ $labels.namespace }}/{{ $labels.scaledObject }}
+              fails: the workload no longer scales on it.
+        - alert: KedaScaledObjectErrors
+          expr: >-
+            sum by (namespace, scaledObject) (rate(keda_scaled_object_errors_total[5m])) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              The ScaledObject {{ $labels.namespace }}/{{ $labels.scaledObject }} is in error.
+        - alert: KedaScaledJobErrors
+          expr: >-
+            sum by (namespace, scaledJob) (rate(keda_scaled_job_errors_total[5m])) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              The ScaledJob {{ $labels.namespace }}/{{ $labels.scaledJob }} is in error.

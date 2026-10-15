@@ -1,0 +1,59 @@
+# Flux's readiness, from the Flux Operator's flux_resource_info, which vmagent
+# scrapes by annotation: what no upstream source of the stack covers. Taken
+# from awesome-prometheus-alerts (github.com/samber/awesome-prometheus-alerts,
+# _data/rules.yml at 822af1e), translated onto the Flux Operator's metric:
+# kind and exported_namespace are upstream's labels. Checked in CI with
+# vmalert -dryRun (.github/scripts/check-rules.sh).
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: flux
+spec:
+  groups:
+    - name: socle-flux
+      rules:
+        # FluxCD / Flux Kustomization Failure
+        - alert: FluxKustomizationFailure
+          expr: >-
+            flux_resource_info{ready="False", kind="Kustomization"} > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              The {{ $labels.kind }} '{{ $labels.name }}' in namespace
+              {{ $labels.exported_namespace }} is marked as not ready.
+        # FluxCD / Flux HelmRelease Failure
+        - alert: FluxHelmreleaseFailure
+          expr: >-
+            flux_resource_info{ready="False", kind="HelmRelease"} > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              The {{ $labels.kind }} '{{ $labels.name }}' in namespace
+              {{ $labels.exported_namespace }} is marked as not ready.
+        # FluxCD / Flux Source Issue
+        - alert: FluxSourceIssue
+          expr: >-
+            flux_resource_info{ready="False", kind=~"GitRepository|HelmRepository|Bucket|OCIRepository"} > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              Flux source {{ $labels.kind }} '{{ $labels.name }}' has issue(s).
+        # Not upstream: the same shape for the Flux Operator's ResourceSet,
+        # which every catalog module is (flux_resourceset_info). One not
+        # Ready is a module that does not converge.
+        - alert: FluxResourcesetFailure
+          expr: >-
+            flux_resourceset_info{ready="False"} > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              The ResourceSet '{{ $labels.name }}' in namespace {{ $labels.exported_namespace }}
+              is marked as not ready ({{ $labels.reason }}): the module does not converge.

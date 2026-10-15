@@ -1,0 +1,35 @@
+# external-dns's own alert rules: what awesome-prometheus-alerts does not
+# cover for it (it has no external-dns section), on the metrics it exposes —
+# names read on a live cluster or in its source at the pinned version. Names
+# read on socle-dev (0.22.0).
+# Checked in CI with vmalert -dryRun (.github/scripts/check-rules.sh).
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: socle-external-dns
+spec:
+  groups:
+    - name: socle-external-dns
+      rules:
+        # The last successful sync with the DNS provider: records stop
+        # following the cluster when it ages, whatever the reason.
+        - alert: ExternalDnsSyncStale
+          expr: >-
+            time() - external_dns_controller_last_sync_timestamp_seconds > 3600
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              external-dns has not synced with its DNS provider for an hour: records
+              no longer follow the cluster.
+        - alert: ExternalDnsErrors
+          expr: >-
+            increase(external_dns_registry_errors_total[15m]) > 0
+            or increase(external_dns_source_errors_total[15m]) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              external-dns fails to read its sources or its registry (TXT records).

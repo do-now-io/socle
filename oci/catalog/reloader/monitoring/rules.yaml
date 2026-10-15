@@ -1,0 +1,23 @@
+# reloader's own alert rules: what awesome-prometheus-alerts does not cover
+# for it (it has no Reloader section), on the metrics it exposes — names
+# read on a live cluster or in its source at the pinned version. Names read
+# on socle-dev (v1.4.22).
+# Checked in CI with vmalert -dryRun (.github/scripts/check-rules.sh).
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: socle-reloader
+spec:
+  groups:
+    - name: socle-reloader
+      rules:
+        # A failed reload leaves the workload on the old ConfigMap or Secret.
+        - alert: ReloaderReloadFailed
+          expr: >-
+            increase(reloader_reload_executed_total{success="false"}[15m]) > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              Reloader failed to restart a workload after its ConfigMap or Secret
+              changed: it still runs on the old one.

@@ -606,14 +606,7 @@ spec:
               apiVersion: wgpolicyk8s.io/v1alpha2
               kind: PolicyReport
               metadata:
-                namespace: victoria-metrics
-              (length(results[?result == 'fail'] || `[]`) > `0`): true
-        - error:
-            resource:
-              apiVersion: wgpolicyk8s.io/v1alpha2
-              kind: PolicyReport
-              metadata:
-                namespace: victoria-logs
+                namespace: monitoring
               (length(results[?result == 'fail'] || `[]`) > `0`): true
         - error:
             resource:
@@ -621,13 +614,6 @@ spec:
               kind: PolicyReport
               metadata:
                 namespace: argocd
-              (length(results[?result == 'fail'] || `[]`) > `0`): true
-        - error:
-            resource:
-              apiVersion: wgpolicyk8s.io/v1alpha2
-              kind: PolicyReport
-              metadata:
-                namespace: grafana
               (length(results[?result == 'fail'] || `[]`) > `0`): true
         - patch:
             resource:

@@ -1,81 +1,77 @@
 ---
 title: Observability
-description: "The cross-cloud view: OpenTelemetry collects, Victoria stores, Grafana reads, inside each cluster; the cloud's own signals are read from outside."
+description: "The cross-cloud view: vmagent scrapes, OpenTelemetry carries OTLP and logs, Victoria stores, Grafana reads, inside each cluster; the cloud's own signals are read from outside."
 sidebar:
   order: 4
 ---
 
-Every cluster carries its own monitoring stack: OpenTelemetry collects,
-the Victoria family stores, Grafana reads. Same templates on all four clouds,
-no remote-write, no federation,
-and no cloud access: every backend stores on a volume.
+Every cluster carries its own monitoring stack: vmagent scrapes the cluster,
+OpenTelemetry carries what applications push and the containers' logs, the
+Victoria family stores, Grafana reads, vmalert and Alertmanager alert. Same
+templates on all four clouds, no remote-write, no federation, and no cloud
+access: every backend stores on a volume.
 
-## Seven modules
-
-One module per chart release:
+## Three modules
 
 | Module | Runs as | Default |
 | --- | --- | --- |
-| [`otel_agent`](../catalog/otel-agent.md) | OpenTelemetry Collector, DaemonSet | on |
+| [`monitoring`](../catalog/monitoring.md) | the victoria-metrics-k8s-stack chart, one release: the operator, VictoriaMetrics, VictoriaLogs, VictoriaTraces, vmagent, kube-state-metrics, node-exporter, Grafana, vmalert and Alertmanager | on; traces **off** (pre-GA), alerting **off** (it needs where alerts go) |
 | [`otel_gateway`](../catalog/otel-gateway.md) | OpenTelemetry Collector, 1 replica | on |
-| [`victoria_metrics`](../catalog/victoria-metrics.md) | 1 pod and a PVC | on |
-| [`victoria_logs`](../catalog/victoria-logs.md) | 1 pod and a PVC | on |
-| [`victoria_traces`](../catalog/victoria-traces.md) | 1 pod and a PVC | **off**: pre-GA, an upgrade may drop stored traces |
-| [`grafana`](../catalog/grafana.md) | 1 replica | on |
-| [`alerting`](../catalog/alerting.md) | vmalert and Alertmanager, 1 replica each | **off**: it needs where alerts go |
+| [`otel_agent`](../catalog/otel-agent.md) | OpenTelemetry Collector, DaemonSet | on, while monitoring's logs are |
 
 ## What talks to what
 
 ```text
+kubelets, cAdvisor, kube-state-metrics,
+node-exporter, annotated pods ◀──scrape── vmagent ──▶ VictoriaMetrics :8428
 applications ──OTLP 4317/4318──▶ otel_gateway ──┐
-annotated pods ◀──scrape──────── otel_gateway   │  OTLP over HTTP
-Kubernetes API ◀──object state, events── gateway ├─▶ victoria_metrics :8428  /opentelemetry/v1/metrics
-                                                 ├─▶ victoria_logs    :9428  /insert/opentelemetry/v1/logs
-kubelet, /var/log/pods ◀──── otel_agent ─────────┤
-                                                 └─▶ victoria_traces  :10428 /insert/opentelemetry/v1/traces
-grafana ──▶ Prometheus, VictoriaLogs and Jaeger datasources, one per backend that is on
-alerting: vmalert ──rules──▶ victoria_metrics;  firing ──▶ Alertmanager ──▶ your receivers
+Kubernetes API ◀──events────────── otel_gateway │  OTLP over HTTP
+                                                ├─▶ VictoriaMetrics :8428  /opentelemetry/v1/metrics
+/var/log/pods ◀──── otel_agent ─────────────────┼─▶ VictoriaLogs    :9428  /insert/opentelemetry/v1/logs
+                                                └─▶ VictoriaTraces  :10428 /insert/opentelemetry/v1/traces
+Grafana ──▶ VictoriaMetrics, VictoriaLogs, VictoriaTraces and Alertmanager datasources
+vmalert ──every VMRule──▶ VictoriaMetrics; firing ──▶ Alertmanager ──▶ your receivers
 ```
 
-- **Every signal is OTLP over HTTP**, which all three backends ingest.
-- **The agent exports straight to the backends**, not through the gateway.
-- **Pipelines follow the modules that are on**: turning a backend off removes
-  its pipelines and its datasource in one reconciliation. No `dependsOn`
-  links the seven.
+- **Metrics are scraped in one place**, vmagent, with the `job` labels the
+  upstream rules and dashboards select on. The collectors scrape nothing.
+- **OTLP over HTTP** for everything applications push, which all three
+  backends ingest. The agent exports straight to VictoriaLogs.
+- **Pipelines follow the parts that are on**: turning a backend off removes
+  its pipelines and its datasource in one reconciliation; with monitoring
+  off, the gateway's metrics end in `nop`.
 - **Do not override `fullnameOverride`** in `values`: the endpoints rely on
   it, and the plan does not refuse it.
 
 <details>
 <summary>Under the hood</summary>
 
-| Signal | Source | Module | Collector preset |
-| --- | --- | --- | --- |
-| Node, pod, container resources | kubelet stats API | `otel_agent` | `kubeletMetrics` |
-| Container logs | `/var/log/pods`, read-only | `otel_agent` (`logs = true`) | `logsCollection`, no checkpoints |
-| Kubernetes metadata | API server | both | `kubernetesAttributes` |
-| Object state | API server | `otel_gateway` | `clusterMetrics` |
-| Kubernetes events, as logs | API server | `otel_gateway` | `kubernetesEvents` |
-| Prometheus endpoints | pods annotated `prometheus.io/scrape` | `otel_gateway` | `prometheus` receiver |
-| Application OTLP | gRPC 4317, HTTP 4318 on `otel-gateway.otel-gateway.svc` | `otel_gateway` | `otlp` receiver |
+| Signal | Source | Read by |
+| --- | --- | --- |
+| Object state | kube-state-metrics | vmagent |
+| Nodes | node-exporter | vmagent |
+| Pods and containers' resources, volumes' fill | the kubelets and their cAdvisor | vmagent |
+| Prometheus endpoints, the collectors' and Flux's included | pods annotated `prometheus.io/scrape` | vmagent |
+| Container logs | `/var/log/pods`, read-only | `otel_agent`, no checkpoints |
+| Kubernetes events, as logs | API server | `otel_gateway` |
+| Application OTLP | gRPC 4317, HTTP 4318 on `otel-gateway.otel-gateway.svc` | `otel_gateway`, with `k8s_attributes` |
 
-The collectors run the `otelcol-k8s` distribution. Host metrics are off
-(they need the node's root filesystem, which Autopilot and the Baseline Pod
-Security Standard refuse). Scraping is by annotation, with no
-`ServiceMonitor`. Without log checkpoints, a restarted agent loses the lines
-written while it was down.
+The control plane is the cloud's and is not scraped. The collectors run the
+`otelcol-k8s` distribution. Without log checkpoints, a restarted agent loses
+the lines written while it was down.
 
 </details>
 
 ## Where the data lives
 
-| Module | Retention | Volume |
+| Part | Retention | Volume |
 | --- | --- | --- |
-| `victoria_metrics` | `15d` | `20Gi` |
-| `victoria_logs` | `7d` | `20Gi` |
-| `victoria_traces` | `7d` | `10Gi` |
+| `monitoring.metrics` | `15d` | `20Gi` |
+| `monitoring.logs` | `7d` | `20Gi` |
+| `monitoring.traces` | `7d` | `10Gi` |
 
 Both are attributes, `retention` and `storage_size`
-([Inputs](../reference/inputs.md)). The claim uses the cluster's default
+([Inputs](../reference/inputs.md)). The claims use the cluster's default
 StorageClass.
 
 - **A volume can grow** where the class allows expansion; shrinking is
@@ -84,11 +80,9 @@ StorageClass.
 <details>
 <summary>Under the hood</summary>
 
-The charts default retention to a month, so the socle sets it. Each backend
-runs in `deployment` mode, a standalone PVC rather than a claim template.
-VictoriaMetrics caps new series per hour (`-storage.maxHourlySeries`,
-100 000) and keeps Prometheus metric names
-(`-opentelemetry.usePrometheusNaming`).
+The operator creates each backend's Deployment and claim. VictoriaMetrics
+caps new series per hour (`-storage.maxHourlySeries`, 100 000) and keeps
+Prometheus metric names for OTLP (`-opentelemetry.usePrometheusNaming`).
 
 </details>
 
@@ -96,15 +90,23 @@ VictoriaMetrics caps new series per hour (`-storage.maxHourlySeries`,
 
 Grafana gets one datasource per backend that is on: Prometheus type for
 VictoriaMetrics, the `victoriametrics-logs-datasource` plugin, Jaeger type
-for VictoriaTraces. Dashboards are ConfigMaps labelled `grafana_dashboard`,
-shipped by the module they describe, on OpenTelemetry names.
+for VictoriaTraces, and Alertmanager with alerting on. The dashboards are the
+stack's, kube-prometheus' and VictoriaMetrics', and any ConfigMap labelled
+`grafana_dashboard`.
 
 - **No egress to grafana.com, no logs**: the VictoriaLogs plugin downloads
-  at start.
+  at start. No egress to raw.githubusercontent.com, no rules and no
+  dashboards: the chart's sync job downloads them.
 - **No persistence**: everything Grafana shows is provisioned.
-- **A route needs `kube.grafana.domain`** and the shared Gateways;
-  `private` by default.
+- **A route needs `kube.monitoring.grafana.domain`** and the shared
+  Gateways; `private` by default.
 - **Grafana is AGPL-3.0**, run unmodified from upstream's images.
+
+## Alerting
+
+kube-prometheus-stack's rules and VictoriaMetrics', with the socle's for Flux
+and the collectors ([Alert rules](../reference/alert-rules.md)); a client's
+own `VMRule`s, in any namespace, load beside them.
 
 ## Per cloud
 
@@ -112,12 +114,12 @@ shipped by the module they describe, on OpenTelemetry names.
 | --- | --- |
 | AWS | the bootstrap marks `gp3` (EBS, encrypted) default |
 | GCP | the agent DaemonSet is billed per Pod request on Autopilot |
-| Azure | `/var/log/pods` is a `hostPath`, forbidden once Deployment Safeguards apply: `otel_agent.logs = false` until then. `opentofu/azure` still enables Managed Prometheus and Container Insights |
+| Azure | `/var/log/pods` is a `hostPath`, forbidden once Deployment Safeguards apply: `otel_agent.enabled = false` until then. `opentofu/azure` still enables Managed Prometheus and Container Insights |
 | Scaleway | nothing; Cockpit keeps Scaleway's own data |
 
 ## What is not in the stack
 
-Your own alert rules (#82), anything central (remote-write, federation,
+Anything central (remote-write, federation,
 multi-cluster Grafana, one Alertmanager across clusters), backups and high availability of the backends, profiles, SSO on
 Grafana.
 

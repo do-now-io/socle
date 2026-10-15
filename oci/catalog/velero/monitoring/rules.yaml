@@ -1,0 +1,52 @@
+# velero's own alert rules: what awesome-prometheus-alerts does not cover
+# for it (it has no Velero section), on the metrics it exposes — names read
+# on a live cluster or in its source at the pinned version. The chart's own
+# examples (metrics.prometheusRule.spec in velero 12.2.0's values), but
+# VeleroNoNewBackup's absent(): it fired on a new cluster until the first
+# backup ran.
+# Checked in CI with vmalert -dryRun (.github/scripts/check-rules.sh).
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: socle-velero
+spec:
+  groups:
+    - name: socle-velero
+      rules:
+        - alert: VeleroBackupFailed
+          expr: >-
+            velero_backup_last_status{schedule!=""} != 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: Velero backup {{ $labels.schedule }} has failed
+        # A backup failing for 12 hours is data no longer protected.
+        - alert: VeleroBackupFailing
+          expr: >-
+            velero_backup_last_status{schedule!=""} != 1
+          for: 12h
+          labels:
+            severity: critical
+          annotations:
+            message: Velero backup {{ $labels.schedule }} has been failing for the last 12h
+        # Only the schedules that run at least daily: the socle names each
+        # <frequency>-<retention>, and a weekly or monthly one would fire
+        # between its runs. Those are watched by the two rules above.
+        - alert: VeleroNoNewBackup
+          expr: >-
+            (time() - velero_backup_last_successful_timestamp{schedule=~".*(hourly|daily)-.*"}) > 25 * 3600
+          for: 1h
+          labels:
+            severity: critical
+          annotations:
+            message: Velero backup {{ $labels.schedule }} has not run successfully in the last 25h
+        - alert: VeleroBackupPartialFailures
+          expr: >-
+            rate(velero_backup_partial_failure_total{schedule!=""}[25m])
+            / rate(velero_backup_attempt_total{schedule!=""}[25m]) > 0.5
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: Velero backup {{ $labels.schedule }} has {{ $value | humanizePercentage }} partialy failed backups

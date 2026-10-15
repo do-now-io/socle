@@ -39,8 +39,8 @@ artifact. You list only what differs from the defaults:
 
 ```hcl
 kube = {
-  argocd          = { domain = "argocd.acme.example" }
-  victoria_traces = { enabled = true }
+  argocd     = { domain = "argocd.acme.example" }
+  monitoring = { traces = { enabled = true } }
 }
 ```
 
