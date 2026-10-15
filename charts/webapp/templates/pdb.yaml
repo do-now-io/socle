@@ -1,0 +1,17 @@
+{{- /*
+Only from two guaranteed pods: with one, a budget would either protect
+nothing or block every node drain.
+*/ -}}
+{{- $v := .Values -}}
+{{- $guaranteed := ternary $v.autoscaling.minReplicas $v.replicas $v.autoscaling.enabled | int -}}
+{{- if and $v.podDisruptionBudget.enabled (ge $guaranteed 2) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  {{- include "socle-lib.metadata" (dict "root" . "name" (include "socle-lib.fullname" .)) | nindent 2 }}
+spec:
+  maxUnavailable: {{ $v.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      {{- include "socle-lib.selectorLabels" . | nindent 6 }}
+{{- end }}

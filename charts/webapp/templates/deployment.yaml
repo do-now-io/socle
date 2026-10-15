@@ -1,0 +1,32 @@
+{{- $v := .Values -}}
+{{- $container := include "webapp.container" . -}}
+{{- $pod := include "webapp.pod" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  {{- include "socle-lib.metadata" (dict "root" . "name" (include "socle-lib.fullname" .)) | nindent 2 }}
+  {{- if and $v.reloader.enabled (include "socle-lib.readsConfig" .) }}
+  annotations:
+    reloader.stakater.com/auto: "true"
+  {{- end }}
+spec:
+  {{- if not $v.autoscaling.enabled }}
+  replicas: {{ $v.replicas }}
+  {{- end }}
+  strategy:
+    {{- toYaml $v.strategy | nindent 4 }}
+  selector:
+    matchLabels:
+      {{- include "socle-lib.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "socle-lib.labels" . | nindent 8 }}
+      {{- if $v.metrics.enabled }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ $v.metrics.port | default $v.port | quote }}
+        prometheus.io/path: {{ $v.metrics.path }}
+      {{- end }}
+    spec:
+      {{- include "socle-lib.podSpec" (dict "root" . "pod" $pod "container" $container) | nindent 6 }}

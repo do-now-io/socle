@@ -1,0 +1,21 @@
+{{- include "socle-lib.uniqueNames" (dict "key" "routes" "items" .Values.routes) -}}
+{{- $backend := list (dict "name" (include "socle-lib.fullname" .) "port" .Values.port) -}}
+{{- range .Values.routes }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  {{- include "socle-lib.metadata" (dict "root" $ "name" (include "socle-lib.objectName" (dict "root" $ "name" .name))) | nindent 2 }}
+spec:
+  parentRefs:
+    {{- toYaml .parentRefs | nindent 4 }}
+  {{- with .hostnames }}
+  hostnames:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range .rules }}
+    {{- $rule := set (deepCopy .) "backendRefs" $backend }}
+    - {{- toYaml $rule | nindent 6 }}
+    {{- end }}
+{{- end }}

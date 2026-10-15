@@ -1,0 +1,25 @@
+{{- $v := .Values -}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  {{- include "socle-lib.metadata" (dict "root" . "name" (include "socle-lib.fullname" .)) | nindent 2 }}
+spec:
+  schedule: {{ $v.schedule | quote }}
+  timeZone: {{ $v.timeZone }}
+  suspend: {{ $v.suspend }}
+  concurrencyPolicy: {{ $v.concurrencyPolicy }}
+  successfulJobsHistoryLimit: {{ $v.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ $v.failedJobsHistoryLimit }}
+  {{- with $v.startingDeadlineSeconds }}
+  startingDeadlineSeconds: {{ . }}
+  {{- end }}
+  jobTemplate:
+    spec:
+      backoffLimit: {{ $v.backoffLimit }}
+      activeDeadlineSeconds: {{ $v.activeDeadlineSeconds }}
+      template:
+        metadata:
+          labels:
+            {{- include "socle-lib.labels" . | nindent 12 }}
+        spec:
+          {{- include "socle-lib.podSpec" (dict "root" . "pod" (printf "restartPolicy: %s" $v.restartPolicy)) | nindent 10 }}
