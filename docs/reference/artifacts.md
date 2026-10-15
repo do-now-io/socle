@@ -26,6 +26,22 @@ source = "oci://ghcr.io/do-now-io/socle/opentofu-modules//opentofu/aws?tag=${var
 artifact_url = "oci://ghcr.io/do-now-io/socle/flux-modules"
 ```
 
+## The charts
+
+[webapp](../charts/webapp.md) and [cronjob](../charts/cronjob.md), Helm
+charts you install with your own values, are published beside the two
+packages:
+
+| Chart | Contents | Tags |
+| --- | --- | --- |
+| `oci://ghcr.io/do-now-io/charts/webapp` | the chart, `socle-lib` bundled | `X.Y.Z` only |
+| `oci://ghcr.io/do-now-io/charts/cronjob` | the chart, `socle-lib` bundled | `X.Y.Z` only |
+
+Built at the release from the release commit, not promoted from an alpha: a
+chart carries its version inside its `Chart.yaml`, so an alpha given the
+release tag would still announce itself as the alpha. Signed like the
+packages, as `main`'s workflow; a chart version is never pushed twice.
+
 ## Tags
 
 One tag names both packages; `socle_version` takes any of them, never

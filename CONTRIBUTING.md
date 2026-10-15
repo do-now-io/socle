@@ -160,6 +160,7 @@ the folder says which:
 | `reference/` | reference | look something up: inputs, artifacts, compatibility, the standards |
 | `clouds/<cloud>/` | per cloud | know what the socle builds on that cloud: `index`, `prerequisites`, `foundations`, `limits` |
 | `catalog/` | per module | know what a module installs, what it may be given, and what it needs |
+| `charts/` | per chart | know what a chart renders, its values, and how to deploy an application with it |
 | `decisions/` | decision records, not published on the site | know what was decided, when, and whether it still holds |
 
 ### The rules
