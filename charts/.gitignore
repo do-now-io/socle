@@ -2,3 +2,5 @@
 # socle-lib, and their lock: file:// dependencies need none.
 /*/charts/
 /*/Chart.lock
+# The e2e renders both charts here before Chainsaw applies them.
+tests/e2e/rendered/

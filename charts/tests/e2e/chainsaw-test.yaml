@@ -1,0 +1,314 @@
+# webapp's and cronjob's proof on floci (#83): a client who switches every
+# kyverno_policies policy to Enforce deploys both charts unchanged. The
+# modules on through the socle's inputs, as a client turns them on: kyverno,
+# kyverno_policies (restricted, every policy enforced, ghcr.io allowed),
+# external_secrets on floci's Secrets Manager, reloader. A pod the profile
+# refuses is refused first, so that what follows is admitted under Enforce
+# and not before it. Then each chart's e2e fixture (charts/<chart>/ci/
+# e2e-values.yaml), rendered by the job: the Deployment Available, its
+# ExternalSecret Ready, the CronJob's first Job complete, and no PolicyReport
+# failure in the namespace.
+#
+# What floci cannot prove: the route Accepted. floci runs no Cilium, so
+# gateway_api renders no Gateway there (docs/catalog/gateway-api.md); the
+# HTTPRoute is asserted as rendered, its acceptance is the sandbox's.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: charts
+  labels:
+    phase: charts
+    cloud: any
+    platform: any
+spec:
+  description: Both charts install and run with every kyverno_policies policy enforced.
+  timeouts:
+    apply: 1m
+    assert: 5m
+    error: 2m
+    # A Deployment's pods take longer than the default to go (measured on
+    # floci, external-secrets' suite).
+    delete: 2m
+    cleanup: 2m
+  steps:
+    - name: the database password is seeded in floci's Secrets Manager
+      try:
+        - script:
+            env:
+              - name: AWS_ENDPOINT_URL
+                value: http://localhost:4566
+            content: |
+              key=charts-e2e/database
+              aws secretsmanager delete-secret --secret-id "$key" --force-delete-without-recovery > /dev/null 2>&1 || true
+              aws secretsmanager create-secret --name "$key" --secret-string s3cret --query Name --output text
+
+    - name: kyverno, every restricted and socle policy enforced, external_secrets and reloader on
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    kyverno:
+                      enabled: true
+                    kyverno_policies:
+                      enabled: true
+                      profile: restricted
+                      allowed_registries: [ghcr.io]
+                      enforce:
+                        - disallow-capabilities
+                        - disallow-capabilities-strict
+                        - disallow-host-namespaces
+                        - disallow-host-path
+                        - disallow-host-ports
+                        - disallow-host-process
+                        - disallow-latest-tag
+                        - disallow-privilege-escalation
+                        - disallow-privileged-containers
+                        - disallow-proc-mount
+                        - disallow-selinux
+                        - require-requests
+                        - require-run-as-non-root-user
+                        - require-run-as-nonroot
+                        - restrict-apparmor-profiles
+                        - restrict-image-registries
+                        - restrict-seccomp
+                        - restrict-seccomp-strict
+                        - restrict-sysctls
+                        - restrict-volume-types
+                    external_secrets:
+                      enabled: true
+                      values:
+                        extraEnv:
+                          - name: AWS_SECRETSMANAGER_ENDPOINT
+                            value: (join('', ['http://', $values.floci_ip, ':4566']))
+                    reloader:
+                      enabled: true
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: kyverno-policies
+                namespace: kyverno-policies
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: external-secrets
+                namespace: external-secrets
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: reloader
+                namespace: reloader
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        # Each enforced policy is compiled into a native policy the API server
+        # applies; the last of the list stands for all of them. Compiled, then
+        # ten seconds for the API server's informer to load it (the
+        # kyverno_policies suite measured why).
+        - assert:
+            resource:
+              apiVersion: admissionregistration.k8s.io/v1
+              kind: ValidatingAdmissionPolicy
+              metadata:
+                name: vpol-restrict-volume-types
+              (status.observedGeneration == metadata.generation): true
+        - assert:
+            resource:
+              apiVersion: admissionregistration.k8s.io/v1
+              kind: ValidatingAdmissionPolicy
+              metadata:
+                name: vpol-require-run-as-nonroot
+              (status.observedGeneration == metadata.generation): true
+        - sleep:
+            duration: 10s
+        # A pod the restricted profile refuses: no security context, root.
+        - create:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                name: refused
+              spec:
+                containers:
+                  - name: busybox
+                    image: ghcr.io/containerd/busybox:1.36
+                    command: [sleep, "3600"]
+                    resources:
+                      requests:
+                        cpu: 10m
+                        memory: 16Mi
+            expect:
+              - check:
+                  ($error != null): true
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: kyverno-policies
+            name: kyverno-policies
+        - get:
+            apiVersion: admissionregistration.k8s.io/v1
+            kind: ValidatingAdmissionPolicyBinding
+
+    - name: a ClusterSecretStore of the client's, on floci's static keys, is Ready
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: floci-credentials
+                namespace: external-secrets
+              stringData:
+                access-key-id: test
+                secret-access-key: test
+        - apply:
+            resource:
+              apiVersion: external-secrets.io/v1
+              kind: ClusterSecretStore
+              metadata:
+                name: floci
+              spec:
+                provider:
+                  aws:
+                    service: SecretsManager
+                    region: eu-west-3
+                    auth:
+                      secretRef:
+                        accessKeyIDSecretRef:
+                          name: floci-credentials
+                          namespace: external-secrets
+                          key: access-key-id
+                        secretAccessKeySecretRef:
+                          name: floci-credentials
+                          namespace: external-secrets
+                          key: secret-access-key
+        - assert:
+            resource:
+              apiVersion: external-secrets.io/v1
+              kind: ClusterSecretStore
+              metadata:
+                name: floci
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: external-secrets.io/v1
+            kind: ClusterSecretStore
+            name: floci
+
+    - name: webapp installs under Enforce, its pods run, its ExternalSecret is Ready
+      try:
+        - apply:
+            file: rendered/webapp.yaml
+        - assert:
+            resource:
+              apiVersion: external-secrets.io/v1
+              kind: ExternalSecret
+              metadata:
+                name: shop-database
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: shop-database
+              data:
+                DATABASE_PASSWORD: czNjcmV0
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: shop
+                annotations:
+                  reloader.stakater.com/auto: "true"
+              status:
+                readyReplicas: 1
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Service
+              metadata:
+                name: shop
+        - assert:
+            resource:
+              apiVersion: gateway.networking.k8s.io/v1
+              kind: HTTPRoute
+              metadata:
+                name: shop-api
+              spec:
+                parentRefs:
+                  - name: private
+                    namespace: gateway-system
+      catch:
+        - describe:
+            apiVersion: apps/v1
+            kind: Deployment
+            name: shop
+        - describe:
+            apiVersion: external-secrets.io/v1
+            kind: ExternalSecret
+            name: shop-database
+        - events: {}
+        - podLogs:
+            selector: app.kubernetes.io/instance=shop
+            tail: 40
+
+    - name: cronjob installs under Enforce, and its first Job completes
+      try:
+        - apply:
+            file: rendered/cronjob.yaml
+        - assert:
+            resource:
+              apiVersion: batch/v1
+              kind: Job
+              metadata:
+                (ownerReferences[?kind == 'CronJob'] | [0].name): billing
+              status:
+                succeeded: 1
+      catch:
+        - describe:
+            apiVersion: batch/v1
+            kind: CronJob
+            name: billing
+        - get:
+            apiVersion: batch/v1
+            kind: Job
+        - events: {}
+
+    - name: no PolicyReport in the namespace carries a failure
+      try:
+        - error:
+            resource:
+              apiVersion: wgpolicyk8s.io/v1alpha2
+              kind: PolicyReport
+              (summary.fail > `0`): true
+      catch:
+        - get:
+            apiVersion: wgpolicyk8s.io/v1alpha2
+            kind: PolicyReport

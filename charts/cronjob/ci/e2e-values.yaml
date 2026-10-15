@@ -1,0 +1,15 @@
+# What the floci e2e deploys (charts/tests/e2e): a task every minute that
+# prints and exits, so that a Job completes within the test.
+schedule: "* * * * *"
+activeDeadlineSeconds: 120
+image:
+  registry: ghcr.io/containerd
+  repository: busybox
+  tag: "1.36"
+command: [sh, -c, echo the task ran]
+resources:
+  requests:
+    cpu: 10m
+    memory: 16Mi
+securityContext:
+  runAsUser: 1000
