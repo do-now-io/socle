@@ -408,7 +408,7 @@ run "crossplane_identity_creates_only_bounded_roles" {
     error_message = "the boundary must always deny identity and account services."
   }
   assert {
-    condition     = alltrue([for st in jsondecode(aws_iam_role_policy.crossplane[0].policy).Statement : st.Resource == "arn:aws:iam::000000000000:role/socle/socle-test/*" if !contains(["PodIdentityAssociationsOnThisCluster", "ReadAnyRoleInTheAccount", "ManageBucketsUnderTheClusterPrefix"], st.Sid)])
+    condition     = alltrue([for st in jsondecode(aws_iam_role_policy.crossplane[0].policy).Statement : st.Resource == "arn:aws:iam::000000000000:role/socle/socle-test/*" if !contains(["PodIdentityAssociationsOnThisCluster", "ReadAnyRoleInTheAccount", "ManageBucketsUnderTheClusterPrefix", "ManageQueuesUnderTheClusterPrefix", "ManageEventRulesUnderTheClusterPrefix"], st.Sid)])
     error_message = "every mutating IAM statement of the Crossplane identity must be scoped to roles under /socle/<cluster>/."
   }
   assert {
@@ -445,6 +445,108 @@ run "crossplane_identity_creates_only_bounded_roles" {
       ]
     ]))
     error_message = "the Crossplane identity must never delete a bucket or anything in it, read or write an object, or open a bucket through a policy or an ACL: a bucket of backups outlives every managed resource."
+  }
+}
+
+run "without_ec2_the_boundary_denies_all_of_iam" {
+  command = plan
+  variables {
+    crossplane = { allowed_services = ["route53", "sqs"] }
+  }
+
+  assert {
+    condition     = !anytrue([for st in jsondecode(aws_iam_policy.crossplane_boundary[0].policy).Statement : contains(["PassTheNodeRoleToEc2Only", "ReadInstanceProfiles", "NeverIamBeyondTheNodeRole"], st.Sid)])
+    error_message = "without ec2 no role can launch an instance, so the node-role exception must not exist."
+  }
+}
+
+# docs/catalog/karpenter.md: a role that may launch instances may launch them
+# as the nodes' role, and read profiles — nothing else of IAM.
+run "with_ec2_the_boundary_lets_a_role_pass_the_node_role_to_ec2_and_nothing_else" {
+  command = plan
+  variables {
+    crossplane = { allowed_services = ["ec2", "ssm", "pricing", "sqs", "eks"] }
+  }
+
+  assert {
+    condition = one([
+      for st in jsondecode(aws_iam_policy.crossplane_boundary[0].policy).Statement :
+      st.Effect == "Allow" && st.Action == "iam:PassRole" && st.Resource == "arn:aws:iam::000000000000:role/socle-test-bootstrap-node" && st.Condition.StringEquals["iam:PassedToService"] == "ec2.amazonaws.com"
+      if st.Sid == "PassTheNodeRoleToEc2Only"
+    ])
+    error_message = "the boundary may let a role pass the bootstrap nodes' role, to EC2 only, and no other role."
+  }
+  assert {
+    condition = one([
+      for st in jsondecode(aws_iam_policy.crossplane_boundary[0].policy).Statement :
+      st.Action == ["iam:GetInstanceProfile", "iam:ListInstanceProfiles"] && st.Resource == "arn:aws:iam::000000000000:instance-profile/*"
+      if st.Sid == "ReadInstanceProfiles"
+    ])
+    error_message = "the boundary may let a role read instance profiles, never create or change one."
+  }
+  assert {
+    condition = one([
+      for st in jsondecode(aws_iam_policy.crossplane_boundary[0].policy).Statement :
+      st.Effect == "Deny" && st.Action == "iam:*" && st.NotResource == ["arn:aws:iam::000000000000:role/socle-test-bootstrap-node", "arn:aws:iam::000000000000:instance-profile/*"]
+      if st.Sid == "NeverIamBeyondTheNodeRole"
+    ])
+    error_message = "iam must stay denied on every role but the nodes' and on everything but instance profiles."
+  }
+  assert {
+    condition     = one([for st in jsondecode(aws_iam_policy.crossplane_boundary[0].policy).Statement : !contains(st.Action, "iam:*") && contains(st.Action, "sts:*") if st.Sid == "NeverIdentityNorAccount"])
+    error_message = "sts and the account services stay denied on everything."
+  }
+  assert {
+    condition     = length([for st in jsondecode(aws_iam_policy.crossplane_boundary[0].policy).Statement : st if st.Effect == "Allow" && strcontains(jsonencode(st.Action), "iam:")]) == 2
+    error_message = "exactly two statements of the boundary may allow anything of IAM."
+  }
+}
+
+run "crossplane_may_own_queues_and_event_rules_under_the_cluster_prefix" {
+  command = plan
+  variables {
+    crossplane = { allowed_services = ["sqs"] }
+  }
+  override_resource {
+    target = aws_iam_policy.crossplane_boundary
+    values = { arn = "arn:aws:iam::000000000000:policy/socle/socle-test/socle-test-crossplane-boundary" }
+  }
+  override_resource {
+    target = aws_eks_cluster.socle
+    values = {
+      arn                   = "arn:aws:eks:eu-west-3:000000000000:cluster/socle-test"
+      certificate_authority = [{ data = "Y2E=" }]
+    }
+  }
+
+  assert {
+    condition = one([
+      for st in jsondecode(aws_iam_role_policy.crossplane[0].policy).Statement :
+      st.Resource == "arn:aws:sqs:eu-west-3:000000000000:socle-test-*" && contains(st.Action, "sqs:CreateQueue") && !contains(st.Action, "sqs:SendMessage") && !contains(st.Action, "sqs:ReceiveMessage")
+      if st.Sid == "ManageQueuesUnderTheClusterPrefix"
+    ])
+    error_message = "Crossplane may manage queues only under the cluster's own name prefix, and never read or write their messages."
+  }
+  assert {
+    condition = one([
+      for st in jsondecode(aws_iam_role_policy.crossplane[0].policy).Statement :
+      st.Resource == "arn:aws:events:eu-west-3:000000000000:rule/socle-test-*" && contains(st.Action, "events:PutTargets")
+      if st.Sid == "ManageEventRulesUnderTheClusterPrefix"
+    ])
+    error_message = "Crossplane may manage EventBridge rules and their targets only under the cluster's own name prefix."
+  }
+}
+
+run "the_nodes_role_has_an_instance_profile_named_after_it" {
+  command = plan
+
+  assert {
+    condition     = aws_iam_instance_profile.node.name == "socle-test-bootstrap-node" && aws_iam_instance_profile.node.role == "socle-test-bootstrap-node"
+    error_message = "Karpenter's EC2NodeClass names the profile <cluster>-bootstrap-node: it must carry the bootstrap nodes' role, under the role's own name."
+  }
+  assert {
+    condition     = output.node_instance_profile == "socle-test-bootstrap-node"
+    error_message = "the output must name the profile."
   }
 }
 

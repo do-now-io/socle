@@ -78,6 +78,21 @@ resource "aws_iam_role_policy" "node_cilium_operator" {
   policy = data.aws_iam_policy_document.cilium_operator.json
 }
 
+# The same role, as an instance profile: what an instance launched outside
+# the node group runs as. The catalog's Karpenter names it in its
+# EC2NodeClass (docs/catalog/karpenter.md), so its nodes are the bootstrap
+# nodes' peers — the same kubelet, ECR and Cilium ENI rights, the access
+# entry EKS made for this role, no second identity to keep in step — and it
+# never creates a profile of its own. A profile is not a role: the rule that
+# no role is made here for a module stands. Named like the role, which no
+# other profile in the account can be.
+resource "aws_iam_instance_profile" "node" {
+  name = aws_iam_role.node.name
+  role = aws_iam_role.node.name
+
+  tags = local.tags
+}
+
 # Instance metadata answers only on the node itself (one hop): a pod that is
 # not hostNetwork cannot borrow the node's role. IMDSv2 only, and an
 # encrypted root volume. No variable: none of it is a client's call.
