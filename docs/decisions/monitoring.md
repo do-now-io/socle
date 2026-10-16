@@ -82,7 +82,7 @@ VictoriaMetrics repositories, and writes them as `VMRule`s. Unpinned, two
 installs of one socle version could load different rules.
 
 **Decision.** Every source the chart reads is pinned to a tag: kube-prometheus
-v0.19.0, VictoriaMetrics v1.153.0, operator v0.75.0, VictoriaLogs v1.53.0,
+v0.19.0, VictoriaMetrics v1.154.0, operator v0.75.0, VictoriaLogs v1.53.0,
 VictoriaTraces v0.10.0, the versions the chart runs. The groups that read the
 control plane are off with its scrape. The socle's own rules, Flux and the
 collectors, are `VMRule`s in their modules, checked with `vmalert -dryRun` in
@@ -234,7 +234,7 @@ on k3s, 2026-10-12.
 **accepted** · 2026-10-12 · [`oci/catalog/monitoring/resourceset.yaml`](../../oci/catalog/monitoring/resourceset.yaml)
 
 **Decision.** While logs are on, Grafana's `plugins` list
-`victoriametrics-logs-datasource@0.32.0`; Grafana downloads it at start, and
+`victoriametrics-logs-datasource@0.33.1`; Grafana downloads it at start, and
 the chart provisions the VictoriaLogs datasource only when it is listed.
 Restates GRAFANA-02 of 0.1.
 
@@ -246,7 +246,7 @@ socle-built image.
 and traces are unaffected.
 
 **Sources.** The chart's `defaultDatasources` template; the VictoriaLogs
-Grafana datasource 0.32.0.
+Grafana datasource 0.33.1.
 
 ## MONITORING-12: Each module brings its own monitoring, only while it is on
 

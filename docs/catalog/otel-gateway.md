@@ -43,7 +43,7 @@ kube = {
   otel_gateway = {
     enabled = true # on by default; off removes the release and its rules
 
-    # Any value of the opentelemetry-collector chart 0.173.1; yours win over the socle's.
+    # Any value of the opentelemetry-collector chart 0.176.0; yours win over the socle's.
     values = {
       resources = { limits = { memory = "2Gi" } }
     }
@@ -75,7 +75,7 @@ kube = {
 <details>
 <summary>Under the hood</summary>
 
-**Installed**: chart `opentelemetry-collector` 0.173.1 (collector 0.160.0)
+**Installed**: chart `opentelemetry-collector` 0.176.0 (collector 0.162.0)
 from `oci://ghcr.io/open-telemetry/opentelemetry-helm-charts`, in
 `deployment` mode, in the `otel-gateway` namespace, with a `ClusterIP`
 Service, and a `VMRule` applied by a Flux `Kustomization` once monitoring

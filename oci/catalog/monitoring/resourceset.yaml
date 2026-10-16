@@ -82,7 +82,7 @@ spec:
             mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
             operation: copy
           ref:
-            tag: 0.95.2  # VictoriaMetrics v1.153.0, operator v0.75.0
+            tag: 0.96.0  # VictoriaMetrics v1.154.0, operator v0.75.0
         ---
         # The socle's own chart values, listed first in valuesFrom. (No template
         # delimiters in these comments: the operator templates them too.)
@@ -526,13 +526,13 @@ spec:
                   url: "https://raw.githubusercontent.com/prometheus-operator/kube-prometheus/v0.19.0/\
                     manifests/nodeExporter-prometheusRule.yaml"
                 vmhealth:
-                  url: https://raw.githubusercontent.com/VictoriaMetrics/VictoriaMetrics/v1.153.0/deployment/docker/rules/alerts-health.yml
+                  url: https://raw.githubusercontent.com/VictoriaMetrics/VictoriaMetrics/v1.154.0/deployment/docker/rules/alerts-health.yml
                 vmagent:
-                  url: https://raw.githubusercontent.com/VictoriaMetrics/VictoriaMetrics/v1.153.0/deployment/docker/rules/alerts-vmagent.yml
+                  url: https://raw.githubusercontent.com/VictoriaMetrics/VictoriaMetrics/v1.154.0/deployment/docker/rules/alerts-vmagent.yml
                 vmalert:
-                  url: https://raw.githubusercontent.com/VictoriaMetrics/VictoriaMetrics/v1.153.0/deployment/docker/rules/alerts-vmalert.yml
+                  url: https://raw.githubusercontent.com/VictoriaMetrics/VictoriaMetrics/v1.154.0/deployment/docker/rules/alerts-vmalert.yml
                 vmsingle:
-                  url: "https://raw.githubusercontent.com/VictoriaMetrics/VictoriaMetrics/v1.153.0/\
+                  url: "https://raw.githubusercontent.com/VictoriaMetrics/VictoriaMetrics/v1.154.0/\
                     deployment/docker/rules/alerts-single-node.yml"
                 vmoperator:
                   url: https://raw.githubusercontent.com/VictoriaMetrics/operator/v0.75.0/config/alerting/vmoperator-rules.yaml
@@ -618,7 +618,7 @@ spec:
               # egress to it gets Grafana without its logs. Listing it is also
               # what makes the chart provision the VictoriaLogs datasource.
               plugins:
-                - victoriametrics-logs-datasource@0.32.0
+                - victoriametrics-logs-datasource@0.33.1
               << end >>
               # Every ConfigMap labelled grafana_dashboard "1", in any namespace,
               # is a dashboard: the stack's, the modules', a client's. ConfigMaps

@@ -84,7 +84,7 @@
         annotations:
           fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
       spec:
-        package: xpkg.crossplane.io/crossplane-contrib/provider-family-gcp:v3.0.0
+        package: xpkg.crossplane.io/crossplane-contrib/provider-family-gcp:v3.1.0
         runtimeConfigRef:
           name: provider-gcp
       ---
@@ -97,7 +97,7 @@
         annotations:
           fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
       spec:
-        package: xpkg.crossplane.io/crossplane-contrib/provider-gcp-cloudplatform:v3.0.0
+        package: xpkg.crossplane.io/crossplane-contrib/provider-gcp-cloudplatform:v3.1.0
         runtimeConfigRef:
           name: provider-gcp
       ---
@@ -112,7 +112,7 @@
         annotations:
           fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
       spec:
-        package: xpkg.crossplane.io/crossplane-contrib/provider-gcp-storage:v3.0.0
+        package: xpkg.crossplane.io/crossplane-contrib/provider-gcp-storage:v3.1.0
         runtimeConfigRef:
           name: provider-gcp
 - op: add

@@ -48,7 +48,7 @@ kube = {
     enabled  = false         # off by default
     prefixes = ["acme-prod"] # default: the cluster's name; [] = no access, no store
 
-    # Any value of the external-secrets chart 2.11.0; yours win over the socle's.
+    # Any value of the external-secrets chart 2.13.0; yours win over the socle's.
     values = {
       concurrent = 2
       log        = { level = "debug" }
@@ -90,7 +90,7 @@ kube = {
 <details>
 <summary>Under the hood</summary>
 
-**Installed**: chart `external-secrets` 2.11.0 (ESO v2.11.0) from
+**Installed**: chart `external-secrets` 2.13.0 (ESO v2.13.0) from
 `oci://ghcr.io/external-secrets/charts/external-secrets`, in `external-secrets`
 (Pod Security `restricted`). On aws with crossplane on and a prefix,
 `Role/external-secrets`, `PodIdentityAssociation/external-secrets` and

@@ -63,7 +63,7 @@ kube = {
 
     node_agent = false # default: eks_addons.efs_csi; the node-agent for EFS volumes, a privileged DaemonSet; refused on gcp
 
-    # Any value of the velero chart 12.2.0; yours win over the socle's.
+    # Any value of the velero chart 12.2.1; yours win over the socle's.
     values = {
       resources     = { limits = { memory = "1Gi" } }
       configuration = { logFormat = "json" }
@@ -109,7 +109,7 @@ kube = {
 <details>
 <summary>Under the hood</summary>
 
-**Installed**: chart `velero` 12.2.0 (Velero 1.18.2) from
+**Installed**: chart `velero` 12.2.1 (Velero 1.18.2) from
 `https://vmware-tanzu.github.io/helm-charts`, with
 `velero-plugin-for-aws:v1.14.4` on aws, `velero-plugin-for-gcp:v1.14.4` on
 gcp, in the `velero` namespace (Pod Security `restricted`, `privileged` with

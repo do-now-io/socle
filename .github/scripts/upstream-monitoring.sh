@@ -23,8 +23,8 @@ mode="${1:-check}"
 sources() {
   cat <<'EOF'
 argocd|rules|awesome-prometheus-alerts|https://raw.githubusercontent.com/samber/awesome-prometheus-alerts/822af1e59938844e9f32c9c2ff7cbe63e8438655/dist/rules/argocd/embedded-exporter.yml
-argocd|dashboard|dashboard-argocd|https://raw.githubusercontent.com/argoproj/argo-cd/v3.5.3/examples/dashboard.json
-argocd-image-updater|dashboard|dashboard-argocd-image-updater|https://raw.githubusercontent.com/argoproj-labs/argocd-image-updater/v1.3.0/config/example-grafana-dashboard.json
+argocd|dashboard|dashboard-argocd|https://raw.githubusercontent.com/argoproj/argo-cd/v3.5.5/examples/dashboard.json
+argocd-image-updater|dashboard|dashboard-argocd-image-updater|https://raw.githubusercontent.com/argoproj-labs/argocd-image-updater/v1.3.1/config/example-grafana-dashboard.json
 crossplane|dashboard|dashboard-crossplane|https://grafana.com/api/dashboards/24549/revisions/3/download
 external-dns|dashboard|dashboard-external-dns|https://grafana.com/api/dashboards/23969/revisions/1/download
 keda|dashboard|dashboard-keda|https://raw.githubusercontent.com/kedacore/keda/v2.21.0/config/grafana/keda-dashboard.json
