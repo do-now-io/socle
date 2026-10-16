@@ -56,13 +56,14 @@ site/                               # the site's generator: Astro + Starlight
 | Node.js 24 | the documentation site (`site/`) |
 
 The scripts under `.github/scripts/` run as they do in CI, from anywhere in
-the repository: `check-version.sh`, `check-catalog-clouds.sh`.
+the repository: `check-version.sh`, `check-catalog-clouds.sh`,
+`check-catalog-pages.sh`.
 
 ## What each check proves
 
 | Workflow | When | What a green run proves |
 | --- | --- | --- |
-| `pr-static.yaml` | every PR, every push to `main` | YAML and workflows lint clean; `VERSION` is stamped everywhere; `catalog.tf` and the cloud overlays agree and every module ships its e2e suite; every OpenTofu module formats, validates, passes `tofu test` and TFLint, and its terraform-docs block is current; the catalog renders and kubeconforms strictly, and every cloud overlay builds with kustomize; every alert rule file loads in `vmalert -dryRun`; no secret is committed. Trivy's misconfiguration findings: on same-repo PRs and pushes the SARIF is uploaded and the gate is the **Code scanning results / Trivy** check; only on fork PRs does the job itself fail on HIGH/CRITICAL |
+| `pr-static.yaml` | every PR, every push to `main` | YAML and workflows lint clean; `VERSION` is stamped everywhere; `catalog.tf` and the cloud overlays agree and every module ships its e2e suite; every module ships its page, each `requires` in it waits for what it needs, and the dependency graph has no cycle; every OpenTofu module formats, validates, passes `tofu test` and TFLint, and its terraform-docs block is current; the catalog renders and kubeconforms strictly, and every cloud overlay builds with kustomize; every alert rule file loads in `vmalert -dryRun`; no secret is committed. Trivy's misconfiguration findings: on same-repo PRs and pushes the SARIF is uploaded and the gate is the **Code scanning results / Trivy** check; only on fork PRs does the job itself fail on HIGH/CRITICAL |
 | `integration.yaml` | every PR, every push to `main` | each foundations module plans against a cloud emulator: [floci](https://floci.io) for AWS, floci-gcp, floci-az; Scaleway, which has no emulator, plans its minimal example offline. The Azure leg is `continue-on-error`: floci-az's certificate fails Go's x509 validation. A plan, not an apply |
 | `docs.yaml` | every PR, forks included | the documentation site builds in strict mode: no broken internal link or anchor, no page outside the navigation, no include that does not resolve |
 | `pages.yaml` | every push to `main`, every run of `docs.yaml` (the PR events), every run of `publish-artifact.yaml` on `main` | the site is deployed: the last release at the root, `main` under `/dev/`, and a preview of each open PR from a branch of this repository under `/pr/<N>/`, linked from a comment on the PR |
@@ -86,7 +87,7 @@ commit is worth nothing.
 discovered, so its job names cannot be listed in a ruleset; the `e2e` job
 needs every other job and is red if any of them is. The `protect-main`
 ruleset requires the five static checks (yamllint, actionlint, OpenTofu,
-kubeconform, Trivy), not `e2e`. Each e2e job publishes a JUnit report: the
+kubeconform, Trivy) and the site's strict build, not `e2e`. Each e2e job publishes a JUnit report: the
 Checks tab shows one check per job, the failing step named.
 
 ## Testing
@@ -196,7 +197,10 @@ the folder says which:
    module, like its `resourceset.yaml`, its `catalog.tf` entry and its tests.
    It starts from [`docs/catalog/_template.md`](https://github.com/do-now-io/socle/blob/main/docs/catalog/_template.md) and
    its frontmatter carries `description`, `category` and `requires`, which
-   feed the catalog's overview.
+   feed the catalog's overview, its dependency graph and `catalog.json`.
+   `check-catalog-pages.sh` fails a module without its page, a `requires`
+   on a module or a cloud that does not offer it, a `requires` its
+   `ResourceSet` does not wait for (`spec.dependsOn`), and a cycle.
 7. **File names are kebab-case, without a cloud or product prefix**: the
    folder already says `aws`.
 8. **The site build is a pull request check, in strict mode.** A broken

@@ -74,6 +74,9 @@ jobs:
       - name: The catalog and the per-cloud overlays agree
         run: |
           .github/scripts/check-catalog-clouds.sh | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Every catalog module has its page, and the dependency graph holds
+        run: |
+          .github/scripts/check-catalog-pages.sh | tee -a "$GITHUB_STEP_SUMMARY"
       # The operator refuses a VMRule that does not load: a socle rule that
       # would never fire (docs/catalog/monitoring.md). The version is the one
       # the monitoring module's chart runs.
