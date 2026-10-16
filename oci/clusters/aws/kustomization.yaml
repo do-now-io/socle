@@ -24,6 +24,7 @@ resources:
   - ../../catalog/velero/resourceset.yaml
   - ../../catalog/hello/resourceset.yaml
   - ../../catalog/metrics-server/resourceset.yaml
+  - ../../catalog/karpenter/resourceset.yaml
 patches:
   - path: gateway-api/patch.yaml
     target:
@@ -57,3 +58,7 @@ patches:
     target:
       kind: ResourceSet
       name: hello
+  - path: karpenter/patch.yaml
+    target:
+      kind: ResourceSet
+      name: karpenter

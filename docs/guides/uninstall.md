@@ -48,6 +48,11 @@ suite).
 
 ## Everything
 
+With `karpenter` on, turn it off first and wait for its nodes to go
+(`kubectl get nodeclaims` empty): they are in no OpenTofu state, and an
+instance left behind stops the VPC's deletion
+([karpenter](../catalog/karpenter.md)).
+
 On GCP, the cluster carries deletion protection: set
 `gcp.deletion_protection = false` and apply first. Then, on both:
 
@@ -81,6 +86,8 @@ below.
 | Module roles (AWS), when `crossplane` went first or the bootstrap left the state | nothing is left to delete them | delete the roles under `/socle/<cluster>/` in IAM |
 | Module bindings (GCP), when `crossplane` went first or the bootstrap left the state | nothing is left to delete them; a socle created in the project next inherits them | remove the `principal://…` members of the project's IAM policy |
 | Velero's bucket (S3 on AWS, GCS on GCP) | Crossplane may not delete a bucket of data | in the cloud, once its backups are not needed |
+| Karpenter's CRDs, and the NodePools you wrote | Helm never deletes a chart's CRDs | by hand once unused, or with the cluster |
+| An instance Karpenter launched, when the socle went while it drained | only Karpenter terminates its nodes | terminate the instances tagged `karpenter.sh/nodepool` and `kubernetes.io/cluster/<cluster>` in EC2 |
 | A pending Velero `Restore` | its finalizer holds the namespace | delete the `Restore` ([Restore a backup](restore-a-backup.md)) |
 | `ImageUpdater` objects in `argocd`, once `argocd_image_updater` is off | their finalizer holds them, and the `argocd` namespace, with no controller to release it | delete them before turning the module off, or release them: `kubectl -n argocd patch imageupdater <name> --type merge -p '{"metadata":{"finalizers":[]}}'` |
 | A mirror's pull secret | `flux-system` outlives the operator's release | with the cluster |

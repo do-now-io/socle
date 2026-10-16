@@ -147,3 +147,17 @@ check "crossplane_has_an_identity" {
     error_message = "kube.crossplane.enabled is set without aws.crossplane: the AWS provider runs with no identity, and every CloudAccess will fail. Set aws.crossplane, or keep Crossplane off."
   }
 }
+
+# A warning, not an error: the module converges, but Karpenter's controller
+# is refused by IAM on every call to a service the boundary does not allow —
+# and without ec2 there, the boundary has no node-role exception either, so
+# no node is ever launched (docs/catalog/karpenter.md).
+check "karpenter_has_its_services" {
+  assert {
+    condition = (
+      !try(var.kube.karpenter.enabled, false)
+      || length(setsubtract(["ec2", "ssm", "pricing", "sqs", "eks"], try(var.aws.crossplane.allowed_services, []))) == 0
+    )
+    error_message = "kube.karpenter.enabled is set but aws.crossplane.allowed_services lacks ${join(", ", setsubtract(["ec2", "ssm", "pricing", "sqs", "eks"], try(var.aws.crossplane.allowed_services, [])))}: Karpenter's controller would be refused by IAM. Add them to aws.crossplane.allowed_services."
+  }
+}

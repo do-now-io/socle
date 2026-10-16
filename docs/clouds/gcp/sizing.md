@@ -76,7 +76,7 @@ So ask for the `SSD_TOTAL_GB` increase ([prerequisites](prerequisites.md#quotas)
 
 ## On AWS
 
-The same requests apply. With metrics-server, the node exporter, Velero's node-agent (512Mi of disk per node, no limit: Kopia's cache grows with what it uploads) and four Crossplane providers, the catalog requests about 2.1 vCPU, 5.7 GiB of memory and 6.2 GiB of ephemeral storage. On EKS a request only schedules; nothing turns it into a limit, but under DiskPressure the kubelet evicts first the pods furthest over their ephemeral-storage request.
+The same requests apply. With metrics-server, the node exporter, Velero's node-agent (512Mi of disk per node, no limit: Kopia's cache grows with what it uploads), six Crossplane providers and Karpenter's two replicas, the catalog requests about 2.4 vCPU, 6.8 GiB of memory and 6.8 GiB of ephemeral storage. On EKS a request only schedules; nothing turns it into a limit, but under DiskPressure the kubelet evicts first the pods furthest over their ephemeral-storage request.
 
 ## The guard
 

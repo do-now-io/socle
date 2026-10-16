@@ -1896,3 +1896,98 @@ run "argocd_image_updater_repositories_need_the_project_on_gcp" {
   }
   expect_failures = [var.project]
 }
+
+# --- karpenter ---
+
+run "kube_refuses_karpenter_without_crossplane" {
+  command = plan
+  variables {
+    region = "eu-west-3"
+    kube   = { karpenter = { enabled = true } }
+  }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_karpenter_without_a_region" {
+  command = plan
+  variables {
+    kube = { crossplane = { enabled = true }, karpenter = { enabled = true } }
+  }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_karpenter_on_gcp" {
+  command = plan
+  variables {
+    cloud   = "gcp"
+    project = { id = "sandbox-2bace", number = "123456789012" }
+    kube    = { karpenter = { enabled = false } }
+  }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_a_karpenter_capacity_type_karpenter_does_not_know" {
+  command = plan
+  variables { kube = { karpenter = { node_pool = { capacity_types = ["spot", "preemptible"] } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_no_karpenter_capacity_type" {
+  command = plan
+  variables { kube = { karpenter = { node_pool = { capacity_types = [] } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_a_karpenter_architecture_that_is_not_kubernetes_arch" {
+  command = plan
+  variables { kube = { karpenter = { node_pool = { architectures = ["x86_64"] } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_a_karpenter_architecture_twice" {
+  command = plan
+  variables { kube = { karpenter = { node_pool = { architectures = ["arm64", "arm64"] } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_a_fractional_karpenter_cpu_limit" {
+  command = plan
+  variables { kube = { karpenter = { node_pool = { cpu = 1.5 } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_a_karpenter_memory_limit_without_a_binary_unit" {
+  command = plan
+  variables { kube = { karpenter = { node_pool = { memory = "128G" } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_a_karpenter_consolidate_after_that_is_not_a_duration" {
+  command = plan
+  variables { kube = { karpenter = { node_pool = { consolidate_after = "1 minute" } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_a_karpenter_ami_outside_al2023" {
+  command = plan
+  variables { kube = { karpenter = { node_pool = { ami = "bottlerocket@latest" } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_an_unknown_karpenter_node_pool_key" {
+  command = plan
+  variables { kube = { karpenter = { node_pool = { instance_types = ["m7g.large"] } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_karpenter_values_carrying_a_literal_credential_env" {
+  command = plan
+  variables { kube = { karpenter = { values = { controller = { env = [{ name = "AWS_SECRET_ACCESS_KEY", value = "x" }] } } } } }
+  expect_failures = [var.kube]
+}
+
+run "kube_refuses_karpenter_values_secret_that_is_not_a_secret_name" {
+  command = plan
+  variables { kube = { karpenter = { values_secret = "Karpenter_Values" } } }
+  expect_failures = [var.kube]
+}

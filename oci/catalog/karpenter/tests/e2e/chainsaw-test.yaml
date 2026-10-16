@@ -1,0 +1,1330 @@
+# The karpenter module's proof (docs/catalog/karpenter.md). Off by default,
+# so `health` proves the disabled shape only. The `module` phase, on aws, in
+# two halves:
+#
+# 1. The module's own AWS resources, with Crossplane on: its Role reaches
+#    floci's IAM under /socle/<cluster>/ with AWS's controller policy scoped
+#    to this cluster and to the bootstrap nodes' role, its queue reaches
+#    floci's SQS and its five rules floci's EventBridge — proven from what
+#    Crossplane reports — and the workload is withheld while the
+#    association is not Ready. Then off: the managed resources go, with the
+#    namespace. The floci seams (providerConfigRef: floci, the association
+#    never syncing) are steps of their own, to delete the day floci serves
+#    Pod Identity.
+# 2. The controller and its nodes' objects, for real, against floci's EC2.
+#    floci has no Pod Identity, so the controller runs with Crossplane off
+#    and static test keys in kube.karpenter.values (the plan refuses both;
+#    this test writes the inputs directly — the seam). The controller
+#    Available under Pod Security restricted, never on a node it manages;
+#    the whole valuesFrom order; the EC2NodeClass and the NodePool as the
+#    inputs say, the client's node_pool included, the EC2NodeClass
+#    reconciled by the controller against floci's EC2; then off, in the
+#    order that lets Karpenter remove its nodes — the NodePool and the
+#    EC2NodeClass go before the controller, their finalizers released by
+#    it — and the CRDs stay.
+#
+# Not provable on floci, which launches no EC2 node behind its EKS: a node
+# launched, joining, Cilium on it, consolidation — karpenter-module-eks,
+# last in this file, run by hand on the aws sandbox (docs/catalog/karpenter.md,
+# Measured).
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: karpenter-health
+  labels:
+    phase: health
+    cloud: any
+    platform: any
+spec:
+  description: Off by default, the ResourceSet is Ready and renders nothing.
+  timeouts:
+    assert: 3m
+    error: 1m
+  steps:
+    - name: the ResourceSet is Ready with nothing in its inventory
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: karpenter
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (length(inventory.entries || `[]`)): 0
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: karpenter
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: karpenter
+---
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: karpenter-module-aws
+  labels:
+    phase: module
+    cloud: aws
+    platform: any
+spec:
+  description: >-
+    The controller's role, its queue and its rules through Crossplane, the
+    workload withheld until they are Ready; then the controller and the
+    default EC2NodeClass and NodePool against floci, removed nodes first.
+  timeouts:
+    assert: 5m
+    error: 3m
+    delete: 3m
+  steps:
+    # First half: the module's own AWS resources (docs/catalog/karpenter.md, Cloud access).
+    - name: with Crossplane on, the module declares its Role, its association, its queue and its rules
+      # Two providers more than velero's four, cold.
+      timeouts:
+        assert: 10m
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    crossplane:
+                      enabled: true
+                      permissions_boundary: arn:aws:iam::000000000000:policy/socle-e2e-catalog-crossplane-boundary
+                    karpenter:
+                      enabled: true
+        # In the order their CRDs appear: the release (core), the providers
+        # Healthy, their CRDs Established (a Provider is Healthy before every
+        # CRD it brings is served), then the module's objects.
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: crossplane
+                namespace: crossplane-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: pkg.crossplane.io/v1
+              kind: Provider
+              metadata:
+                name: provider-aws-sqs
+              status:
+                (conditions[?type == 'Healthy'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: pkg.crossplane.io/v1
+              kind: Provider
+              metadata:
+                name: provider-aws-cloudwatchevents
+              status:
+                (conditions[?type == 'Healthy'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: roles.iam.aws.m.upbound.io
+              status:
+                (conditions[?type == 'Established'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: podidentityassociations.eks.aws.m.upbound.io
+              status:
+                (conditions[?type == 'Established'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: queues.sqs.aws.m.upbound.io
+              status:
+                (conditions[?type == 'Established'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: rules.cloudwatchevents.aws.m.upbound.io
+              status:
+                (conditions[?type == 'Established'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: targets.cloudwatchevents.aws.m.upbound.io
+              status:
+                (conditions[?type == 'Established'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: crossplane-provider-config
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: iam.aws.m.upbound.io/v1beta1
+              kind: Role
+              metadata:
+                name: karpenter
+                namespace: karpenter
+                annotations:
+                  crossplane.io/external-name: (join('', [$values.cluster, '-karpenter']))
+              spec:
+                forProvider:
+                  path: (join('', ['/socle/', $values.cluster, '/']))
+                  permissionsBoundary: arn:aws:iam::000000000000:policy/socle-e2e-catalog-crossplane-boundary
+        - assert:
+            resource:
+              apiVersion: eks.aws.m.upbound.io/v1beta1
+              kind: PodIdentityAssociation
+              metadata:
+                name: karpenter
+                namespace: karpenter
+              spec:
+                forProvider:
+                  clusterName: ($values.cluster)
+                  namespace: karpenter
+                  serviceAccount: karpenter
+        - assert:
+            resource:
+              apiVersion: sqs.aws.m.upbound.io/v1beta1
+              kind: Queue
+              metadata:
+                name: karpenter
+                namespace: karpenter
+              spec:
+                forProvider:
+                  name: (join('', [$values.cluster, '-karpenter']))
+                  messageRetentionSeconds: 300
+                  sqsManagedSseEnabled: true
+                  (contains(policy, 'events.amazonaws.com')): true
+                  (contains(policy, 'aws:SecureTransport')): true
+        - assert:
+            resource:
+              apiVersion: cloudwatchevents.aws.m.upbound.io/v1beta1
+              kind: Rule
+              metadata:
+                name: karpenter-spot
+                namespace: karpenter
+                annotations:
+                  crossplane.io/external-name: (join('', [$values.cluster, '-karpenter-spot']))
+              spec:
+                forProvider:
+                  (contains(eventPattern, 'EC2 Spot Instance Interruption Warning')): true
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: karpenter
+        - describe:
+            apiVersion: pkg.crossplane.io/v1
+            kind: Provider
+        - podLogs:
+            namespace: flux-system
+            selector: app.kubernetes.io/name=flux-operator
+            tail: 40
+    - name: 'floci seam: a ClusterProviderConfig with static keys, and the module''s resources pointed at it'
+      skipDelete: true
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: floci-credentials
+                namespace: crossplane-system
+              stringData:
+                credentials: |
+                  [default]
+                  aws_access_key_id = test
+                  aws_secret_access_key = test
+        - apply:
+            resource:
+              apiVersion: aws.m.upbound.io/v1beta1
+              kind: ClusterProviderConfig
+              metadata:
+                name: floci
+              spec:
+                credentials:
+                  source: Secret
+                  secretRef:
+                    namespace: crossplane-system
+                    name: floci-credentials
+                    key: credentials
+                endpoint:
+                  hostnameImmutable: true
+                  services: [iam, eks, sts, sqs, events]
+                  url:
+                    type: Static
+                    static: (join('', ['http://', $values.floci_ip, ':4566']))
+                skip_credentials_validation: true
+                skip_metadata_api_check: true
+                skip_region_validation: true
+                skip_requesting_account_id: true
+        - patch:
+            resource:
+              apiVersion: iam.aws.m.upbound.io/v1beta1
+              kind: Role
+              metadata:
+                name: karpenter
+                namespace: karpenter
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: floci}
+        - patch:
+            resource:
+              apiVersion: eks.aws.m.upbound.io/v1beta1
+              kind: PodIdentityAssociation
+              metadata:
+                name: karpenter
+                namespace: karpenter
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: floci}
+        - patch:
+            resource:
+              apiVersion: sqs.aws.m.upbound.io/v1beta1
+              kind: Queue
+              metadata:
+                name: karpenter
+                namespace: karpenter
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: floci}
+        - patch:
+            resource:
+              apiVersion: cloudwatchevents.aws.m.upbound.io/v1beta1
+              kind: Rule
+              metadata:
+                name: karpenter-health
+                namespace: karpenter
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: floci}
+        - patch:
+            resource:
+              apiVersion: cloudwatchevents.aws.m.upbound.io/v1beta1
+              kind: Rule
+              metadata:
+                name: karpenter-spot
+                namespace: karpenter
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: floci}
+        - patch:
+            resource:
+              apiVersion: cloudwatchevents.aws.m.upbound.io/v1beta1
+              kind: Rule
+              metadata:
+                name: karpenter-rebalance
+                namespace: karpenter
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: floci}
+        - patch:
+            resource:
+              apiVersion: cloudwatchevents.aws.m.upbound.io/v1beta1
+              kind: Rule
+              metadata:
+                name: karpenter-state
+                namespace: karpenter
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: floci}
+        - patch:
+            resource:
+              apiVersion: cloudwatchevents.aws.m.upbound.io/v1beta1
+              kind: Rule
+              metadata:
+                name: karpenter-reservation
+                namespace: karpenter
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: floci}
+        - patch:
+            resource:
+              apiVersion: cloudwatchevents.aws.m.upbound.io/v1beta1
+              kind: Target
+              metadata:
+                name: karpenter-health
+                namespace: karpenter
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: floci}
+        - patch:
+            resource:
+              apiVersion: cloudwatchevents.aws.m.upbound.io/v1beta1
+              kind: Target
+              metadata:
+                name: karpenter-spot
+                namespace: karpenter
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: floci}
+        - patch:
+            resource:
+              apiVersion: cloudwatchevents.aws.m.upbound.io/v1beta1
+              kind: Target
+              metadata:
+                name: karpenter-rebalance
+                namespace: karpenter
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: floci}
+        - patch:
+            resource:
+              apiVersion: cloudwatchevents.aws.m.upbound.io/v1beta1
+              kind: Target
+              metadata:
+                name: karpenter-state
+                namespace: karpenter
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: floci}
+        - patch:
+            resource:
+              apiVersion: cloudwatchevents.aws.m.upbound.io/v1beta1
+              kind: Target
+              metadata:
+                name: karpenter-reservation
+                namespace: karpenter
+              spec:
+                providerConfigRef: {kind: ClusterProviderConfig, name: floci}
+    # Read from what Crossplane reports (status.atProvider): AWS's controller
+    # policy, every EC2 write scoped by this cluster's tag, PassRole on the
+    # bootstrap nodes' role only and to EC2 only, no instance-profile write.
+    - name: the Role becomes an IAM role under /socle/<cluster>/ with AWS's controller policy, scoped to this cluster
+      try:
+        - assert:
+            resource:
+              apiVersion: iam.aws.m.upbound.io/v1beta1
+              kind: Role
+              metadata:
+                name: karpenter
+                namespace: karpenter
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                atProvider:
+                  arn: (join('', ['arn:aws:iam::000000000000:role/socle/', $values.cluster, '/', $values.cluster, '-karpenter']))
+                  (contains(assumeRolePolicy || '', 'pods.eks.amazonaws.com')): true
+                  (inlinePolicy[?name == 'controller'] || `[]`):
+                    - (contains(policy || '', 'ec2:RunInstances')): true
+                      (contains(policy || '', join('', ['aws:RequestTag/kubernetes.io/cluster/', $values.cluster]))): true
+                      (contains(policy || '', join('', ['role/', $values.cluster, '-bootstrap-node']))): true
+                      (contains(policy || '', 'ec2.amazonaws.com')): true
+                      (contains(policy || '', join('', [':', $values.cluster, '-karpenter"']))): true
+                      (contains(policy || '', 'iam:CreateInstanceProfile')): false
+                      (contains(policy || '', 'iam:AddRoleToInstanceProfile')): false
+                      (contains(policy || '', '"*:*"')): false
+      catch:
+        - describe:
+            apiVersion: iam.aws.m.upbound.io/v1beta1
+            kind: Role
+            namespace: karpenter
+            name: karpenter
+        - podLogs:
+            namespace: crossplane-system
+            selector: pkg.crossplane.io/provider=provider-aws-iam
+            tail: 40
+    - name: the interruption queue reaches SQS, and the five rules EventBridge, each targeting the queue
+      try:
+        - assert:
+            resource:
+              apiVersion: sqs.aws.m.upbound.io/v1beta1
+              kind: Queue
+              metadata:
+                name: karpenter
+                namespace: karpenter
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                atProvider:
+                  arn: (join('', ['arn:aws:sqs:eu-west-3:000000000000:', $values.cluster, '-karpenter']))
+        - assert:
+            resource:
+              apiVersion: cloudwatchevents.aws.m.upbound.io/v1beta1
+              kind: Rule
+              metadata:
+                name: karpenter-health
+                namespace: karpenter
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: cloudwatchevents.aws.m.upbound.io/v1beta1
+              kind: Rule
+              metadata:
+                name: karpenter-spot
+                namespace: karpenter
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: cloudwatchevents.aws.m.upbound.io/v1beta1
+              kind: Rule
+              metadata:
+                name: karpenter-rebalance
+                namespace: karpenter
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: cloudwatchevents.aws.m.upbound.io/v1beta1
+              kind: Rule
+              metadata:
+                name: karpenter-state
+                namespace: karpenter
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: cloudwatchevents.aws.m.upbound.io/v1beta1
+              kind: Rule
+              metadata:
+                name: karpenter-reservation
+                namespace: karpenter
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: cloudwatchevents.aws.m.upbound.io/v1beta1
+              kind: Target
+              metadata:
+                name: karpenter-spot
+                namespace: karpenter
+              spec:
+                forProvider:
+                  arn: (join('', ['arn:aws:sqs:eu-west-3:000000000000:', $values.cluster, '-karpenter']))
+                  rule: (join('', [$values.cluster, '-karpenter-spot']))
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: sqs.aws.m.upbound.io/v1beta1
+            kind: Queue
+            namespace: karpenter
+        - describe:
+            apiVersion: cloudwatchevents.aws.m.upbound.io/v1beta1
+            kind: Rule
+            namespace: karpenter
+        - describe:
+            apiVersion: cloudwatchevents.aws.m.upbound.io/v1beta1
+            kind: Target
+            namespace: karpenter
+        - podLogs:
+            namespace: crossplane-system
+            selector: pkg.crossplane.io/provider=provider-aws-cloudwatchevents
+            tail: 40
+    # floci seam, second half: the association never syncs (floci 2.1.0 has
+    # no association API), so karpenter-access, which waits for it, is never
+    # Ready, the aws cloud step never healthy, and the workload step never
+    # applied: one full minute after the role and the queue turned Ready,
+    # still no controller. The day it syncs this step fails and goes with
+    # the seam.
+    - name: 'floci seam: the association cannot sync, so the workload is withheld'
+      try:
+        - assert:
+            resource:
+              apiVersion: eks.aws.m.upbound.io/v1beta1
+              kind: PodIdentityAssociation
+              metadata:
+                name: karpenter
+                namespace: karpenter
+              status:
+                (conditions[?type == 'Synced'] || `[]`):
+                  - status: 'False'
+        - sleep:
+            duration: 60s
+        # The ServiceAccount is the aws step's, there before the chart; the
+        # check that proves the association usable runs under it only once the
+        # association is Ready (#97): no Job.
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ServiceAccount
+              metadata:
+                name: karpenter
+                namespace: karpenter
+                annotations:
+                  helm.sh/resource-policy: keep
+        - error:
+            resource:
+              apiVersion: batch/v1
+              kind: Job
+              metadata:
+                name: karpenter-pod-identity
+                namespace: karpenter
+        - error:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: karpenter-controller
+                namespace: flux-system
+        - error:
+            resource:
+              apiVersion: kustomize.toolkit.fluxcd.io/v1
+              kind: Kustomization
+              metadata:
+                name: karpenter-nodes
+                namespace: flux-system
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: karpenter-access
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'False'
+        # Not Ready: Unknown while the step's health check waits, False once it
+        # times out.
+        - error:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: karpenter
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: karpenter
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: karpenter-access
+    # The association's finalizer waits on an API floci does not have:
+    # released by hand. Then the module off: every managed resource is
+    # deleted (each holds its finalizer until the cloud's object is gone), the
+    # namespace with them. Crossplane off last.
+    - name: off, the role, the queue and the rules are deleted, the namespace goes
+      try:
+        - patch:
+            resource:
+              apiVersion: eks.aws.m.upbound.io/v1beta1
+              kind: PodIdentityAssociation
+              metadata:
+                name: karpenter
+                namespace: karpenter
+                finalizers: []
+        # No idle gate: the workload is withheld, there is no release.
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    karpenter:
+                      enabled: false
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: karpenter
+        - delete:
+            ref:
+              apiVersion: aws.m.upbound.io/v1beta1
+              kind: ClusterProviderConfig
+              name: floci
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Secret
+              name: floci-credentials
+              namespace: crossplane-system
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    crossplane:
+                      enabled: false
+                      permissions_boundary: ''
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: crossplane-system
+      catch:
+        - describe:
+            apiVersion: v1
+            kind: Namespace
+            name: karpenter
+        - podLogs:
+            namespace: flux-system
+            selector: app.kubernetes.io/name=flux-operator
+            tail: 40
+    # Second half. floci seam: no Pod Identity, so the controller takes
+    # static test keys, floci's endpoint as a pod sees it, through the
+    # controller's environment, and Crossplane stays off so that the cloud
+    # step renders nothing to wait for. The client's values set a key the
+    # socle sets too (the controller's memory request, 256Mi): theirs wins.
+    - name: 'the controller converges, never on a node it manages, the client''s value beats the socle''s'
+      timeouts:
+        assert: 6m
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    karpenter:
+                      enabled: true
+                      # The client's own NodePool shape, from the first
+                      # apply: Flux applies a *Class before the rest and
+                      # waits for it to be Ready, and floci's EC2NodeClass
+                      # never is (no tagged subnet), so a later change of
+                      # node_pool would wait on it here — not on AWS.
+                      node_pool:
+                        capacity_types: [on-demand]
+                        architectures: [arm64, amd64]
+                        cpu: 8
+                        memory: 32Gi
+                        consolidate_after: 5m
+                        ami: al2023@latest
+                      values:
+                        controller:
+                          env:
+                            - name: AWS_REGION
+                              value: eu-west-3
+                            - name: AWS_ACCESS_KEY_ID
+                              value: test
+                            - name: AWS_SECRET_ACCESS_KEY
+                              value: test
+                            - name: AWS_ENDPOINT_URL
+                              value: (join('', ['http://', $values.floci_ip, ':4566']))
+                          resources:
+                            requests:
+                              memory: 320Mi
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: karpenter
+                labels:
+                  pod-security.kubernetes.io/enforce: restricted
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: karpenter-controller
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: karpenter
+                namespace: karpenter
+              spec:
+                install:
+                  crds: CreateReplace
+                upgrade:
+                  crds: CreateReplace
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: karpenter
+                namespace: karpenter
+              spec:
+                replicas: 2
+                template:
+                  metadata:
+                    annotations:
+                      prometheus.io/scrape: 'true'
+                      prometheus.io/port: '8080'
+                  spec:
+                    serviceAccountName: karpenter
+                    affinity:
+                      nodeAffinity:
+                        requiredDuringSchedulingIgnoredDuringExecution:
+                          (nodeSelectorTerms[0].matchExpressions[?key == 'karpenter.sh/nodepool'] || `[]`):
+                            - operator: DoesNotExist
+                    (containers[?name == 'controller'] || `[]`):
+                      - resources:
+                          requests:
+                            cpu: 100m
+                            memory: 320Mi
+                        (env[?name == 'CLUSTER_NAME'] || `[]`):
+                          - value: ($values.cluster)
+                        (env[?name == 'INTERRUPTION_QUEUE'] || `[]`):
+                          - value: (join('', [$values.cluster, '-karpenter']))
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+                readyReplicas: 2
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: karpenter
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        # Crossplane off: aws's cloud step renders no access.
+        - error:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: karpenter-access
+                namespace: flux-system
+        # The module's monitoring — rules and dashboards — applied with it,
+        # the monitoring module being on.
+        - assert:
+            resource:
+              apiVersion: kustomize.toolkit.fluxcd.io/v1
+              kind: Kustomization
+              metadata:
+                name: karpenter-monitoring
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: karpenter
+            name: karpenter
+        - events:
+            namespace: karpenter
+        - podLogs:
+            namespace: karpenter
+            tail: 40
+    # The order of valuesFrom, proven whole
+    # (docs/decisions/socle.md#socle-06-the-clients-values-win): the socle's
+    # document, then kube.karpenter.values, then the Secret the client names
+    # in values_secret, merged last; the Secret cleared, the client's 320Mi.
+    - name: kube.karpenter.values_secret is merged last, over values and the socle
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: karpenter-e2e-values
+                namespace: karpenter
+                labels:
+                  reconcile.fluxcd.io/watch: Enabled
+              stringData:
+                values.yaml: |
+                  controller:
+                    resources:
+                      requests:
+                        memory: 352Mi
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    karpenter:
+                      values_secret: karpenter-e2e-values
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: karpenter
+                namespace: karpenter
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'controller'] || `[]`):
+                      - resources:
+                          requests:
+                            memory: 352Mi
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    karpenter:
+                      values_secret: ''
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: karpenter
+                namespace: karpenter
+              spec:
+                template:
+                  spec:
+                    (containers[?name == 'controller'] || `[]`):
+                      - resources:
+                          requests:
+                            memory: 320Mi
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Secret
+              name: karpenter-e2e-values
+              namespace: karpenter
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: karpenter
+            name: karpenter
+        - podLogs:
+            namespace: flux-system
+            selector: app=helm-controller
+            tail: 40
+    # The nodes step: the EC2NodeClass and the NodePool as the inputs say —
+    # the client's node_pool, written when the module was turned on — every
+    # selector on what the foundations tag. The controller reconciles
+    # the EC2NodeClass against floci's EC2 — its subnet and security-group
+    # conditions are set, False here: floci's VPC carries no cluster tag —
+    # so it reads EC2 with the selectors the socle wrote.
+    - name: the default EC2NodeClass and NodePool, as the inputs say, reconciled by the controller
+      try:
+        - assert:
+            resource:
+              apiVersion: kustomize.toolkit.fluxcd.io/v1
+              kind: Kustomization
+              metadata:
+                name: karpenter-nodes
+                namespace: flux-system
+              spec:
+                deletionPolicy: WaitForTermination
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: karpenter.k8s.aws/v1
+              kind: EC2NodeClass
+              metadata:
+                name: default
+              spec:
+                instanceProfile: (join('', [$values.cluster, '-bootstrap-node']))
+                amiSelectorTerms:
+                  - alias: al2023@latest
+                # The job's cluster, socle-e2e-catalog: a key cannot be an
+                # expression in an assertion, a parenthesised key is one.
+                (subnetSelectorTerms[0].tags):
+                  kubernetes.io/cluster/socle-e2e-catalog: owned
+                  kubernetes.io/role/internal-elb: '1'
+                (securityGroupSelectorTerms[0].tags):
+                  kubernetes.io/cluster/socle-e2e-catalog: owned
+                metadataOptions:
+                  httpTokens: required
+                  httpPutResponseHopLimit: 1
+                tags:
+                  owner: platform
+                  environment: dev
+              status:
+                (conditions[?type == 'SubnetsReady'] || `[]`):
+                  - reason: SubnetsNotFound
+        - assert:
+            resource:
+              apiVersion: karpenter.sh/v1
+              kind: NodePool
+              metadata:
+                name: default
+              spec:
+                template:
+                  spec:
+                    (requirements[?key == 'karpenter.sh/capacity-type'] || `[]`):
+                      - values: [on-demand]
+                    (requirements[?key == 'kubernetes.io/arch'] || `[]`):
+                      - values: [arm64, amd64]
+                    (startupTaints[?key == 'node.cilium.io/agent-not-ready'] || `[]`):
+                      - effect: NoExecute
+                limits:
+                  cpu: '8'
+                  memory: 32Gi
+                disruption:
+                  consolidationPolicy: WhenEmptyOrUnderutilized
+                  consolidateAfter: 5m
+      catch:
+        - describe:
+            apiVersion: kustomize.toolkit.fluxcd.io/v1
+            kind: Kustomization
+            namespace: flux-system
+            name: karpenter-nodes
+        - describe:
+            apiVersion: karpenter.k8s.aws/v1
+            kind: EC2NodeClass
+            name: default
+        - describe:
+            apiVersion: karpenter.sh/v1
+            kind: NodePool
+            name: default
+        - podLogs:
+            namespace: karpenter
+            tail: 40
+    # The uninstall order (KARPENTER-04): the NodePool and the EC2NodeClass go
+    # first, their finalizers released by the controller still running —
+    # with it gone first, the EC2NodeClass would hold forever — then the
+    # controller and the namespace. The CRDs stay, for whatever NodePools a
+    # client wrote. Behind the idle gate: no release in flight.
+    - name: enabled = false removes the nodes' objects before the controller, the CRDs stay
+      try:
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: karpenter
+                namespace: karpenter
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'Released'] || `[]`):
+                  - status: 'True'
+                (length(conditions[?type == 'Reconciling'] || `[]`)): 0
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    karpenter:
+                      enabled: false
+                      values: {}
+                      node_pool:
+                        capacity_types: [spot, on-demand]
+                        architectures: [arm64, amd64]
+                        cpu: 32
+                        memory: 128Gi
+                        consolidate_after: 1m
+                        ami: al2023@latest
+        - error:
+            resource:
+              apiVersion: karpenter.k8s.aws/v1
+              kind: EC2NodeClass
+              metadata:
+                name: default
+        - error:
+            resource:
+              apiVersion: karpenter.sh/v1
+              kind: NodePool
+              metadata:
+                name: default
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: karpenter
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: nodepools.karpenter.sh
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: ec2nodeclasses.karpenter.k8s.aws
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: karpenter
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (length(inventory.entries || `[]`)): 0
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: karpenter
+        - describe:
+            apiVersion: karpenter.k8s.aws/v1
+            kind: EC2NodeClass
+            name: default
+        - podLogs:
+            namespace: flux-system
+            selector: app.kubernetes.io/name=flux-operator
+            tail: 40
+---
+# The proof floci cannot give: run by hand on the aws sandbox, against the
+# module as the sandbox's root turned it on (docs/catalog/karpenter.md,
+# Measured). A Deployment that fits nowhere on the bootstrap group — it asks
+# for a Karpenter node — gets one: launched, registered, Cilium's startup
+# taint gone (its agent runs there), the pods Running; scaled to zero, the
+# node is consolidated away. Selected with platform=eks; the floci CI never
+# selects it.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: karpenter-module-eks
+  labels:
+    phase: module
+    cloud: aws
+    platform: eks
+spec:
+  description: >-
+    A Deployment that needs a Karpenter node gets one, with Cilium on it;
+    scaled to zero, the node goes.
+  timeouts:
+    apply: 30s
+    assert: 10m
+    error: 10m
+    delete: 2m
+    cleanup: 5m
+    exec: 30s
+  steps:
+    - name: the module is Ready, its EC2NodeClass and NodePool too
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: karpenter
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: karpenter.k8s.aws/v1
+              kind: EC2NodeClass
+              metadata:
+                name: default
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: karpenter.sh/v1
+              kind: NodePool
+              metadata:
+                name: default
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: karpenter.k8s.aws/v1
+            kind: EC2NodeClass
+            name: default
+        - podLogs:
+            namespace: karpenter
+            tail: 60
+    - name: a Deployment that needs a Karpenter node gets one, with Cilium on it
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: karpenter-e2e
+                labels:
+                  pod-security.kubernetes.io/enforce: restricted
+        - apply:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: inflate
+                namespace: karpenter-e2e
+              spec:
+                replicas: 2
+                selector:
+                  matchLabels:
+                    app: inflate
+                template:
+                  metadata:
+                    labels:
+                      app: inflate
+                  spec:
+                    # A Karpenter node, never the bootstrap group.
+                    affinity:
+                      nodeAffinity:
+                        requiredDuringSchedulingIgnoredDuringExecution:
+                          nodeSelectorTerms:
+                            - matchExpressions:
+                                - key: karpenter.sh/nodepool
+                                  operator: In
+                                  values: [default]
+                    terminationGracePeriodSeconds: 0
+                    securityContext:
+                      runAsNonRoot: true
+                      runAsUser: 65532
+                      seccompProfile:
+                        type: RuntimeDefault
+                    containers:
+                      - name: pause
+                        image: registry.k8s.io/pause:3.10
+                        securityContext:
+                          allowPrivilegeEscalation: false
+                          capabilities:
+                            drop: [ALL]
+                        resources:
+                          requests:
+                            cpu: '1'
+                            memory: 256Mi
+                            ephemeral-storage: 64Mi
+        - assert:
+            resource:
+              apiVersion: karpenter.sh/v1
+              kind: NodeClaim
+              metadata:
+                labels:
+                  karpenter.sh/nodepool: default
+              status:
+                (conditions[?type == 'Launched'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'Registered'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'Initialized'] || `[]`):
+                  - status: 'True'
+        # Cilium's agent removes its startup taint once it runs on the node:
+        # the node Ready and untainted is Cilium Ready there.
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Node
+              metadata:
+                labels:
+                  karpenter.sh/nodepool: default
+              spec:
+                (length(taints[?key == 'node.cilium.io/agent-not-ready'] || `[]`)): 0
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: inflate
+                namespace: karpenter-e2e
+              status:
+                readyReplicas: 2
+      catch:
+        - describe:
+            apiVersion: karpenter.sh/v1
+            kind: NodeClaim
+        - events:
+            namespace: karpenter-e2e
+        - podLogs:
+            namespace: karpenter
+            tail: 60
+    - name: scaled to zero, the node is consolidated away
+      try:
+        - patch:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: inflate
+                namespace: karpenter-e2e
+              spec:
+                replicas: 0
+        - error:
+            resource:
+              apiVersion: karpenter.sh/v1
+              kind: NodeClaim
+              metadata:
+                labels:
+                  karpenter.sh/nodepool: default
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Node
+              metadata:
+                labels:
+                  karpenter.sh/nodepool: default
+      catch:
+        - describe:
+            apiVersion: karpenter.sh/v1
+            kind: NodeClaim
+        - podLogs:
+            namespace: karpenter
+            tail: 60

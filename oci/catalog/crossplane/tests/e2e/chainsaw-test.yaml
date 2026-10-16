@@ -168,6 +168,26 @@ spec:
               status:
                 (conditions[?type == 'Healthy'] || `[]`):
                   - status: 'True'
+        # SQS and EventBridge, for the queues and rules a module owns
+        # (docs/catalog/karpenter.md).
+        - assert:
+            resource:
+              apiVersion: pkg.crossplane.io/v1
+              kind: Provider
+              metadata:
+                name: provider-aws-sqs
+              status:
+                (conditions[?type == 'Healthy'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: pkg.crossplane.io/v1
+              kind: Provider
+              metadata:
+                name: provider-aws-cloudwatchevents
+              status:
+                (conditions[?type == 'Healthy'] || `[]`):
+                  - status: 'True'
         # A Provider is Healthy before every CRD it brings is served, and an
         # assert on a kind not served yet fails at once (run 36983797132,
         # once the S3 provider joined the family): the CRDs Established first.

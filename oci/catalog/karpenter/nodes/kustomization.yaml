@@ -1,0 +1,11 @@
+# The default EC2NodeClass and NodePool of the karpenter module, applied by
+# its karpenter-nodes Kustomization, whose patches put in what is the
+# cluster's and what kube.karpenter.node_pool says
+# (oci/catalog/karpenter/resourceset.yaml, step nodes). As written here they
+# are the catalog's defaults for a cluster named `socle`: valid objects, so
+# CI validates them against Karpenter's schemas.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ec2nodeclass.yaml
+  - nodepool.yaml

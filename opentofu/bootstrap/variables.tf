@@ -1070,6 +1070,82 @@ variable "kube" {
     )
     error_message = "kube.metrics_server.values must not set --kubelet-insecure-tls: it disables verification of kubelet certificates, so metrics-server would present its credentials to anyone impersonating a kubelet. The socle owns the nodes, and a certificate that does not validate is a socle bug to fix, not a client's to work around."
   }
+
+  # --- karpenter — docs/catalog/karpenter.md ---------------------------------
+
+  # Its role and its interruption queue are Crossplane managed resources: with
+  # Crossplane off it would install a controller that can launch nothing.
+  validation {
+    condition     = !can(keys(var.kube)) || !try(var.kube.karpenter.enabled, false) || try(var.kube.crossplane.enabled, false) == true
+    error_message = "kube.karpenter needs kube.crossplane.enabled = true: its IAM role, Pod Identity association and interruption queue are Crossplane managed resources (docs/catalog/karpenter.md). Turn Crossplane on, and allow ec2, ssm, pricing, sqs and eks in the foundations' aws.crossplane.allowed_services."
+  }
+
+  validation {
+    condition     = !can(keys(var.kube)) || !try(var.kube.karpenter.enabled, false) || var.region != ""
+    error_message = "kube.karpenter needs the cluster's region: its queue, its EventBridge rules and its Pod Identity association are regional. Pass region to the bootstrap module (the aws root wires var.aws.region)."
+  }
+
+  validation {
+    condition = !can(var.kube.karpenter.node_pool.capacity_types) || try(
+      length(tolist(var.kube.karpenter.node_pool.capacity_types)) > 0
+      && length(distinct(tolist(var.kube.karpenter.node_pool.capacity_types))) == length(tolist(var.kube.karpenter.node_pool.capacity_types))
+      && alltrue([for c in tolist(var.kube.karpenter.node_pool.capacity_types) : contains(["spot", "on-demand"], c)]),
+      false
+    )
+    error_message = "kube.karpenter.node_pool.capacity_types must list spot, on-demand or both, each once."
+  }
+
+  validation {
+    condition = !can(var.kube.karpenter.node_pool.architectures) || try(
+      length(tolist(var.kube.karpenter.node_pool.architectures)) > 0
+      && length(distinct(tolist(var.kube.karpenter.node_pool.architectures))) == length(tolist(var.kube.karpenter.node_pool.architectures))
+      && alltrue([for a in tolist(var.kube.karpenter.node_pool.architectures) : contains(["arm64", "amd64"], a)]),
+      false
+    )
+    error_message = "kube.karpenter.node_pool.architectures must list arm64, amd64 or both, each once: the values of kubernetes.io/arch."
+  }
+
+  validation {
+    condition     = !can(var.kube.karpenter.node_pool.cpu) || try(var.kube.karpenter.node_pool.cpu >= 1 && floor(var.kube.karpenter.node_pool.cpu) == var.kube.karpenter.node_pool.cpu, false)
+    error_message = "kube.karpenter.node_pool.cpu must be a whole number of vCPU, at least 1: the ceiling of all the NodePool's nodes together."
+  }
+
+  validation {
+    condition     = !can(var.kube.karpenter.node_pool.memory) || try(can(regex("^[1-9][0-9]*(Mi|Gi|Ti)$", var.kube.karpenter.node_pool.memory)), false)
+    error_message = "kube.karpenter.node_pool.memory must be a Kubernetes quantity in Mi, Gi or Ti, such as 128Gi: the ceiling of all the NodePool's nodes together."
+  }
+
+  validation {
+    condition     = !can(var.kube.karpenter.node_pool.consolidate_after) || try(can(regex("^([0-9]+h)?([0-9]+m)?([0-9]+s)?$", var.kube.karpenter.node_pool.consolidate_after)) && var.kube.karpenter.node_pool.consolidate_after != "", false)
+    error_message = "kube.karpenter.node_pool.consolidate_after must be a duration in hours, minutes and seconds, such as 1m or 1h30m."
+  }
+
+  # AL2023 only: the bootstrap nodes' AMI family, the one whose nodeadm
+  # Karpenter configures for this cluster and Cilium is proven on.
+  validation {
+    condition     = !can(var.kube.karpenter.node_pool.ami) || try(can(regex("^al2023@(latest|v[0-9]{8})$", var.kube.karpenter.node_pool.ami)), false)
+    error_message = "kube.karpenter.node_pool.ami must be an AL2023 alias, al2023@latest or al2023@v<YYYYMMDD> such as al2023@v20261001: the bootstrap nodes' AMI family."
+  }
+
+  # values is free-form, minus credentials: the controller takes its AWS
+  # access from Pod Identity, and an access key in controller.env would land
+  # in the state and in a ConfigMap. Its name says it whatever the case.
+  validation {
+    condition = (
+      !can(var.kube.karpenter.values)
+      || !can(keys(var.kube.karpenter.values))
+      || alltrue([
+        for e in try(tolist(var.kube.karpenter.values.controller.env), []) :
+        !(can(e.value) && can(regex("(?i)(secret|password|passwd|token|credential|api_?key|access_?key|private_?key)", try(e.name, ""))))
+      ])
+    )
+    error_message = "kube.karpenter.values must not carry secrets: a controller.env entry with a literal value named like a password, token, secret, credential or key is refused. Its AWS access is its Pod Identity role; anything else goes in a Secret named in kube.karpenter.values_secret."
+  }
+
+  validation {
+    condition     = !can(var.kube.karpenter.values_secret) || try(var.kube.karpenter.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.karpenter.values_secret)), true)
+    error_message = "kube.karpenter.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
+  }
 }
 
 # ---------------------------------------------------------------------------

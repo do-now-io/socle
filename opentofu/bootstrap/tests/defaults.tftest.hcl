@@ -1661,3 +1661,53 @@ run "flux_version_takes_an_exact_version" {
     error_message = "an exact flux_version must reach the FluxInstance as written."
   }
 }
+
+# --- karpenter — docs/catalog/karpenter.md ---
+
+run "karpenter_is_off_by_default_with_a_spot_and_graviton_first_node_pool" {
+  command = plan
+
+  assert {
+    condition     = output.inputs.modules.karpenter.enabled == false && output.inputs.modules.karpenter.values == {} && output.inputs.modules.karpenter.values_secret == ""
+    error_message = "karpenter must be off by default: it needs Crossplane and services the client allows."
+  }
+  assert {
+    condition = (
+      output.inputs.modules.karpenter.node_pool.capacity_types == ["spot", "on-demand"]
+      && output.inputs.modules.karpenter.node_pool.architectures == ["arm64", "amd64"]
+      && output.inputs.modules.karpenter.node_pool.cpu == 32
+      && output.inputs.modules.karpenter.node_pool.memory == "128Gi"
+      && output.inputs.modules.karpenter.node_pool.consolidate_after == "1m"
+      && output.inputs.modules.karpenter.node_pool.ami == "al2023@latest"
+    )
+    error_message = "the default NodePool: Spot and on demand, Graviton and x86, 32 vCPU and 128Gi in all, consolidated after a minute, on the latest AL2023 (docs/catalog/karpenter.md)."
+  }
+}
+
+run "karpenter_node_pool_keeps_its_defaults_beside_what_the_client_writes" {
+  command = plan
+  variables {
+    region = "eu-west-3"
+    kube = {
+      crossplane = { enabled = true }
+      karpenter = {
+        enabled   = true
+        node_pool = { capacity_types = ["on-demand"], cpu = 8 }
+        values    = { logLevel = "debug" }
+      }
+    }
+  }
+
+  assert {
+    condition     = output.inputs.modules.karpenter.enabled && output.inputs.modules.karpenter.node_pool.capacity_types == ["on-demand"] && output.inputs.modules.karpenter.node_pool.cpu == 8
+    error_message = "what the client writes in node_pool must reach the inputs."
+  }
+  assert {
+    condition     = output.inputs.modules.karpenter.node_pool.architectures == ["arm64", "amd64"] && output.inputs.modules.karpenter.node_pool.ami == "al2023@latest"
+    error_message = "a key of node_pool the client leaves out keeps its default."
+  }
+  assert {
+    condition     = output.inputs.modules.karpenter.values.logLevel == "debug"
+    error_message = "values must flow through untouched."
+  }
+}

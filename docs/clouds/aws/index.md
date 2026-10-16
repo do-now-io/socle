@@ -62,5 +62,5 @@ September 2026, 730 hours a month.
   every module checked by Chainsaw, then uninstalled and destroyed
   ([`e2e.yaml`](../../../.github/workflows/e2e.yaml)). Not proven: Cilium on
   real nodes, Pod Identity, IAM enforcement, ACM, Route 53, the NLBs.
-- **Not built**: Karpenter ([#53](https://github.com/do-now-io/socle/issues/53)),
-  the Upgrade Insights pre-check, cloud-resource observability.
+- **Not built**: the Upgrade Insights pre-check, cloud-resource observability.
+  Karpenter is the [karpenter](../../catalog/karpenter.md) catalog module.
