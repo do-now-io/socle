@@ -209,12 +209,12 @@
     },
     {
       "customType": "regex",
-      "description": "terraform-docs, run by image in pr-static (one tag per architecture since 0.21: the runners' amd64)",
+      "description": "The images pr-static runs with docker run (terraform-docs: one tag per architecture since 0.21, the runners' amd64; kubeconform)",
       "managerFilePatterns": [
         "/^\\.github/workflows/pr-static\\.yaml$/"
       ],
       "matchStrings": [
-        "image=(?<depName>quay\\.io/terraform-docs/terraform-docs):(?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[a-f0-9]{64})"
+        "(?<depName>(?:quay|ghcr)\\.io/[a-z0-9-]+/[a-z0-9-]+):(?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[a-f0-9]{64})"
       ],
       "datasourceTemplate": "docker"
     },
