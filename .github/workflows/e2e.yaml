@@ -117,7 +117,7 @@ jobs:
     # `services.*.image`, and nothing inside a `run:` line.
     services:
       floci:
-        image: floci/floci:2.1.0@sha256:f5aa8c18302cedb4f2385f5c4e455b3efc77fee6bf7b6e5d1712b2817ba102db
+        image: floci/floci:2.3.0@sha256:e0b292df4dc9559b7b1bf4f51bdda4bb8e269276236438cd03cae661260ea8a9
         ports:
           - 4566:4566
         volumes:
@@ -197,7 +197,7 @@ jobs:
           floci: ${{ job.services.floci.id }}
       - name: The Checks tab names the failing step
         if: always()
-        uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6.5.0
+        uses: mikepenz/action-junit-report@6ef3fdcfcd5f0b5d14df3e659ef19b8c6820f93d # v6.6.1
         with:
           report_paths: ${{ runner.temp }}/reports/*.xml
           check_name: e2e root (${{ matrix.cloud }})
@@ -238,7 +238,7 @@ jobs:
         include: ${{ fromJSON(needs.discover.outputs.pairs) }}
     services:
       floci:
-        image: floci/floci:2.1.0@sha256:f5aa8c18302cedb4f2385f5c4e455b3efc77fee6bf7b6e5d1712b2817ba102db
+        image: floci/floci:2.3.0@sha256:e0b292df4dc9559b7b1bf4f51bdda4bb8e269276236438cd03cae661260ea8a9
         ports:
           - 4566:4566
         volumes:
@@ -363,7 +363,7 @@ jobs:
           floci: ${{ job.services.floci.id }}
       - name: The Checks tab names the failing step
         if: always()
-        uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6.5.0
+        uses: mikepenz/action-junit-report@6ef3fdcfcd5f0b5d14df3e659ef19b8c6820f93d # v6.6.1
         with:
           report_paths: ${{ runner.temp }}/reports/*.xml
           check_name: e2e ${{ matrix.module }} (${{ matrix.cloud }})
@@ -403,7 +403,7 @@ jobs:
       checks: write
     services:
       floci:
-        image: floci/floci:2.1.0@sha256:f5aa8c18302cedb4f2385f5c4e455b3efc77fee6bf7b6e5d1712b2817ba102db
+        image: floci/floci:2.3.0@sha256:e0b292df4dc9559b7b1bf4f51bdda4bb8e269276236438cd03cae661260ea8a9
         ports:
           - 4566:4566
         volumes:
@@ -413,8 +413,9 @@ jobs:
       TAG: ${{ inputs.tag }}
       CLOUD: aws
       CLUSTER: socle-e2e-catalog
-      HELM_VERSION: 4.2.4
-      HELM_SHA256: c306b46f719b0a4da32d0f78ee21bf90ce8d602f15b22ab753f0674d1670a7f3
+      # renovate: datasource=github-releases depName=helm/helm extractVersion=^v(?<version>.+)$
+      HELM_VERSION: 4.3.1
+      HELM_SHA256: 0403a88ae20913d11b10a2467b50087721fea7581736da6b9d3992f5357fe54b
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -475,7 +476,7 @@ jobs:
           floci: ${{ job.services.floci.id }}
       - name: The Checks tab names the failing step
         if: always()
-        uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6.5.0
+        uses: mikepenz/action-junit-report@6ef3fdcfcd5f0b5d14df3e659ef19b8c6820f93d # v6.6.1
         with:
           report_paths: ${{ runner.temp }}/reports/*.xml
           check_name: e2e charts (aws)
