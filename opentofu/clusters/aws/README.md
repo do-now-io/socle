@@ -122,6 +122,7 @@ No resources.
 | Name | Description |
 |------|-------------|
 | <a name="output_artifact"></a> [artifact](#output\_artifact) | The socle artifact this cluster pulls, as URL and tag. |
+| <a name="output_cilium"></a> [cilium](#output\_cilium) | Whether the bootstrap installed Cilium and CoreDNS before Flux, with their chart versions — what cilium.enabled decided. |
 | <a name="output_cluster_endpoint"></a> [cluster\_endpoint](#output\_cluster\_endpoint) | The control plane's API endpoint. |
 | <a name="output_cluster_name"></a> [cluster\_name](#output\_cluster\_name) | Name of the EKS cluster. |
 | <a name="output_inputs"></a> [inputs](#output\_inputs) | What the catalog renders from, after normalisation. Compare with kubectl -n flux-system get resourcesetinputprovider socle -o yaml. |
