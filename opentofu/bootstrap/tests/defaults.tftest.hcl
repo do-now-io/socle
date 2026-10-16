@@ -152,6 +152,36 @@ run "defaults_are_the_recommended_position" {
   }
 }
 
+run "hello_is_on_with_one_replica_and_its_message" {
+  command = plan
+  assert {
+    condition     = output.inputs.modules.hello == { enabled = true, replicas = 1, message = "hello from socle" }
+    error_message = "hello, the pipeline's own proof, is on by default with one replica and the socle's message."
+  }
+}
+
+# What a root and the e2e read back: the artifact it pulls, the namespace
+# Flux runs in, the operator and Flux versions it installs.
+run "the_outputs_name_the_artifact_the_namespace_and_the_versions" {
+  command = plan
+  variables {
+    operator_version = "0.59.1"
+    flux_version     = "2.9.x"
+  }
+  assert {
+    condition     = output.artifact.url == "oci://ghcr.io/do-now-io/socle/flux-modules" && output.artifact.tag == output.socle_version
+    error_message = "artifact names the socle's registry and the tag the module pins."
+  }
+  assert {
+    condition     = output.namespace == "flux-system"
+    error_message = "Flux and the catalog's ResourceSets live in flux-system."
+  }
+  assert {
+    condition     = output.operator_version == "0.59.1" && output.flux_version == "2.9.x"
+    error_message = "operator_version and flux_version are the ones the caller passed."
+  }
+}
+
 run "client_values_are_merged_over_catalog_defaults" {
   command = plan
   variables {
