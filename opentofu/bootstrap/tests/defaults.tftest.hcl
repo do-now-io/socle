@@ -390,7 +390,7 @@ run "aws_installs_cilium_and_coredns_before_flux" {
     error_message = "the templates must be told that the socle's Cilium runs here and serves the Gateway API."
   }
   assert {
-    condition     = output.cilium.chart_version == "1.20.2" && output.cilium.coredns_version == "1.47.1"
+    condition     = output.cilium.chart_version == "1.20.3" && output.cilium.coredns_version == "1.48.2"
     error_message = "the pinned versions must be visible to the root that consumes them."
   }
 }

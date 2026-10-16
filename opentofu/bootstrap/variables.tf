@@ -1382,7 +1382,7 @@ variable "cosign_identity" {
 variable "operator_version" {
   description = "Chart version of flux-operator, which is also the operator's own version. Pinned exactly: the operator is pre-1.0 and its minors are not a stable contract."
   type        = string
-  default     = "0.60.0"
+  default     = "0.61.0"
   nullable    = false
 
   validation {

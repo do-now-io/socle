@@ -36,8 +36,8 @@ needs is an input (`inputs.cloud`, `inputs.cluster.region`, `inputs.gateway`).
 **accepted** · 2026-09-24 · [`opentofu/bootstrap/cilium.tf`](../../opentofu/bootstrap/cilium.tf)
 
 **Decision.** On aws and azure only, the bootstrap installs Cilium (chart
-1.20.2) as a `helm_release` before `flux-operator`, and on aws CoreDNS (chart
-1.47.1) right after. Cilium is not a catalog module; it is refused at plan on
+1.20.3) as a `helm_release` before `flux-operator`, and on aws CoreDNS (chart
+1.48.2) right after. Cilium is not a catalog module; it is refused at plan on
 GKE and Kapsule, which operate Cilium themselves.
 
 **Context.** EKS (no self-managed add-ons) and AKS (`network_plugin = "none"`)
@@ -261,7 +261,7 @@ when their roots are written.
 
 **Decision.** The socle's composition comes from OCI only. A read-only
 third-party dependency may come from a `GitRepository` pinned by commit: the
-Gateway API CRDs, commit `8bb74df` (v1.6.1).
+Gateway API CRDs, commit `c083613` (v1.6.3).
 
 **Context.** Vendored, those CRDs were 20116 lines; an `http` data source cost
 6.4 MB of state; republishing needed a package and a CI step.
@@ -387,8 +387,9 @@ identities runs before the first catalog module.
 **Context.** The add-ons need nodes and network, which the foundations stop
 short of; without the agent, Crossplane's AWS providers hang silently (#48).
 
-**Consequences.** The bootstrap needs the `aws` provider on aws. floci 2.1.0
-has no add-on API, so the e2e leaves them off.
+**Consequences.** The bootstrap needs the `aws` provider on aws. floci 2.3.0's
+add-on API has neither the EBS CSI driver nor the snapshot controller, so the
+e2e leaves them off.
 
 **Sources.** [Cilium before Flux](../architecture/cilium-before-flux.md#the-order-of-the-releases) · #48.
 
@@ -396,7 +397,7 @@ has no add-on API, so the e2e leaves them off.
 
 **accepted** · 2026-09-24 · [`opentofu/bootstrap/cilium.tf`](../../opentofu/bootstrap/cilium.tf) (`helm_release.coredns`)
 
-**Decision.** On aws the bootstrap installs CoreDNS (chart 1.47.1) by Helm
+**Decision.** On aws the bootstrap installs CoreDNS (chart 1.48.2) by Helm
 after Cilium, behind a `kube-dns` Service at the `.10` address, two replicas.
 On azure, AKS's own CoreDNS runs once Cilium does.
 

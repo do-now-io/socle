@@ -70,8 +70,8 @@ spec:
           type: RuntimeDefault
       containers:
         - name: restart
-          # v2.9.5
-          image: ghcr.io/fluxcd/flux-cli@sha256:704d5529535570a495249b643159c93a9aa88ffca07813c974a54b7ba6edbd86
+          # v2.9.6
+          image: ghcr.io/fluxcd/flux-cli@sha256:b1ac18156f227af9a524b842a96f2c20986c7a779ef721df3ba4e4540f449d76
           command: ["kubectl"]
           args: ["-n", "kube-system", "rollout", "restart", "deployment/cilium-operator"]
           securityContext:
