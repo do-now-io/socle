@@ -232,7 +232,10 @@ jobs:
     name: ${{ matrix.module }} (${{ matrix.cloud }})
     runs-on: ubuntu-24.04
     needs: discover
-    timeout-minutes: 20
+    # velero's job ran 17.8 to 20.3 min once Crossplane installs six AWS
+    # providers (#53), and karpenter's is of the same length: 20 left no
+    # room for the destroy.
+    timeout-minutes: 25
     permissions:
       contents: read
       checks: write

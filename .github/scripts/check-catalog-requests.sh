@@ -118,7 +118,8 @@ pull() { # <dest> <helm pull args...>: three attempts, helm's error kept
     fi
     rm -rf "${dest}"
     echo "helm pull $* (attempt ${n}/3): ${err}" >&2
-    [ "${n}" = 3 ] || sleep $((n * 5))
+    # 20 s, then 40 s: a throttling registry (ECR Public, 429) needs longer than a blip.
+    [ "${n}" = 3 ] || sleep $((n * 20))
   done
   echo "::error::cannot pull $*: ${err}"
   exit 1
