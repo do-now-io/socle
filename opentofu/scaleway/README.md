@@ -14,7 +14,7 @@ module "socle" {
   owner        = "platform"
   environment  = "prod"
 
-  kubernetes_version                   = "1.35"
+  kubernetes_version                   = "1.37"
   cluster_endpoint_public_access_cidrs = ["203.0.113.0/24"]
 
   maintenance_window = {

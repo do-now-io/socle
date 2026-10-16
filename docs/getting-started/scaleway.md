@@ -69,7 +69,7 @@ module "foundations" {
   environment  = "prod"
 
   # Required, no default: Scaleway has no release channel.
-  kubernetes_version = "1.35"
+  kubernetes_version = "1.37"
 
   # Required, no default, 0.0.0.0/0 refused: the control plane is always public.
   # List the runner's egress and the operators'.

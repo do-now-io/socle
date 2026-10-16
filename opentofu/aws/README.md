@@ -20,7 +20,7 @@ module "foundations" {
   environment  = "prod"
 
   availability_zones                   = ["eu-west-3a", "eu-west-3b"]
-  kubernetes_version                   = "1.34"
+  kubernetes_version                   = "1.37"
   cluster_endpoint_public_access_cidrs = ["203.0.113.10/32"]
 }
 ```

@@ -112,7 +112,7 @@ No resources.
 | <a name="input_project_id"></a> [project\_id](#input\_project\_id) | Scaleway Project to deploy into. One Project per environment — it is the only boundary Scaleway offers for both IAM and cost. | `string` | n/a | yes |
 | <a name="input_cluster_name"></a> [cluster\_name](#input\_cluster\_name) | Name of the cluster. | `string` | `"socle-minimal"` | no |
 | <a name="input_environment"></a> [environment](#input\_environment) | Environment this cluster serves. | `string` | `"dev"` | no |
-| <a name="input_kubernetes_version"></a> [kubernetes\_version](#input\_kubernetes\_version) | Kubernetes minor to deploy. Explicit by design: Scaleway has no release channel. | `string` | `"1.35"` | no |
+| <a name="input_kubernetes_version"></a> [kubernetes\_version](#input\_kubernetes\_version) | Kubernetes minor to deploy. Explicit by design: Scaleway has no release channel. | `string` | `"1.37"` | no |
 | <a name="input_owner"></a> [owner](#input\_owner) | Team accountable for the cluster. | `string` | `"platform"` | no |
 | <a name="input_region"></a> [region](#input\_region) | Region for the cluster and its network. | `string` | `"fr-par"` | no |
 
