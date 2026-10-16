@@ -383,8 +383,13 @@ jobs:
         with:
           path: /tmp/charts
           # The pinned chart versions live in the modules' ResourceSets and
-          # in the clouds' patches.
+          # in the clouds' patches. A chart is cached under its URL, name and
+          # version, which never change content, so the last cache restores
+          # whatever charts it has when the key moves: a registry that
+          # throttles the runners (ECR Public answers 429 to anonymous pulls,
+          # the karpenter chart's) is then asked only for a new version.
           key: catalog-charts-${{ hashFiles('oci/catalog/*/resourceset.yaml', 'oci/clusters/*/*/patch.yaml') }}
+          restore-keys: catalog-charts-
       - name: Every container the catalog runs states its requests
         if: steps.detect.outputs.found == 'true'
         run: |
