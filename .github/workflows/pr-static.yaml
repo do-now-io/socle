@@ -269,10 +269,12 @@ jobs:
               done
           done
           # A child ResourceSet's resources (a store, a provider config, the
-          # shared Gateways) are objects too: pulled out to nested/ so
-          # kubeconform reads them, and not only their parent's schema.
+          # shared Gateways, a Pod Identity check) are objects too: pulled out
+          # to nested/ so kubeconform reads them, and not only their parent's
+          # schema. Gathered across documents first: split_doc separates the
+          # resources of one ResourceSet, not those of two.
           for f in rendered/*.yaml; do
-            nested="$(yq 'select(.kind == "ResourceSet") | .spec.resources[] | split_doc' "${f}")"
+            nested="$(yq ea '[select(.kind == "ResourceSet") | .spec.resources[]] | .[] | split_doc' "${f}")"
             [ -z "${nested}" ] || echo "${nested}" > "rendered/nested/$(basename "${f}")"
           done
           # The bootstrap envelope Helm deposits: the literal templates (the
