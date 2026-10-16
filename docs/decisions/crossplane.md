@@ -140,3 +140,50 @@ the core's working set was 176Mi and the RBAC manager's 18Mi; the providers
 inside Autopilot's CPU-to-memory ratio (1:1 to 1:6.5).
 
 **Sources.** [Autopilot resource requests](https://cloud.google.com/kubernetes-engine/docs/concepts/autopilot-resource-requests); the module page's measurements.
+
+## CROSSPLANE-07: On aws, the workload waits for a pod that has the credentials, not for the association
+
+**accepted** · 2026-10-16 · [`oci/clusters/aws/external-dns/patch.yaml`](../../oci/clusters/aws/external-dns/patch.yaml), [`oci/clusters/aws/external-secrets/patch.yaml`](../../oci/clusters/aws/external-secrets/patch.yaml), [`oci/clusters/aws/keda/patch.yaml`](../../oci/clusters/aws/keda/patch.yaml), [`oci/clusters/aws/velero/patch.yaml`](../../oci/clusters/aws/velero/patch.yaml), [`oci/clusters/aws/argocd-image-updater/patch.yaml`](../../oci/clusters/aws/argocd-image-updater/patch.yaml)
+
+**Context.** EKS Pod Identity injects a pod's credentials at admission
+only, and associations are eventually consistent: Crossplane reports one as
+`Ready` once `CreatePodIdentityAssociation` returns, but the admission
+webhook learns of it a few seconds later. On the sandbox (2026-10-09),
+external-dns was admitted 3 s after its association turned `Ready`, got no
+credentials, and logged soft errors for 21 minutes until a `rollout restart`
+([#97](https://github.com/do-now-io/socle/issues/97)). The issue weighed four
+options. A fixed delay is unbounded by AWS and slows every install. A
+failing initContainer loops on the same pod, whose env is fixed at
+admission. Checking after the install and restarting needs a mechanism the
+socle does not have. The fourth option waits for the thing itself.
+
+**Decision.** In each module that has an association, `<module>-access`
+applies a Job once the role and the association are `Ready`, and waits for
+it (`wait: true`). The Job runs under the module's ServiceAccount, uses the
+AWS CLI's image, and runs `sts get-caller-identity` with the instance
+metadata off. It succeeds only on a pod that got the credentials. Each
+failure is a new pod, so a new admission. On aws, that ServiceAccount is
+created by the cloud step, not by the chart (`create: false`), so it exists
+before the chart is installed. It is created whether Crossplane is on or
+off, and carries `helm.sh/resource-policy: keep`. Nothing changes on gcp.
+
+**Consequences.** On aws, the workload starts once the propagation has
+happened, however long it takes: no fixed delay, no runbook restart. The
+Job needs no permission: `GetCallerIdentity` answers even under the
+boundary's deny on `sts`. It adds one image, `public.ecr.aws/aws-cli/aws-cli`,
+which `kube.kyverno_policies.allowed_registries` must allow when set. A
+client can no longer name or annotate the module's ServiceAccount through
+`values` on aws, which only mattered for IRSA, which the socle does not use
+([AWS-03](aws.md#aws-03-pod-identity-not-irsa)). The upgrade that hands the
+ServiceAccount over from the chart keeps it in place (measured on kind: same
+UID). On gcp nothing is injected at admission: the GKE metadata server
+exchanges the token on each call. A pod that starts before a binding
+propagates (typically 2 minutes, up to 7 or longer) gets refusals, then
+recovers. Every module concerned retries on its own loop, so a Job there
+would only hold the install for a delay that already ends on its own.
+
+**Sources.** [EKS Pod Identity considerations](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html#pod-id-considerations),
+[How EKS Pod Identity works](https://docs.aws.amazon.com/eks/latest/userguide/pod-id-how-it-works.html),
+[GetCallerIdentity](https://docs.aws.amazon.com/STS/latest/APIReference/API_GetCallerIdentity.html),
+[IAM access change propagation](https://cloud.google.com/iam/docs/access-change-propagation),
+[flux-operator ResourceSet](https://fluxoperator.dev/docs/crd/resourceset/) (`recreateOnFailure`, `force`, steps).

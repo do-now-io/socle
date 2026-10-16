@@ -170,8 +170,11 @@ to the module
 ([`oci/clusters/aws/keda/patch.yaml`](../../oci/clusters/aws/keda/patch.yaml),
 [SOCLE-32](../decisions/socle.md#socle-32-what-only-one-cloud-has-that-cloud-adds-to-the-module-as-steps)): the module waits for the `crossplane`
 ResourceSet, and the chart's step starts only once the role and its
-association are Ready (`keda-access`), since Pod Identity hands credentials
-at admission only. On gcp the binding is gcp's `cloud` step
+association are Ready and the Job `keda-operator-pod-identity` has received
+the credentials under the operator's ServiceAccount (`keda-access`). That
+ServiceAccount is created by aws's step, not the chart. Pod Identity hands
+out credentials at admission only, and a Ready association reaches the
+admission webhook seconds later ([module IAM](../architecture/module-iam.md#the-ordering-chain)). On gcp the binding is gcp's `cloud` step
 ([`oci/clusters/gcp/keda/patch.yaml`](../../oci/clusters/gcp/keda/patch.yaml)),
 with the same `keda-access` wait; GKE hands out tokens at call time, so there
 the order only spares the operator minutes of denied reads. Turn the module

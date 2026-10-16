@@ -62,17 +62,36 @@ admin or owner roles are refused at plan.
 foundations: cluster, Crossplane's role and boundary (GCP: its conditional grants)
   └▶ bootstrap: Cilium, CoreDNS, Pod Identity Agent, then Flux
        └▶ crossplane module: core, then the cloud's providers and provider config
-            └▶ <module>, step cloud: its role and Pod Identity association (GCP: its bindings),
-               healthy once <module>-access sees them Ready
+            └▶ <module>, step cloud: its ServiceAccount, role and Pod Identity association (GCP: its bindings),
+               healthy once <module>-access sees them Ready and, on AWS, a pod has proven the credentials
                  └▶ <module>, step workload: the chart
 ```
 
-On AWS the role must exist before the pod: Pod Identity injects credentials
-at admission only, so a pod admitted earlier runs without them until it is
-recreated. On GCP the step `cloud` holds the module's bindings
-(`ProjectIAMMember`, or `Bucket` and `BucketIAMMember`) on its own
-principal, and the workload waits for them through `<module>-access`, as
-on AWS.
+On AWS the association must be usable before the pod exists. Pod Identity
+injects the credentials at admission only, so a pod admitted earlier runs
+without them until it is recreated. `Ready` is not enough: associations are
+[eventually consistent](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html#pod-id-considerations).
+The association is `Ready` as soon as `CreatePodIdentityAssociation`
+returns, and the admission webhook learns of it seconds later. On the
+sandbox, external-dns was admitted 3 s after the association turned `Ready`,
+got no credentials, and logged soft errors for 21 minutes until someone ran
+`rollout restart` ([#97](https://github.com/do-now-io/socle/issues/97)). So
+`<module>-access` waits for proof: a Job, under the module's own
+ServiceAccount, runs `aws sts get-caller-identity` with the instance metadata
+off. A pod admitted too early has no credentials and fails, and the Job's next
+pod is a new admission. The workload step starts once the Job is `Complete`.
+The wait is exactly as long as the propagation, with no fixed delay and no
+`rollout restart`.
+
+On GCP the step `cloud` holds the module's bindings (`ProjectIAMMember`, or
+`Bucket` and `BucketIAMMember`) on its own principal, and the workload waits
+for them through `<module>-access`, as on AWS. There is no Job: nothing is
+injected at admission. The GKE metadata server exchanges the token on each
+call, so a pod that starts while a binding is still propagating
+([typically 2 minutes, potentially 7 or longer](https://cloud.google.com/iam/docs/access-change-propagation))
+gets refusals, then succeeds once it lands. external-dns, External Secrets,
+KEDA, Velero and Argo CD Image Updater all retry on their own loop. A Job
+there would hold every install for a delay that already ends on its own.
 
 <details>
 <summary>Under the hood</summary>
@@ -82,10 +101,28 @@ A module's cloud resources are what that cloud adds to it:
 module's `workload` step and makes the module `dependsOn` the `crossplane`
 `ResourceSet`, which always exists and is Ready at once when Crossplane is
 off ([SOCLE-32](../decisions/socle.md#socle-32-what-only-one-cloud-has-that-cloud-adds-to-the-module-as-steps)). The step also renders
-`<module>-access`, an empty `ResourceSet` that waits on the role and the
+`<module>-access`, a `ResourceSet` that waits on the role and the
 association with an explicit `readyExpr`, because a managed resource not yet
 created has no Ready condition, which the step's health check reads as
-healthy; the `workload` step starts once it is Ready.
+healthy. The `workload` step starts once it is Ready.
+
+On AWS, `<module>-access` then applies `<serviceaccount>-pod-identity`, a
+Job with `wait: true`. Its one container is the AWS CLI's own image,
+`public.ecr.aws/aws-cli/aws-cli` pinned by digest, and it runs one command
+with no shell. It needs no permission: `GetCallerIdentity` answers even
+under an explicit deny ([API_GetCallerIdentity](https://docs.aws.amazon.com/STS/latest/APIReference/API_GetCallerIdentity.html)),
+so the boundary's deny on `sts` leaves it whole. Each failure is a new pod,
+and a Job that exhausts its six retries is recreated on the next reconcile
+(`recreateOnFailure`). A completed Job stays, and runs again only when its
+template changes. If `kube.kyverno_policies.allowed_registries` is set, it
+must include `public.ecr.aws`.
+
+For the Job to run before the chart, the module's ServiceAccount on AWS is the
+cloud step's, not the chart's (`serviceAccount.create: false` in
+`<module>-cloud-values`). It is kept with Crossplane off too, so that turning
+Crossplane on or off never moves it between owners. It carries
+`helm.sh/resource-policy: keep`, so on the one upgrade that hands it over
+from the chart, Helm leaves it in place (measured: same UID).
 
 What runs before Crossplane takes its access elsewhere: Cilium's operator
 from the bootstrap nodes' role; the EBS and EFS CSI drivers from roles the
