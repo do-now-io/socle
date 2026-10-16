@@ -56,7 +56,8 @@ keys are [webapp](webapp.md#the-values)'s. The task's own:
 
 **Built from** [`charts/cronjob`](../../charts/cronjob) and the
 [`socle-lib`](../../charts/socle-lib) library chart. **Proven** as webapp
-is; on floci, its first Job completes with every policy enforced.
+is; on floci and on the GKE sandbox (`charts-gke`), its first Job completes
+with every policy enforced.
 **Published** at each release as `oci://ghcr.io/do-now-io/charts/cronjob`,
 signed.
 
