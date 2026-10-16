@@ -17,7 +17,7 @@ From [Prerequisites](../clouds/aws/prerequisites.md):
 - a principal that can create the resources (it becomes the cluster's first
   admin);
 - the public IP of the machine that applies;
-- OpenTofu 1.10 or later, the AWS CLI, `kubectl`.
+- OpenTofu 1.13 or later, the AWS CLI, `kubectl`.
 
 ## Write your main.tf
 

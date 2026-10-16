@@ -13,7 +13,7 @@ Every foundations module, and the bootstrap module, passes this checklist.
 - [ ] **`main.tf`, `variables.tf`, `outputs.tf`, `versions.tf`**, plus topic files. *Verify:* review.
 - [ ] **A minimal example** (foundations modules; the bootstrap is shown by the roots). *Verify:* `test -d opentofu/<cloud>/examples/minimal`.
 - [ ] **Tests.** *Verify:* `test -d opentofu/<cloud>/tests`.
-- [ ] **OpenTofu 1.10 or later**, for OCI modules. *Verify:* `required_version = ">= 1.10"`.
+- [ ] **OpenTofu 1.13 or later**, for anonymous OCI module init. *Verify:* `required_version = ">= 1.13"`.
 
 ## 2. Interface
 

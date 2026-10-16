@@ -46,7 +46,7 @@ site/                               # the site's generator: Astro + Starlight
 
 | Tool | For |
 | --- | --- |
-| [OpenTofu](https://opentofu.org/) 1.10 or later | `tofu fmt`, `validate`, `test` on every module under `opentofu/` |
+| [OpenTofu](https://opentofu.org/) 1.13 or later (CI runs 1.13.0, the floor) | `tofu fmt`, `validate`, `test` on every module under `opentofu/` |
 | [TFLint](https://github.com/terraform-linters/tflint) | the per-cloud rulesets (`.tflint.hcl` in each module) |
 | [terraform-docs](https://terraform-docs.io/) 0.20 | the reference between `BEGIN_TF_DOCS` and `END_TF_DOCS` in each module README |
 | [Trivy](https://trivy.dev/) | misconfiguration and secret scans |

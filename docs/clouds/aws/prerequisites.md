@@ -87,7 +87,7 @@ terraform {
 
 ## Tooling
 
-- [ ] OpenTofu 1.10 or later (OCI module sources).
+- [ ] OpenTofu 1.13 or later: below it, `tofu init` of the public OCI modules fails with a 403 ([Distribution](../../architecture/distribution.md#visibility)).
 - [ ] The AWS CLI: the helm provider gets its token from `aws eks get-token`.
 - [ ] `kubectl`.
 - [ ] `cosign`, to verify the modules package: OpenTofu does not verify OCI

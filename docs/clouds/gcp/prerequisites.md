@@ -195,7 +195,7 @@ terraform {
 
 ## Tooling
 
-- [ ] OpenTofu 1.10 or later.
+- [ ] OpenTofu 1.13 or later: below it, `tofu init` of the public OCI modules fails with a 403 ([Distribution](../../architecture/distribution.md#visibility)).
 - [ ] `gcloud`, authenticated as above.
 - [ ] `gke-gcloud-auth-plugin` (`gcloud components install
   gke-gcloud-auth-plugin`, or the package

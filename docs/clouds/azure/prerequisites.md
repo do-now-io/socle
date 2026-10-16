@@ -115,7 +115,7 @@ State holds every attribute of every resource, the cluster's CA included.
 
 ## Tooling
 
-- [ ] OpenTofu 1.10 or later ([`versions.tf`](../../../opentofu/azure/versions.tf)).
+- [ ] OpenTofu 1.13 or later ([`versions.tf`](../../../opentofu/azure/versions.tf)).
 - [ ] The Azure CLI, logged in (`az login`).
 - [ ] `kubectl`.
 - [ ] `cosign`, to verify the modules package: OpenTofu does not verify OCI

@@ -30,7 +30,7 @@ From [prerequisites](../clouds/azure/prerequisites.md):
   NAP picks; a region without three zones needs `zones` set;
 - for step 2, a runner that reaches the private VNet and resolves its
   private DNS zone;
-- OpenTofu 1.10 or later, the Azure CLI, `kubectl`.
+- OpenTofu 1.13 or later, the Azure CLI, `kubectl`.
 
 ```sh
 az login
@@ -43,7 +43,7 @@ The root, `main.tf`. Step 1 is the foundations alone:
 
 ```hcl
 terraform {
-  required_version = ">= 1.10"
+  required_version = ">= 1.13"
 
   backend "azurerm" {
     resource_group_name  = "socle-tfstate-rg"
