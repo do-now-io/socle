@@ -82,6 +82,11 @@ output "bootstrap_node_group" {
   }
 }
 
+output "node_instance_profile" {
+  description = "Name of the instance profile carrying the bootstrap nodes' role, the identity of every node of the cluster: the bootstrap group's, and those the catalog's Karpenter launches (its EC2NodeClass names it)."
+  value       = aws_iam_instance_profile.node.name
+}
+
 output "crossplane_role_arn" {
   description = "ARN of the IAM role the catalog's crossplane module's AWS providers run as, through Pod Identity. Null when crossplane is not set."
   value       = one(aws_iam_role.crossplane[*].arn)

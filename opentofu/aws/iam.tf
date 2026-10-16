@@ -86,7 +86,9 @@ data "aws_iam_policy_document" "cilium_operator" {
 # - no way to remove or swap that boundary, no managed-policy attachment, no
 #   policy creation, no access to any role outside the path — its own
 #   included, which lives at /;
-# - PassRole to EKS Pod Identity only, associations on this cluster only.
+# - PassRole to EKS Pod Identity only, associations on this cluster only;
+# - buckets, queues and EventBridge rules under the cluster's name prefix
+#   only, the resources a module owns beside its role.
 # What it cannot bound: a role's trust policy. IAM has no condition key on
 # the document, so a compromised Crossplane could create a role, within the
 # boundary, that another principal may assume. The boundary is the answer —
@@ -110,6 +112,20 @@ locals {
   # other roles, reach the organisation or the account settings.
   crossplane_denied_services = ["iam", "sts", "organizations", "account", "sso", "identitystore"]
 
+  # The one exception to "never iam", and only once the client allows ec2: a
+  # role that may launch instances may launch them as the socle's node role
+  # — the bootstrap nodes' (nodes.tf), the only role an instance of this
+  # cluster ever runs as — and read the instance profiles that carry it.
+  # Karpenter's controller is that role (docs/catalog/karpenter.md): EC2
+  # refuses RunInstances with an instance profile unless the caller may pass
+  # its role, and Karpenter checks the profile it is given before using it.
+  # Nothing else of IAM: no other role to pass, no profile to create or to
+  # change, so no module can make an instance of more than the nodes already
+  # are. docs/decisions/aws.md, AWS-21.
+  crossplane_node_role_exception = contains(try(var.crossplane.allowed_services, []), "ec2")
+  crossplane_node_role_arn       = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.cluster_name}-bootstrap-node"
+  crossplane_instance_profiles   = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:instance-profile/*"
+
   # The ceiling of every role Crossplane creates. The deny is always there,
   # which also keeps an empty allowlist a valid document.
   crossplane_boundary_policy = jsonencode({
@@ -121,12 +137,36 @@ locals {
         Action   = "${svc}:*"
         Resource = "*"
       }],
+      [for st in [
+        {
+          Sid       = "PassTheNodeRoleToEc2Only"
+          Effect    = "Allow"
+          Action    = "iam:PassRole"
+          Resource  = local.crossplane_node_role_arn
+          Condition = { StringEquals = { "iam:PassedToService" = "ec2.amazonaws.com" } }
+        },
+        {
+          Sid      = "ReadInstanceProfiles"
+          Effect   = "Allow"
+          Action   = ["iam:GetInstanceProfile", "iam:ListInstanceProfiles"]
+          Resource = local.crossplane_instance_profiles
+        },
+      ] : st if local.crossplane_node_role_exception],
       [{
         Sid      = "NeverIdentityNorAccount"
         Effect   = "Deny"
-        Action   = [for svc in local.crossplane_denied_services : "${svc}:*"]
+        Action   = [for svc in local.crossplane_denied_services : "${svc}:*" if !(local.crossplane_node_role_exception && svc == "iam")]
         Resource = "*"
       }],
+      # With the exception, iam is denied on everything but the node role and
+      # the instance profiles; on those, only the two statements above allow
+      # anything, so every other IAM action stays refused there too.
+      [for st in [{
+        Sid         = "NeverIamBeyondTheNodeRole"
+        Effect      = "Deny"
+        Action      = "iam:*"
+        NotResource = [local.crossplane_node_role_arn, local.crossplane_instance_profiles]
+      }] : st if local.crossplane_node_role_exception],
     )
   })
 }
@@ -279,6 +319,49 @@ resource "aws_iam_role_policy" "crossplane" {
           "s3:UntagResource",
         ]
         Resource = "arn:aws:s3:::${var.cluster_name}-*"
+      },
+      {
+        # A module's own queue, under the cluster's prefix: Karpenter's
+        # interruption queue (docs/catalog/karpenter.md). Create it, read and
+        # write its attributes — its access policy among them, which is what
+        # lets EventBridge deliver to it — tag it, delete it. A queue holds
+        # notices minutes old, nothing to keep: it goes with the module.
+        Sid    = "ManageQueuesUnderTheClusterPrefix"
+        Effect = "Allow"
+        Action = [
+          "sqs:CreateQueue",
+          "sqs:DeleteQueue",
+          "sqs:GetQueueAttributes",
+          "sqs:GetQueueUrl",
+          "sqs:SetQueueAttributes",
+          "sqs:ListQueueTags",
+          "sqs:TagQueue",
+          "sqs:UntagQueue",
+        ]
+        Resource = "arn:aws:sqs:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:${var.cluster_name}-*"
+      },
+      {
+        # A module's own EventBridge rules on the default bus, under the
+        # cluster's prefix, and their targets: the EC2 and AWS Health events
+        # Karpenter reads from its queue. A target needs no role to reach a
+        # queue — the queue's policy admits events.amazonaws.com — so no
+        # PassRole here.
+        Sid    = "ManageEventRulesUnderTheClusterPrefix"
+        Effect = "Allow"
+        Action = [
+          "events:PutRule",
+          "events:DescribeRule",
+          "events:DeleteRule",
+          "events:EnableRule",
+          "events:DisableRule",
+          "events:PutTargets",
+          "events:RemoveTargets",
+          "events:ListTargetsByRule",
+          "events:ListTagsForResource",
+          "events:TagResource",
+          "events:UntagResource",
+        ]
+        Resource = "arn:aws:events:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:rule/${var.cluster_name}-*"
       },
     ]
   })

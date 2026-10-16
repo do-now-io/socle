@@ -6,7 +6,8 @@ sidebar:
 ---
 
 Some modules act on the cloud: external-dns writes DNS records, KEDA reads
-queues, External Secrets reads a secret manager, Velero writes a bucket. Each
+queues, External Secrets reads a secret manager, Velero writes a bucket,
+Karpenter launches nodes. Each
 needs a role on each cloud.
 
 ## The rule
@@ -30,7 +31,14 @@ foundations grant it once, the same for every client, bounded by shape
   default) and always denies `iam`, `sts`, `organizations`, `account`, `sso`
   and `identitystore`;
 - Crossplane cannot attach managed policies, edit the boundary, or touch a
-  role outside its path.
+  role outside its path;
+- with `ec2` in the list, and only then, a role may pass the bootstrap
+  nodes' role to EC2 and read instance profiles: Karpenter's nodes run as
+  that role, through the instance profile the foundations give it, and no
+  other IAM action is allowed
+  ([AWS-21](../decisions/aws.md#aws-21-the-boundarys-one-iam-exception-the-node-role-passed-to-ec2));
+- beside roles, Crossplane manages a module's buckets, queues and
+  EventBridge rules under `<cluster>-` only.
 
 A module on a new service needs one word in `allowed_services`: a reviewed
 change. The root wires the boundary into `kube.crossplane.permissions_boundary`.
