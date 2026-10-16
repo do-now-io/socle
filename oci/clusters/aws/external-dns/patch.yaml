@@ -199,6 +199,15 @@
                       # 2.38.1
                       image: public.ecr.aws/aws-cli/aws-cli@sha256:733d5be1015825e4038c6016f3fa9954868ddee1f611b73be795a9cc2e706bfd
                       args: ["sts", "get-caller-identity"]
+                      # The one way round the injection: a Secret external-dns-aws
+                      # the client creates, with static keys and, for an
+                      # AWS-compatible endpoint, AWS_ENDPOINT_URL — what the
+                      # floci e2e does, floci's credentials reaching AWS's
+                      # own endpoints. Absent, nothing is set.
+                      envFrom:
+                        - secretRef:
+                            name: external-dns-aws
+                            optional: true
                       env:
                         - name: AWS_REGION
                           value: << inputs.cluster.region >>
