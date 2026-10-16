@@ -244,7 +244,18 @@ resource "aws_iam_role" "flow_logs" {
 }
 
 # Scoped to this VPC's own log group — there is no AWS-managed policy for
-# flow logs, and the documented example grants these five actions on "*".
+# flow logs, and the documented example grants five actions on "*". Four of
+# them: logs:CreateLogGroup is left out on purpose (#98). With it, the flow
+# logs service creates the group itself when it delivers ("The log group in
+# CloudWatch Logs is only created when traffic is recorded", VPC Flow Logs
+# troubleshooting), and it still delivers for several minutes after the flow
+# log is deleted ("it can take several minutes to stop collecting data") —
+# records still in the ten-minute aggregation window. A destroy then deletes
+# the group and the late delivery puts it back, with no retention and no key,
+# outside the state, and the next apply of the same cluster_name fails on
+# ResourceAlreadyExistsException. The group is created above, before the
+# flow log, so the service never needs to create it; without the action, a
+# late delivery to a deleted group fails and its records are dropped.
 resource "aws_iam_role_policy" "flow_logs" {
   count = var.create_vpc && var.vpc_flow_logs_enabled ? 1 : 0
 
@@ -256,7 +267,6 @@ resource "aws_iam_role_policy" "flow_logs" {
     Statement = [{
       Effect = "Allow"
       Action = [
-        "logs:CreateLogGroup",
         "logs:CreateLogStream",
         "logs:PutLogEvents",
         "logs:DescribeLogGroups",
@@ -281,4 +291,8 @@ resource "aws_flow_log" "socle" {
   max_aggregation_interval = 600
 
   tags = merge(local.tags, { Name = "${var.cluster_name}-flow-logs" })
+
+  # The role is referenced, its policy is not: without this the flow log could
+  # be created, and deliver, before the role may write.
+  depends_on = [aws_iam_role_policy.flow_logs]
 }

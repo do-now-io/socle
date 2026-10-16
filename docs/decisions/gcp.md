@@ -356,3 +356,24 @@ The shared Gateways themselves:
 [GATEWAY-API-05](gateway-api.md#gateway-api-05-on-gcp-the-shared-gateways-on-gkes-classes-and-no-crd-of-the-socles).
 
 **Sources.** [Secure a Gateway](https://cloud.google.com/kubernetes-engine/docs/how-to/secure-gateway) · [Deploy a Google-managed certificate with DNS authorization](https://cloud.google.com/certificate-manager/docs/deploy-google-managed-dns-auth) · [regional](https://cloud.google.com/certificate-manager/docs/deploy-google-managed-regional).
+
+## GCP-17: The logs live in the project's buckets, so a destroy leaves nothing to collide
+
+**accepted** · 2026-10-16 · [`opentofu/gcp/network.tf`](../../opentofu/gcp/network.tf) (`log_config`), [`opentofu/gcp/cluster.tf`](../../opentofu/gcp/cluster.tf) (`logging_config`)
+
+**Context.** On AWS, a late delivery recreated a log group the destroy had
+just deleted, and the next apply of the same cluster failed on the name
+([AWS-20](aws.md#aws-20-a-destroy-leaves-no-log-group-behind), #98). GCP's
+subnet flow logs, Cloud NAT's and GKE's go through the project's log router:
+Cloud Logging creates the `_Required` and `_Default` sinks and buckets for
+each project, and the module creates no sink, bucket or log of its own.
+
+**Decision.** Nothing to change: the logs stay in `_Default`, which the
+module neither creates nor deletes.
+
+**Consequences.** Entries delivered after a destroy land in `_Default` like
+the ones before it and expire with its retention (30 days unless the project
+sets another); none carries a name the next apply creates. A client who
+routes them elsewhere owns that sink.
+
+**Sources.** [Routing and storage overview](https://cloud.google.com/logging/docs/routing/overview) · [Configure log buckets](https://cloud.google.com/logging/docs/buckets) · #98.

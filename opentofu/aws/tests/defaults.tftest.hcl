@@ -314,6 +314,37 @@ run "the_audit_trail_is_one_variable_away" {
     condition     = toset(aws_eks_cluster.socle.enabled_cluster_log_types) == toset(["audit", "authenticator"]) && aws_cloudwatch_log_group.cluster.retention_in_days == 90
     error_message = "a client whose audit needs the API server's record turns on audit and authenticator, into the log group the module already created with its retention."
   }
+  assert {
+    condition     = time_sleep.cluster_logs_drain.destroy_duration == "5m"
+    error_message = "with a log type on, the destroy waits between the cluster and its group, so that EKS's last delivery does not recreate the group outside the state (#98)."
+  }
+}
+
+run "a_destroy_waits_for_the_control_plane_logs_only_when_there_are_any" {
+  command = plan
+
+  assert {
+    condition     = time_sleep.cluster_logs_drain.destroy_duration == "0s"
+    error_message = "with no log type on, EKS sends nothing to the group, and a destroy has nothing to wait for."
+  }
+}
+
+run "the_flow_logs_role_cannot_recreate_its_log_group" {
+  command = plan
+
+  override_resource {
+    target = aws_cloudwatch_log_group.flow_logs
+    values = { arn = "arn:aws:logs:eu-west-3:000000000000:log-group:/aws/vpc/socle-test/flow-logs" }
+  }
+
+  assert {
+    condition     = !contains(jsondecode(aws_iam_role_policy.flow_logs[0].policy).Statement[0].Action, "logs:CreateLogGroup")
+    error_message = "the flow logs service creates the group when it delivers, and delivers after the flow log is deleted: with logs:CreateLogGroup, a destroy leaves the group behind and the next apply of the same cluster_name fails (#98)."
+  }
+  assert {
+    condition     = toset(jsondecode(aws_iam_role_policy.flow_logs[0].policy).Statement[0].Action) == toset(["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogGroups", "logs:DescribeLogStreams"])
+    error_message = "the role keeps the four other actions of AWS's documented policy: the group exists, the service writes streams into it."
+  }
 }
 
 run "crossplane_gets_no_identity_unless_asked" {

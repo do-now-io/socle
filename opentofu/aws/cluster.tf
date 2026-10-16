@@ -19,6 +19,24 @@ resource "aws_cloudwatch_log_group" "cluster" {
   tags = local.tags
 }
 
+# The same name is what exposes this group to the race of the flow logs' in
+# network.tf (#98): EKS creates /aws/eks/<cluster>/cluster itself when it
+# delivers, through its service-linked role (AmazonEKSServiceRolePolicy allows
+# logs:CreateLogGroup on /aws/eks/*), and that delivery is "within a few
+# minutes … best effort" (EKS control plane logs). A group deleted right after
+# the cluster can be put back by the last of it, with no retention and no key,
+# and the next apply of the same cluster_name fails on
+# ResourceAlreadyExistsException. Unlike the flow logs' role, that policy is
+# AWS's and cannot be narrowed, so the destroy waits instead: the cluster goes,
+# then this sleep, then the group. Only when a log type is on — with none,
+# EKS sends nothing and a destroy waits for nothing. The duration is read from
+# the state at destroy time, so it is the one last applied that counts.
+resource "time_sleep" "cluster_logs_drain" {
+  destroy_duration = length(var.cluster_log_types) > 0 ? "5m" : "0s"
+
+  depends_on = [aws_cloudwatch_log_group.cluster]
+}
+
 # One key for both log groups this module creates — the control plane's, just
 # below, and the VPC flow logs' in network.tf. CloudWatch Logs already encrypts
 # at rest with an AWS-owned key; this moves custody of that key to the account
@@ -183,7 +201,7 @@ resource "aws_eks_cluster" "socle" {
 
   depends_on = [
     aws_iam_role_policy_attachment.cluster,
-    aws_cloudwatch_log_group.cluster,
+    time_sleep.cluster_logs_drain,
   ]
 }
 
