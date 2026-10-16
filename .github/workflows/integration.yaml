@@ -82,6 +82,10 @@ jobs:
         with:
           persist-credentials: false
       - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          # The floor every versions.tf declares (issue #89): CI proves it, and
+          # moves only when the floor does.
+          tofu_version: 1.13.0
       - name: Start floci emulator
         if: matrix.emulator != ''
         run: |
