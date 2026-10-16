@@ -93,7 +93,7 @@ module "socle" {
   # k3s brings its own CNI, kube-proxy and CoreDNS; the production default
   # would install Cilium over them. See floci.tfvars beside this file.
   cilium = { enabled = false }
-  # And no EKS add-on API in floci 2.1.0 either (CreateAddon: "Unknown
-  # operation", measured 2026-10-01; it exists on nightly). See floci.tfvars.
+  # And no EKS add-on: floci has the API since 2.2.0, but records add-ons as
+  # metadata only, nothing runs in its k3s. See floci.tfvars.
   eks_addons = { pod_identity_agent = false, ebs_csi = false, snapshot_controller = false }
 }

@@ -6,13 +6,12 @@
 #    floci's S3 versioned, encrypted, public access blocked, with its
 #    lifecycle — read from what Crossplane reports and from S3 itself — its
 #    Role floci's IAM under /socle/<cluster>/ with the bucket policy only, and
-#    the workload step is withheld while the association is not Ready, the
-#    aws cloud step never healthy. Then off:
+#    the workload step follows the association once it is Ready. Then off:
 #    the role goes, the bucket stays. The floci seams (providerConfigRef:
-#    floci, the association never syncing) are steps of their own, to delete
-#    the day floci serves Pod Identity.
-# 2. A backup and a restore, for real, into that orphaned bucket. floci has
-#    no Pod Identity, so Velero runs with Crossplane off and static test keys
+#    floci, the cluster's DNS) are steps of their own.
+# 2. A backup and a restore, for real, into that orphaned bucket. floci's
+#    Pod Identity credentials reach AWS's own endpoints, not floci's, so
+#    Velero runs with Crossplane off and static test keys
 #    (the plan refuses velero without Crossplane; this test writes the inputs
 #    directly — the seam). The server under Pod Security restricted; the
 #    whole valuesFrom order; the node-agent; a labelled application's file
@@ -319,15 +318,12 @@ spec:
             kind: Provider
         - events:
             namespace: crossplane-system
-        - podLogs:
-            namespace: crossplane-system
-            tail: 40
     # floci seam: the module leaves providerConfigRef at its default, the
-    # socle's Pod Identity ClusterProviderConfig, which floci cannot serve.
+    # socle's Pod Identity ClusterProviderConfig, which reaches AWS's own
+    # endpoints: floci serves Pod Identity since 2.2.0, but not there.
     # floci's own is named after the fact, with S3 among its services and
-    # path-style addressing (floci answers one host). Deleted the day floci
-    # serves Pod Identity. skipDelete: the off step removes them itself,
-    # before Crossplane goes.
+    # path-style addressing (floci answers one host). skipDelete: the off
+    # step removes them itself, before Crossplane goes.
     # floci seam, DNS: the SDK prefixes S3 Control's host with the account
     # (000000000000.<endpoint host>), and an IP takes no prefix — "lookup
     # 000000000000.172.18.0.2: no such host" (run 36876844601). k3s's CoreDNS
@@ -591,13 +587,13 @@ spec:
             namespace: crossplane-system
             selector: pkg.crossplane.io/provider=provider-aws-iam
             tail: 40
-    # floci seam, second half: the association never syncs (floci 2.1.0 has
-    # no association API), so velero-access, which waits for it, is never
-    # Ready, the aws cloud step never healthy, and the workload step never
-    # applied: one full minute after the bucket and the role turned Ready,
-    # still no HelmRelease. The day it syncs this step fails and goes with
-    # the seam.
-    - name: 'floci seam: the association cannot sync, so the workload is withheld'
+    # The association syncs on floci since 2.2.0 (its Pod Identity API,
+    # floci-io/floci#4012), so velero-access turns Ready, the cloud step
+    # healthy, and the workload step follows: the gate holds the chart
+    # exactly until the association exists, as on EKS.
+    - name: the association syncs, and the workload follows
+      timeouts:
+        assert: 6m
       try:
         - assert:
             resource:
@@ -608,16 +604,9 @@ spec:
                 namespace: velero
               status:
                 (conditions[?type == 'Synced'] || `[]`):
-                  - status: 'False'
-        - sleep:
-            duration: 60s
-        - error:
-            resource:
-              apiVersion: helm.toolkit.fluxcd.io/v2
-              kind: HelmRelease
-              metadata:
-                name: velero
-                namespace: velero
+                  - status: 'True'
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
         - assert:
             resource:
               apiVersion: fluxcd.controlplane.io/v1
@@ -627,16 +616,14 @@ spec:
                 namespace: flux-system
               status:
                 (conditions[?type == 'Ready'] || `[]`):
-                  - status: 'False'
-        # Not Ready: Unknown while the step's health check waits, False once it
-        # times out.
-        - error:
+                  - status: 'True'
+        - assert:
             resource:
-              apiVersion: fluxcd.controlplane.io/v1
-              kind: ResourceSet
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
               metadata:
                 name: velero
-                namespace: flux-system
+                namespace: velero
               status:
                 (conditions[?type == 'Ready'] || `[]`):
                   - status: 'True'
@@ -645,27 +632,38 @@ spec:
             apiVersion: fluxcd.controlplane.io/v1
             kind: ResourceSet
             namespace: flux-system
-            name: velero
         - describe:
-            apiVersion: fluxcd.controlplane.io/v1
-            kind: ResourceSet
-            namespace: flux-system
-            name: velero-access
-    # The association's finalizer waits on an API floci does not have:
-    # released by hand. Then the module off: the IAM role is deleted, the
+            apiVersion: eks.aws.m.upbound.io/v1beta1
+            kind: PodIdentityAssociation
+            namespace: velero
+            name: velero-server
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: velero
+            name: velero
+        - events:
+            namespace: velero
+    # The module off: the IAM role is deleted, the
     # namespace goes — and the bucket stays, its managed resources having no
     # Delete. Crossplane off last.
     - name: off, the IAM role is deleted, the namespace goes, the bucket stays
       try:
-        - patch:
+        # The release must be idle before the module goes: helm-controller
+        # honours a deletion only once the running action returns.
+        - assert:
             resource:
-              apiVersion: eks.aws.m.upbound.io/v1beta1
-              kind: PodIdentityAssociation
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
               metadata:
-                name: velero-server
+                name: velero
                 namespace: velero
-                finalizers: []
-        # No idle gate: the workload is withheld, there is no release.
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'Released'] || `[]`):
+                  - status: 'True'
+                (length(conditions[?type == 'Reconciling'] || `[]`)): 0
         - patch:
             resource:
               apiVersion: fluxcd.controlplane.io/v1

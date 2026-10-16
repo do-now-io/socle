@@ -15,11 +15,8 @@
 # 2. The module's own AWS access, with Crossplane on: its Role reaches
 #    floci's IAM under /socle/<cluster>/ with a read-only policy scoped to
 #    the prefix — proven from what Crossplane reports — and the workload and
-#    the socle's store are withheld while the association is not Ready. The
-#    two floci seams (providerConfigRef: floci, the association never
-#    syncing) are steps of their own, to delete the day floci serves Pod
-#    Identity; that day the socle's store, secret-manager, is asserted Ready
-#    instead.
+#    the socle's store follow the association once it is Ready. The floci
+#    seam (providerConfigRef: floci) is a step of its own.
 #
 # Not provable on floci: the association reaching EKS, the controller getting
 # the role's credentials, IAM enforcing the prefix and the boundary — the
@@ -218,9 +215,6 @@ spec:
             name: external-secrets
         - events:
             namespace: external-secrets
-        - podLogs:
-            namespace: external-secrets
-            tail: 40
     # What a client without Crossplane does: his own store, on keys he holds.
     # floci accepts any key on Secrets Manager.
     - name: a ClusterSecretStore of the client's, on static keys, is Ready
@@ -779,13 +773,10 @@ spec:
             kind: Provider
         - events:
             namespace: crossplane-system
-        - podLogs:
-            namespace: crossplane-system
-            tail: 40
     # floci seam: the module leaves providerConfigRef at its default, the
-    # socle's Pod Identity ClusterProviderConfig, which floci cannot serve.
-    # floci's own is named after the fact. Deleted the day floci serves Pod
-    # Identity.
+    # socle's Pod Identity ClusterProviderConfig, which reaches AWS's own
+    # endpoints: floci serves Pod Identity since 2.2.0, but not there.
+    # floci's own is named after the fact.
     # skipDelete: the last step removes these two itself, before Crossplane
     # goes — Chainsaw's own cleanup would run after, when no provider is left
     # to release the ClusterProviderConfig, and time out.
@@ -880,13 +871,16 @@ spec:
             namespace: crossplane-system
             selector: pkg.crossplane.io/provider=provider-aws-iam
             tail: 40
-    # floci seam, second half: the association never syncs (floci 2.1.0 has
-    # no association API), so external-secrets-access is never Ready, aws's
-    # cloud step never healthy, and neither the workload step nor the store
-    # step after it is applied: one full minute after the Role turned into
-    # IAM, still no HelmRelease, and no socle store. Asserted as such so that the day it syncs this step fails
-    # and goes with the seam above.
-    - name: 'floci seam: the association cannot sync, so the workload and the socle''s store are withheld'
+    # The association syncs on floci since 2.2.0 (its Pod Identity API,
+    # floci-io/floci#4012), so external-secrets-access turns Ready, the cloud step
+    # healthy, and the workload step follows: the gate holds the chart
+    # exactly until the association exists, as on EKS.
+    # The socle's store, the step after the workload, is applied too; it
+    # does not turn Ready here — its controller reaches Secrets Manager with
+    # the Pod Identity credentials at AWS's own endpoint, not floci's.
+    - name: the association syncs, and the workload follows
+      timeouts:
+        assert: 6m
       try:
         - assert:
             resource:
@@ -897,22 +891,9 @@ spec:
                 namespace: external-secrets
               status:
                 (conditions[?type == 'Synced'] || `[]`):
-                  - status: 'False'
-        - sleep:
-            duration: 60s
-        - error:
-            resource:
-              apiVersion: helm.toolkit.fluxcd.io/v2
-              kind: HelmRelease
-              metadata:
-                name: external-secrets
-                namespace: external-secrets
-        - error:
-            resource:
-              apiVersion: external-secrets.io/v1
-              kind: ClusterSecretStore
-              metadata:
-                name: secret-manager
+                  - status: 'True'
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
         - assert:
             resource:
               apiVersion: fluxcd.controlplane.io/v1
@@ -922,19 +903,23 @@ spec:
                 namespace: flux-system
               status:
                 (conditions[?type == 'Ready'] || `[]`):
-                  - status: 'False'
-        # Not Ready: Unknown while the step's health check waits, False once it
-        # times out.
-        - error:
+                  - status: 'True'
+        - assert:
             resource:
-              apiVersion: fluxcd.controlplane.io/v1
-              kind: ResourceSet
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
               metadata:
                 name: external-secrets
-                namespace: flux-system
+                namespace: external-secrets
               status:
                 (conditions[?type == 'Ready'] || `[]`):
                   - status: 'True'
+        - assert:
+            resource:
+              apiVersion: external-secrets.io/v1
+              kind: ClusterSecretStore
+              metadata:
+                name: secret-manager
       catch:
         - describe:
             apiVersion: fluxcd.controlplane.io/v1
@@ -945,23 +930,33 @@ spec:
             kind: PodIdentityAssociation
             namespace: external-secrets
             name: external-secrets
-    # The association's finalizer waits on an API floci does not have:
-    # released by hand, the only thing done here a real cluster does not
-    # need. Then the module off deletes the IAM role and the namespace goes;
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: external-secrets
+            name: external-secrets
+        - events:
+            namespace: external-secrets
+    # The module off deletes the IAM role and the namespace goes;
     # Crossplane off last (turning both off at once leaves the managed
     # resources with no provider to delete them).
     - name: off, the IAM role is deleted and the namespace goes
       try:
-        - patch:
+        # The release must be idle before the module goes: helm-controller
+        # honours a deletion only once the running action returns.
+        - assert:
             resource:
-              apiVersion: eks.aws.m.upbound.io/v1beta1
-              kind: PodIdentityAssociation
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
               metadata:
                 name: external-secrets
                 namespace: external-secrets
-                finalizers: []
-        # No idle gate here: with Crossplane on and floci's association never
-        # Ready, the workload is withheld — there is no release to wait for.
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'Released'] || `[]`):
+                  - status: 'True'
+                (length(conditions[?type == 'Reconciling'] || `[]`)): 0
         - patch:
             resource:
               apiVersion: fluxcd.controlplane.io/v1

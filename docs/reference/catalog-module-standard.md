@@ -85,8 +85,9 @@ the module's tests the job sets `kube.<module>.enabled = false` (the
 `root` and `health`, requires an empty `tofu plan -detailed-exitcode`, then
 uninstalls and runs the `destroyed` suites. Chainsaw operations come first;
 a `script` only for what the cluster cannot show (a record in floci's Route
-53) or a `catch` that prints the node's state. What floci cannot serve (Pod
-Identity, today) is a step of its own, named as such.
+53) or a `catch` that prints the node's state. What floci cannot serve (the
+cloud's own endpoints, which the socle's ClusterProviderConfig reaches) is a
+step of its own, named as such.
 
 </details>
 

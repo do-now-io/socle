@@ -15,9 +15,8 @@
 # 2. The module's own AWS access, with Crossplane on: its Role reaches
 #    floci's IAM under /socle/<cluster>/ with the route53 policy scoped to
 #    domain_filters — proven from what Crossplane reports — and the workload
-#    is withheld while the association is not Ready. The two floci seams
-#    (providerConfigRef: floci, the association never syncing) are steps of
-#    their own, to delete the day floci serves Pod Identity.
+#    follows the association once it is Ready. The floci seam
+#    (providerConfigRef: floci) is a step of its own.
 #
 # Not provable on floci: the association reaching EKS, the pod getting the
 # role's credentials, IAM enforcing the policy and the boundary — the
@@ -186,9 +185,6 @@ spec:
             name: external-dns
         - events:
             namespace: external-dns
-        - podLogs:
-            namespace: external-dns
-            tail: 40
     # external-dns 0.22 reads external-dns.kubernetes.io/ annotations; the
     # older external-dns.alpha.kubernetes.io/ prefix is ignored.
     - name: an Ingress becomes an A record and an ExternalName Service a CNAME, each with the client's TXT
@@ -734,13 +730,10 @@ spec:
             kind: Provider
         - events:
             namespace: crossplane-system
-        - podLogs:
-            namespace: crossplane-system
-            tail: 40
     # floci seam: the module leaves providerConfigRef at its default, the
-    # socle's Pod Identity ClusterProviderConfig, which floci cannot serve.
-    # floci's own is named after the fact. Deleted the day floci serves Pod
-    # Identity.
+    # socle's Pod Identity ClusterProviderConfig, which reaches AWS's own
+    # endpoints: floci serves Pod Identity since 2.2.0, but not there.
+    # floci's own is named after the fact.
     # skipDelete: the last step removes these two itself, before Crossplane
     # goes — Chainsaw's own cleanup would run after, when no provider is left
     # to release the ClusterProviderConfig, and time out.
@@ -833,12 +826,13 @@ spec:
             namespace: crossplane-system
             selector: pkg.crossplane.io/provider=provider-aws-iam
             tail: 40
-    # floci seam, second half: the association never syncs (floci 2.1.0 has
-    # no association API), so the aws step's gate is never Ready and the
-    # chart must never have been applied: one full minute after the Role
-    # turned into IAM, still no HelmRelease. Asserted as such so that the day
-    # it syncs this step fails and goes with the seam above.
-    - name: 'floci seam: the association cannot sync, so the workload is withheld'
+    # The association syncs on floci since 2.2.0 (its Pod Identity API,
+    # floci-io/floci#4012), so external-dns-access turns Ready, the cloud step
+    # healthy, and the workload step follows: the gate holds the chart
+    # exactly until the association exists, as on EKS.
+    - name: the association syncs, and the workload follows
+      timeouts:
+        assert: 6m
       try:
         - assert:
             resource:
@@ -849,18 +843,9 @@ spec:
                 namespace: external-dns
               status:
                 (conditions[?type == 'Synced'] || `[]`):
-                  - status: 'False'
-        - sleep:
-            duration: 60s
-        - error:
-            resource:
-              apiVersion: helm.toolkit.fluxcd.io/v2
-              kind: HelmRelease
-              metadata:
-                name: external-dns
-                namespace: external-dns
-        # The aws step holds the module at the association: its gate is not
-        # Ready, so neither is the module, and the workload step never ran.
+                  - status: 'True'
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
         - assert:
             resource:
               apiVersion: fluxcd.controlplane.io/v1
@@ -870,16 +855,14 @@ spec:
                 namespace: flux-system
               status:
                 (conditions[?type == 'Ready'] || `[]`):
-                  - status: 'False'
-        # Not Ready: Unknown while the step's health check waits, False once it
-        # times out.
-        - error:
+                  - status: 'True'
+        - assert:
             resource:
-              apiVersion: fluxcd.controlplane.io/v1
-              kind: ResourceSet
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
               metadata:
                 name: external-dns
-                namespace: flux-system
+                namespace: external-dns
               status:
                 (conditions[?type == 'Ready'] || `[]`):
                   - status: 'True'
@@ -888,29 +871,38 @@ spec:
             apiVersion: fluxcd.controlplane.io/v1
             kind: ResourceSet
             namespace: flux-system
-            name: external-dns-access
         - describe:
             apiVersion: eks.aws.m.upbound.io/v1beta1
             kind: PodIdentityAssociation
             namespace: external-dns
             name: external-dns
-    # The association's finalizer waits on an API floci does not have:
-    # released by hand, the only thing done here a real cluster does not
-    # need. Then the module off deletes the IAM role and the namespace goes;
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: external-dns
+            name: external-dns
+        - events:
+            namespace: external-dns
+    # The module off deletes the IAM role and the namespace goes;
     # Crossplane off last (docs/catalog/external-dns.md: turning both off at
     # once leaves the managed resources with no provider to delete them).
     - name: off, the IAM role is deleted and the namespace goes
       try:
-        - patch:
+        # The release must be idle before the module goes: helm-controller
+        # honours a deletion only once the running action returns.
+        - assert:
             resource:
-              apiVersion: eks.aws.m.upbound.io/v1beta1
-              kind: PodIdentityAssociation
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
               metadata:
                 name: external-dns
                 namespace: external-dns
-                finalizers: []
-        # No idle gate here: with Crossplane on and floci's association never
-        # Ready, the workload is withheld — there is no release to wait for.
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'Released'] || `[]`):
+                  - status: 'True'
+                (length(conditions[?type == 'Reconciling'] || `[]`)): 0
         - patch:
             resource:
               apiVersion: fluxcd.controlplane.io/v1
@@ -1176,9 +1168,6 @@ spec:
             name: external-dns
         - events:
             namespace: external-dns
-        - podLogs:
-            namespace: external-dns
-            tail: 40
     # An ExternalName Service becomes a CNAME, the shape every non-AWS cloud
     # gives a hostname (and the reason for the socle- TXT prefix). The name
     # is the run's namespace, so a record an earlier run left under

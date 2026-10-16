@@ -17,8 +17,8 @@
 #              module's own Role, pointed at floci (the seam, its own steps),
 #              becomes an IAM role under /socle/<cluster>/ whose one policy
 #              gets the registry token and reads the repositories named,
-#              nothing else; the association never syncs on floci, so the
-#              workload is withheld; off deletes the role.
+#              nothing else; the association syncs, the workload follows
+#              it; off deletes the role.
 #   module     on gcp (GKE, the sandbox), the module as its tfvars leave it,
 #              repositories named: the ProjectIAMMember binding Artifact
 #              Registry Reader to the controller's own principal, the
@@ -706,9 +706,9 @@ spec:
             namespace: crossplane-system
             tail: 40
     # floci seam: the module leaves providerConfigRef at its default, the
-    # socle's Pod Identity ClusterProviderConfig, which floci cannot serve.
-    # floci's own is named after the fact. Deleted the day floci serves Pod
-    # Identity. skipDelete: the last step removes these two itself, before
+    # socle's Pod Identity ClusterProviderConfig, which reaches AWS's own
+    # endpoints: floci serves Pod Identity since 2.2.0, but not there.
+    # floci's own is named after the fact. skipDelete: the last step removes these two itself, before
     # Crossplane goes.
     - name: 'floci seam: a ClusterProviderConfig with static keys, and the module''s resources pointed at it'
       skipDelete: true
@@ -816,12 +816,13 @@ spec:
             namespace: crossplane-system
             selector: pkg.crossplane.io/provider=provider-aws-iam
             tail: 40
-    # floci seam, second half: the association never syncs (floci has no
-    # association API), so argocd-image-updater-access, which waits on it,
-    # is never Ready, aws's cloud step never healthy, the workload step never
-    # applied and the chart never installed. Asserted as such so that the
-    # day it syncs this step fails and goes with the seam above.
-    - name: 'floci seam: the association cannot sync, so the workload is withheld'
+    # The association syncs on floci since 2.2.0 (its Pod Identity API,
+    # floci-io/floci#4012), so argocd-image-updater-access turns Ready, the cloud step
+    # healthy, and the workload step follows: the gate holds the chart
+    # exactly until the association exists, as on EKS.
+    - name: the association syncs, and the workload follows
+      timeouts:
+        assert: 6m
       try:
         - assert:
             resource:
@@ -832,16 +833,9 @@ spec:
                 namespace: argocd-image-updater
               status:
                 (conditions[?type == 'Synced'] || `[]`):
-                  - status: 'False'
-        - sleep:
-            duration: 60s
-        - error:
-            resource:
-              apiVersion: helm.toolkit.fluxcd.io/v2
-              kind: HelmRelease
-              metadata:
-                name: argocd-image-updater
-                namespace: argocd-image-updater
+                  - status: 'True'
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
         - assert:
             resource:
               apiVersion: fluxcd.controlplane.io/v1
@@ -851,49 +845,53 @@ spec:
                 namespace: flux-system
               status:
                 (conditions[?type == 'Ready'] || `[]`):
-                  - status: 'False'
-        # Waiting on the cloud step: Unknown while its health check runs,
-        # False once it times out — never True.
+                  - status: 'True'
         - assert:
             resource:
-              apiVersion: fluxcd.controlplane.io/v1
-              kind: ResourceSet
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
               metadata:
                 name: argocd-image-updater
-                namespace: flux-system
+                namespace: argocd-image-updater
               status:
-                (length(conditions[?type == 'Ready' && status == 'True'] || `[]`)): 0
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
       catch:
         - describe:
             apiVersion: fluxcd.controlplane.io/v1
             kind: ResourceSet
             namespace: flux-system
-            name: argocd-image-updater
-        - describe:
-            apiVersion: fluxcd.controlplane.io/v1
-            kind: ResourceSet
-            namespace: flux-system
-            name: argocd-image-updater-access
         - describe:
             apiVersion: eks.aws.m.upbound.io/v1beta1
             kind: PodIdentityAssociation
             namespace: argocd-image-updater
             name: argocd-image-updater
-    # The association's finalizer waits on an API floci does not have:
-    # released by hand, the only thing done here a real cluster does not
-    # need. Then the module off deletes the IAM role and the namespace goes;
-    # the seam's objects removed before Crossplane, Crossplane off last. No
-    # idle gate: the release was withheld, there is none to wait for.
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: argocd-image-updater
+            name: argocd-image-updater
+        - events:
+            namespace: argocd-image-updater
+    # The module off deletes the IAM role and the namespace goes;
+    # the seam's objects removed before Crossplane, Crossplane off last.
     - name: off, the IAM role is deleted and the namespace goes
       try:
-        - patch:
+        # The release must be idle before the module goes: helm-controller
+        # honours a deletion only once the running action returns.
+        - assert:
             resource:
-              apiVersion: eks.aws.m.upbound.io/v1beta1
-              kind: PodIdentityAssociation
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
               metadata:
                 name: argocd-image-updater
                 namespace: argocd-image-updater
-                finalizers: []
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'Released'] || `[]`):
+                  - status: 'True'
+                (length(conditions[?type == 'Reconciling'] || `[]`)): 0
         - patch:
             resource:
               apiVersion: fluxcd.controlplane.io/v1

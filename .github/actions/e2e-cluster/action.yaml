@@ -26,12 +26,11 @@
 # metrics-server is removed, so the socle's runs as it would on EKS, which
 # ships none; on gcp it stays, in the place of GKE's own.
 #
-# floci 2.x facts this encodes, measured on 2.1.0 (2026-09-30):
+# floci facts this encodes, measured on 2.1.0 (2026-09-30), still so on
+# 2.3.0:
 # - the EKS token webhook rejects the well-known `test`/`test` pair, so a
 #   real IAM user and access key are created first and exported for the job;
-#   floci's IAM accepts any registered key — and it refuses a presigned
-#   token after 60 s, so the kubeconfig handed to the job carries a
-#   ServiceAccount token (see the kubeconfig step);
+#   floci's IAM accepts any registered key;
 # - the k3s container joins floci's own Docker network (auto-detected), so a
 #   pod reaches floci at FLOCI_IP, never at the runner's localhost;
 # - HTTP on 4566 is the default; TLS is opt-in (FLOCI_TLS_ENABLED), untouched.
@@ -187,12 +186,13 @@ runs:
         [ "$status" = 0 ] || { echo "::error::k3s's own metrics-server could not be removed"; exit 1; }
         echo "| k3s's own metrics-server | removed while the apply ran |" >> "$GITHUB_STEP_SUMMARY"
 
-    # On aws, the kubeconfig Chainsaw reads carries a ServiceAccount token,
-    # not the `aws eks get-token` exec plugin `update-kubeconfig` writes:
-    # floci 2.x refuses that presigned token after 60 s and Chainsaw's client
-    # does not re-run the plugin on a 401, so every assert died at 60 s
-    # whatever its timeout (measured: an assert with a 100 s timeout ends at
-    # 61 s through the exec plugin, at 100 s through a static token).
+    # On aws, the kubeconfig `update-kubeconfig` writes, with the
+    # `aws eks get-token` exec plugin. floci 2.1.0 refused that presigned
+    # token after 60 s, and Chainsaw then died at 60 s whatever an assert's
+    # timeout, so this step used to hand it a ServiceAccount token instead;
+    # floci 2.2.0 accepts it for the authenticator's 15 minutes
+    # (floci-io/floci#4186), and client-go runs the plugin again before the
+    # expiry the token carries.
     # On gcp, floci-gcp's k3s takes any bearer token as cluster-admin: the
     # kubeconfig is written from the fixture root's two outputs.
     - name: kubeconfig
@@ -205,18 +205,7 @@ runs:
       run: |
         case "$CLOUD" in
           aws)
-            aws eks update-kubeconfig --name "$CLUSTER" --kubeconfig "$RUNNER_TEMP/eks.kubeconfig" > /dev/null
-            export KUBECONFIG="$RUNNER_TEMP/eks.kubeconfig"
-            kubectl -n kube-system create serviceaccount e2e
-            kubectl create clusterrolebinding e2e --clusterrole=cluster-admin --serviceaccount=kube-system:e2e
-            token="$(kubectl -n kube-system create token e2e --duration=3h)"
-            kubectl config view --raw --minify --flatten -o json | python3 -c '
-        import sys, json
-        c = json.load(sys.stdin)
-        c["users"] = [{"name": "e2e", "user": {"token": sys.argv[1]}}]
-        c["contexts"][0]["context"]["user"] = "e2e"
-        print(json.dumps(c))' "$token" > "$RUNNER_TEMP/e2e.kubeconfig"
-            export KUBECONFIG="$RUNNER_TEMP/e2e.kubeconfig"
+            aws eks update-kubeconfig --name "$CLUSTER" --kubeconfig "$KUBECONFIG" > /dev/null
             ;;
           gcp)
             tofu output -raw cluster_ca_certificate | base64 -d > "$RUNNER_TEMP/k3s-ca.crt"

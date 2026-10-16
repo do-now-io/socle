@@ -3,15 +3,14 @@
 # turns it on with one client value, proves what a module declares for its
 # AWS access against floci's IAM, and turns it off again.
 #
-# floci is the one seam, in two steps of their own so they go the day floci
-# runs Pod Identity (on nightly since 2026-09-21, expected in the 2026-10-06
-# stable): the socle's ClusterProviderConfig `default` is on Pod Identity,
-# which floci does not serve, so the test creates a second one, `floci`, with
-# static test keys and floci's endpoint as a pod sees it ($values.floci_ip,
-# the Docker network they share), and points the module-shaped resources at
-# it; and floci 2.1.0 has no association API, so the PodIdentityAssociation
-# never syncs and is released by hand. floci ignores PermissionsBoundary and
-# enforces no policy: the role is proven, the boundary and the policy are not.
+# floci is the one seam, a step of its own: the socle's ClusterProviderConfig
+# `default` reaches AWS's own endpoints, so the test creates a second one,
+# `floci`, with static test keys and floci's endpoint as a pod sees it
+# ($values.floci_ip, the Docker network they share), and points the
+# module-shaped resources at it. The PodIdentityAssociation syncs: floci
+# serves the association API since 2.2.0 (floci-io/floci#4012). floci ignores
+# PermissionsBoundary and enforces no policy: the role and the association
+# are proven, the boundary and the policy are not.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -321,8 +320,8 @@ spec:
         - describe:
             apiVersion: pkg.crossplane.io/v1
             kind: ProviderRevision
-    # The seam: floci's own ClusterProviderConfig. Deleted with this step
-    # the day floci serves Pod Identity.
+    # The seam: floci's own ClusterProviderConfig, kept while the socle's
+    # reaches AWS's own endpoints.
     # skipDelete: the last step removes these two itself, before Crossplane
     # goes — Chainsaw's own cleanup would run after, when no provider is left
     # to release the ClusterProviderConfig, and time out.
@@ -550,10 +549,10 @@ spec:
             namespace: flux-system
             selector: app=helm-controller
             tail: 40
-    # floci seam, second half: the association never syncs (no API in floci
-    # 2.1.0). Asserted as such so that the day it syncs, this step fails and
-    # gets deleted together with the seam above.
-    - name: 'floci seam: the association cannot sync, and is released by hand'
+    # The association is real on floci since 2.2.0: Synced and Ready, then
+    # deleted like any managed resource, its finalizer released by the
+    # provider once floci has deleted it.
+    - name: the association syncs, and deleting it deletes it
       try:
         - assert:
             resource:
@@ -564,21 +563,25 @@ spec:
                 namespace: e2e-probe
               status:
                 (conditions[?type == 'Synced'] || `[]`):
-                  - status: 'False'
-        - patch:
-            resource:
-              apiVersion: eks.aws.m.upbound.io/v1beta1
-              kind: PodIdentityAssociation
-              metadata:
-                name: probe
-                namespace: e2e-probe
-                finalizers: []
+                  - status: 'True'
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
         - delete:
             ref:
               apiVersion: eks.aws.m.upbound.io/v1beta1
               kind: PodIdentityAssociation
               name: probe
               namespace: e2e-probe
+      catch:
+        - describe:
+            apiVersion: eks.aws.m.upbound.io/v1beta1
+            kind: PodIdentityAssociation
+            namespace: e2e-probe
+            name: probe
+        - podLogs:
+            namespace: crossplane-system
+            selector: pkg.crossplane.io/provider=provider-aws-eks
+            tail: 40
     - name: deleting the Role deletes the IAM role
       try:
         - delete:

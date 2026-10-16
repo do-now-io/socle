@@ -62,8 +62,8 @@ cilium = {
   enabled = false
 }
 
-# floci 2.1.0 has no add-on API (CreateAddon answers "Unknown operation",
-# measured 2026-10-01; nightly records them as metadata only), and its k3s
+# floci 2.1.0 had no add-on API (CreateAddon answered "Unknown operation",
+# measured 2026-10-01); 2.2.0 records add-ons as metadata only, and its k3s
 # runs no add-on workload either way. The e2e proves the catalog, not AWS's
 # packaging.
 eks_addons = {
