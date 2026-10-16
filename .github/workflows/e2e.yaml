@@ -463,7 +463,7 @@ jobs:
             --set "tag=$TAG" --set "cloud=$CLOUD" --set "cluster=$CLUSTER" --set "floci_ip=$FLOCI_IP" \
             --report-format JUNIT-STEP --report-name root --report-path "$RUNNER_TEMP/reports"
           chainsaw test charts/tests/e2e \
-            --selector "phase=charts" \
+            --selector "phase=charts, cloud in ($CLOUD, any), platform in (floci, any)" \
             --set "tag=$TAG" --set "cloud=$CLOUD" --set "cluster=$CLUSTER" --set "floci_ip=$FLOCI_IP" \
             --report-format JUNIT-STEP --report-name charts --report-path "$RUNNER_TEMP/reports"
       - name: Uninstall the socle

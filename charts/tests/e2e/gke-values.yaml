@@ -1,0 +1,16 @@
+# What charts-gke (chainsaw-test.yaml) changes in webapp's e2e fixture, loaded
+# after charts/webapp/ci/e2e-values.yaml: the ExternalSecret reads through the
+# socle's own store, `secret-manager`, which external_secrets creates on gcp
+# with crossplane on, the secret external-secrets-module-gke seeds by hand,
+# `<cluster>_e2e-app` (value `first`). The sandbox's cluster is socle-gke;
+# another cluster sets its own name here. A list is replaced, not merged, so
+# the entry is whole.
+externalSecrets:
+  - name: database
+    secretStoreRef:
+      kind: ClusterSecretStore
+      name: secret-manager
+    data:
+      - secretKey: DATABASE_PASSWORD
+        remoteRef:
+          key: socle-gke_e2e-app
