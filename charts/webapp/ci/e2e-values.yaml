@@ -1,6 +1,7 @@
-# What the floci e2e deploys (charts/tests/e2e): podinfo, whose image names
-# its user (USER app) instead of numbering it, so runAsUser is what lets the
-# kubelet run it non-root; a ConfigMap and an ExternalSecret it reads, a route.
+# What the e2e deploys (charts/tests/e2e), on floci and, with gke-values.yaml
+# after it, on the GKE sandbox: podinfo, whose image names its user (USER app)
+# instead of numbering it, so runAsUser is what lets the kubelet run it
+# non-root; a ConfigMap and an ExternalSecret it reads, a route.
 image:
   registry: ghcr.io/stefanprodan
   repository: podinfo
