@@ -110,8 +110,8 @@ install, which native compilation needs.
 
 **Cloud access**: none.
 
-**Ordering**: the policies' `HelmRelease` `dependsOn` the engine's, so they
-install after it.
+**Ordering**: waits for the `kyverno` ResourceSet, and the policies'
+`HelmRelease` `dependsOn` the engine's, so they install after it.
 
 **On GCP**: `vpolExclude.excludeNamespaces` also names GKE's namespaces,
 through the cloud's `kyverno-policies-cloud-values` (from

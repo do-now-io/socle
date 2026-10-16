@@ -54,6 +54,14 @@ spec:
     - apiVersion: fluxcd.controlplane.io/v1
       kind: ResourceSetInputProvider
       name: socle
+  # The policies' kinds are the kyverno module's CRDs: it requires kyverno,
+  # so it waits for kyverno's ResourceSet (docs/catalog/kyverno-policies.md).
+  dependsOn:
+    - apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSet
+      name: kyverno
+      namespace: flux-system
+      ready: true
   wait: true
   steps:
     - name: namespace
