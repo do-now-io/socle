@@ -154,17 +154,23 @@ runs:
         [ -z "$VAR_FILE" ] || args+=(-var-file "$GITHUB_WORKSPACE/$VAR_FILE")
         [ -z "$KUBE" ] || args+=(-var "kube=$KUBE")
         tofu init -input=false > /dev/null
-        # gcp: floci-gcp reports the cluster RUNNING seconds after k3s starts,
-        # before its API server presents the certificate the returned CA
-        # signs — the helm provider, a second later, got "x509: certificate
-        # signed by unknown authority" (run 38926527396). So the cluster
-        # first, then its API answering /readyz over TLS verified with that
-        # CA, then the rest.
+        # gcp: the cluster as created carries an empty CA — floci-gcp 0.11.0
+        # answers the create before it has extracted k3s's, measured
+        # locally: master_auth[0].cluster_ca_certificate = "" in the state —
+        # and the helm provider, configured from it, fell back to the system
+        # roots: "x509: certificate signed by unknown authority" (run
+        # 38926527396). So the cluster first, then read back (refresh-only),
+        # its API answering /readyz over TLS verified with the CA it now
+        # has, then the rest, whose helm provider gets that CA.
         if [ "$CLOUD" = gcp ]; then
           SECONDS=0
           tofu apply -auto-approve "${args[@]}" -target=google_container_cluster.e2e > /dev/null
-          tofu output -raw cluster_ca_certificate | base64 -d > "$RUNNER_TEMP/k3s-ca.crt"
-          endpoint="$(tofu output -raw endpoint)"
+          tofu apply -refresh-only -auto-approve "${args[@]}" -target=google_container_cluster.e2e > /dev/null
+          # From the state, not the outputs: a targeted apply leaves them
+          # unwritten.
+          cluster="$(tofu show -json | jq '.values.root_module.resources[] | select(.address == "google_container_cluster.e2e") | .values')"
+          jq -r '.master_auth[0].cluster_ca_certificate' <<< "$cluster" | base64 -d > "$RUNNER_TEMP/k3s-ca.crt"
+          endpoint="$(jq -r '.endpoint' <<< "$cluster")"
           for _ in $(seq 1 90); do
             curl -fsS --cacert "$RUNNER_TEMP/k3s-ca.crt" -H "Authorization: Bearer floci-gcp" \
               "https://$endpoint/readyz" > /dev/null 2>&1 && break

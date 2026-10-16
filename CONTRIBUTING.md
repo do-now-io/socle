@@ -150,9 +150,9 @@ What the emulators cannot prove, and the e2e therefore does not claim:
   key, so the action registers an IAM user first; a pod reaches floci at the
   container's IP (`FLOCI_IP`), not at `localhost`.
 - **floci-gcp specifics**: k3s takes any bearer token as cluster-admin, so
-  the kubeconfig carries a fixed one; the cluster is RUNNING before its API
-  presents its certificate, so the action waits for `/readyz` verified with
-  the returned CA before the helm releases.
+  the kubeconfig carries a fixed one; the cluster as created carries an
+  empty CA, so the action applies it alone, reads it back, waits for
+  `/readyz` verified with the CA it then has, and only then the rest.
 
 ## Documentation
 
