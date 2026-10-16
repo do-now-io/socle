@@ -6,8 +6,8 @@ sidebar:
 ---
 
 This guide restores one namespace from a backup taken by the
-[velero](../catalog/velero.md) module, on aws. It is an operator's task: a
-`Restore` can rewrite any namespace.
+[velero](../catalog/velero.md) module, on AWS or GCP. It is an operator's
+task: a `Restore` can rewrite any namespace.
 
 **What you need:** the `velero` CLI 1.18, a kubeconfig with cluster-admin
 rights, and the module's server running
@@ -31,6 +31,15 @@ volumes:
 
 ```sh
 velero backup describe <backup> --details
+```
+
+On GCP, what `describe` reads from the bucket, and `velero backup logs`, fail:
+they go through a URL signed as a Google service account, which the module
+has none of ([velero](../catalog/velero.md#good-to-know)). Read the logs from
+the bucket:
+
+```sh
+gcloud storage cat gs://<cluster>-velero-<project number>/backups/<backup>/<backup>-logs.gz | gunzip
 ```
 
 ## 2. Suspend your GitOps sync
@@ -61,7 +70,8 @@ velero restore create <restore> --from-backup <backup> --include-namespaces <nam
 
 The restore is `Completed`, every claim `Bound`, the pods running; then check
 the data from inside your application. On `PartiallyFailed`, read
-`velero restore logs <restore>`.
+`velero restore logs <restore>`, or on GCP
+`gs://<cluster>-velero-<project number>/restores/<restore>/restore-<restore>-logs.gz`.
 
 ```sh
 velero restore describe <restore> --details
@@ -94,11 +104,14 @@ kubectl -n velero patch restore <restore> --type merge -p '{"metadata":{"finaliz
 
 ## After a lost cluster
 
-Rebuild the cluster with the **same name, in the same account and region**,
-and turn `crossplane` and `velero` on again: Crossplane adopts the bucket
+Rebuild the cluster with the **same name, in the same account and region
+on AWS, in the same project on GCP**, and turn `crossplane` and `velero` on
+again: Crossplane adopts the bucket
 left behind, and Velero reads every backup back from it. Then restore from
 step 1. A cluster rebuilt under another name cannot reach the old bucket.
 
 Measured on floci k3s, 2026-10-02: a namespace restored from a node-agent
-backup, `Completed` in 10 s, the file read back unchanged. The full rebuild
-on AWS and an EBS snapshot restore are not measured yet.
+backup, `Completed` in 10 s, the file read back unchanged. Measured on the
+sandbox's GKE Autopilot, 2026-10-16: a Persistent Disk snapshot backed up and
+restored with its data. The full rebuild and an EBS snapshot restore on AWS
+are not measured yet.
