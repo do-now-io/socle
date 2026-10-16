@@ -36,9 +36,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+# The packages are named after the repository that builds them, and not
+# written out: a fork publishes to its own namespace instead of failing on
+# ours. OCI names are lowercase, GitHub's need not be, and an expression
+# cannot lowercase — so each job sets them in its first step (GITHUB_ENV).
 env:
   REGISTRY: ghcr.io
-  REPOSITORY: do-now-io/socle/flux-modules
 
 # `shell: bash` runs every step with -o pipefail: a failure on the left of a
 # pipe (`| tee`, `| python3`) fails the step instead of vanishing behind the
@@ -61,6 +64,13 @@ jobs:
       subject: ${{ steps.identity.outputs.subject }}
       cosign_identity: ${{ steps.identity.outputs.cosign_identity }}
     steps:
+      - name: Name the packages after this repository
+        run: |
+          {
+            echo "REPOSITORY=${GITHUB_REPOSITORY,,}/flux-modules"
+            echo "MODULES_REPOSITORY=${GITHUB_REPOSITORY,,}/opentofu-modules"
+            echo "CHARTS=${GITHUB_REPOSITORY_OWNER,,}/charts"
+          } >> "$GITHUB_ENV"
       # Full history and tags: compute-tag.sh reads the commits since the last
       # release to name the next version.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -164,9 +174,9 @@ jobs:
       contents: read
       packages: write
       id-token: write
-    env:
-      REPOSITORY: do-now-io/socle/opentofu-modules
     steps:
+      - name: Name the package after this repository
+        run: echo "REPOSITORY=${GITHUB_REPOSITORY,,}/opentofu-modules" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -304,10 +314,16 @@ jobs:
       packages: write
       id-token: write
     env:
-      CHARTS: do-now-io/charts
       HELM_VERSION: 4.2.4
       HELM_SHA256: c306b46f719b0a4da32d0f78ee21bf90ce8d602f15b22ab753f0674d1670a7f3
     steps:
+      - name: Name the packages after this repository
+        run: |
+          {
+            echo "REPOSITORY=${GITHUB_REPOSITORY,,}/flux-modules"
+            echo "MODULES_REPOSITORY=${GITHUB_REPOSITORY,,}/opentofu-modules"
+            echo "CHARTS=${GITHUB_REPOSITORY_OWNER,,}/charts"
+          } >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -369,6 +385,13 @@ jobs:
       contents: read
       packages: write
     steps:
+      - name: Name the packages after this repository
+        run: |
+          {
+            echo "REPOSITORY=${GITHUB_REPOSITORY,,}/flux-modules"
+            echo "MODULES_REPOSITORY=${GITHUB_REPOSITORY,,}/opentofu-modules"
+            echo "CHARTS=${GITHUB_REPOSITORY_OWNER,,}/charts"
+          } >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -390,7 +413,7 @@ jobs:
       - name: Tag the commit's module alpha with the same version
         id: release_modules
         env:
-          REPOSITORY: do-now-io/socle/opentofu-modules
+          REPOSITORY: ${{ env.MODULES_REPOSITORY }}
           RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
           SHA: ${{ needs.release-please.outputs.sha }}
         run: .github/scripts/release.sh >> "$GITHUB_OUTPUT"
@@ -403,7 +426,6 @@ jobs:
           DIGEST: ${{ steps.release.outputs.digest }}
           SUBJECT: ${{ needs.publish.outputs.subject }}
           RELEASE_URL: ${{ needs.release-please.outputs.html_url }}
-          MODULES_REPOSITORY: do-now-io/socle/opentofu-modules
           MODULES_ALPHA: ${{ steps.release_modules.outputs.alpha }}
           MODULES_DIGEST: ${{ steps.release_modules.outputs.digest }}
         run: |

@@ -48,17 +48,17 @@ jobs:
       matrix:
         include:
           - cloud: aws
-            emulator: floci/floci:1.5.34
+            emulator: floci/floci:1.5.34@sha256:b3b3a70a294b8ba8095385b8571ea1e4d44d494950d98de5e812cd9de02f506b
             port: "4566"
             health_path: /_localstack/health
             work_dir: opentofu/aws
           - cloud: gcp
-            emulator: floci/floci-gcp:0.8.0
+            emulator: floci/floci-gcp:0.8.0@sha256:5037d304aded5ab4ccf4697239131521fe66b8952f411f6c1781c9166d2ab01b
             port: "4588"
             health_path: /_floci-gcp/health
             work_dir: opentofu/gcp/tests/emulator
           - cloud: azure
-            emulator: floci/floci-az:0.10.0
+            emulator: floci/floci-az:0.10.0@sha256:39425ae982c478c92685e159c66a8deb393766192d8b6b74aa078bf9587dbbfe
             port: "4577"
             health_path: /_floci/health
             work_dir: opentofu/azure/tests/emulator

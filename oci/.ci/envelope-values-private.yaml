@@ -1,0 +1,7 @@
+# Layered over envelope-values.yaml: the same envelope with the artifact
+# pulled through a Secret, as while the GHCR package is private — so the
+# root ResourceSet's `<< if inputs.socle.pullSecret >>` branch is rendered
+# in CI and not only in a cluster.
+inputs:
+  socle:
+    pullSecret: ghcr-auth
