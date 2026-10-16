@@ -39,8 +39,52 @@ output "workload_identity_pool" {
 }
 
 output "workload_identity_principal_prefix" {
-  description = "Prefix of a workload's IAM principal identifier. Append ns/NAMESPACE/sa/SERVICEACCOUNT. Note that two clusters in one project produce identical principals for the same namespace and service account."
-  value       = "principal://iam.googleapis.com/projects/${var.project_id}/locations/global/workloadIdentityPools/${local.workload_identity_pool}/subject"
+  description = "Prefix of a workload's IAM principal identifier, naming the project by its number as Workload Identity Federation requires. Append /ns/NAMESPACE/sa/SERVICEACCOUNT. Note that two clusters in one project produce identical principals for the same namespace and service account."
+  value       = local.workload_identity_principal_prefix
+}
+
+output "project_id" {
+  description = "The project the cluster lives in — half of every workload's principal, with project_number."
+  value       = var.project_id
+}
+
+output "project_number" {
+  description = "The project's number, which a Workload Identity Federation principal names the project by."
+  value       = local.project_number
+}
+
+output "region" {
+  description = "Region of the cluster, and of the internal Gateway's regional certificate."
+  value       = var.region
+}
+
+output "crossplane_principal" {
+  description = "The federated principal the catalog's crossplane module's GCP providers run as (crossplane-system/provider-gcp), read off its grants: whatever consumes it is applied after them and destroyed before them. Null when crossplane is not set."
+  # Read off the two grants, never the local string: a reference to them is
+  # what orders the catalog after Crossplane's grants on an apply, and before
+  # them on a destroy — Crossplane must still hold them while it deletes the
+  # modules' bindings, or each delete is a 403 and the binding stays in the
+  # project for the next socle to inherit. The member is known at plan, so
+  # the value is too.
+  value = one(distinct(concat(
+    google_project_iam_member.crossplane_project_grants[*].member,
+    google_project_iam_member.crossplane_buckets[*].member,
+  )))
+}
+
+output "dns_records_role" {
+  description = "Full name of the custom role external-dns writes DNS records with: find the project's managed zones, read and change their record sets. Project-level, because a zone's IAM policy is never honoured when granted on the zone itself (measured 2026-10-07), so Crossplane binds it on the project, and --domain-filter bounds what external-dns writes. Always among the roles Crossplane may grant. Built from its ID, so known on the first plan. Empty when crossplane is not set."
+  value       = local.dns_records_role
+}
+
+output "gateway_certificate_map" {
+  description = "Name of the Certificate Manager map the public Gateway's networking.gke.io/certmap annotation takes — what the bootstrap module's gateway_certificate_map takes. Empty when gateway_certificate is not set."
+  value       = var.gateway_certificate == null ? "" : google_certificate_manager_certificate_map.gateway[0].name
+}
+
+output "gateway_regional_certificate" {
+  description = "Name of the regional Certificate Manager certificate the internal Gateway's HTTPS listener takes, in its networking.gke.io/cert-manager-certs TLS option — what the bootstrap module's gateway_regional_certificate takes. Empty when gateway_certificate is not set."
+  value       = var.gateway_certificate == null ? "" : google_certificate_manager_certificate.gateway_regional[0].name
 }
 
 output "upgrade_notifications_topic" {
@@ -79,10 +123,17 @@ output "labels" {
 }
 
 output "helm_kubernetes" {
-  description = "Drop-in value for the helm provider's kubernetes attribute, so a root configures it in one line. Uses the DNS endpoint, the only one enabled by default. Carries no credential: gke-gcloud-auth-plugin obtains a short-lived token from the caller's ambient gcloud credentials at call time."
+  description = "Drop-in value for the helm provider's kubernetes attribute, so a root configures it in one line. Uses the DNS endpoint, the only one enabled by default, which serves a publicly trusted certificate: no cluster CA is carried (use cluster_ca_certificate with the IP endpoint). Carries no credential: gke-gcloud-auth-plugin obtains a short-lived token from the caller's ambient gcloud credentials at call time."
+  # No cluster_ca_certificate on purpose. The DNS-based endpoint presents a
+  # certificate issued by Google Trust Services (subject *.<region>.gke.goog),
+  # not one signed by the cluster CA, so pinning the cluster CA makes helm fail
+  # with "x509: certificate signed by unknown authority". The system trust
+  # store verifies it; `gcloud container clusters get-credentials
+  # --dns-endpoint` likewise writes no CA for it. The cluster_ca_certificate
+  # output stays for clients who use the IP endpoint.
+  # https://cloud.google.com/kubernetes-engine/docs/concepts/network-isolation#dns-based_endpoint
   value = {
-    host                   = "https://${google_container_cluster.socle.control_plane_endpoints_config[0].dns_endpoint_config[0].endpoint}"
-    cluster_ca_certificate = base64decode(google_container_cluster.socle.master_auth[0].cluster_ca_certificate)
+    host = "https://${google_container_cluster.socle.control_plane_endpoints_config[0].dns_endpoint_config[0].endpoint}"
     exec = {
       api_version = "client.authentication.k8s.io/v1beta1"
       command     = "gke-gcloud-auth-plugin"

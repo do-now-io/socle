@@ -42,3 +42,18 @@ Both show as a GitOps diff.
 The annotation also names the object that changed.
 
 **Sources.** Stakater Reloader's documentation (reload strategies).
+
+## RELOADER-03: A disk request, on every cloud
+
+**accepted** · 2026-10-16 · [`oci/catalog/reloader/resourceset.yaml`](../../oci/catalog/reloader/resourceset.yaml)
+
+**Decision.** Reloader asks 64Mi of ephemeral storage beside its 10m /
+64Mi: its rotated logs, on a read-only root filesystem.
+
+**Context.** GKE Autopilot reserves 1 GiB of disk for a container that
+states none
+([MONITORING-13](monitoring.md#monitoring-13-requests-on-every-container-disk-included-on-every-cloud)).
+
+**Consequences.** None beyond the reservation.
+
+**Sources.** [Resource requests in Autopilot](https://docs.cloud.google.com/kubernetes-engine/docs/concepts/autopilot-resource-requests).

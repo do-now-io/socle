@@ -1,0 +1,53 @@
+# The kyverno module on gcp: the namespaces GKE runs, kept out of every
+# webhook of Kyverno's (docs/catalog/kyverno.md, Good to know).
+- op: test
+  path: /spec/steps/1/name
+  value: workload
+- op: add
+  path: /spec/steps/1
+  value:
+    name: cloud
+    resourcesTemplate: |
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: kyverno-cloud-values
+        namespace: kyverno
+        labels:
+          reconcile.fluxcd.io/watch: Enabled
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.kyverno.enabled >>enabled<< else >>disabled<< end >>
+      data:
+        values.yaml: |
+          # The catalog's selector, restated whole — Helm replaces a list, it
+          # does not merge it — with GKE's own namespaces added. GKE rewrites a
+          # mutating webhook that reaches its managed namespaces, and Kyverno
+          # would rewrite it back on every reconcile; leases in kube-node-lease
+          # are the nodes' heartbeat, which GKE asks no webhook to intercept.
+          # A selector matches no prefix, so each is named: those of a 1.35
+          # Autopilot cluster (kubectl get ns, sandbox, 2026-10-07), plus
+          # gke-managed-cim and gmp-system, which GKE documents. A namespace a
+          # later GKE version adds is not excluded until it joins the list.
+          config:
+            webhooks:
+              namespaceSelector:
+                matchExpressions:
+                  - key: kubernetes.io/metadata.name
+                    operator: NotIn
+                    values:
+                      - kube-system
+                      - flux-system
+                      - kube-node-lease
+                      - gke-managed-system
+                      - gke-managed-cim
+                      - gke-managed-filestorecsi
+                      - gke-managed-networking-dra-driver
+                      - gke-managed-parallelstorecsi
+                      - gke-managed-volumepopulator
+                      - gke-gmp-system
+                      - gmp-system
+                      - gmp-public
+                  - key: resourceset.fluxcd.controlplane.io/namespace
+                    operator: NotIn
+                    values:
+                      - flux-system

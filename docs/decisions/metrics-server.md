@@ -68,3 +68,21 @@ namespace is never deleted while metrics-server starts. Pinning to the
 bootstrap nodes is decided with Karpenter (#53).
 
 **Sources.** Measured on floci and on a demo EKS, 2026-10-06.
+
+## METRICS-SERVER-04: The chart's requests, stated with a disk request
+
+**accepted** · 2026-10-16 · [`oci/catalog/metrics-server/resourceset.yaml`](../../oci/catalog/metrics-server/resourceset.yaml)
+
+**Decision.** The socle's values restate the chart's 100m / 200Mi and add
+64Mi of ephemeral storage: its rotated logs and, under `/tmp`, its
+self-signed certificate.
+
+**Context.** The catalog states a disk request on every container, so that
+no pod is sized by the platform
+([MONITORING-13](monitoring.md#monitoring-13-requests-on-every-container-disk-included-on-every-cloud)).
+The module is aws-only; on EKS the request only schedules, and under
+DiskPressure the kubelet evicts first the pods furthest over theirs.
+
+**Consequences.** None beyond the reservation.
+
+**Sources.** The metrics-server chart 3.14.0's values.

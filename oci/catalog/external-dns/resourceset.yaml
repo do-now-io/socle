@@ -5,7 +5,8 @@
 # values tested never presence.
 #
 # What is the same on every cloud. The DNS provider, its credentials and,
-# on aws, the module's own IAM role are each cloud's, in
+# with Crossplane on, the module's own cloud access (an IAM role on aws, an
+# IAM member on the project on gcp) are each cloud's, in
 # oci/clusters/<cloud>/external-dns/patch.yaml: a step named cloud that the
 # cloud inserts before workload (docs/decisions/socle.md, SOCLE-32).
 #
@@ -116,6 +117,10 @@ spec:
               requests:
                 cpu: 10m
                 memory: 64Mi
+                # 64Mi for a long-running container that writes nothing: GKE
+                # Autopilot reserves 1Gi for a container that names none
+                # (docs/clouds/gcp/limits.md).
+                ephemeral-storage: 64Mi
               limits:
                 memory: 128Mi
         ---

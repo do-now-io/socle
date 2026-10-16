@@ -59,12 +59,14 @@ What the inputs hold (`defaultValues`, the bootstrap's `inputs` output):
 | --- | --- |
 | `cloud` | `aws`, `gcp`, `azure` or `scaleway`; picks `./clusters/<cloud>` |
 | `cluster.name`, `.environment`, `.owner`, `.region`, `.accountId` | the cluster's identity; `accountId` on aws only |
+| `cluster.projectId`, `.projectNumber` | the GCP project the cluster runs in, on gcp only: a module's Workload Identity principal names its number and the pool named after its id, and a bucket's name carries the number |
 | `socle.url`, `.version`, `.pullSecret` | where the artifact is pulled from |
 | `cosign.issuer`, `.subject` | the identity the signature must match |
 | `modules.<module>.<attribute>` | every module, every attribute, your values over the defaults |
 | `cilium.installed`, `.gatewayApi`, `.hubble` | what the bootstrap decided about the network |
 | `gateway.className`, `.shared`, `.namespace`, `.certificateArn` | the GatewayClass, whether the shared Gateways exist, their certificate on aws |
-| `storage.snapshots` | the CSI snapshot controller is installed (aws) |
+| `gateway.certificateMap`, `.regionalCertificate` | on gcp only: the Certificate Manager map of the public Gateway, and the certificate of the private one |
+| `storage.snapshots` | the CSI snapshot controller and its CRDs are there: on aws from the add-on the bootstrap installed, on gcp always (GKE manages the PD CSI driver and the snapshot CRDs) |
 
 The schema is [`catalog.tf`](../../opentofu/bootstrap/catalog.tf): `kube` is
 `any`, validated against it at plan,

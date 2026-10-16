@@ -81,7 +81,7 @@ kube = {
 **What the socle sets**: one replica, or two with `ha`, a preferred
 anti-affinity on the node and `maxUnavailable: 1`; a toleration of
 `CriticalAddonsOnly`; the chart's `system-cluster-critical` priority, its
-requests (100m CPU, 200Mi), no limits, and its self-signed certificate
+requests (100m CPU, 200Mi) stated with 64Mi of ephemeral storage, no limits, and its self-signed certificate
 between the API server and metrics-server. Your `values` are merged over
 these.
 

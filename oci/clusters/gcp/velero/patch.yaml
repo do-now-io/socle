@@ -1,0 +1,234 @@
+# The velero module on gcp: the module's GCS bucket, one IAM binding on it for
+# velero/velero-server's own principal (Workload Identity Federation, no Google
+# service account — docs/architecture/module-iam.md), the GCP object-store
+# plugin, the backupStorageLocation on that bucket, the volume policy for
+# GKE's Persistent Disk CSI driver, and the PD VolumeSnapshotClass
+# (docs/catalog/velero.md, docs/decisions/velero.md). Never a node-agent:
+# Autopilot refuses its hostPath, and the plan refuses node_agent on gcp.
+#
+# The bucket is never deleted by the socle: it carries managementPolicies
+# without Delete (namespaced managed resources have no deletionPolicy in
+# Crossplane v2), and Crossplane's bucket role has no storage.buckets.delete
+# at all (opentofu/gcp/iam.tf). Turning the module off, or uninstalling the
+# socle, leaves the bucket and every backup in it; a cluster rebuilt under the
+# same name adopts it by its external name. Never deleted is not never
+# changed: storage.buckets.update still lets Crossplane rewrite the bucket's
+# lifecycle rules and its uniform bucket-level access.
+- op: add
+  path: /spec/dependsOn
+  value:
+    # The bucket's and the binding's kinds come from Crossplane's providers.
+    - apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSet
+      name: crossplane
+      namespace: flux-system
+      ready: true
+- op: test
+  path: /spec/steps/1/name
+  value: workload
+- op: add
+  path: /spec/steps/1
+  value:
+    name: cloud
+    resourcesTemplate: |
+      << $on := inputs.modules.velero.enabled >>
+      << $bucket := printf "%s-velero-%s" inputs.cluster.name inputs.cluster.projectNumber >>
+      << if inputs.modules.crossplane.enabled >>
+      << $principal := printf
+           "principal://iam.googleapis.com/projects/%s/locations/global/workloadIdentityPools/%s.svc.id.goog/subject/ns/%s/sa/%s"
+           inputs.cluster.projectNumber inputs.cluster.projectId "velero" "velero-server" ->>
+      # The module's bucket on GCS. External name = the bucket's name: global,
+      # so it carries the project number; under the cluster's prefix, the only
+      # one Crossplane's bucket role may create (opentofu/gcp/iam.tf). Observe,
+      # Create, Update, LateInitialize — no Delete: deleting this object
+      # releases it and leaves the bucket.
+      #
+      # Uniform bucket-level access is what makes the binding below safe. The
+      # foundations refuse every predefined admin role in allowed_roles but
+      # roles/storage.objectAdmin, because its one IAM-granting permission,
+      # storage.objects.setIamPolicy, writes object ACLs — and a bucket with
+      # uniform access has none. Encrypted at rest by GCS's default,
+      # Google-managed keys: nothing to declare, as SSE-S3 on AWS.
+      #
+      # Versioning: Velero deleting a backup at its TTL leaves its objects as
+      # noncurrent versions, deleted 30 days later by the lifecycle rule — a
+      # deletion, by mistake or by whoever got the role, is recoverable for a
+      # month. No abort rule for incomplete uploads: the plugin writes through
+      # the JSON API's resumable uploads, which GCS expires itself after a week.
+      apiVersion: storage.gcp.m.upbound.io/v1beta2
+      kind: Bucket
+      metadata:
+        name: velero
+        namespace: velero
+        annotations:
+          crossplane.io/external-name: << $bucket >>
+          fluxcd.controlplane.io/reconcile: << if $on >>enabled<< else >>disabled<< end >>
+      spec:
+        managementPolicies: [Observe, Create, Update, LateInitialize]
+        forProvider:
+          location: << upper inputs.cluster.region >>
+          uniformBucketLevelAccess: true
+          publicAccessPrevention: enforced
+          versioning:
+            enabled: true
+          lifecycleRule:
+            - condition:
+                withState: ARCHIVED
+                daysSinceNoncurrentTime: 30
+              action:
+                type: Delete
+          labels:
+            socle-cluster: << inputs.cluster.name | quote >>
+            socle-module: velero
+      ---
+      # The module's own GCP access, docs/architecture/module-iam.md: object
+      # actions on its bucket, nothing else, granted to velero/velero-server's
+      # own principal, by project number. No compute role: in CSI mode Velero
+      # creates VolumeSnapshot objects and GKE's PD CSI driver takes the
+      # snapshots with its own identity. Crossplane writes this binding only if
+      # the foundations list roles/storage.objectAdmin in
+      # gcp.crossplane.allowed_roles; otherwise it stays not Ready on the IAM
+      # error, and the workload step waits for it. Default management policies:
+      # the binding goes with the module, nothing reaches the bucket once
+      # Velero is gone.
+      apiVersion: storage.gcp.m.upbound.io/v1beta1
+      kind: BucketIAMMember
+      metadata:
+        name: velero-server
+        namespace: velero
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if $on >>enabled<< else >>disabled<< end >>
+      spec:
+        forProvider:
+          bucketRef:
+            name: velero
+          role: roles/storage.objectAdmin
+          member: << $principal | quote >>
+      ---
+      # Healthy only once the bucket and the binding are Ready, so the workload
+      # step starts after them: a server started before its binding fails its
+      # storage location until the next validation, and a binding that never
+      # turns Ready (the role not in allowed_roles) must hold the workload
+      # visibly. A dependsOn with a readyExpr, because a managed resource not
+      # yet created carries no Ready condition at all, which the step's own
+      # health check reads as healthy (measured on floci,
+      # aws/velero/patch.yaml).
+      apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSet
+      metadata:
+        name: velero-access
+        namespace: flux-system
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if $on >>enabled<< else >>disabled<< end >>
+      spec:
+        dependsOn:
+          - apiVersion: storage.gcp.m.upbound.io/v1beta2
+            kind: Bucket
+            name: velero
+            namespace: velero
+            ready: true
+            readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
+          - apiVersion: storage.gcp.m.upbound.io/v1beta1
+            kind: BucketIAMMember
+            name: velero-server
+            namespace: velero
+            ready: true
+            readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
+        resources: []
+      ---
+      << end >>
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: velero-cloud-values
+        namespace: velero
+        labels:
+          # helm-controller watches a valuesFrom ConfigMap only with this label;
+          # without it, a change here waits for the next interval (10m).
+          reconcile.fluxcd.io/watch: Enabled
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if $on >>enabled<< else >>disabled<< end >>
+      data:
+        values.yaml: |
+          # Application Default Credentials, from the GKE metadata server:
+          # the token of velero-server's own principal. No key anywhere, and
+          # no iam.gke.io/gcp-service-account annotation.
+          credentials:
+            useSecret: false
+          # Autopilot refuses the node-agent's hostPath (Warden): never one
+          # here, whatever node_agent says — the plan refuses it on gcp.
+          deployNodeAgent: false
+          # Pinned with the chart: 1.14.x is the line for Velero 1.18. It
+          # copies one binary into the plugins emptyDir, which the server's
+          # own request covers; asked nothing, Autopilot would reserve
+          # 500m / 2Gi / 1Gi for the pod's whole life.
+          initContainers:
+            - name: velero-plugin-for-gcp
+              image: docker.io/velero/velero-plugin-for-gcp:v1.14.4
+              imagePullPolicy: IfNotPresent
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                  ephemeral-storage: 32Mi
+              volumeMounts:
+                - mountPath: /target
+                  name: plugins
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+          configuration:
+            backupStorageLocation:
+              - name: default
+                provider: gcp
+                bucket: << $bucket >>
+                default: true
+                config:
+                  # Required, and a placeholder on purpose. With the
+                  # metadata server's credentials, velero-plugin-for-gcp
+                  # v1.14.4 refuses to start without a serviceAccount
+                  # (object_store.go, initFromComputeEngine), and uses it
+                  # for one thing: signing download URLs through IAM
+                  # signBlob, as that Google service account. The socle
+                  # creates none, so `velero backup logs`, `download` and
+                  # what `describe` reads from the bucket fail; backups and
+                  # restores sign nothing (docs/catalog/velero.md). No
+                  # region: the plugin refuses any key it does not know.
+                  serviceAccount: no-google-service-account
+          # The volume policy every Schedule references: Persistent Disk by
+          # CSI snapshot. No file-system backup: no node-agent on
+          # Autopilot. Any other volume — Filestore included — gets
+          # Velero's fallback: no snapshot location and no fs-backup
+          # annotation, so it is skipped.
+          configMaps:
+            volume-policy:
+              data:
+                policy.yaml: |
+                  version: v1
+                  volumePolicies:
+                    - conditions:
+                        csi:
+                          driver: pd.csi.storage.gke.io
+                      action:
+                        type: snapshot
+      << if inputs.storage.snapshots >>
+      ---
+      # The class Velero takes Persistent Disk CSI snapshots with, by its
+      # label: GKE's driver takes them with its own identity, so the module
+      # needs no compute role. Retain: a snapshot outlives its VolumeSnapshot
+      # objects — Velero deletes it when the backup expires, nothing else
+      # does. GKE ships the snapshot controller and its CRDs:
+      # storage.snapshots is true on gcp.
+      apiVersion: snapshot.storage.k8s.io/v1
+      kind: VolumeSnapshotClass
+      metadata:
+        name: velero-pd
+        labels:
+          velero.io/csi-volumesnapshot-class: "true"
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if $on >>enabled<< else >>disabled<< end >>
+      driver: pd.csi.storage.gke.io
+      deletionPolicy: Retain
+      << end >>

@@ -57,7 +57,7 @@ Control plane tiers, fr-par, 2026-10-05:
 
 - **No Gateway API implementation**: CRDs only, no shared Gateway, no route; ArgoCD and Grafana are not exposed.
 - **No Crossplane provider**: the foundations' Crossplane key has no consumer.
-- **No Velero**: AWS only.
+- **No Velero**: aws and gcp only.
 - **No cert-manager**.
 - **No Cockpit federation, no billing reader**: the query token only.
 - **No `opentofu/clusters/scaleway` root** ([quickstart](../../getting-started/scaleway.md)).

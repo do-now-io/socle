@@ -39,11 +39,12 @@ level deep: a key written alone keeps its siblings at their default.
 | `hello` | `enabled` | `true` | podinfo, as a proof that the pipeline works |
 | `hello` | `replicas` | `1` | replicas of the podinfo Deployment |
 | `hello` | `message` | `"hello from socle"` | the message podinfo serves |
-| `gateway_api` | `enabled` | `true` | the Gateway API standard CRDs from upstream, pinned by commit, and Cilium's `cilium` class on aws and azure. Offered on aws, azure and scaleway; GKE owns its own. Off orphans the CRDs |
-| `gateway_api` | `gateways` | `true` | the shared Gateways `gateway-system/public` and `private`, on aws (once the foundations issued `gateway_certificate`) and azure |
-| `crossplane` | `enabled` | `false` | Crossplane and, on aws, its IAM, EKS and S3 providers: the tooling each module declares its cloud access through. Off leaves the CRDs and orphans every module role still declared |
-| `crossplane` | `permissions_boundary` | `""` | aws: the boundary every module role carries; an IAM policy ARN. The aws root wires it from the foundations' `crossplane_permissions_boundary_arn` |
-| `external_dns` | `enabled` | `false` | DNS records for Services, Ingresses and HTTPRoutes in the cloud's zone. On aws with `crossplane` on, its own IAM role; elsewhere the client brings a credential. The aws root turns it on when `aws.gateway_certificate` is set and Crossplane can give it a role |
+| `gateway_api` | `enabled` | `true` | the Gateway API standard CRDs from upstream, pinned by commit, and Cilium's `cilium` class on aws and azure. On gcp GKE owns the CRDs and the class, and the module renders the shared Gateways only. Off orphans the CRDs |
+| `gateway_api` | `gateways` | `true` | the shared Gateways `gateway-system/public` and `private`, on aws (once the foundations issued `gateway_certificate`), azure, and gcp (once they issued the certificate map and the regional certificate, `gcp.gateway_certificate`) |
+| `crossplane` | `enabled` | `false` | Crossplane and, per cloud, its providers (on aws IAM, EKS and S3; on gcp the Google Cloud ones, as the federated principal the foundations' `gcp.crossplane` grants): the tooling each module declares its cloud access through. Off leaves the CRDs and orphans every module role still declared |
+| `crossplane` | `permissions_boundary` | `""` | aws: the boundary every module role carries; an IAM policy ARN. The aws root wires it from the foundations' `crossplane_permissions_boundary_arn`. Refused on gcp |
+| `crossplane` | `dns_records_role` | `""` | gcp: the project custom role Crossplane grants external-dns to write DNS records, on the project (a zone's own IAM is never honoured); `projects/<id>/roles/<role>`. The gcp root wires it from the foundations' `dns_records_role`. Refused elsewhere |
+| `external_dns` | `enabled` | `false` | DNS records for Services, Ingresses and HTTPRoutes in the cloud's zone. On aws and gcp with `crossplane` on, its own access (an IAM role on aws, a binding of the DNS records role on gcp); elsewhere the client brings a credential. The aws and gcp roots turn it on when the foundations' `gateway_certificate` is set and Crossplane can give it access |
 | `external_dns` | `domain_filters` | `[]` | zones it may write to, as DNS names; at least one when enabled |
 | `external_dns` | `policy` | `"upsert-only"` | `upsert-only` never deletes a record; `sync` also deletes what it owns |
 | `external_dns` | `txt_owner_id` | the cluster name | the owner in the TXT registry, so two clusters never fight over a zone |
@@ -53,8 +54,8 @@ level deep: a key written alone keeps its siblings at their default.
 | `argocd` | `gateway` | `"private"` | the shared Gateway its HTTPRoute attaches to: `private`, `public`, or `""` for none |
 | `argocd` | `ha` | `false` | the chart's HA layout: Redis HA, two replicas of server, repo-server and applicationset |
 | `argocd_image_updater` | `enabled` | `false` | Argo CD Image Updater, watching `argocd`; refused while `argocd` is off |
-| `argocd_image_updater` | `repositories` | `[]` | aws only: the ECR repositories of the cluster's account and region its own read-only role may read, globs allowed, never `*` alone. Needs `crossplane` on and `ecr` in `aws.crossplane.allowed_services`. `[]`: no role, no registry entry |
-| `argocd_image_updater` | `registries` | `[]` | the client's other registries, as Image Updater's `registries.conf` writes them, after the socle's ECR entry; `credentials` a `secret:`, `pullsecret:`, `env:` or `ext:` reference. `config.registries` is refused in `values` |
+| `argocd_image_updater` | `repositories` | `[]` | aws: the ECR repositories of the cluster's account and region its own read-only role may read, globs allowed, never `*` alone; needs `ecr` in `aws.crossplane.allowed_services`. gcp: `LOCATION/REPOSITORY` in the cluster's project, read through `roles/artifactregistry.reader` on the whole project, which must be in `gcp.crossplane.allowed_roles`; one registry entry per location named. Both need `crossplane` on. `[]`: no role, no registry entry |
+| `argocd_image_updater` | `registries` | `[]` | the client's other registries, as Image Updater's `registries.conf` writes them, after the socle's ECR or Artifact Registry entries; `credentials` a `secret:`, `pullsecret:`, `env:` or `ext:` reference. `config.registries` is refused in `values` |
 | `monitoring` | `enabled` | `true` | the victoria-metrics-k8s-stack chart as one release: the operator, VictoriaMetrics, vmagent scraping the cluster, kube-state-metrics, node-exporter, and the parts below |
 | `monitoring` | `metrics` | `{ retention = "15d", storage_size = "20Gi" }` | VictoriaMetrics single-node. `retention`: whole hours, days, weeks or years (`15d`, `4w`, `1y`), at least a day; `storage_size`: the claim on the default StorageClass, in `Gi` or `Ti`, `""` for an `emptyDir` |
 | `monitoring` | `logs` | `{ enabled = true, retention = "7d", storage_size = "20Gi" }` | VictoriaLogs single-node, the same shape; off also stops `otel_agent` |
@@ -64,7 +65,7 @@ level deep: a key written alone keeps its siblings at their default.
 | `otel_agent` | `enabled` | `true` | the OpenTelemetry Collector as a DaemonSet: container logs to VictoriaLogs, while `monitoring.logs` is on |
 | `otel_gateway` | `enabled` | `true` | the OpenTelemetry Collector as a one-replica Deployment: the applications' OTLP and the Kubernetes events |
 | `keda` | `enabled` | `false` | KEDA, event-driven autoscaling down to zero |
-| `keda` | `services` | `[]` | aws only: the services KEDA's own role may read, from `sqs`, `cloudwatch`, `kinesis`, `dynamodb`. Needs `crossplane` on and each service in `aws.crossplane.allowed_services` |
+| `keda` | `services` | `[]` | aws and gcp: the services KEDA's own identity may read — on aws from `sqs`, `cloudwatch`, `kinesis`, `dynamodb`, each service also in `aws.crossplane.allowed_services`; on gcp `pubsub`, read through Cloud Monitoring, `roles/monitoring.viewer` also in `gcp.crossplane.allowed_roles`. Needs `crossplane` on |
 | `metrics_server` | `enabled` | `true` | the `metrics.k8s.io` API behind `kubectl top` and HPAs on CPU or memory. aws only |
 | `metrics_server` | `ha` | `false` | two replicas on two nodes, with a disruption budget |
 | `kyverno` | `enabled` | `false` | the Kyverno engine, no policy |
@@ -73,11 +74,11 @@ level deep: a key written alone keeps its siblings at their default.
 | `kyverno_policies` | `enforce` | `[]` | policies switched to Enforce, each compiled into a native ValidatingAdmissionPolicy; only names this configuration renders |
 | `kyverno_policies` | `allowed_registries` | `[]` | registries images may come from; empty means no registry policy |
 | `external_secrets` | `enabled` | `false` | External Secrets Operator |
-| `external_secrets` | `prefixes` | `[<cluster_name>]` | aws with `crossplane` on: the module's read-only role reads `secret:<prefix>/*`, and the `ClusterSecretStore` `secret-manager` is created on it. Needs `secretsmanager` in `aws.crossplane.allowed_services`. `[]`: no role, no store |
+| `external_secrets` | `prefixes` | `[<cluster_name>]` | aws with `crossplane` on: the module's read-only role reads `secret:<prefix>/*`, and the `ClusterSecretStore` `secret-manager` is created on it. Needs `secretsmanager` in `aws.crossplane.allowed_services`. On gcp secrets are named `<prefix>_<name>`, so a prefix is letters, digits and `-` (no `_`, no `/`). `[]`: no role, no store |
 | `reloader` | `enabled` | `false` | Stakater Reloader, opt-in per workload by annotation; `reloader.autoReloadAll` is refused in `values` |
-| `velero` | `enabled` | `false` | Velero, backups the applications opt into by label. aws only; needs `crossplane` on and `s3` in `aws.crossplane.allowed_services` |
+| `velero` | `enabled` | `false` | Velero, backups the applications opt into by label. aws and gcp; needs `crossplane` on and the bucket's access in the foundations' allowlist: `s3` in `aws.crossplane.allowed_services`, `roles/storage.objectAdmin` in `gcp.crossplane.allowed_roles` |
 | `velero` | `policies` | seven pairs | `[{ frequency, retention, schedule }]`, one `Schedule` each: hourly 24h and 48h, daily 7d and 30d, weekly 30d and 90d, monthly 90d |
-| `velero` | `node_agent` | `eks_addons.efs_csi` | the privileged node-agent DaemonSet, which backs EFS volumes up by file system |
+| `velero` | `node_agent` | `eks_addons.efs_csi` | the privileged node-agent DaemonSet, which backs EFS volumes up by file system. Refused on gcp: Autopilot forbids its hostPath, and every volume is a PD snapshot |
 
 What each module installs and refuses in `values`: its [catalog page](../catalog/index.mdx).
 
@@ -109,11 +110,15 @@ Three objects, each `any`, validated like `kube`; every key optional.
   replacement, operator replicas, resources, the GatewayClass name; all but
   the chart versions are reachable through `values`.
 - **`cluster_network`** (`api_endpoint`, `service_cidr` on aws, `pod_cidr` on
-  azure) comes from the foundations' outputs; you never write it.
+  azure) comes from the foundations' outputs; you never write it. Neither
+  do you write, on gcp, `project` (`{ id, number }`, the catalog's
+  `inputs.cluster.projectId` and `projectNumber`), `gateway_certificate_map`
+  or `gateway_regional_certificate`: the gcp root wires them.
 
 ## The bootstrap module's variables
 
 Generated from [`opentofu/bootstrap`](../../opentofu/bootstrap/README.md);
-the aws root's own variables: [OpenTofu modules](opentofu-modules.md#clustersaws).
+the roots' own variables: [OpenTofu modules](opentofu-modules.md#clustersaws)
+and [clusters/gcp](opentofu-modules.md#clustersgcp).
 
 ::include{file="opentofu/bootstrap/README.md" section="tf-docs"}

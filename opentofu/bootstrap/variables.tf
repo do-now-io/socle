@@ -61,6 +61,41 @@ variable "region" {
   }
 }
 
+variable "project" {
+  description = <<-EOT
+    On gcp, the project the cluster runs in, as `{ id, number }` — the
+    foundations' project_id and project_number outputs, never the client's.
+    Exposed to the catalog as inputs.cluster.projectId and projectNumber: a
+    module's Workload Identity principal names the project number, and the
+    pool named after the project id. Required on gcp, refused elsewhere.
+  EOT
+  type = object({
+    id     = string
+    number = string
+  })
+  default = null
+
+  validation {
+    condition     = var.cloud != "gcp" || var.project != null
+    error_message = "project is required on gcp: every module's Workload Identity principal names it. Pass the foundations' project_id and project_number (the gcp root wires them)."
+  }
+
+  validation {
+    condition     = var.cloud == "gcp" || var.project == null
+    error_message = "project is only configurable on gcp: the other clouds have no project, and their templates read none."
+  }
+
+  validation {
+    condition     = var.project == null || can(regex("^[a-z][a-z0-9-]{4,28}[a-z0-9]$", try(var.project.id, "")))
+    error_message = "project.id must be a GCP project ID, such as sandbox-2bace: 6 to 30 lowercase letters, digits and dashes, starting with a letter."
+  }
+
+  validation {
+    condition     = var.project == null || can(regex("^[1-9][0-9]{0,18}$", try(var.project.number, "")))
+    error_message = "project.number must be the project's number, digits only, such as 123456789012 — not its ID: a Workload Identity principal names the number."
+  }
+}
+
 # ---------------------------------------------------------------------------
 # The catalog — docs/reference/inputs.md and docs/architecture/flux-catalog.md
 # ---------------------------------------------------------------------------
@@ -178,6 +213,29 @@ variable "kube" {
     error_message = "kube.crossplane.permissions_boundary must be empty or an IAM policy ARN, such as arn:aws:iam::123456789012:policy/socle/acme-prod/acme-prod-crossplane-boundary."
   }
 
+  # On gcp nothing carries a boundary: what Crossplane may grant is bounded
+  # by the condition on its own binding, the foundations' allowed_roles. A
+  # boundary written there would be silently ignored.
+  validation {
+    condition     = !can(keys(var.kube)) || var.cloud != "gcp" || try(var.kube.crossplane.permissions_boundary == "", true)
+    error_message = "kube.crossplane.permissions_boundary is aws's: on gcp no binding carries a boundary, the foundations' crossplane.allowed_roles bound what Crossplane may grant. Leave it empty."
+  }
+
+  # The custom role external-dns writes DNS records with is gcp's: the gcp
+  # root wires it from the foundations. Elsewhere nothing reads it, so a
+  # value there is a mistake.
+  validation {
+    condition     = !can(keys(var.kube)) || var.cloud == "gcp" || try(var.kube.crossplane.dns_records_role == "", true)
+    error_message = "kube.crossplane.dns_records_role is gcp's: the custom role Crossplane grants external-dns on the project, wired by the gcp root from the foundations. Leave it empty on ${var.cloud}."
+  }
+
+  # The root wires it from the foundations' dns_records_role output; a client
+  # who writes it himself must write a project-level custom role.
+  validation {
+    condition     = !can(var.kube.crossplane.dns_records_role) || try(var.kube.crossplane.dns_records_role == "" || can(regex("^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/roles/[A-Za-z0-9_.]{3,64}$", var.kube.crossplane.dns_records_role)), true)
+    error_message = "kube.crossplane.dns_records_role must be empty or a project custom role's full name, such as projects/sandbox-2bace/roles/socleDnsRecords_acme_prod."
+  }
+
   validation {
     condition     = !can(var.kube.crossplane.values_secret) || try(var.kube.crossplane.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.crossplane.values_secret)), true)
     error_message = "kube.crossplane.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
@@ -217,6 +275,15 @@ variable "kube" {
   validation {
     condition     = !can(keys(var.kube)) || var.cloud != "aws" || !try(var.kube.external_dns.enabled, false) || !try(var.kube.crossplane.enabled, false) || var.region != ""
     error_message = "kube.external_dns with kube.crossplane on AWS needs the cluster's region: the module's Pod Identity association is regional. Pass region to the bootstrap module (the aws root wires var.aws.region)."
+  }
+
+  # On gcp with Crossplane on, the module's access is a binding of the
+  # foundations' DNS records role, which Crossplane declares. Without the
+  # role there is nothing to bind: external-dns would run with no access to
+  # Cloud DNS and every write would fail at IAM, on the pod's logs only.
+  validation {
+    condition     = !can(keys(var.kube)) || var.cloud != "gcp" || !try(var.kube.external_dns.enabled, false) || !try(var.kube.crossplane.enabled, false) || try(var.kube.crossplane.dns_records_role != "", false)
+    error_message = "kube.external_dns with kube.crossplane on gcp needs kube.crossplane.dns_records_role: the project custom role Crossplane binds external-dns to, to write DNS records. The gcp root wires it from the foundations' dns_records_role once gcp.crossplane is set; otherwise name it yourself (projects/<id>/roles/<role>), or turn kube.crossplane off and grant external-dns's principal its access yourself."
   }
 
   # values is free-form on purpose, minus one rule: no secret material. What a
@@ -301,25 +368,45 @@ variable "kube" {
     error_message = "kube.argocd_image_updater needs ArgoCD: set kube.argocd.enabled = true, or turn both off in the same change."
   }
 
-  # Repository names as ECR writes them, with * for a glob, each naming
-  # something: a bare * would be every repository of the registry.
+  # On aws, repository names as ECR writes them, with * for a glob, each
+  # naming something: a bare * would be every repository of the registry.
+  # On gcp, an Artifact Registry repository of the cluster's project as
+  # LOCATION/REPOSITORY: the location names the registry host
+  # (<location>-docker.pkg.dev), and the reader role is granted on the
+  # project, so a glob would add nothing.
   validation {
     condition = !can(keys(var.kube)) || alltrue([
       for r in try(tolist(var.kube.argocd_image_updater.repositories), []) :
-      can(regex("^[a-z0-9*][a-z0-9._/*-]{0,255}$", r)) && can(regex("[a-z0-9]", r))
+      var.cloud == "gcp"
+      ? can(regex("^[a-z][a-z0-9-]*[a-z0-9]/[a-z]([a-z0-9-]{0,61}[a-z0-9])?$", r))
+      : (can(regex("^[a-z0-9*][a-z0-9._/*-]{0,255}$", r)) && can(regex("[a-z0-9]", r)))
     ])
-    error_message = "kube.argocd_image_updater.repositories: each entry must be an ECR repository name, such as crm-api or acme/front — lowercase letters, digits, '.', '_', '-' and '/' — with * for a glob such as acme/*, never * alone."
+    error_message = "kube.argocd_image_updater.repositories: on aws each entry must be an ECR repository name, such as crm-api or acme/front — lowercase letters, digits, '.', '_', '-' and '/' — with * for a glob such as acme/*, never * alone; on gcp, LOCATION/REPOSITORY of the cluster's project, such as europe-west1/apps; no glob."
   }
 
   # The role reading those repositories is a Crossplane managed resource.
   validation {
     condition     = !can(keys(var.kube)) || length(try(tolist(var.kube.argocd_image_updater.repositories), [])) == 0 || try(var.kube.crossplane.enabled, false)
-    error_message = "kube.argocd_image_updater.repositories names ECR repositories, so Image Updater needs its own role, which only Crossplane creates: set kube.crossplane.enabled = true (and ecr in the foundations' aws.crossplane.allowed_services), or leave repositories empty and configure the registry through registries with a credential of yours."
+    error_message = "kube.argocd_image_updater.repositories names ECR repositories, so Image Updater needs its own role, which only Crossplane creates: set kube.crossplane.enabled = true (and ecr in the foundations' aws.crossplane.allowed_services; on gcp, roles/artifactregistry.reader in the foundations' crossplane.allowed_roles), or leave repositories empty and configure the registry through registries with a credential of yours."
   }
 
   validation {
-    condition     = !can(keys(var.kube)) || length(try(tolist(var.kube.argocd_image_updater.repositories), [])) == 0 || var.cloud == "aws"
-    error_message = "kube.argocd_image_updater.repositories names ECR repositories, which exist on aws only. Configure your registry through registries, with a credential in a Secret of yours, and leave repositories empty."
+    condition     = !can(keys(var.kube)) || length(try(tolist(var.kube.argocd_image_updater.repositories), [])) == 0 || contains(["aws", "gcp"], var.cloud)
+    error_message = "kube.argocd_image_updater.repositories names the cloud's own repositories — ECR repositories on aws, Artifact Registry repositories on gcp — and ${var.cloud} has none the socle reads. Configure your registry through registries, with a credential in a Secret of yours, and leave repositories empty."
+  }
+
+  # On gcp the socle writes one registry entry per location named in
+  # repositories; Image Updater keys entries by prefix, so one of the
+  # client's for the same host would silently replace it, or never be read.
+  # The aws twin of this rule is a precondition in main.tf: there the host
+  # carries the account, which a rule on var.kube cannot know.
+  validation {
+    condition = !can(keys(var.kube)) || var.cloud != "gcp" || !anytrue([
+      for r in try(tolist(var.kube.argocd_image_updater.registries), []) :
+      anytrue([for x in try(tolist(var.kube.argocd_image_updater.repositories), []) :
+      startswith(lower(try(r.prefix, "")), "${split("/", x)[0]}-docker.pkg.dev")])
+    ])
+    error_message = "kube.argocd_image_updater.registries names <location>-docker.pkg.dev, which the socle already configures from repositories. To read one more repository of that location, add it to kube.argocd_image_updater.repositories."
   }
 
   validation {
@@ -623,14 +710,15 @@ variable "kube" {
   }
 
   # --- keda — docs/catalog/keda.md -------------------------------------------
-  # services is the list of AWS services KEDA's own role may read. Each entry
-  # is one the module knows how to scope to the scaler's exact read calls;
-  # anything else is refused, with the list — a service the module cannot
-  # scope would otherwise get nothing, silently. RDS has no scaler: its
-  # metrics are read through cloudwatch.
+  # services is the list of the cloud's services KEDA's own role may read.
+  # Each entry is one the module knows how to scope to the scaler's exact
+  # read calls on this cloud; anything else is refused, with the list — a
+  # service the module cannot scope would otherwise get nothing, silently.
+  # RDS has no scaler: its metrics are read through cloudwatch. A cloud with
+  # no list is the next rule's to refuse.
   validation {
-    condition     = !can(keys(var.kube)) || alltrue([for x in try(tolist(var.kube.keda.services), []) : contains(local.keda_services, x)])
-    error_message = "kube.keda.services: unknown service. KEDA's own role can read ${join(", ", local.keda_services)} — the AWS scalers the module scopes. RDS metrics go through cloudwatch; a cron, Prometheus, Kafka, RabbitMQ or Redis trigger needs no entry."
+    condition     = !can(keys(var.kube)) || !contains(keys(local.keda_services), var.cloud) || alltrue([for x in try(tolist(var.kube.keda.services), []) : contains(lookup(local.keda_services, var.cloud, []), x)])
+    error_message = var.cloud == "gcp" ? "kube.keda.services: unknown service on gcp. KEDA's own identity can read ${join(", ", local.keda_services.gcp)} — the GCP scalers the module scopes. A cron, Prometheus, Kafka, RabbitMQ or Redis trigger needs no entry." : "kube.keda.services: unknown service. KEDA's own role can read ${join(", ", local.keda_services.aws)} — the AWS scalers the module scopes. RDS metrics go through cloudwatch; a cron, Prometheus, Kafka, RabbitMQ or Redis trigger needs no entry."
   }
 
   # A named service is a role, and only Crossplane creates one: without it the
@@ -639,15 +727,15 @@ variable "kube" {
   # to an identity made outside the socle.
   validation {
     condition     = !can(keys(var.kube)) || length(try(tolist(var.kube.keda.services), [])) == 0 || try(var.kube.crossplane.enabled, false)
-    error_message = "kube.keda.services names a service, so KEDA needs its own cloud role, which only Crossplane creates: set kube.crossplane.enabled = true (and aws.crossplane.allowed_services in the foundations, naming the same services), or leave services empty and bind keda/keda-operator to an identity you made yourself."
+    error_message = var.cloud == "gcp" ? "kube.keda.services names a service, so KEDA needs its own cloud binding, which only Crossplane creates: set kube.crossplane.enabled = true (and roles/monitoring.viewer in the foundations' crossplane.allowed_roles), or leave services empty and bind keda/keda-operator to an identity you made yourself." : "kube.keda.services names a service, so KEDA needs its own cloud role, which only Crossplane creates: set kube.crossplane.enabled = true (and aws.crossplane.allowed_services in the foundations, naming the same services), or leave services empty and bind keda/keda-operator to an identity you made yourself."
   }
 
-  # The role is declared for AWS only, on the cloud where the crossplane
-  # module has a provider. Elsewhere the client annotates keda-operator
-  # through values (GKE Workload Identity, AKS workload identity).
+  # The role is declared on the clouds where the crossplane module has a
+  # provider: aws and gcp. Elsewhere the client annotates keda-operator
+  # through values (AKS workload identity).
   validation {
-    condition     = !can(keys(var.kube)) || length(try(tolist(var.kube.keda.services), [])) == 0 || var.cloud == "aws"
-    error_message = "kube.keda.services is offered on aws only for now: no other cloud has a Crossplane provider in the socle yet. Every scaler still works: reference a Secret from a TriggerAuthentication, or bind an identity you made to keda-operator through values (podIdentity.gcp, podIdentity.azureWorkload). Leave services empty."
+    condition     = !can(keys(var.kube)) || length(try(tolist(var.kube.keda.services), [])) == 0 || contains(keys(local.keda_services), var.cloud)
+    error_message = "kube.keda.services is offered on ${join(" and ", keys(local.keda_services))} only for now: no other cloud has a Crossplane provider in the socle yet. Every scaler still works: reference a Secret from a TriggerAuthentication, or bind an identity you made to keda-operator through values (podIdentity.azureWorkload). Leave services empty."
   }
 
   # The Pod Identity association is regional; the socle's ClusterProviderConfig
@@ -815,11 +903,23 @@ variable "kube" {
   # separated by "/", none empty — and never a wildcard: "*" or a trailing
   # "/" would widen the role past what the client named.
   validation {
-    condition = !can(var.kube.external_secrets.prefixes) || try(alltrue([
+    condition = !can(var.kube.external_secrets.prefixes) || var.cloud == "gcp" || try(alltrue([
       for p in tolist(var.kube.external_secrets.prefixes) :
       can(regex("^[A-Za-z0-9_+=.@-]+(/[A-Za-z0-9_+=.@-]+)*$", p)) && length(p) <= 256
     ]), false)
     error_message = "kube.external_secrets.prefixes must be a list of Secrets Manager name paths such as \"acme-prod\" or \"shared/platform\": letters, digits and _+=.@-, segments separated by \"/\", no leading or trailing \"/\", no wildcard. The role reads secret:<prefix>/* for each."
+  }
+
+  # On gcp a Secret Manager secret ID has no path: the module binds the
+  # accessor role on the secrets named <prefix>_<name>, "_" standing where
+  # "/" does on aws. A prefix holding "_" would blur that separator — acme
+  # would then read acme_prod_* too — and a "/" would match no secret, so
+  # the binding would grant nothing, silently.
+  validation {
+    condition = !can(var.kube.external_secrets.prefixes) || var.cloud != "gcp" || try(alltrue([
+      for p in tolist(var.kube.external_secrets.prefixes) : can(regex("^[A-Za-z0-9-]{1,255}$", p))
+    ]), false)
+    error_message = "kube.external_secrets.prefixes on gcp must be a list of Secret Manager name prefixes such as \"acme-prod\" or \"my-app\": letters, digits and -, no \"_\", no \"/\", no wildcard. Secrets are named <prefix>_<name>; the binding reads the secrets whose name starts with <prefix>_ for each."
   }
 
   # The Pod Identity association is regional and so is the role's ARN scope;
@@ -868,18 +968,27 @@ variable "kube" {
   }
 
   # --- velero — docs/catalog/velero.md --------------------------------------
-  # On aws the module's bucket and role are Crossplane managed resources: with
-  # Crossplane off there is neither, and Velero would run with nowhere to
-  # write. A client's own bucket and identity are out of scope in v1.
+  # On aws and gcp the module's bucket and its access are Crossplane managed
+  # resources: with Crossplane off there is neither, and Velero would run
+  # with nowhere to write. A client's own bucket and identity are out of
+  # scope in v1.
   validation {
-    condition     = !can(keys(var.kube)) || var.cloud != "aws" || !try(var.kube.velero.enabled, false) || try(var.kube.crossplane.enabled, false) == true
-    error_message = "kube.velero on aws needs kube.crossplane.enabled = true: the module's bucket and its IAM role are Crossplane managed resources (docs/catalog/velero.md). Turn Crossplane on, and allow s3 in the foundations' aws.crossplane.allowed_services."
+    condition     = !can(keys(var.kube)) || !contains(["aws", "gcp"], var.cloud) || !try(var.kube.velero.enabled, false) || try(var.kube.crossplane.enabled, false) == true
+    error_message = var.cloud == "gcp" ? "kube.velero on gcp needs kube.crossplane.enabled = true: the module's bucket and its IAM binding are Crossplane managed resources (docs/catalog/velero.md). Turn Crossplane on, and allow roles/storage.objectAdmin in the foundations' crossplane.allowed_roles." : "kube.velero on aws needs kube.crossplane.enabled = true: the module's bucket and its IAM role are Crossplane managed resources (docs/catalog/velero.md). Turn Crossplane on, and allow s3 in the foundations' aws.crossplane.allowed_services."
   }
 
-  # The bucket and the Pod Identity association are regional.
+  # The bucket is regional, and on aws so is the Pod Identity association.
   validation {
-    condition     = !can(keys(var.kube)) || var.cloud != "aws" || !try(var.kube.velero.enabled, false) || var.region != ""
-    error_message = "kube.velero on aws needs the cluster's region: the bucket and the module's Pod Identity association are regional. Pass region to the bootstrap module (the aws root wires var.aws.region)."
+    condition     = !can(keys(var.kube)) || !contains(["aws", "gcp"], var.cloud) || !try(var.kube.velero.enabled, false) || var.region != ""
+    error_message = var.cloud == "gcp" ? "kube.velero on gcp needs the cluster's region: the bucket is regional. Pass region to the bootstrap module (the gcp root wires the foundations' region output)." : "kube.velero on aws needs the cluster's region: the bucket and the module's Pod Identity association are regional. Pass region to the bootstrap module (the aws root wires var.aws.region)."
+  }
+
+  # Autopilot refuses the hostPath mount of the kubelet's pods directory the
+  # node-agent reads volumes through: its DaemonSet would never schedule.
+  # On gcp every volume is a PD, backed up as a CSI snapshot.
+  validation {
+    condition     = !can(keys(var.kube)) || var.cloud != "gcp" || try(var.kube.velero.node_agent, false) != true
+    error_message = "kube.velero.node_agent is refused on gcp: Autopilot forbids the node-agent's hostPath, so its DaemonSet would never run. Persistent Disk volumes are backed up as CSI snapshots, which need no node-agent."
   }
 
   # policies: each entry becomes one Schedule named <frequency>-<retention>,
@@ -1164,6 +1273,32 @@ variable "gateway_certificate_arn" {
     client's. Null or empty on aws means no shared Gateway, and no route
     attached to one. Unknown at plan on the apply that issues it, which is
     why nothing validates it here. Ignored elsewhere.
+  EOT
+  type        = string
+  default     = null
+}
+
+variable "gateway_certificate_map" {
+  description = <<-EOT
+    On gcp, the Certificate Manager map the public shared Gateway's global
+    load balancer terminates TLS with — the foundations'
+    gateway_certificate_map output, never the client's. Null or empty on gcp
+    means no shared Gateway, and no route attached to one. Unknown at plan on
+    the apply that creates it, which is why nothing validates it here.
+    Ignored elsewhere.
+  EOT
+  type        = string
+  default     = null
+}
+
+variable "gateway_regional_certificate" {
+  description = <<-EOT
+    On gcp, the regional Certificate Manager certificate the private shared
+    Gateway's internal load balancer terminates TLS with — the foundations'
+    gateway_regional_certificate output, never the client's. Null or empty
+    on gcp means no shared Gateway either: a private listener without it
+    would never be programmed. Unknown at plan on the apply that creates it,
+    which is why nothing validates it here. Ignored elsewhere.
   EOT
   type        = string
   default     = null

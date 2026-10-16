@@ -288,3 +288,80 @@ sync job's `ruleGroupVMRuleName` (VictoriaMetrics/helm-charts
 names read on socle-dev, 2026-10-15, and every dashboard query evaluated
 there: grafana.com 15038, external-dns' most-used dashboard, still reads the
 `*_a_records` metrics 0.15 replaced, so the socle takes 23969.
+
+## MONITORING-13: Requests on every container, disk included, on every cloud
+
+**accepted** · 2026-10-16 · [`oci/catalog/monitoring/resourceset.yaml`](../../oci/catalog/monitoring/resourceset.yaml)
+
+**Decision.** The socle's values state a cpu, a memory and an
+ephemeral-storage request for every container the release runs: the
+chart's (the operator, kube-state-metrics, node-exporter, Grafana and its
+two sidecars, the sync job and the operator's cleanup hook) and those the
+operator builds from its objects (`spec.resources` of VMSingle, VMAgent,
+VLSingle, VTSingle, VMAlert, VMAlertmanager and the internal VMAuth, and
+`spec.configReloaderResources` for the config-reloader and config-init
+containers beside the last four: the operator's own 10m / 25Mi, stated with
+64Mi of disk). Disk is 64Mi for a long-running container, 32Mi for a hook;
+vmagent 256Mi, for the queue it keeps in an `emptyDir` while
+VictoriaMetrics does not take its writes; Grafana 256Mi, for its SQLite
+database, its search index and the VictoriaLogs plugin; VictoriaMetrics,
+VictoriaLogs and VictoriaTraces 64Mi with a claim and **2Gi** with
+`storage_size = ""`, their data then in an `emptyDir`. VictoriaMetrics asks
+60m rather than 50m, and Grafana 80m, to stay within 6.5 GiB of memory a
+vCPU.
+
+**Context.** GKE Autopilot reserves, and bills, each pod from its requests;
+a container that leaves one out gets 500m CPU, 2 GiB of memory and 1 GiB of
+disk, and the disk request becomes the container's limit. Autopilot raises
+the CPU of a pod above 6.5 GiB a vCPU. The operator adds its own defaults
+only for a resource the object leaves out, and none for disk
+(operator v0.75.0, `build.Resources`, `VM_CONFIG_RELOADER_REQUEST_*`).
+
+**Consequences.** The same requests on every cloud; on EKS they only
+schedule, and under DiskPressure the kubelet evicts first the pods furthest
+over theirs. On Autopilot a pod past its disk request is evicted: a client
+whose dashboards, queue or `emptyDir`-held data outgrow it raises it in
+`values`. The disk figures are chosen, not measured; 2Gi promises no
+retention, data to keep belongs on a claim.
+
+**Sources.** [Resource requests in Autopilot](https://docs.cloud.google.com/kubernetes-engine/docs/concepts/autopilot-resource-requests);
+VictoriaMetrics operator v0.75.0 `internal/config/config.go` and
+`internal/controller/operator/factory/build/container.go`; the
+victoria-metrics-k8s-stack chart 0.95.2's values; GKE sandbox, 2026-10-07
+(PR #84: every socle pod reserved 1 GiB of disk before).
+
+## MONITORING-14: On gcp, no node-exporter, and Grafana health-checked on /api/health
+
+**accepted** · 2026-10-16 · [`oci/clusters/gcp/monitoring/patch.yaml`](../../oci/clusters/gcp/monitoring/patch.yaml)
+
+**Decision.** On gcp the module's cloud step sets
+`prometheus-node-exporter.enabled: false` in `monitoring-cloud-values`; the
+chart then leaves out node-exporter's rules and dashboard as well. A step
+after `workload` adds `HealthCheckPolicy/grafana` while Grafana has a route:
+GKE's load balancer checks `/api/health` on the serving port.
+
+**Context.** node-exporter runs with `hostNetwork`, `hostPID` and the node's
+root filesystem as a `hostPath`. Autopilot blocks host namespaces, except
+for verified partners' containers, and admits a `hostPath` only under
+`/var/log`, read-only: the DaemonSet would be refused and the release never
+`Ready`. Google documents that Autopilot already collects node-exporter's
+metrics for its nodes, for Managed Service for Prometheus — not for this
+VictoriaMetrics. GKE's load balancer health-checks `/` and accepts only a
+200; Grafana answers `/` with a 302 to `/login`, so without the policy the
+backend is unhealthy and the route answers 502.
+
+**Consequences.** On gcp the stack's node panels (node-exporter-full, the
+nodes' CPU, memory, filesystem and network from `node_*`) are empty and no
+node-exporter alert fires: node health is read in Cloud Monitoring. The
+kubelets, cAdvisor and kube-state-metrics are still scraped.
+
+**Sources.** [Autopilot security
+measures](https://docs.cloud.google.com/kubernetes-engine/docs/concepts/autopilot-security)
+(updated 2026-10-13); [Managed Service for Prometheus, Node
+Exporter](https://docs.cloud.google.com/stackdriver/docs/managed-prometheus/exporters/node_exporter)
+("These metrics are already enabled for nodes in GKE Autopilot clusters");
+[Configure Gateway resources, health
+check](https://cloud.google.com/kubernetes-engine/docs/how-to/configure-gateway-resources#configure_health_check);
+the chart 0.95.2's `defaultRules` and `defaultDashboards`, keyed on
+`prometheus-node-exporter.enabled`; Grafana's 502 behind the GKE Gateway,
+sandbox, PR #84.

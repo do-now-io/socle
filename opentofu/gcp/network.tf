@@ -17,6 +17,15 @@ resource "google_compute_network" "socle" {
   description             = "Socle foundations network for ${var.cluster_name}"
 }
 
+# GCP-0076 and GCP-0029 (subnet flow logs) fire only when this module is
+# scanned through a root that passes subnet_flow_logs_enabled as an explicit
+# null (opentofu/clusters/gcp groups its inputs in an object, so an omitted
+# key arrives as null). The variable is nullable = false with the default on,
+# so OpenTofu writes the log_config; Trivy evaluates the null literally and
+# does not model nullable. The ignore lines must stay contiguous and directly
+# above the resource, or Trivy drops them.
+#trivy:ignore:AVD-GCP-0076
+#trivy:ignore:AVD-GCP-0029
 resource "google_compute_subnetwork" "socle" {
   count = var.create_subnetwork ? 1 : 0
 

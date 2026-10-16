@@ -69,6 +69,11 @@ kube = {
   and every namespace a `flux-system` ResourceSet renders. A
   `config.webhooks.namespaceSelector` in `values` replaces that whole: keep
   them in it.
+- **On GCP, nor GKE's own namespaces**: `kube-node-lease`,
+  `gke-managed-system`, `gke-managed-cim`, `gke-managed-filestorecsi`,
+  `gke-managed-networking-dra-driver`, `gke-managed-parallelstorecsi`,
+  `gke-managed-volumepopulator`, `gke-gmp-system`, `gmp-system` and
+  `gmp-public`. A selector of your own on GCP keeps these too.
 - **Turning it off removes every Kyverno policy**, yours included, since the
   CRDs go with it. Set `crds.annotations` to keep them, as above.
 - **Turn `kyverno_policies` off first**: `tofu plan` refuses it on with
@@ -87,6 +92,24 @@ kube = {
 one background and one reports controller, no cleanup controller,
 requests with no limits, scrape annotations and the chart's Grafana
 dashboard. Your `values` are merged over these.
+
+**Requests**: every container states CPU, memory and ephemeral storage, the
+init container and the chart's three hooks (CRD migration, webhook removal,
+scale to zero) included: 64Mi of disk for a controller, 32Mi for an init
+container or a hook, for logs and a small sigstore cache. On GKE Autopilot a
+container that states no disk gets 1Gi reserved and billed. The same on every
+cloud; the chart's own limits on the init container and the hooks stay.
+
+**On GCP**: the webhooks' `namespaceSelector` also names GKE's namespaces,
+through the cloud's `kyverno-cloud-values` (from
+[`oci/clusters/gcp/kyverno/patch.yaml`](../../oci/clusters/gcp/kyverno/patch.yaml)).
+GKE rewrites a mutating webhook that reaches its managed namespaces, and
+Kyverno would rewrite it back on every reconcile; leases in `kube-node-lease`
+are the nodes' heartbeat. A selector matches no prefix, so each is named: the
+list is what `kubectl get ns` showed on a 1.35 Autopilot cluster of the
+sandbox (2026-10-07), plus `gke-managed-cim` and `gmp-system`, which GKE
+documents. A namespace a later GKE version adds is not excluded until it
+joins the list.
 
 **Cloud access**: none.
 

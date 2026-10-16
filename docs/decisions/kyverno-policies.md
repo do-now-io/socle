@@ -81,3 +81,28 @@ socle changes nothing the client wrote. Mutation, image verification or
 per-namespace rules are the client's own policies, in his GitOps.
 
 **Sources.** The catalog module contract ([architecture/flux-catalog.md](../architecture/flux-catalog.md)).
+
+## KYVERNO-POLICIES-05: On GCP, GKE's namespaces out, and the e2e on a hostPath
+
+**accepted** · 2026-10-16 · [`oci/clusters/gcp/kyverno-policies/patch.yaml`](../../oci/clusters/gcp/kyverno-policies/patch.yaml), [`oci/catalog/kyverno-policies/tests/e2e/chainsaw-test.yaml`](../../oci/catalog/kyverno-policies/tests/e2e/chainsaw-test.yaml)
+
+**Context.** GKE keeps mutating webhooks out of its managed namespaces, but
+not a native `ValidatingAdmissionPolicy`: an enforced policy would judge, and
+could refuse, the pods GKE runs there. On Autopilot, GKE's own admission
+(Warden) refuses a privileged pod before Kyverno sees it (`denied by
+autogke-disallow-privilege`, measured on the sandbox), so the floci test's
+privileged pod cannot prove anything there.
+
+**Decision.** On gcp, a step `cloud` publishes
+`kyverno-policies-cloud-values`, which restates the catalog's three
+`vpolExclude.excludeNamespaces` and adds the [kyverno](kyverno.md) module's
+GKE names (KYVERNO-04). The module e2e is aws's (`cloud: aws`, run on floci); on
+GKE, `kyverno-policies-module-gke` runs the same steps on a pod mounting the
+node's `/var/log` read-only, the one `hostPath` Autopilot admits, which
+`disallow-host-path` reports in Audit and refuses once enforced.
+
+**Consequences.** The privileged policies stay in the set on every cloud; on
+Autopilot they only report pods Warden already blocks. The three names are
+written twice, in the catalog and in the gcp step.
+
+**Sources.** Measured on GKE Autopilot 1.35, sandbox-2bace, 2026-10-07, and `kyverno-policies-module-gke` passed there on 2026-10-16 (artifact `0.0.0-feat-gcp-parity.d896756`) · [Autopilot security capabilities](https://cloud.google.com/kubernetes-engine/docs/concepts/autopilot-security).

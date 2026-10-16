@@ -132,3 +132,53 @@ written while it was down.
 
 **Sources.** Measured on floci, 2026-09-30 (a line in VictoriaLogs 6 s
 after the pod's creation); #91.
+
+## OTEL-AGENT-07: On gcp, the logs without the chart's preset, and a priority for the agent
+
+**accepted** · 2026-10-16 · [`oci/clusters/gcp/otel-agent/patch.yaml`](../../oci/clusters/gcp/otel-agent/patch.yaml)
+
+**Decision.** On gcp the module's cloud step turns the chart's
+`logsCollection` preset off and writes what it would have: one read-only
+`hostPath` on `/var/log/pods` and the `file_log` receiver as chart 0.173.1
+renders it, listed in the logs pipeline. It also creates
+`PriorityClass/socle-node-agent` (value 1000000,
+`PreemptLowerPriority`, `globalDefault: false`) before the workload step,
+and sets the chart's `priorityClassName` to it.
+
+**Context.** Autopilot admits a `hostPath` only under `/var/log`, read-only.
+The preset always mounts `/var/lib/docker/containers` as well, a path
+containerd never writes to, and Autopilot refuses the whole pod for it. A
+DaemonSet pod is bound to its node: on a full one (Autopilot's 32 pods, or
+its CPU and memory) it stays `Pending`, and the module never `Ready` —
+measured on the GKE sandbox. With a priority above an ordinary pod's 0 it
+preempts one, which the autoscaler places elsewhere. The system classes
+(2000000000 and up) are the cluster's; GKE allows a custom class up to
+1000000000.
+
+**Consequences.** The collector's rendered configuration on gcp is the
+preset's, byte for byte. A client's `priorityClassName` in `values` wins;
+the class then stays unused. The class goes with the module.
+
+**Sources.** [Autopilot security
+measures](https://docs.cloud.google.com/kubernetes-engine/docs/concepts/autopilot-security);
+the opentelemetry-collector chart 0.173.1's `logsCollection` preset;
+[cluster autoscaler, pod eviction
+order](https://docs.cloud.google.com/kubernetes-engine/docs/concepts/cluster-autoscaler);
+`otel-agent-health-gke`, sandbox, PR #84 (the test's `to_number(priority)` and its
+`globalDefault` read, both fixed there), passed again on 2026-10-16 (artifact
+`0.0.0-feat-gcp-parity.d896756`).
+
+## OTEL-AGENT-08: A disk request, on every cloud
+
+**accepted** · 2026-10-16 · [`oci/catalog/otel-agent/resourceset.yaml`](../../oci/catalog/otel-agent/resourceset.yaml)
+
+**Decision.** The agent asks 64Mi of ephemeral storage beside its 50m /
+128Mi: its rotated logs and scratch, nothing else is written.
+
+**Context.** GKE Autopilot sizes a DaemonSet container that leaves its disk
+out at 100Mi, and makes the request the limit
+([MONITORING-13](monitoring.md#monitoring-13-requests-on-every-container-disk-included-on-every-cloud)).
+
+**Consequences.** The per-node price on Autopilot is 50m / 128Mi / 64Mi.
+
+**Sources.** [Resource requests in Autopilot](https://docs.cloud.google.com/kubernetes-engine/docs/concepts/autopilot-resource-requests).

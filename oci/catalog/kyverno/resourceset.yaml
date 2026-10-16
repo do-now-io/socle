@@ -11,8 +11,16 @@
 # opentofu/bootstrap/manifests/templates/root.yaml).
 #
 # Values: no spec.values on the HelmRelease. The socle's defaults are a
-# ConfigMap listed first in valuesFrom, the client's second, his Secret last —
-# later wins, so the client overrides any socle default (docs/decisions/socle.md#socle-06-the-clients-values-win).
+# ConfigMap listed first in valuesFrom, the cloud's (kyverno-cloud-values,
+# optional) second, the client's third, his Secret last — later wins, so the
+# client overrides any socle default (docs/decisions/socle.md#socle-06-the-clients-values-win).
+#
+# What is the same on every cloud is here. What is one cloud's — on gcp, the
+# namespaces GKE runs, kept out of the webhooks — is that cloud's
+# oci/clusters/<cloud>/kyverno/patch.yaml: a step named cloud, inserted
+# before workload, publishing kyverno-cloud-values (docs/decisions/socle.md,
+# SOCLE-32). Steps, each applied once the one before is healthy: namespace,
+# then workload.
 #
 # Every other rule is the hello module's: inputsFrom the one provider, the
 # reconcile toggle on each resource, values tested never presence.
@@ -27,196 +35,236 @@ spec:
       kind: ResourceSetInputProvider
       name: socle
   wait: true
-  resourcesTemplate: |
-    apiVersion: v1
-    kind: Namespace
-    metadata:
-      name: kyverno
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if inputs.modules.kyverno.enabled >>enabled<< else >>disabled<< end >>
-    ---
-    apiVersion: source.toolkit.fluxcd.io/v1
-    kind: OCIRepository
-    metadata:
-      name: kyverno-chart
-      namespace: kyverno
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if inputs.modules.kyverno.enabled >>enabled<< else >>disabled<< end >>
-    spec:
-      interval: 1h
-      url: oci://ghcr.io/kyverno/charts/kyverno
-      layerSelector:
-        mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
-        operation: copy
-      ref:
-        tag: 3.9.1  # appVersion v1.19.1
-    ---
-    # The socle's own chart values, as a document rather than the HelmRelease's
-    # spec.values: helm-controller merges valuesFrom in order and then
-    # spec.values over the result, so an inline socle default would beat the
-    # client on every key both set. (No template delimiters in these
-    # comments: the operator templates them too.)
-    apiVersion: v1
-    kind: ConfigMap
-    metadata:
-      name: kyverno-socle-values
-      namespace: kyverno
-      # helm-controller re-reconciles the release the moment a labelled
-      # valuesFrom ConfigMap changes, instead of at its next interval.
-      labels:
-        reconcile.fluxcd.io/watch: Enabled
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if inputs.modules.kyverno.enabled >>enabled<< else >>disabled<< end >>
-    data:
-      values.yaml: |
-        # Admission is the one controller in the API server's path: three
-        # replicas, the chart's preferred anti-affinity spreading them, and a
-        # PodDisruptionBudget so a node drain never takes the last one. The
-        # background and reports controllers are leader-elected — a second
-        # replica is a standby, not capacity — so one each.
-        admissionController:
-          replicas: 3
-          podDisruptionBudget:
-            enabled: true
-            minAvailable: 1
-          # Scraped by the otel_gateway module, which reads these annotations;
-          # the chart's dashboard reads what they expose.
-          podAnnotations:
-            prometheus.io/scrape: "true"
-            prometheus.io/port: "8000"
-          container:
-            resources:
-              requests:
-                cpu: 100m
-                memory: 128Mi
-        backgroundController:
-          replicas: 1
-          podAnnotations:
-            prometheus.io/scrape: "true"
-            prometheus.io/port: "8000"
-          resources:
-            requests:
-              cpu: 50m
-              memory: 64Mi
-        # No cleanup controller: the socle ships no cleanup or deleting
-        # policy, and it is the one controller that outlives the chart's
-        # uninstall hook — measured on floci, it re-registered its webhook
-        # configuration two seconds after the hook removed it, and the
-        # configuration stayed with no server behind it. A client who wants
-        # TTL cleanup turns it on in values (docs/catalog/kyverno.md).
-        cleanupController:
-          enabled: false
-        reportsController:
-          replicas: 1
-          podAnnotations:
-            prometheus.io/scrape: "true"
-            prometheus.io/port: "8000"
-          resources:
-            requests:
-              cpu: 50m
-              memory: 64Mi
-        config:
-          # Namespaces no webhook of Kyverno's ever sees: the control plane's
-          # own and Flux's, so that no policy, however it is set, can stand
-          # between Flux and what it applies; and every namespace the socle
-          # renders — the operator labels each with the namespace of the
-          # ResourceSet that rendered it, flux-system for the socle's. Kyverno
-          # judges the client's applications, never the socle's own
-          # components. The chart excludes its own namespace on top
-          # (excludeKyvernoNamespace). A client who replaces this selector
-          # through values replaces it whole: he keeps these expressions.
-          webhooks:
-            namespaceSelector:
-              matchExpressions:
-                - key: kubernetes.io/metadata.name
-                  operator: NotIn
-                  values:
-                    - kube-system
-                    - flux-system
-                - key: resourceset.fluxcd.controlplane.io/namespace
-                  operator: NotIn
-                  values:
-                    - flux-system
-        # The chart's dashboard, as a ConfigMap labelled grafana_dashboard,
-        # which the grafana module's sidecar loads from every namespace.
-        grafana:
-          enabled: true
-    ---
-    # The client's own chart values, as he wrote them in kube.kyverno.values,
-    # merged over the socle's document above — the client wins wherever the
-    # two meet. OpenTofu refuses secrets in there.
-    apiVersion: v1
-    kind: ConfigMap
-    metadata:
-      name: kyverno-client-values
-      namespace: kyverno
-      labels:
-        reconcile.fluxcd.io/watch: Enabled
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if inputs.modules.kyverno.enabled >>enabled<< else >>disabled<< end >>
-    data:
-      values.yaml: |<< toYaml inputs.modules.kyverno.values | nindent 4 >>
-    ---
-    apiVersion: helm.toolkit.fluxcd.io/v2
-    kind: HelmRelease
-    metadata:
-      name: kyverno
-      namespace: kyverno
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if inputs.modules.kyverno.enabled >>enabled<< else >>disabled<< end >>
-    spec:
-      interval: 10m
-      releaseName: kyverno
-      chartRef:
+  steps:
+    - name: namespace
+      resourcesTemplate: |
+        apiVersion: v1
+        kind: Namespace
+        metadata:
+          name: kyverno
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if inputs.modules.kyverno.enabled >>enabled<< else >>disabled<< end >>
+    - name: workload
+      resourcesTemplate: |
+        apiVersion: source.toolkit.fluxcd.io/v1
         kind: OCIRepository
-        name: kyverno-chart
-      # No spec.values, on purpose: it would be merged last and win. The
-      # order below is the precedence, later wins — the socle's defaults, the
-      # client's values from kube.kyverno.values, then his Secret when he
-      # named one, created by him in kyverno, never read by OpenTofu,
-      # optional so the release does not wait for it.
-      valuesFrom:
-        - kind: ConfigMap
+        metadata:
+          name: kyverno-chart
+          namespace: kyverno
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if inputs.modules.kyverno.enabled >>enabled<< else >>disabled<< end >>
+        spec:
+          interval: 1h
+          url: oci://ghcr.io/kyverno/charts/kyverno
+          layerSelector:
+            mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+            operation: copy
+          ref:
+            tag: 3.9.1  # appVersion v1.19.1
+        ---
+        # The socle's own chart values, as a document rather than the HelmRelease's
+        # spec.values: helm-controller merges valuesFrom in order and then
+        # spec.values over the result, so an inline socle default would beat the
+        # client on every key both set. (No template delimiters in these
+        # comments: the operator templates them too.)
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
           name: kyverno-socle-values
-          valuesKey: values.yaml
-        - kind: ConfigMap
+          namespace: kyverno
+          # helm-controller re-reconciles the release the moment a labelled
+          # valuesFrom ConfigMap changes, instead of at its next interval.
+          labels:
+            reconcile.fluxcd.io/watch: Enabled
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if inputs.modules.kyverno.enabled >>enabled<< else >>disabled<< end >>
+        data:
+          values.yaml: |
+            # Admission is the one controller in the API server's path: three
+            # replicas, the chart's preferred anti-affinity spreading them, and a
+            # PodDisruptionBudget so a node drain never takes the last one. The
+            # background and reports controllers are leader-elected — a second
+            # replica is a standby, not capacity — so one each.
+            admissionController:
+              replicas: 3
+              podDisruptionBudget:
+                enabled: true
+                minAvailable: 1
+              # Scraped by the otel_gateway module, which reads these annotations;
+              # the chart's dashboard reads what they expose.
+              podAnnotations:
+                prometheus.io/scrape: "true"
+                prometheus.io/port: "8000"
+              # Disk stated on every container, on every cloud: GKE Autopilot
+              # otherwise reserves 1Gi of ephemeral storage for each
+              # (docs/catalog/kyverno.md, Under the hood). Logs and a small sigstore
+              # cache: 64Mi for a long-running container, 32Mi for an init
+              # container or a hook. The chart's own limits stay.
+              initContainer:
+                resources:
+                  requests:
+                    cpu: 10m
+                    memory: 64Mi
+                    ephemeral-storage: 32Mi
+              container:
+                resources:
+                  requests:
+                    cpu: 100m
+                    memory: 128Mi
+                    ephemeral-storage: 64Mi
+            backgroundController:
+              replicas: 1
+              podAnnotations:
+                prometheus.io/scrape: "true"
+                prometheus.io/port: "8000"
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                  ephemeral-storage: 64Mi
+            # No cleanup controller: the socle ships no cleanup or deleting
+            # policy, and it is the one controller that outlives the chart's
+            # uninstall hook — measured on floci, it re-registered its webhook
+            # configuration two seconds after the hook removed it, and the
+            # configuration stayed with no server behind it. A client who wants
+            # TTL cleanup turns it on in values (docs/catalog/kyverno.md).
+            cleanupController:
+              enabled: false
+            # The upgrade hook (CRD migration) and the uninstall hooks (webhook
+            # removal, scale to zero): the chart's cpu and memory, and disk.
+            crds:
+              migration:
+                podResources:
+                  requests:
+                    cpu: 10m
+                    memory: 64Mi
+                    ephemeral-storage: 32Mi
+            webhooksCleanup:
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 64Mi
+                  ephemeral-storage: 32Mi
+            reportsController:
+              replicas: 1
+              podAnnotations:
+                prometheus.io/scrape: "true"
+                prometheus.io/port: "8000"
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                  ephemeral-storage: 64Mi
+            config:
+              # Namespaces no webhook of Kyverno's ever sees: the control plane's
+              # own and Flux's, so that no policy, however it is set, can stand
+              # between Flux and what it applies; and every namespace the socle
+              # renders — the operator labels each with the namespace of the
+              # ResourceSet that rendered it, flux-system for the socle's. Kyverno
+              # judges the client's applications, never the socle's own
+              # components. The chart excludes its own namespace on top
+              # (excludeKyvernoNamespace). A client who replaces this selector
+              # through values replaces it whole: he keeps these expressions. A
+              # cloud that runs namespaces of its own restates the selector
+              # whole in its kyverno-cloud-values, these expressions included
+              # (oci/clusters/gcp/kyverno/patch.yaml).
+              webhooks:
+                namespaceSelector:
+                  matchExpressions:
+                    - key: kubernetes.io/metadata.name
+                      operator: NotIn
+                      values:
+                        - kube-system
+                        - flux-system
+                    - key: resourceset.fluxcd.controlplane.io/namespace
+                      operator: NotIn
+                      values:
+                        - flux-system
+            # The chart's dashboard, as a ConfigMap labelled grafana_dashboard,
+            # which the grafana module's sidecar loads from every namespace.
+            grafana:
+              enabled: true
+        ---
+        # The client's own chart values, as he wrote them in kube.kyverno.values,
+        # merged over the socle's document above — the client wins wherever the
+        # two meet. OpenTofu refuses secrets in there.
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
           name: kyverno-client-values
-          valuesKey: values.yaml
-        << if inputs.modules.kyverno.values_secret >>
-        - kind: Secret
-          name: << inputs.modules.kyverno.values_secret | quote >>
-          valuesKey: values.yaml
-          optional: true
-        << end >>
-      install:
-        remediation:
-          retries: 3
-      upgrade:
-        remediation:
-          retries: 3
-    << $monitored := and inputs.modules.kyverno.enabled inputs.modules.monitoring.enabled ->>
-    ---
-    # The module's monitoring — its alert rules and its dashboard, from
-    # monitoring/ in the socle artifact: VMRules and a ConfigMap Grafana's
-    # sidecar loads. Present only while both this module and the monitoring
-    # module are on: monitoring brings the VMRule CRD, and until it has the
-    # Kustomization fails and retries every minute
-    # (docs/decisions/monitoring.md, MONITORING-12).
-    apiVersion: kustomize.toolkit.fluxcd.io/v1
-    kind: Kustomization
-    metadata:
-      name: kyverno-monitoring
-      namespace: flux-system
-      annotations:
-        fluxcd.controlplane.io/reconcile: << if $monitored >>enabled<< else >>disabled<< end >>
-    spec:
-      interval: 1h
-      retryInterval: 1m
-      sourceRef:
-        kind: OCIRepository
-        name: socle
-      path: ./catalog/kyverno/monitoring
-      targetNamespace: kyverno
-      prune: true
-      wait: true
-      timeout: 2m
+          namespace: kyverno
+          labels:
+            reconcile.fluxcd.io/watch: Enabled
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if inputs.modules.kyverno.enabled >>enabled<< else >>disabled<< end >>
+        data:
+          values.yaml: |<< toYaml inputs.modules.kyverno.values | nindent 4 >>
+        ---
+        apiVersion: helm.toolkit.fluxcd.io/v2
+        kind: HelmRelease
+        metadata:
+          name: kyverno
+          namespace: kyverno
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if inputs.modules.kyverno.enabled >>enabled<< else >>disabled<< end >>
+        spec:
+          interval: 10m
+          releaseName: kyverno
+          chartRef:
+            kind: OCIRepository
+            name: kyverno-chart
+          # No spec.values, on purpose: it would be merged last and win. The
+          # order below is the precedence, later wins — the socle's defaults, the
+          # cloud step's, the client's values from kube.kyverno.values, then his
+          # Secret when he named one, created by him in kyverno, never read by
+          # OpenTofu, optional so the release does not wait for it.
+          valuesFrom:
+            - kind: ConfigMap
+              name: kyverno-socle-values
+              valuesKey: values.yaml
+            # The cloud step's, when the cloud has values for the chart.
+            - kind: ConfigMap
+              name: kyverno-cloud-values
+              valuesKey: values.yaml
+              optional: true
+            - kind: ConfigMap
+              name: kyverno-client-values
+              valuesKey: values.yaml
+            << if inputs.modules.kyverno.values_secret >>
+            - kind: Secret
+              name: << inputs.modules.kyverno.values_secret | quote >>
+              valuesKey: values.yaml
+              optional: true
+            << end >>
+          install:
+            remediation:
+              retries: 3
+          upgrade:
+            remediation:
+              retries: 3
+        << $monitored := and inputs.modules.kyverno.enabled inputs.modules.monitoring.enabled ->>
+        ---
+        # The module's monitoring — its alert rules and its dashboard, from
+        # monitoring/ in the socle artifact: VMRules and a ConfigMap Grafana's
+        # sidecar loads. Present only while both this module and the monitoring
+        # module are on: monitoring brings the VMRule CRD, and until it has the
+        # Kustomization fails and retries every minute
+        # (docs/decisions/monitoring.md, MONITORING-12).
+        apiVersion: kustomize.toolkit.fluxcd.io/v1
+        kind: Kustomization
+        metadata:
+          name: kyverno-monitoring
+          namespace: flux-system
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if $monitored >>enabled<< else >>disabled<< end >>
+        spec:
+          interval: 1h
+          retryInterval: 1m
+          sourceRef:
+            kind: OCIRepository
+            name: socle
+          path: ./catalog/kyverno/monitoring
+          targetNamespace: kyverno
+          prune: true
+          wait: true
+          timeout: 2m

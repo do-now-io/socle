@@ -1,5 +1,16 @@
-# The external-dns module on gcp: Cloud DNS, read with the metadata
-# server's Workload Identity credentials (docs/catalog/external-dns.md).
+# The external-dns module on gcp: Cloud DNS, read with the metadata server's
+# Workload Identity credentials and, with Crossplane on, the module's own IAM
+# member on the cluster's project (docs/catalog/external-dns.md,
+# docs/architecture/module-iam.md, docs/decisions/external-dns.md).
+- op: add
+  path: /spec/dependsOn
+  value:
+    # The member's kind comes from Crossplane's providers.
+    - apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSet
+      name: crossplane
+      namespace: flux-system
+      ready: true
 - op: test
   path: /spec/steps/1/name
   value: workload
@@ -8,6 +19,68 @@
   value:
     name: cloud
     resourcesTemplate: |
+      << if and inputs.modules.crossplane.enabled inputs.modules.crossplane.dns_records_role >>
+      << $principal := printf
+           "principal://iam.googleapis.com/projects/%s/locations/global/workloadIdentityPools/%s.svc.id.goog/subject/ns/%s/sa/%s"
+           inputs.cluster.projectNumber inputs.cluster.projectId "external-dns" "external-dns" ->>
+      # The module's own GCP access, docs/architecture/module-iam.md: no Google
+      # service account, the ServiceAccount external-dns/external-dns is the
+      # principal itself (Workload Identity Federation, by project number). Its
+      # one role is among what the foundations let Crossplane grant
+      # (modifiedGrantsByRole.hasOnly), and nothing else is.
+      #
+      # On the project, not on a zone: measured on a sandbox project
+      # (2026-10-07), a zone's getIamPolicy and setIamPolicy granted on the zone
+      # are never honoured, so Crossplane cannot bind anything on a zone, and
+      # Cloud DNS takes no IAM condition. The foundations' records role finds
+      # the project's zones — external-dns lists them on every loop
+      # (ManagedZones.List, provider/google/google.go, v0.22.0) — and writes
+      # their records: every zone of the project, bounded in software by
+      # --domain-filter. One socle cluster per project (EXTERNAL-DNS-03).
+      # Without the role there is nothing to bind: tofu plan refuses the
+      # module with Crossplane on and dns_records_role empty
+      # (opentofu/bootstrap/variables.tf), and the guard above keeps a member
+      # with an empty role, which IAM would refuse, from ever rendering.
+      apiVersion: cloudplatform.gcp.m.upbound.io/v1beta1
+      kind: ProjectIAMMember
+      metadata:
+        name: external-dns
+        namespace: external-dns
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.external_dns.enabled >>enabled<< else >>disabled<< end >>
+      spec:
+        forProvider:
+          project: << inputs.cluster.projectId | quote >>
+          role: << inputs.modules.crossplane.dns_records_role | quote >>
+          member: << $principal | quote >>
+      ---
+      # Healthy only once the member is Ready, so the workload step starts
+      # after it. Workload Identity has no admission-time injection to wait
+      # for — the token is exchanged on each call — but a member that never
+      # turns Ready (Crossplane without its grants in the foundations, a role
+      # it may not grant) must hold the workload as visibly as on aws, rather
+      # than leave a pod that writes nothing. A dependsOn with a readyExpr,
+      # because a managed resource not yet created carries no Ready condition
+      # at all, which the step's own health check reads as healthy (measured on
+      # floci, aws/external-dns/patch.yaml).
+      apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSet
+      metadata:
+        name: external-dns-access
+        namespace: flux-system
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.external_dns.enabled >>enabled<< else >>disabled<< end >>
+      spec:
+        dependsOn:
+          - apiVersion: cloudplatform.gcp.m.upbound.io/v1beta1
+            kind: ProjectIAMMember
+            name: external-dns
+            namespace: external-dns
+            ready: true
+            readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
+        resources: []
+      ---
+      << end >>
       apiVersion: v1
       kind: ConfigMap
       metadata:
@@ -20,10 +93,21 @@
       data:
         values.yaml: |
           # Cloud DNS, through the metadata server's Workload Identity
-          # credentials: the ServiceAccount's own principal, or a Google service
-          # account the client binds and names through values
-          # (serviceAccount.annotations, iam.gke.io/gcp-service-account). The
-          # project comes from the metadata server when --google-project is
-          # absent (provider/google/google.go, v0.22.0).
+          # credentials: the ServiceAccount's own principal — with Crossplane
+          # on, the one the member above binds — or, with it off, a Google
+          # service account the client binds and names through values
+          # (serviceAccount.annotations, iam.gke.io/gcp-service-account).
+          #
+          # The project is named rather than asked of the metadata server, the
+          # default when --google-project is absent (provider/google/google.go,
+          # v0.22.0): the zones are the cluster's project's, which is where the
+          # member is bound. Public zones only: a split-horizon private zone of
+          # the same name matches the same domain filters and would get every
+          # record twice; a client who wants private zones says so through
+          # values. A map, not a list: a client's extraArgs map merges into it,
+          # where a list would replace it whole.
           provider:
             name: google
+          extraArgs:
+            google-project: << inputs.cluster.projectId | quote >>
+            google-zone-visibility: public

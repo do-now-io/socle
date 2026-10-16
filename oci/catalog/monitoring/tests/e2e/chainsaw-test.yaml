@@ -4,8 +4,9 @@
 #   health   the ResourceSet and the release Ready, every part Available on
 #            its Bound claim, the socle's own flags live; then what no object
 #            shows (monitoring.sh): vmagent scraping each source the stack's
-#            rules read — kube-state-metrics, node-exporter, cAdvisor, the
-#            collectors and Flux by annotation — an application's OTLP
+#            rules read — kube-state-metrics, cAdvisor, the collectors and
+#            Flux by annotation, node-exporter where the cloud runs it
+#            (monitoring-node-exporter) — an application's OTLP
 #            metric and log through the gateway, a container's line and the
 #            Kubernetes events through the agent, and Grafana serving the
 #            stack's datasources and dashboards.
@@ -123,15 +124,6 @@ spec:
         - assert:
             resource:
               apiVersion: apps/v1
-              kind: DaemonSet
-              metadata:
-                name: monitoring-prometheus-node-exporter
-                namespace: monitoring
-              status:
-                (numberReady == desiredNumberScheduled): true
-        - assert:
-            resource:
-              apiVersion: apps/v1
               kind: Deployment
               metadata:
                 name: grafana
@@ -191,7 +183,6 @@ spec:
             content: |
               . ./monitoring.sh
               eventually 180 has_series 'kube_pod_info{job="kube-state-metrics"}'
-              eventually 120 has_series 'node_cpu_seconds_total{job="node-exporter"}'
               eventually 120 has_series 'container_cpu_usage_seconds_total{job="kubelet", metrics_path="/metrics/cadvisor"}'
               eventually 120 has_series 'kubelet_running_pods{job="kubelet"}'
               eventually 120 has_series 'otelcol_process_uptime{job="opentelemetry-collector", namespace="otel-gateway"}'
@@ -236,6 +227,109 @@ spec:
             namespace: monitoring
             selector: app.kubernetes.io/name=grafana
             tail: 60
+---
+# node-exporter, where the cloud admits it: GKE Autopilot refuses its host
+# namespaces and its hostPath, and oci/clusters/gcp/monitoring/patch.yaml
+# turns it off (monitoring-health-gke). The test is `cloud: aws`, not `any`,
+# for that reason: gcp has no node-exporter. azure and scaleway, which run
+# it too, need a test labelled for them once they get an e2e root (a label
+# holds one cloud).
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: monitoring-node-exporter
+  labels:
+    phase: health
+    cloud: aws
+    platform: any
+spec:
+  description: node-exporter runs on every node and vmagent scrapes it.
+  timeouts:
+    assert: 5m
+    exec: 3m
+  steps:
+    - name: the DaemonSet is ready on every node, its series in VictoriaMetrics
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: monitoring-prometheus-node-exporter
+                namespace: monitoring
+              status:
+                (numberReady == desiredNumberScheduled): true
+        - script:
+            content: |
+              . ./monitoring.sh
+              eventually 120 has_series 'node_cpu_seconds_total{job="node-exporter"}'
+      catch:
+        - podLogs:
+            namespace: monitoring
+            selector: app.kubernetes.io/name=prometheus-node-exporter
+            tail: 40
+---
+# The GCP proof, run against the sandbox's GKE Autopilot (no GKE in CI): what
+# oci/clusters/gcp/monitoring/patch.yaml adds. node-exporter is off, so the
+# release converges where Autopilot would refuse its DaemonSet, and with it
+# its rules and its dashboard.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: monitoring-health-gke
+  labels:
+    phase: health
+    cloud: gcp
+    platform: gke
+spec:
+  description: On GKE Autopilot the release is Ready without node-exporter.
+  timeouts:
+    # Chainsaw's defaults (apply 5s, assert 30s) are too short on GKE: a call
+    # through the cluster's DNS endpoint can outlast 5 s (context deadline
+    # exceeded) and an Autopilot pod takes minutes to restart. Every gke test
+    # holds at least apply 30s, assert 180s, error 60s, delete 60s, cleanup
+    # 120s and exec 30s (measured on the sandbox, 2026-10-16).
+    apply: 30s
+    cleanup: 120s
+    delete: 60s
+    exec: 30s
+    assert: 5m
+    error: 1m
+  steps:
+    - name: the cloud's values turn node-exporter off, and the release is Ready without it
+      try:
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: monitoring-cloud-values
+                namespace: monitoring
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: monitoring
+                namespace: monitoring
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: monitoring-prometheus-node-exporter
+                namespace: monitoring
+      catch:
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: monitoring
+            name: monitoring
+        - events:
+            namespace: monitoring
 ---
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
@@ -738,7 +832,7 @@ spec:
             content: |
               . ./monitoring.sh
               eventually 180 has_group kubernetes-apps
-              eventually 60 has_group node-exporter
+              eventually 60 has_group kube-state-metrics
               eventually 60 has_group socle-flux
               eventually 60 has_group opentelemetry-collector
               echo "rule groups: $(rule_groups | tr '\n' ' ')"

@@ -25,7 +25,7 @@ ghcr.io/do-now-io/socle/flux-modules ───verified pull──▶ Flux ──
 | --- | --- | --- | --- |
 | Foundations | One module per cloud: network, cluster, the nodes the socle starts on, identities | [`opentofu/aws`](../../opentofu/aws/), `gcp`, `azure`, `scaleway` | OpenTofu |
 | Bootstrap | Cilium and CoreDNS where the cloud has none, the EKS add-ons, the Flux Operator and instance, the envelope of inputs | [`opentofu/bootstrap`](../../opentofu/bootstrap/) | OpenTofu, same apply |
-| Root | The one apply: calls both, configures the providers | [`opentofu/clusters/aws`](../../opentofu/clusters/aws/) (AWS only so far) | the socle; your `main.tf` calls it |
+| Root | The one apply: calls both, configures the providers | [`opentofu/clusters/aws`](../../opentofu/clusters/aws/), [`gcp`](../../opentofu/clusters/gcp/) | the socle; your `main.tf` calls it |
 | Catalog | One `ResourceSet` per module, one overlay per cloud | [`oci/`](../../oci/) | Flux, from the signed artifact |
 
 ## The positions
@@ -71,7 +71,7 @@ command, args } }`.
 | Cloud | Exec | State |
 | --- | --- | --- |
 | AWS | `aws eks get-token --cluster-name …` | works; the root applies with it on floci |
-| GCP | `gke-gcloud-auth-plugin`, host is the DNS endpoint | output exists; no GCP root yet |
+| GCP | `gke-gcloud-auth-plugin`, host is the DNS endpoint | works; the gcp root applies with it |
 | Azure | `kubelogin get-token --login azurecli --server-id 6dae42f8-4368-4678-94ff-3960e28e3630` | needs Entra ID authentication, which `opentofu/azure` does not configure yet |
 | Scaleway | `sh -c` emitting an `ExecCredential` from `SCW_SECRET_KEY` | output exists; no Scaleway root yet |
 

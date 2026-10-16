@@ -99,6 +99,9 @@ spec:
               requests:
                 cpu: 10m
                 memory: 64Mi
+                # Logs only: a container that states no disk is sized by the
+                # platform — GKE Autopilot reserves 1 GiB (docs/clouds/gcp/sizing.md).
+                ephemeral-storage: 64Mi
               limits:
                 memory: 256Mi
             # Scraped by the otel_gateway module, which reads these annotations.

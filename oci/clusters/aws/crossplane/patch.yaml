@@ -64,6 +64,9 @@
                       requests:
                         cpu: 50m
                         memory: 320Mi
+                        # Logs, and the provider's small Terraform workspaces
+                        # under /tmp, one per managed resource.
+                        ephemeral-storage: 256Mi
       ---
       # The family provider is a dependency of the other two; declared so
       # that its version is pinned here and not resolved by Crossplane.

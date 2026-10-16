@@ -4,24 +4,26 @@ description: Backup and restore of your applications' volumes and objects, chose
 category: backup
 requires:
   - module: crossplane
-    clouds: [aws]
-    why: its bucket and IAM role are Crossplane managed resources; refused at plan otherwise
+    clouds: [aws, gcp]
+    why: its bucket and its access (an IAM role on aws, an IAM binding on gcp) are Crossplane managed resources; refused at plan otherwise
 ---
 
 Velero backs up what GitOps cannot restore, the data in your applications'
-EBS and EFS volumes, with the applications' own objects, into the module's
-own S3 bucket. Nothing is backed up unless an application asks with two
-labels. **Off by default**, aws only. To restore:
+volumes (EBS and EFS on aws, Persistent Disk on gcp), with the applications'
+own objects, into the module's own bucket (S3 on aws, GCS on gcp). Nothing is
+backed up unless an application asks with two labels. **Off by default**, on
+aws and gcp. To restore:
 [Restore a backup](../guides/restore-a-backup.md).
 
 ## Getting started
 
 Turn it on with the crossplane it needs, on foundations that list `s3` in
-`aws.crossplane.allowed_services`:
+`aws.crossplane.allowed_services` on aws, or `roles/storage.objectAdmin` in
+`gcp.crossplane.allowed_roles` on gcp:
 
 ```hcl kube-start="velero"
 kube = {
-  crossplane = { enabled = true }
+  crossplane = { enabled = true } # aws: the bucket and the module's role; gcp: the bucket and its binding
   velero = {
     enabled = true
   }
@@ -37,7 +39,7 @@ Then `kubectl -n velero get backupstoragelocations` shows `default`
 | --- | --- | --- |
 | `enabled` | `false` | Turns the module on or off. The bucket is kept either way. |
 | `policies` | seven pairs, below | A list of `{ frequency, retention, schedule }`, one `Schedule` each. Setting it replaces the whole list. |
-| `node_agent` | `eks_addons.efs_csi` | The node-agent, needed for EFS volumes: a privileged DaemonSet. |
+| `node_agent` | `eks_addons.efs_csi` | The node-agent, needed for EFS volumes: a privileged DaemonSet. Refused on gcp. |
 | `values` | `{}` | Any [`velero` chart](https://artifacthub.io/packages/helm/vmware-tanzu/velero) value; yours win. |
 | `values_secret` | `""` | A Secret in `velero` with a `values.yaml` key, for what must stay out of the OpenTofu state. |
 
@@ -46,7 +48,7 @@ Then `kubectl -n velero get backupstoragelocations` shows `default`
 ```hcl kube-full="velero"
 kube = {
   velero = {
-    enabled = false # off by default; aws only, needs kube.crossplane.enabled = true
+    enabled = false # off by default; aws and gcp, needs kube.crossplane.enabled = true
 
     # One Schedule per { frequency, retention } label pair; setting it replaces the whole list.
     policies = [
@@ -59,7 +61,7 @@ kube = {
       { frequency = "monthly", retention = "90d", schedule = "0 3 1 * *" },
     ]
 
-    node_agent = false # default: eks_addons.efs_csi; the node-agent for EFS volumes, a privileged DaemonSet
+    node_agent = false # default: eks_addons.efs_csi; the node-agent for EFS volumes, a privileged DaemonSet; refused on gcp
 
     # Any value of the velero chart 12.2.0; yours win over the socle's.
     values = {
@@ -81,12 +83,22 @@ kube = {
   and `socle.do-now.io/backup-retention: 30d`. Each pair of `policies` is one
   `Schedule`, `velero-<frequency>-<retention>`. A pair that is not a policy
   is admitted with a warning, and never backed up.
-- **What it needs**: `kube.crossplane.enabled`, `s3` in the foundations'
-  `aws.crossplane.allowed_services`, and `eks_addons.snapshot_controller`
-  (on by default) for EBS snapshots. `tofu plan` refuses it off aws, without
-  crossplane, and with credentials in `values`.
-- **EBS volumes are snapshotted, EFS volumes copied** by the node-agent into
-  the bucket; any other volume is skipped.
+- **What it needs**: `kube.crossplane.enabled`; on aws, `s3` in the
+  foundations' `aws.crossplane.allowed_services` and
+  `eks_addons.snapshot_controller` (on by default) for EBS snapshots; on gcp,
+  `roles/storage.objectAdmin` in `gcp.crossplane.allowed_roles` — without it
+  the binding stays not `Ready` and the server waits for it. `tofu plan`
+  refuses it on azure and scaleway, without crossplane, with `node_agent` on
+  gcp, and with credentials in `values`.
+- **EBS and Persistent Disk volumes are snapshotted, EFS volumes copied** by
+  the node-agent into the bucket; any other volume is skipped — Filestore
+  included on gcp, where Autopilot refuses the node-agent's `hostPath`.
+- **On gcp, `velero backup logs`, `velero restore logs`, `velero backup
+  download` and what `velero backup describe` reads from the bucket fail**:
+  they go through a URL signed as a Google service account, and the module
+  has none (below). Read the logs from the bucket instead, with read access
+  to it:
+  `gcloud storage cat gs://<cluster>-velero-<project number>/backups/<backup>/<backup>-logs.gz | gunzip`.
 - **Turn it off before crossplane**, so the role can be released, and leave
   no `Restore` behind: its finalizer holds the `velero` namespace in
   `Terminating` ([Restore a backup](../guides/restore-a-backup.md#7-delete-the-restore)).
@@ -99,8 +111,9 @@ kube = {
 
 **Installed**: chart `velero` 12.2.0 (Velero 1.18.2) from
 `https://vmware-tanzu.github.io/helm-charts`, with
-`velero-plugin-for-aws:v1.14.4`, in the `velero` namespace (Pod Security
-`restricted`, `privileged` with the node-agent). The module
+`velero-plugin-for-aws:v1.14.4` on aws, `velero-plugin-for-gcp:v1.14.4` on
+gcp, in the `velero` namespace (Pod Security `restricted`, `privileged` with
+the node-agent). The module
 ([`oci/catalog/velero`](../../oci/catalog/velero/resourceset.yaml)) is what
 every cloud shares: the chart, one `Schedule` per policy and the warning
 admission policy. What is aws's
@@ -109,25 +122,59 @@ admission policy. What is aws's
 plugin, the backup storage location, the EBS and EFS volume policy and the
 `VolumeSnapshotClass` `velero-ebs`. The bucket
 `<cluster>-velero-<account id>` is versioned, SSE-S3 encrypted and private,
-and never deleted by the socle.
+and never deleted by the socle. What is gcp's
+([`oci/clusters/gcp/velero/patch.yaml`](../../oci/clusters/gcp/velero/patch.yaml))
+is the same step on GCS: the bucket `<cluster>-velero-<project number>`
+(uniform bucket-level access, public access prevention enforced, versioned,
+noncurrent versions deleted after 30 days, Google-managed encryption), its
+binding, the GCP plugin, the backup storage location, the Persistent Disk
+volume policy, the `VolumeSnapshotClass` `velero-pd` on
+`pd.csi.storage.gke.io`, and `deployNodeAgent: false`. No
+`VolumeSnapshotLocation` on either cloud: CSI snapshots need none.
 
 **What the socle sets**: a non-root, read-only server; `upgradeCRDs: true`
 and `cleanUpCRDs: false`, so a re-enabled module re-reads its backups from
-the bucket.
+the bucket. Requests on every cloud, disk included, since GKE Autopilot
+reserves 500m / 2Gi / 1Gi for a container that states none: the server
+50m / 128Mi / 512Mi (its `emptyDir`s hold the plugin and Kopia's cache), the
+CRD upgrade Job 50m / 128Mi / 32Mi, the node-agent 50m / 128Mi / 512Mi, the
+Kopia repository maintenance Jobs the server starts at runtime the server's
+own, through `configuration.repositoryMaintenanceJob`; the plugin's init
+container 10m / 32Mi / 32Mi on gcp.
 
-**Cloud access**: an IAM role `<cluster>-velero`, declared through
+**Cloud access**: on aws, an IAM role `<cluster>-velero`, declared through
 Crossplane under the permissions boundary, bound to `velero/velero-server`
 by Pod Identity, with object access to its own bucket only
-([Module IAM](../architecture/module-iam.md)).
+([Module IAM](../architecture/module-iam.md)). On gcp, one
+`BucketIAMMember`: `roles/storage.objectAdmin` on the module's bucket only,
+for `velero/velero-server`'s own Workload Identity principal
+(`principal://iam.googleapis.com/projects/<project number>/locations/global/workloadIdentityPools/<project id>.svc.id.goog/subject/ns/velero/sa/velero-server`)
+— no Google service account, no key. The plugin then needs a
+`serviceAccount` in the storage location to start, used only to sign
+download URLs: the socle sets the placeholder `no-google-service-account`
+(`object_store.go`, velero-plugin-for-gcp v1.14.4). A client who wants
+signed URLs creates a Google service account, grants velero-server's
+principal `roles/iam.serviceAccountTokenCreator` on it, and replaces
+`configuration.backupStorageLocation` in `values` with its e-mail. No
+compute role on either cloud: the CSI driver takes the snapshots with its
+own identity.
 
 **Ordering**: the module waits for the `crossplane` ResourceSet; its steps
-run in order — the namespace, aws's step, then the chart — and aws's step is
-healthy only once the bucket, the role and the Pod Identity association are
-`Ready`, so the server starts with its credentials.
+run in order — the namespace, the cloud's step, then the chart — and the
+cloud's step is healthy only once the bucket and the module's access (the
+role and the Pod Identity association on aws, the binding on gcp) are
+`Ready`, so the server starts with its credentials. Turning it off, the
+binding goes with the module on gcp; the bucket stays on both.
 
 **Measured** on floci k3s, 2026-10-02: a labelled claim backed up, its
 namespace deleted and restored in 10 s, the file read back unchanged; off,
 the role deleted and the bucket kept. EBS snapshots and Pod Identity on EKS
-are not measured yet.
+are not measured yet. On gcp, `velero-module-gke` (labels `cloud: gcp`,
+`platform: gke`) runs by hand against the sandbox's GKE Autopilot: the
+bucket and its binding `Ready`, the server `Available` on its own principal,
+a Persistent Disk snapshot backed up and restored with its data; first proven
+with the earlier GCP work on 2026-10-07, passed again on this layout on
+2026-10-16 (artifact `0.0.0-feat-gcp-parity.d896756`, 250 s), and turning the module off removed its
+binding from the project.
 
 </details>

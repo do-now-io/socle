@@ -7,7 +7,8 @@ sidebar:
 
 The socle exposes services through Gateway API and ships no Ingress: CRDs from
 upstream pinned by commit, and two shared Cilium Gateways, `public` and
-`private`. GATEWAY-API-02 supersedes the exposure decisions in [aws](aws.md) and [azure](azure.md).
+`private`; on gcp, the same two Gateways on GKE's own classes and nothing
+else (GATEWAY-API-05). GATEWAY-API-02 supersedes the exposure decisions in [aws](aws.md) and [azure](azure.md).
 
 ## GATEWAY-API-01: The CRDs from upstream, pinned by commit, and one operator restart
 
@@ -34,7 +35,7 @@ ignored in `.trivyignore.yaml`. Disabling the module never deletes a Gateway.
 
 ## GATEWAY-API-02: Shared public and private Gateways, on Cilium
 
-**accepted** · 2026-09-30 · [`oci/catalog/gateway-api/resourceset.yaml`](../../oci/catalog/gateway-api/resourceset.yaml), [`opentofu/bootstrap/main.tf`](../../opentofu/bootstrap/main.tf)
+**accepted**, its consequence on gcp **superseded by [GATEWAY-API-05](#gateway-api-05-on-gcp-the-shared-gateways-on-gkes-classes-and-no-crd-of-the-socles)** · 2026-09-30, superseded 2026-10-16 · [`oci/catalog/gateway-api/resourceset.yaml`](../../oci/catalog/gateway-api/resourceset.yaml), [`opentofu/bootstrap/main.tf`](../../opentofu/bootstrap/main.tf)
 
 **Decision.** Two Gateways in `gateway-system`, `public` and `private`, on the
 `cilium` class, each one `LoadBalancer` Service; routes from every namespace
@@ -85,3 +86,41 @@ Gateway API: the CRDs exist there but no class serves them.
 second Gateway API implementation to maintain.
 
 **Sources.** Envoy Gateway v1.9.1 Helm chart.
+
+## GATEWAY-API-05: On gcp, the shared Gateways on GKE's classes, and no CRD of the socle's
+
+**accepted** · 2026-10-16 · [`oci/clusters/gcp/gateway-api/patch.yaml`](../../oci/clusters/gcp/gateway-api/patch.yaml), [`oci/clusters/gcp/kustomization.yaml`](../../oci/clusters/gcp/kustomization.yaml)
+
+**Decision.** `gateway_api` is offered on gcp. gcp's patch removes the
+module's `crds` step, behind a `test` op on its name, and appends a
+`gateways` step: `public` on `inputs.gateway.className`
+(`gke-l7-global-external-managed`) with the Certificate Manager map in its
+`networking.gke.io/certmap` annotation, `private` on `gke-l7-rilb` with the
+regional certificate in its `https` listener's `tls.options`
+(`networking.gke.io/cert-manager-certs`), `http` on 80 redirected to https
+on both. The child `ResourceSet` `dependsOn` GKE's two classes being
+`Accepted`.
+
+**Context.** GKE installs and upgrades the standard-channel CRDs with the
+cluster ([GCP-08](gcp.md#gcp-08-exposure-through-gkes-gateway-controller))
+and serves only its own classes; a Flux `Kustomization` applying upstream's
+CRDs would take over objects GKE manages. A patch cannot reach inside the
+`crds` step's template, so the step goes whole: a `remove` on
+`/spec/steps/0`, which the `test` op turns into a build failure the day the
+module's first step is anything else ([SOCLE-32](socle.md#socle-32-what-only-one-cloud-has-that-cloud-adds-to-the-module-as-steps)).
+An emptied step left in place, or a catalog condition on the cloud, would
+have needed `inputs.cloud` in `oci/catalog/`. Google's load balancer has a
+forwarding rule and target proxy per protocol, so the redirect on 80 does not
+loop as Cilium's would on aws (GATEWAY-API-02).
+
+**Consequences.** Every module that routes through a shared Gateway does so
+on gcp too. On gcp, disabling the module never touches a CRD. The module's
+CRD tests are labelled `cloud: aws`; `gateway-api-health-gke` (`platform: gke`) is
+gcp's proof, run by hand against the sandbox. Measured on GKE Autopilot
+(2026-10-07): the redirect answers `301 https://<host>:443/`, the public
+Gateway served the Google-managed certificate about 10 minutes after its
+route attached. Again on 2026-10-16 (artifact `0.0.0-feat-gcp-parity.d896756`): Grafana answered 200
+over https about 7 minutes after its `HTTPRoute` was created, a 404 `fault
+filter abort` from the load balancer before.
+
+**Sources.** [Secure a Gateway](https://cloud.google.com/kubernetes-engine/docs/how-to/secure-gateway) · [GatewayClass capabilities](https://cloud.google.com/kubernetes-engine/docs/how-to/gatewayclass-capabilities) · [Deploying Gateways](https://cloud.google.com/kubernetes-engine/docs/how-to/deploying-gateways) · kustomize JSON 6902 patches (`test`, `remove`).

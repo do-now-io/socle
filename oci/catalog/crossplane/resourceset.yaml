@@ -3,7 +3,8 @@
 # each cloud adds, that cloud's providers and their ProviderConfig — and
 # nothing that belongs to a module. A module that needs a cloud service
 # declares its own managed resources (on AWS an IAM Role and a
-# PodIdentityAssociation) in the step its cloud adds to it,
+# PodIdentityAssociation, on GCP an IAM binding of its own ServiceAccount's
+# principal) in the step its cloud adds to it,
 # oci/clusters/<cloud>/<module>/patch.yaml; adding such a module never
 # touches this one. The contract those resources follow and the
 # ordering chain: docs/architecture/module-iam.md; the module:
@@ -14,7 +15,8 @@
 # modules: upstream publishes the chart to charts.crossplane.io only (its
 # promote workflow pushes images to OCI registries, never the chart). A cloud
 # with Crossplane providers appends its own steps after it — on aws,
-# oci/clusters/aws/crossplane/patch.yaml (docs/decisions/socle.md, SOCLE-32).
+# oci/clusters/aws/crossplane/patch.yaml; on gcp,
+# oci/clusters/gcp/crossplane/patch.yaml (docs/decisions/socle.md, SOCLE-32).
 #
 # resourcesTemplate rather than resources: the values Secret is listed only
 # when the client names one, and the operator's block `<< if >>`/`<< end >>`
@@ -73,9 +75,16 @@ spec:
             # Measured on k3s: idle with no provider, core 3m / 32Mi and RBAC
             # manager 2m / 12Mi; with the AWS provider's 71 CRDs loaded, the
             # core at 109Mi. The chart's own 100m / 256Mi each would reserve
-            # half a gigabyte before anything is declared.
+            # half a gigabyte before anything is declared. On the GKE sandbox
+            # (2026-10-07), with the GCP providers' CRDs: core 176Mi, RBAC
+            # manager 18Mi working set — the core's request is 192Mi since.
             # No limits, like every socle module: a memory limit turns a CRD
             # surge into an OOM loop, and a CPU limit throttles reconciliation.
+            # Disk stated too, on every cloud, or GKE Autopilot reserves 1 GiB
+            # a container that states none: the core's package cache is an
+            # emptyDir capped at 20Mi by the chart, its function cache stays
+            # empty (no function), and logs rotate at 5 × 10Mi on GKE. The
+            # init container takes the core's resources.
             # Metrics for the monitoring module's vmagent: the core and the
             # RBAC manager declare port 8080 and annotate their pods. The
             # providers' pods Crossplane annotates itself.
@@ -85,12 +94,14 @@ spec:
               limits: null
               requests:
                 cpu: 50m
-                memory: 128Mi
+                memory: 192Mi
+                ephemeral-storage: 128Mi
             resourcesRBACManager:
               limits: null
               requests:
                 cpu: 10m
                 memory: 32Mi
+                ephemeral-storage: 64Mi
         ---
         # The client's own chart values, as he wrote them in
         # kube.crossplane.values. OpenTofu refuses secrets in there.

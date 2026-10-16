@@ -85,8 +85,8 @@ and watches every ConfigMap and Secret; the chart's scoped mode
 
 **What the socle sets**: `autoReloadAll: false` and
 `reloadStrategy: annotations`, a hardened container (read-only root
-filesystem, every capability dropped), requests 10m CPU and 64Mi with a 256Mi
-memory limit, and `prometheus.io/scrape` for [otel-gateway](otel-gateway.md).
+filesystem, every capability dropped), requests 10m CPU, 64Mi and 64Mi of
+ephemeral storage with a 256Mi memory limit, and `prometheus.io/scrape` for [otel-gateway](otel-gateway.md).
 
 **Cloud access**: none.
 

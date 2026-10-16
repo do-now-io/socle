@@ -1,0 +1,162 @@
+# The crossplane module on gcp: what only gcp has — the provider packages
+# every module's GCP access is made of, and the ProviderConfig they
+# authenticate with (docs/catalog/crossplane.md). Two steps appended after
+# the module's core, as on aws:
+# 1. providers — the provider packages; they need the core's CRDs.
+# 2. config — the ProviderConfig. It needs the providers' own CRDs, which
+#    only exist once they are Healthy — a condition the operator's health
+#    check does not read (Crossplane packages report Healthy, not Ready). So
+#    the step is a child ResourceSet that dependsOn the packages with a
+#    readyExpr on Healthy; this step waits for the child to be Ready. When
+#    the module is off the child goes with everything else, so a dependency
+#    on an absent Provider can never wedge socle-root.
+# A module's own GCP bindings wait for the crossplane ResourceSet, Ready
+# once these steps are.
+- op: add
+  path: /spec/steps/-
+  value:
+    name: providers
+    resourcesTemplate: |
+      # Cloud Platform for the modules' project-level bindings, Storage for
+      # the buckets a module owns and its bindings on them: what every
+      # module's GCP access is made of. No Cloud DNS provider: a zone's own
+      # IAM is never honoured, so external-dns's binding is a project-level
+      # one (docs/catalog/crossplane.md). No Secret Manager provider either:
+      # a prefix cannot be bound on a secret, so external-secrets' access is
+      # a conditional project-level binding too.
+      #
+      # One ServiceAccount name for every GCP provider pod, because the
+      # foundations grant Crossplane's rights to exactly
+      # `…/subject/ns/crossplane-system/sa/provider-gcp`: Crossplane
+      # otherwise names it after the ProviderRevision, a hash. No Google
+      # service account: the pods' Kubernetes ServiceAccount is the
+      # principal itself (Workload Identity Federation for GKE).
+      #
+      # Created by the module and only pointed at, as on aws: named through
+      # serviceAccountTemplate instead, every ProviderRevision would take its
+      # ownership back from the last, forever (#80, crossplane/crossplane#7769).
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: provider-gcp
+        namespace: crossplane-system
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
+      ---
+      # Requests set on purpose: Autopilot gives a container without them
+      # 500m / 2Gi / 1Gi of disk, and bills what is requested. Measured on
+      # the GKE sandbox (2026-10-07): 165–222Mi working set per provider pod;
+      # 320Mi keeps aws's headroom. 100m / 320Mi is 1 vCPU to 3.1Gi, inside
+      # Autopilot's CPU:memory ratio (1:1 to 1:6.5) and above its floor; a
+      # pod bursts past it on a cluster that supports bursting. Disk: logs
+      # and the provider's small Terraform workspaces under /tmp, one per
+      # managed resource.
+      apiVersion: pkg.crossplane.io/v1beta1
+      kind: DeploymentRuntimeConfig
+      metadata:
+        name: provider-gcp
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
+      spec:
+        deploymentTemplate:
+          spec:
+            selector: {}
+            template:
+              spec:
+                serviceAccountName: provider-gcp
+                containers:
+                  - name: package-runtime
+                    resources:
+                      requests:
+                        cpu: 100m
+                        memory: 320Mi
+                        ephemeral-storage: 256Mi
+      ---
+      # The family provider, a dependency of the other two, declared so that
+      # its version is pinned here, under the name Crossplane gives a
+      # dependency it installs itself (the package path, slashes as dashes):
+      # under any other name the lock holds the family twice and every
+      # provider stays unhealthy, as measured on EKS with the aws family.
+      apiVersion: pkg.crossplane.io/v1
+      kind: Provider
+      metadata:
+        name: crossplane-contrib-provider-family-gcp
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
+      spec:
+        package: xpkg.crossplane.io/crossplane-contrib/provider-family-gcp:v3.0.0
+        runtimeConfigRef:
+          name: provider-gcp
+      ---
+      # ProjectIAMMember: a module's role at project level, under an IAM
+      # condition when its scope is a prefix (external-secrets).
+      apiVersion: pkg.crossplane.io/v1
+      kind: Provider
+      metadata:
+        name: provider-gcp-cloudplatform
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
+      spec:
+        package: xpkg.crossplane.io/crossplane-contrib/provider-gcp-cloudplatform:v3.0.0
+        runtimeConfigRef:
+          name: provider-gcp
+      ---
+      # Storage for the buckets a module owns, as it owns its bindings: the
+      # velero module's (docs/catalog/velero.md). Crossplane's own principal
+      # may create and configure buckets under the cluster's name prefix,
+      # and never delete one (opentofu/gcp).
+      apiVersion: pkg.crossplane.io/v1
+      kind: Provider
+      metadata:
+        name: provider-gcp-storage
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
+      spec:
+        package: xpkg.crossplane.io/crossplane-contrib/provider-gcp-storage:v3.0.0
+        runtimeConfigRef:
+          name: provider-gcp
+- op: add
+  path: /spec/steps/-
+  value:
+    name: config
+    resourcesTemplate: |
+      apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSet
+      metadata:
+        name: crossplane-provider-config
+        namespace: flux-system
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.crossplane.enabled >>enabled<< else >>disabled<< end >>
+      spec:
+        dependsOn:
+          - apiVersion: pkg.crossplane.io/v1
+            kind: Provider
+            name: crossplane-contrib-provider-family-gcp
+            ready: true
+            readyExpr: status.conditions.exists(c, c.type == 'Healthy' && c.status == 'True')
+          - apiVersion: pkg.crossplane.io/v1
+            kind: Provider
+            name: provider-gcp-cloudplatform
+            ready: true
+            readyExpr: status.conditions.exists(c, c.type == 'Healthy' && c.status == 'True')
+          - apiVersion: pkg.crossplane.io/v1
+            kind: Provider
+            name: provider-gcp-storage
+            ready: true
+            readyExpr: status.conditions.exists(c, c.type == 'Healthy' && c.status == 'True')
+        wait: true
+        resources:
+          # The provider's credentials: Workload Identity Federation for GKE.
+          # InjectedIdentity hands Terraform nothing, so the provider takes
+          # Application Default Credentials from the GKE metadata server —
+          # the token of the pod's own ServiceAccount, the principal
+          # `…/ns/crossplane-system/sa/provider-gcp` the foundations
+          # granted. No key, and no Google service account to impersonate.
+          - apiVersion: gcp.m.upbound.io/v1beta1
+            kind: ClusterProviderConfig
+            metadata:
+              name: default
+            spec:
+              projectID: << inputs.cluster.projectId | quote >>
+              credentials:
+                source: InjectedIdentity

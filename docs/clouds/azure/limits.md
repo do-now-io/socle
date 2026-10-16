@@ -27,7 +27,7 @@ sidebar:
 ## What the socle does not offer here yet
 
 - **Velero**: refused at plan on `azure`.
-- **A Crossplane Azure provider**: providers render for AWS only.
+- **A Crossplane Azure provider**: providers render for aws and gcp only.
 - **`kube.keda.services`**: refused; use a `TriggerAuthentication` Secret or `podIdentity.azureWorkload` in `values`.
 - **external-dns credentials**: create the `external-dns-azure` Secret ([external-dns](../../catalog/external-dns.md)).
 - **Deployment Safeguards**: Kyverno is the policy path.

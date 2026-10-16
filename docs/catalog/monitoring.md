@@ -135,6 +135,14 @@ kube = {
   all if the port is missing.
 - **`storage_size` grows, never shrinks**, and only where the StorageClass
   allows expansion. To or from `""` replaces the volume: the data is lost.
+  With `""` the data lives in an `emptyDir`, and VictoriaMetrics, VictoriaLogs
+  and VictoriaTraces each ask 2Gi of ephemeral storage for it instead of
+  64Mi. On GKE Autopilot that request is also the limit: a pod past it is
+  evicted, its data lost. Keep data on a claim, or raise
+  `<part>.spec.resources.requests.ephemeral-storage` in `values`.
+- **On gcp there is no node-exporter**: GKE Autopilot refuses its host
+  network, host PID and `hostPath`, so its rules and its dashboard are off
+  too. Autopilot collects the nodes' metrics itself, into Cloud Monitoring.
 - **Past 100,000 new series in an hour, new series are dropped** with a log
   line. Raise `storage.maxHourlySeries` under `vmsingle.spec.extraArgs` in
   `values` if you need to.
@@ -176,10 +184,12 @@ A `ClusterRole/monitoring-grafana` reading ConfigMaps only, which Grafana's
 sidecars use in place of the chart's (which also reads every Secret), and a
 Flux `Kustomization` applying the socle's own `VMRule`s. With a domain, a
 gateway and the shared Gateways, `HTTPRoute/grafana`, waiting for its
-Gateway to be `Accepted`.
+Gateway to be `Accepted`; on gcp also `HealthCheckPolicy/grafana`, so GKE's
+load balancer checks `/api/health` rather than `/`, which Grafana redirects
+to `/login`.
 
 **What vmagent scrapes**, every 30 s: the kubelets and their cAdvisor,
-kube-state-metrics, node-exporter, the stack itself, and every annotated pod
+kube-state-metrics, node-exporter (not on gcp), the stack itself, and every annotated pod
 (the collectors, Flux, Cilium). Not the control plane: the cloud's, its
 rule groups off. The kubelet's API server and etcd families are dropped at
 the scrape (on k3s they ride the kubelet's endpoint). Not the kubelet's
@@ -198,7 +208,13 @@ VictoriaLogs v1.53.0 and VictoriaTraces v0.10.0; Alertmanager's
 configuration from `receivers` and `route`, with the Watchdog's route and
 the `null` route for `info` prepended; the operator's CRDs kept on
 uninstall, so turning the module off never deletes a client's `VMRule`;
-requests on every part, no limits. Your `values` are merged over these.
+cpu, memory and ephemeral-storage requests on every container, the
+operator's config-reloaders and the chart's hooks included, no limits
+([MONITORING-13](../decisions/monitoring.md#monitoring-13-requests-on-every-container-disk-included-on-every-cloud)).
+Your `values` are merged over these. On gcp, from
+`oci/clusters/gcp/monitoring/patch.yaml`: node-exporter off and the
+`HealthCheckPolicy` above
+([MONITORING-14](../decisions/monitoring.md#monitoring-14-on-gcp-no-node-exporter-and-grafana-health-checked-on-apihealth)).
 
 **Cloud access**: none; the data is on the claims; egress to
 raw.githubusercontent.com and grafana.com.

@@ -7,7 +7,8 @@ sidebar:
 
 The argocd-image-updater module moves the client's ArgoCD applications to
 new image tags without a commit. The socle installs the controller and, on
-aws, its read access to ECR; what to update, and how, stays the client's.
+aws, its read access to ECR, on gcp to Artifact Registry; what to update,
+and how, stays the client's.
 
 ## ARGOCD-IMAGE-UPDATER-01: Its own module, off by default, refused without argocd
 
@@ -194,3 +195,66 @@ may configure that registry himself, with his own credential; a registry of
 another account or region is always his.
 
 **Sources.** `registry-scanner/pkg/registry/config.go` and `endpoints.go` in Image Updater.
+
+## ARGOCD-IMAGE-UPDATER-08: On gcp, Artifact Registry Reader on the project, its token from the metadata server
+
+**proposed** · 2026-10-16 · [`oci/clusters/gcp/argocd-image-updater/patch.yaml`](../../oci/clusters/gcp/argocd-image-updater/patch.yaml), [`oci/catalog/argocd-image-updater/tests/e2e/chainsaw-test.yaml`](../../oci/catalog/argocd-image-updater/tests/e2e/chainsaw-test.yaml)
+
+**Context.** ARGOCD-IMAGE-UPDATER-04 has no gcp shape: on gcp the module
+falls under ARGOCD-IMAGE-UPDATER-05, the client's credential. The socle has
+no Google service account there, and Crossplane grants a role only under the
+foundations' `modifiedGrantsByRole.hasOnly()` condition
+([GCP-14](gcp.md#gcp-14-workload-identity-federation-direct-principals-no-google-service-account)).
+Artifact Registry grants roles per repository, and the `provider-gcp-artifact`
+family member has the kind for it (`RegistryRepositoryIAMMember`, v3.0.0),
+but Artifact Registry recognises neither
+`iam.googleapis.com/modifiedGrantsByRole` nor `resource.name` in IAM
+conditions: a Crossplane allowed to set a repository's IAM policy could grant
+itself, or anyone, writer or admin on every repository of the project, and
+push the images the cluster runs. A project grant of
+`roles/artifactregistry.reader` stays under the condition, and reaches every
+repository of the project; the socle already runs one cluster per project.
+
+Artifact Registry takes an OAuth access token as a password, user
+`oauth2accesstoken`, on `LOCATION-docker.pkg.dev`, one host per location, and
+supports federated identities with no listed limitation. The GKE metadata
+server exchanges the pod's ServiceAccount token for such a token, valid one
+hour and cached, without saying how much of the hour is left. Image Updater
+has no Google code: an `ext:` credential runs a script, kills it after 10
+seconds, splits its output on the first `:`, and runs it again once
+`credsexpire` has passed or at once after a 401 or 403. Its v1.3.0 image is
+Alpine with busybox `wget` and `sed`, and neither `curl` nor `gcloud`. It
+matches an image's host exactly before any longer prefix, and registers an
+anonymous entry for a host no entry covers, which then wins over an entry
+whose prefix is a path.
+
+**Decision.** On gcp, `kube.argocd_image_updater.repositories` names
+Artifact Registry repositories of the cluster's project as
+`LOCATION/REPOSITORY` (`europe-west1/apps`). With it not empty and Crossplane
+on, gcp's step declares a `ProjectIAMMember` granting
+`roles/artifactregistry.reader` on the project to the principal
+`…/subject/ns/argocd-image-updater/sa/argocd-image-updater`, and the chart
+waits for it to be Ready. The socle mounts a login script printing
+`oauth2accesstoken:<token>` from the metadata server, and writes one registry
+entry per location named, prefix `LOCATION-docker.pkg.dev`, re-run every 5
+minutes, before the client's `registries`. No key, no Google service account.
+If accepted, this decision replaces ARGOCD-IMAGE-UPDATER-05 for gcp; with
+`repositories` empty, gcp keeps the client's credential.
+
+**Consequences.** The client adds `roles/artifactregistry.reader` to the
+foundations' `crossplane.allowed_roles`; without it the member fails at IAM,
+the reason on its `Synced` condition. The names in `repositories` choose the
+hosts, not what the role reaches: the controller reads every repository of
+the project, and one outside it wherever its owner grants that principal the
+role. An image of a location named, in another project, takes the socle's
+entry, and `tofu plan` refuses a client entry for that host, as
+ARGOCD-IMAGE-UPDATER-07 does for ECR. Measured on the sandbox GKE
+Autopilot, 2026-10-16 (artifact `0.0.0-feat-gcp-parity.d896756`): Artifact
+Registry's Docker endpoint accepts the metadata server's federated token,
+and Image Updater listed the tags of the private repository
+`europe-west1-docker.pkg.dev/sandbox-2bace/socle-e2e/podinfo` and moved the
+Application from 6.9.0 to 6.9.4; the GKE e2e
+(`argocd-image-updater-module-gke`), binding and its propagation included,
+passed in 70 s.
+
+**Sources.** [Artifact Registry access control](https://docs.cloud.google.com/artifact-registry/docs/access-control); [Artifact Registry Docker authentication](https://docs.cloud.google.com/artifact-registry/docs/docker/authentication); [IAM conditions attribute reference](https://docs.cloud.google.com/iam/docs/conditions-attribute-reference); [Resource attributes for IAM conditions](https://docs.cloud.google.com/iam/docs/conditions-resource-attributes); [Set limits on granting roles](https://docs.cloud.google.com/iam/docs/setting-limits-on-granting-roles); [Identity federation: products and limitations](https://docs.cloud.google.com/iam/docs/federated-identity-supported-services); [About Workload Identity Federation for GKE](https://docs.cloud.google.com/kubernetes-engine/docs/concepts/workload-identity); `registry-scanner/pkg/image/credentials.go`, `registry-scanner/pkg/registry/endpoints.go` and `registry.go`, and the `Dockerfile`, in Image Updater v1.3.0; the GKE Autopilot sandbox run of 2026-10-16.

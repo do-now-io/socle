@@ -8,8 +8,10 @@
 #
 # What is the same on every cloud. On aws, the module's own IAM role and the
 # socle's ECR registry entry are aws's, in
-# oci/clusters/aws/argocd-image-updater/patch.yaml: a step named cloud that
-# the cloud inserts before workload (docs/decisions/socle.md, SOCLE-32).
+# oci/clusters/aws/argocd-image-updater/patch.yaml; on gcp, its Artifact
+# Registry Reader grant and the socle's Artifact Registry entries are gcp's,
+# in oci/clusters/gcp/argocd-image-updater/patch.yaml: a step named cloud
+# that the cloud inserts before workload (docs/decisions/socle.md, SOCLE-32).
 #
 # Values, in the order helm-controller merges them, later winning
 # (docs/decisions/socle.md#socle-06-the-clients-values-win):
@@ -35,9 +37,10 @@
 # The registry entries (ARGOCD-IMAGE-UPDATER-04, -07): the client's
 # registries, as written, are config.registries here. They are one list,
 # which a list in the client's values would replace whole: OpenTofu refuses
-# it there. A cloud step that adds the socle's own entry — aws's, for the
-# ECR registry of the cluster's account and region — sets the whole list,
-# its entry first and the client's after it, and replaces this one.
+# it there. A cloud step that adds the socle's own entries — aws's, for the
+# ECR registry of the cluster's account and region; gcp's, for the Artifact
+# Registry host of each location named — sets the whole list, its entries
+# first and the client's after them, and replaces this one.
 #
 # resourcesTemplate rather than resources: the optional Secret entry is
 # conditional text, which the structured resources list cannot carry.
@@ -188,11 +191,19 @@ spec:
               prometheus.io/scrape: "true"
               prometheus.io/port: "8080"
             # The chart sets none. Measured on EKS with one Application watched:
-            # 2m CPU, 25Mi; the memory request leaves twice that.
+            # 2m CPU, 25Mi; the memory request leaves twice that. Disk, chosen:
+            # the git write-back makes a depth-1 clone of the client's
+            # repository in the /tmp emptyDir for each update and removes it
+            # after (pkg/argocd/git.go, v1.3.0), up to ten at once
+            # (--max-concurrent-apps), so 256Mi rather than the 64Mi of a
+            # container that writes only its logs. Autopilot turns the request
+            # into a limit: a client with larger repositories raises it in
+            # values (docs/catalog/argocd-image-updater.md).
             resources:
               requests:
                 cpu: 50m
                 memory: 64Mi
+                ephemeral-storage: 256Mi
         ---
         # The client's own chart values, as written in
         # kube.argocd_image_updater.values. OpenTofu refuses secrets and

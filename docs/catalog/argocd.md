@@ -87,7 +87,10 @@ kube = {
 holds `HTTPRoute/argocd-server`, which waits for its Gateway to be `Accepted`.
 
 **What the socle sets**: one replica of each component (two with `ha`; the
-controller stays at one), requests with no limits, `server.insecure` (TLS
+controller stays at one), cpu, memory and ephemeral-storage requests on
+every container with no limits — 1Gi of disk for the repo server, which
+clones your repositories, raise it in `values` for large ones —
+`server.insecure` (TLS
 ends at the Gateway), `dex` and `notifications` off, `admin.enabled` and
 `global.domain` from the attributes. Your `values` are merged over these.
 

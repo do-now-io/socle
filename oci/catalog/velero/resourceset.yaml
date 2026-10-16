@@ -5,9 +5,9 @@
 # inputsFrom the one provider, the reconcile toggle on EACH resource, values
 # tested never presence.
 #
-# What is the same on every cloud. velero is offered on aws only
-# (catalog_clouds); what is aws's is oci/clusters/aws/velero/patch.yaml, a
-# step named cloud inserted before workload (docs/decisions/socle.md,
+# What is the same on every cloud. velero is offered on aws and gcp
+# (catalog_clouds); what is a cloud's is oci/clusters/<cloud>/velero/patch.yaml,
+# a step named cloud inserted before workload (docs/decisions/socle.md,
 # SOCLE-32). A cloud step provides, in the ConfigMap velero-cloud-values:
 # the object-store plugin, the backupStorageLocation named default that
 # every Schedule below writes to, and configMaps.volume-policy — the
@@ -25,7 +25,9 @@
 # Steps, each applied once the one before is healthy: namespace, then
 # workload — the chart, the Schedules and the admission policy. The cloud's
 # step between them is healthy only once the bucket and the module's access
-# are ready: EKS Pod Identity injects the credentials at pod admission only.
+# are ready: EKS Pod Identity injects the credentials at pod admission only,
+# and on GCP a server started before its binding fails its storage location
+# until the next validation.
 #
 # What an application does: its chart labels every object of its release
 # with socle.do-now.io/backup-frequency and socle.do-now.io/backup-retention.
@@ -89,7 +91,8 @@ spec:
             serviceAccount:
               server:
                 create: true
-                # The subject the module's Pod Identity association binds.
+                # The subject the cloud step's access binds: EKS Pod
+                # Identity's association, GCP's Workload Identity principal.
                 name: velero-server
             # Turning the module off keeps the CRDs: a re-enable re-syncs the
             # Backup objects from the bucket, and they need their kind.
@@ -109,6 +112,24 @@ spec:
               << end >>
               uploaderType: kopia
               defaultVolumesToFsBackup: false
+              # The Kopia repository maintenance Jobs the server starts, one
+              # per repository (file-system backups). Created at runtime: no
+              # render shows them. Without this they run with no request,
+              # which GKE Autopilot sizes at 500m / 2Gi / 1Gi. The chart
+              # writes it to the velero-repo-maintenance ConfigMap; Velero
+              # 1.18 parses every field it sets (an empty limit fails the
+              # Job), "0" being no limit. The Jobs mount the server's
+              # volumes, Kopia's cache among them: the server's requests.
+              repositoryMaintenanceJob:
+                repositoryConfigData:
+                  global:
+                    keepLatestMaintenanceJobs: 3
+                    podResources:
+                      cpuRequest: 50m
+                      memoryRequest: 128Mi
+                      ephemeralStorageRequest: 512Mi
+                      cpuLimit: "0"
+                      memoryLimit: "0"
             # One Schedule per (frequency, retention) pair, named after it,
             # selecting the two labels across every namespace. The volume
             # policy decides each volume's method.
@@ -165,17 +186,33 @@ spec:
                 readOnlyRootFilesystem: true
                 capabilities:
                   drop: [ALL]
+            # Every container states its disk, on every cloud, or GKE
+            # Autopilot reserves 1Gi a container (docs/decisions/gcp.md,
+            # GCP-01): the server's emptyDirs hold the plugin binary its init
+            # container copies (under 100 MiB), the Kopia cache and scratch
+            # space; 512Mi with room. The node-agent's Kopia cache grows with
+            # what it uploads: a request, no limit.
             resources:
               requests:
                 cpu: 50m
                 memory: 128Mi
+                ephemeral-storage: 512Mi
               limits:
                 memory: 512Mi
+            # The CRD upgrade hook's Job: the chart asks nothing for it, and
+            # Autopilot gives a container without requests 500m / 2Gi, and
+            # bills what is requested.
+            upgradeJobResources:
+              requests:
+                cpu: 50m
+                memory: 128Mi
+                ephemeral-storage: 32Mi
             nodeAgent:
               resources:
                 requests:
                   cpu: 50m
                   memory: 128Mi
+                  ephemeral-storage: 512Mi
                 limits:
                   memory: 1Gi
         ---
