@@ -123,9 +123,13 @@ Elsewhere, none.
 each once the one before is healthy: the namespace, then the chart. On aws,
 [`oci/clusters/aws/external-secrets/patch.yaml`](../../oci/clusters/aws/external-secrets/patch.yaml)
 adds what only aws has: the module waits for the `crossplane` ResourceSet, a
-`cloud` step before the chart holds the role and its association and is
-healthy only once both are Ready, and a `store` step after the chart holds
-the `ClusterSecretStore`. On gcp,
+`cloud` step before the chart holds the module's ServiceAccount, the role and
+its association. That step is healthy once both are Ready and the Job
+`external-secrets-pod-identity` has received the Pod Identity credentials
+under that ServiceAccount. A Ready association can still be missing from
+the admission webhook for a few seconds, and a controller admitted then
+would never get credentials ([module IAM](../architecture/module-iam.md#the-ordering-chain)). A `store` step after the chart holds the
+`ClusterSecretStore`. On gcp,
 [`oci/clusters/gcp/external-secrets/patch.yaml`](../../oci/clusters/gcp/external-secrets/patch.yaml)
 does the same with the bindings: the chart waits until each is Ready, as a
 controller started before them would fail its first reads. Turn the module

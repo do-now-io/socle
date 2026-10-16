@@ -221,7 +221,10 @@ Read-only.
 **Ordering**: waits for the `argocd` ResourceSet, and on aws for
 `crossplane`; the chart is applied after the cloud's step, which is healthy
 only once the role and its association are Ready on aws, the project member
-on gcp.
+on gcp. On aws it also waits for the Job `argocd-image-updater-pod-identity`
+to receive the Pod Identity credentials under the module's ServiceAccount,
+which aws's step creates instead of the chart: a Ready association reaches
+the admission webhook seconds later ([module IAM](../architecture/module-iam.md#the-ordering-chain)).
 
 **Measured** on the sandbox EKS, 2026-10-13: an `ImageUpdater` moved an
 `Application` to a new tag pushed to ECR within one 2-minute cycle, Git

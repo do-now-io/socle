@@ -130,9 +130,16 @@ the zone's own policy, hence the project
 [SOCLE-32](../decisions/socle.md#socle-32-what-only-one-cloud-has-that-cloud-adds-to-the-module-as-steps)) inserts a step with the provider and, on
 aws and gcp with crossplane on, the module's access, before the chart's. On
 both the module waits for `crossplane`, and the chart for the access to be
-Ready: on aws since Pod Identity hands credentials at admission only, on gcp
-so that a member that never turns Ready holds the module visibly rather than
-leaving a pod that writes nothing.
+Ready. On aws, Ready is not enough: Pod Identity hands out credentials at
+admission only, and the association reaches the admission webhook seconds
+after it turns Ready. A pod admitted in between writes nothing until it is
+recreated (#97). So on aws the chart also waits for the Job
+`external-dns-pod-identity`, which runs under the module's ServiceAccount
+(created by the aws step, not the chart) and succeeds once that
+ServiceAccount really gets credentials ([module IAM](../architecture/module-iam.md#the-ordering-chain)). On gcp, the wait means a
+member that never turns Ready holds the module visibly rather than leaving a
+pod that writes nothing. A late binding there only delays the first write,
+since tokens are exchanged at call time.
 
 **Measured** on floci, 2026-09-24: an Ingress became an A record with its
 `socle-` TXT; with `sync`, both went when the Ingress did. On the sandbox's

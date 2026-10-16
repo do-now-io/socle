@@ -163,7 +163,11 @@ own identity.
 run in order — the namespace, the cloud's step, then the chart — and the
 cloud's step is healthy only once the bucket and the module's access (the
 role and the Pod Identity association on aws, the binding on gcp) are
-`Ready`, so the server starts with its credentials. Turning it off, the
+`Ready`, so the server starts with its credentials. On aws it also waits for
+the Job `velero-server-pod-identity` to receive them under the server's
+ServiceAccount, which aws's step creates instead of the chart: a Ready
+association reaches the admission webhook seconds later ([module IAM](../architecture/module-iam.md#the-ordering-chain)). On gcp tokens
+are exchanged at call time, so nothing more is needed there. Turning it off, the
 binding goes with the module on gcp; the bucket stays on both.
 
 **Measured** on floci k3s, 2026-10-02: a labelled claim backed up, its
