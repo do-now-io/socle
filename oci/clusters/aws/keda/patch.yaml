@@ -1,8 +1,9 @@
-# The keda module on aws: with Crossplane on and a service named in
-# kube.keda.services, the operator's own IAM role — one read-only statement
-# per named service — and its Pod Identity association
-# (docs/catalog/keda.md, docs/architecture/module-iam.md); and the
-# annotation that rolls the operator when that role changes.
+# The keda module on aws: the operator's ServiceAccount and, with Crossplane on
+# and a service named in kube.keda.services, the operator's own IAM role — one
+# read-only statement per named service —, its Pod Identity association and
+# the proof the association is usable (docs/catalog/keda.md,
+# docs/architecture/module-iam.md); and the annotation that rolls the operator
+# when that role changes.
 - op: add
   path: /spec/dependsOn
   value:
@@ -20,6 +21,21 @@
   value:
     name: cloud
     resourcesTemplate: |
+      # The subject of the Pod Identity association, the socle's on aws rather
+      # than the chart's (its values below): the access check runs under it
+      # before the chart is installed. Kept whatever Crossplane says, so turning
+      # Crossplane on or off never hands it between owners; resource-policy
+      # keep, so the one upgrade that hands it over from the chart does not see
+      # Helm delete it (docs/architecture/module-iam.md).
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: keda-operator
+        namespace: keda
+        annotations:
+          helm.sh/resource-policy: keep
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.keda.enabled >>enabled<< else >>disabled<< end >>
+      ---
       << if and inputs.modules.crossplane.enabled inputs.modules.keda.services >>
       # The module's own AWS access, docs/architecture/module-iam.md. Under
       # /socle/<cluster>/ and carrying Crossplane's boundary when the root wired
@@ -99,12 +115,16 @@
           roleArnRef:
             name: keda-operator
       ---
-      # Healthy only once the Role and the association are Ready, so the
-      # workload step starts after them: EKS Pod Identity injects the credentials
-      # at pod admission, and a pod admitted before its association never gets
-      # them. A dependsOn with a readyExpr, because a managed resource not yet
-      # created carries no Ready condition at all, which the step's own health
-      # check reads as healthy (measured on floci by external-dns).
+      # Healthy only once the Role and the association are Ready and a pod under
+      # the module's ServiceAccount has proven the credentials, so the workload
+      # step starts after them. EKS Pod Identity injects the credentials at pod
+      # admission only, and the association is eventually consistent: Ready as
+      # soon as CreatePodIdentityAssociation returns, known to the admission
+      # webhook seconds later. A pod admitted in between runs without
+      # credentials until it is recreated (#97). A dependsOn with a readyExpr,
+      # because a managed resource not yet created carries no Ready condition at
+      # all, which the step's own health check reads as healthy (measured on
+      # floci).
       apiVersion: fluxcd.controlplane.io/v1
       kind: ResourceSet
       metadata:
@@ -113,6 +133,8 @@
         annotations:
           fluxcd.controlplane.io/reconcile: << if inputs.modules.keda.enabled >>enabled<< else >>disabled<< end >>
       spec:
+        # Ready once the Job below is Complete.
+        wait: true
         dependsOn:
           - apiVersion: iam.aws.m.upbound.io/v1beta1
             kind: Role
@@ -126,7 +148,58 @@
             namespace: keda
             ready: true
             readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
-        resources: []
+        resources:
+          # The association, proven usable by the thing itself: a pod under the
+          # module's ServiceAccount that asks STS who it is, with only the Pod
+          # Identity credentials to answer (the instance metadata off).
+          # GetCallerIdentity needs no permission and an explicit deny does not
+          # stop it (API_GetCallerIdentity), so the boundary's deny on sts
+          # leaves it whole. Without the injection it exits non-zero, and the
+          # Job's next pod is a new admission; the wait is exactly as long as
+          # the propagation. One command, no shell; force, because a Job's
+          # template is immutable (docs/architecture/module-iam.md).
+          - apiVersion: batch/v1
+            kind: Job
+            metadata:
+              name: keda-operator-pod-identity
+              namespace: keda
+              annotations:
+                fluxcd.controlplane.io/force: enabled
+                fluxcd.controlplane.io/recreateOnFailure: enabled
+            spec:
+              backoffLimit: 6
+              template:
+                spec:
+                  serviceAccountName: keda-operator
+                  restartPolicy: Never
+                  securityContext:
+                    runAsNonRoot: true
+                    runAsUser: 65532
+                    runAsGroup: 65532
+                    seccompProfile:
+                      type: RuntimeDefault
+                  containers:
+                    - name: sts
+                      # 2.38.1
+                      image: public.ecr.aws/aws-cli/aws-cli@sha256:733d5be1015825e4038c6016f3fa9954868ddee1f611b73be795a9cc2e706bfd
+                      args: ["sts", "get-caller-identity"]
+                      env:
+                        - name: AWS_REGION
+                          value: << inputs.cluster.region >>
+                        - name: AWS_EC2_METADATA_DISABLED
+                          value: "true"
+                      securityContext:
+                        allowPrivilegeEscalation: false
+                        readOnlyRootFilesystem: true
+                        capabilities:
+                          drop: ["ALL"]
+                      resources:
+                        requests:
+                          cpu: 10m
+                          memory: 64Mi
+                          ephemeral-storage: 16Mi
+                        limits:
+                          memory: 128Mi
       ---
       << end >>
       apiVersion: v1
@@ -140,6 +213,11 @@
           fluxcd.controlplane.io/reconcile: << if inputs.modules.keda.enabled >>enabled<< else >>disabled<< end >>
       data:
         values.yaml: |
+          # The ServiceAccount of the cloud step.
+          serviceAccount:
+            operator:
+              create: false
+              name: keda-operator
           podAnnotations:
             keda:
               # The services the operator's role may read, so that a change

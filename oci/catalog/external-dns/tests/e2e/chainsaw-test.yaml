@@ -852,6 +852,25 @@ spec:
                   - status: 'False'
         - sleep:
             duration: 60s
+        # The ServiceAccount is the aws step's, there before the chart; the
+        # check that proves the association usable runs under it only once the
+        # association is Ready (#97): no Job.
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ServiceAccount
+              metadata:
+                name: external-dns
+                namespace: external-dns
+                annotations:
+                  helm.sh/resource-policy: keep
+        - error:
+            resource:
+              apiVersion: batch/v1
+              kind: Job
+              metadata:
+                name: external-dns-pod-identity
+                namespace: external-dns
         - error:
             resource:
               apiVersion: helm.toolkit.fluxcd.io/v2
