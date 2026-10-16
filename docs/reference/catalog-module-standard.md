@@ -21,7 +21,7 @@ Models: `hello` for structure and tests, `argocd` for chart values.
 | Cloud binding | `<snake_name> = ["aws", …]` in `catalog_clouds`, one per line, when not on every cloud | `check-catalog-clouds.sh`; refused at plan elsewhere |
 | Monitoring, for every module with a workload | Its pods annotated `prometheus.io/scrape` on a declared port (vmagent's scrape of annotated pods), or a `VMServiceScrape` when it serves HTTPS only; `oci/catalog/<kebab-name>/monitoring/`: awesome-prometheus-alerts' file when it has one, the project's dashboard, and the socle's `rules.yaml` for what awesome-prometheus-alerts lacks; applied by a `Kustomization` `<kebab-name>-monitoring` with `retryInterval: 1m`, on only while the module and `monitoring` both are ([MONITORING-12](../decisions/monitoring.md)) | `upstream-monitoring.sh check` (copies unchanged), `check-rules.sh` (`vmalert -dryRun`), both in `pr-static.yaml`; the module's e2e asserts the `Kustomization` Ready |
 | The e2e proof | `oci/catalog/<kebab-name>/tests/e2e/chainsaw-test.yaml`, optional `values.yaml` | `check-catalog-clouds.sh`; `e2e.yaml` runs it |
-| The page | `docs/catalog/<kebab-name>.md`, from [`_template.md`](https://github.com/do-now-io/socle/blob/main/docs/catalog/_template.md) | rule 6 of [CONTRIBUTING](../contributing.md#the-rules); the site build |
+| The page | `docs/catalog/<kebab-name>.md`, from [`_template.md`](https://github.com/do-now-io/socle/blob/main/docs/catalog/_template.md) | `check-catalog-pages.sh`: the page exists, its frontmatter has `title`, `description`, `category`, each `requires` names a module offered on the same clouds, and waits for it; rule 6 of [CONTRIBUTING](../contributing.md#the-rules); the site build |
 | The decisions | `docs/decisions/<kebab-name>.md`, from [`_template.md`](https://github.com/do-now-io/socle/blob/main/docs/decisions/_template.md); not published on the site | review |
 
 ## Template rules
@@ -44,6 +44,8 @@ Models: `hello` for structure and tests, `argocd` for chart values.
 - [ ] Cloud access as Crossplane resources in the cloud's `cloud` step, with a `dependsOn` on `crossplane`
       and an empty `<module>-access` `ResourceSet` that `dependsOn` the role with a `readyExpr`, so the
       `workload` step waits for it; nothing under `opentofu/<cloud>/`.
+- [ ] A module that `requires` another (its page's frontmatter) waits for it: a top-level `dependsOn` on the
+      other's `ResourceSet`, in the template, or in the cloud's `patch.yaml` when the need is one cloud's.
 - [ ] CRDs that hold your objects kept when off, or the page says not
       ([CRDs when a module is off](../architecture/flux-catalog.md#crds-when-a-module-is-off)).
 - [ ] New attributes in `oci/.ci/inputs-sample.yaml`; `flux-operator build rset` renders, kubeconform `-strict` passes.
@@ -93,7 +95,7 @@ Identity, today) is a step of its own, named as such.
 ## Reviewer checklist
 
 - [ ] Folder `oci/catalog/<kebab-name>/`, key `<snake_name>`, `enabled` in the entry.
-- [ ] `.github/scripts/check-catalog-clouds.sh` passes.
+- [ ] `.github/scripts/check-catalog-clouds.sh` and `check-catalog-pages.sh` pass.
 - [ ] Every object, the namespace included, carries the toggle.
 - [ ] The chart pinned exactly, its version in `docs/reference/compatibility.md`.
 - [ ] `valuesFrom` socle, cloud, client, Secret; the watch label on every ConfigMap.

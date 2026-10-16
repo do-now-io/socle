@@ -2,7 +2,7 @@
 title: <module>
 description: One line, for the client — what the module gives them, not how it is built.
 category: networking # networking | security | gitops | observability | autoscaling | secrets | backup | platform
-requires: # only what the module does not work without; each also appears in its ResourceSet's spec.dependsOn
+requires: # only what the module does not work without; each also appears in its ResourceSet's spec.dependsOn, or its cloud's patch.yaml (check-catalog-pages.sh)
   - module: crossplane
     clouds: [aws] # omit for every cloud
     why: its IAM role is a Crossplane managed resource
