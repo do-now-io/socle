@@ -7,16 +7,28 @@
 # Nothing here names a module. A catalog module is a folder under
 # oci/catalog/ and it ships tests/e2e/chainsaw-test.yaml; `discover` turns
 # those folders into the matrix, one job per (module, cloud) on its own
-# floci, and Chainsaw runs the socle's generic suite (oci/tests/e2e) beside
-# the module's own. The clouds are the folders under .github/e2e/, one
+# emulator, and Chainsaw runs the socle's generic suite (oci/tests/e2e)
+# beside the module's own. The clouds are the folders under .github/e2e/, one
 # fixture root each; a (module, cloud) pair exists when the cloud's overlay
-# deploys the module. Adding a module or a cloud never touches this file.
+# deploys the module. Adding a module never touches this file; adding a cloud
+# adds its emulator to the jobs' services.
+#
+# The emulators, one per cloud, each a real k3s behind the cloud's emulated
+# Kubernetes API: floci for aws (EKS), floci-gcp for gcp (GKE). Every job
+# runs both as service containers, so that Renovate reads both images (the
+# github-actions manager knows `services.*.image`, nothing inside a `run:`
+# line or an expression); the e2e-cluster action picks its cloud's by port.
+# The idle one costs a few seconds of start and under 100 MB.
 #
 # Two kinds of job, both ending in `tofu destroy`:
-#   root      the real client root (opentofu/clusters/<cloud>), applied once
-#             with the fixture tfvars; the generic suite plus every module's
-#             `phase: health` tests. Once only: floci does not read back
-#             several EKS attributes, so a second apply of that root fails.
+#   root      every module's `phase: health` tests and the generic suite on
+#             one cluster. On aws the real client root
+#             (opentofu/clusters/aws), applied once with floci.tfvars beside
+#             the fixture: floci does not read back several EKS attributes,
+#             so a second apply of that root fails. A cloud with no
+#             floci.tfvars applies its fixture root instead: gcp, whose root
+#             reaches GKE's DNS endpoint through gke-gcloud-auth-plugin,
+#             which floci-gcp does not serve (.github/e2e/gcp/main.tf).
 #   <module>  the bare fixture root, then the generic suite and the module's
 #             whole suite; the one OpenTofu-driven mutation (the module off
 #             through `kube`, back on, a second plan empty); the socle
@@ -24,8 +36,9 @@
 # `e2e` is the single context a ruleset can require: the matrix is
 # discovered, so its job names cannot be listed.
 #
-# What this cannot prove: what floci does not run — Cilium on real nodes,
-# Pod Identity, IAM enforcement, the cloud's DNS — is the sandbox's (M4).
+# What this cannot prove: what the emulators do not run — Cilium on real
+# nodes, IAM enforcement, the cloud's DNS, GKE Autopilot, Workload Identity
+# Federation — is the sandbox's (M4).
 name: e2e
 
 on:
@@ -63,12 +76,13 @@ env:
 
 jobs:
   # The only listing there is: modules from their tests/e2e folders, clouds
-  # from their fixture roots, pairs from the cloud's overlay.
+  # from their fixture roots, pairs from the cloud's overlay, and each cloud's
+  # root job's root — the real one when a floci.tfvars says it applies there.
   discover:
     name: Discover modules and clouds
     runs-on: ubuntu-24.04
     outputs:
-      clouds: ${{ steps.matrix.outputs.clouds }}
+      roots: ${{ steps.matrix.outputs.roots }}
       pairs: ${{ steps.matrix.outputs.pairs }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -85,13 +99,29 @@ jobs:
               grep -q "catalog/$module/resourceset.yaml" "oci/clusters/$cloud/kustomization.yaml" && pairs+=("$module:$cloud")
             done
           done
+          roots=()
+          for cloud in "${clouds[@]}"; do
+            if [ -f ".github/e2e/$cloud/floci.tfvars" ]; then
+              roots+=("$cloud:opentofu/clusters/$cloud:.github/e2e/$cloud/floci.tfvars:socle-e2e")
+            else
+              roots+=("$cloud:.github/e2e/$cloud::socle-e2e-catalog")
+            fi
+          done
           {
-            echo "clouds=$(printf '%s\n' "${clouds[@]}" | jq -R -s -c 'split("\n") | map(select(length > 0))')"
+            echo "roots=$(printf '%s\n' "${roots[@]}" | jq -R -s -c 'split("\n") | map(select(length > 0))
+              | map(split(":") | {cloud: .[0], root: .[1], var_file: .[2], cluster: .[3]})')"
             echo "pairs=$(printf '%s\n' "${pairs[@]}" \
               | jq -R -s -c 'split("\n") | map(select(length > 0)) | map(split(":") | {module: .[0], cloud: .[1]})')"
           } >> "$GITHUB_OUTPUT"
           {
             echo "### e2e matrix"
+            echo "| Root job | Root |"
+            echo "|---|---|"
+            for root in "${roots[@]}"; do
+              IFS=: read -r cloud dir _ _ <<< "$root"
+              echo "| \`root ($cloud)\` | \`$dir\` |"
+            done
+            echo
             echo "| Module | Clouds |"
             echo "|---|---|"
             for module in "${modules[@]}"; do
@@ -110,16 +140,26 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        cloud: ${{ fromJSON(needs.discover.outputs.clouds) }}
+        include: ${{ fromJSON(needs.discover.outputs.roots) }}
     # floci runs a real k3s behind its emulated EKS once the Docker socket is
-    # mounted and FLOCI_SERVICES_EKS_MOCK is left unset. A service container
-    # so that Renovate reads the image: the github-actions manager knows
-    # `services.*.image`, and nothing inside a `run:` line.
+    # mounted and FLOCI_SERVICES_EKS_MOCK is left unset; floci-gcp the same
+    # behind its emulated GKE, FLOCI_GCP_SERVICES_GKE_MOCK left unset, on the
+    # k3s floci runs (v1.34.1+k3s1, measured on floci 2.1.0's nodes) rather
+    # than its default rancher/k3s:latest. Both on every job: see the header.
     services:
       floci:
         image: floci/floci:2.1.0@sha256:f5aa8c18302cedb4f2385f5c4e455b3efc77fee6bf7b6e5d1712b2817ba102db
         ports:
           - 4566:4566
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock
+      floci-gcp:
+        image: floci/floci-gcp:0.11.0@sha256:eae9683d806ceb643bcb36aee97cdb8cad13c3e2959cd053bf40e481994fde12
+        env:
+          FLOCI_GCP_SERVICES_GKE_DEFAULT_IMAGE: >-
+            rancher/k3s:v1.34.1-k3s1@sha256:5e0707cfd1239b358ef73f3254bc3eadc027dd30cd5ec6ca41e29e47652a1b8c
+        ports:
+          - 4588:4588
         volumes:
           - /var/run/docker.sock:/var/run/docker.sock
     steps:
@@ -128,22 +168,22 @@ jobs:
           persist-credentials: false
       - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
       - uses: kyverno/action-install-chainsaw@1223ef75bedeb59c4e7b5455463d4316e76dff01 # v0.2.15
-      - name: Apply the real root, once
+      - name: Apply the root, once
         id: apply
         uses: ./.github/actions/e2e-cluster
         with:
           mode: apply
-          root: opentofu/clusters/${{ matrix.cloud }}
-          var-file: .github/e2e/${{ matrix.cloud }}/floci.tfvars
-          cluster: socle-e2e
+          cloud: ${{ matrix.cloud }}
+          root: ${{ matrix.root }}
+          var-file: ${{ matrix.var_file }}
+          cluster: ${{ matrix.cluster }}
           tag: ${{ inputs.tag }}
           cosign-identity: ${{ inputs.cosign_identity }}
-          floci: ${{ job.services.floci.id }}
       - name: The socle converges, and every module is healthy
         env:
           TAG: ${{ inputs.tag }}
           CLOUD: ${{ matrix.cloud }}
-          CLUSTER: socle-e2e
+          CLUSTER: ${{ matrix.cluster }}
         # The generic suite first, alone: socle-root Ready means every module
         # is Ready. Not beside the modules' tests: a test that ends while an
         # aggregated API (metrics.k8s.io, KEDA's external metrics) is still
@@ -166,9 +206,10 @@ jobs:
         uses: ./.github/actions/e2e-cluster
         with:
           mode: destroy-socle
-          root: opentofu/clusters/${{ matrix.cloud }}
-          var-file: .github/e2e/${{ matrix.cloud }}/floci.tfvars
-          cluster: socle-e2e
+          cloud: ${{ matrix.cloud }}
+          root: ${{ matrix.root }}
+          var-file: ${{ matrix.var_file }}
+          cluster: ${{ matrix.cluster }}
           tag: ${{ inputs.tag }}
           cosign-identity: ${{ inputs.cosign_identity }}
       # A module may ship a `destroyed` test too: what must survive the
@@ -178,7 +219,7 @@ jobs:
         env:
           TAG: ${{ inputs.tag }}
           CLOUD: ${{ matrix.cloud }}
-          CLUSTER: socle-e2e
+          CLUSTER: ${{ matrix.cluster }}
         run: |
           chainsaw test oci/tests/e2e oci/catalog/*/tests/e2e \
             --selector "phase=destroyed, cloud in ($CLOUD, any), platform in (floci, any)" \
@@ -189,12 +230,12 @@ jobs:
         uses: ./.github/actions/e2e-cluster
         with:
           mode: destroy
-          root: opentofu/clusters/${{ matrix.cloud }}
-          var-file: .github/e2e/${{ matrix.cloud }}/floci.tfvars
-          cluster: socle-e2e
+          cloud: ${{ matrix.cloud }}
+          root: ${{ matrix.root }}
+          var-file: ${{ matrix.var_file }}
+          cluster: ${{ matrix.cluster }}
           tag: ${{ inputs.tag }}
           cosign-identity: ${{ inputs.cosign_identity }}
-          floci: ${{ job.services.floci.id }}
       - name: The Checks tab names the failing step
         if: always()
         uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6.5.0
@@ -209,16 +250,22 @@ jobs:
           TAG: ${{ inputs.tag }}
           SUBJECT: ${{ inputs.subject }}
           CLOUD: ${{ matrix.cloud }}
+          ROOT: ${{ matrix.root }}
         run: |
           if [ "$JOB_STATUS" != success ]; then
             echo "### root ($CLOUD) ❌ — see the failed step; each Chainsaw step's \`catch\` printed what the cluster looked like" \
               >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
+          if [ "$ROOT" = "opentofu/clusters/$CLOUD" ]; then
+            applied="\`$ROOT\` — the real root, foundations included —"
+          else
+            applied="\`$ROOT\` — a bare cluster plus the real bootstrap module; the real root does not apply on its emulator —"
+          fi
           {
             echo "### root ($CLOUD) ✅"
-            echo "Applied \`opentofu/clusters/$CLOUD\` — the real root, foundations included — once on"
-            echo "floci's k3s against \`ghcr.io/do-now-io/socle/flux-modules:$TAG\`, signed as \`$SUBJECT\`."
+            echo "Applied $applied once on"
+            echo "the emulator's k3s against \`ghcr.io/do-now-io/socle/flux-modules:$TAG\`, signed as \`$SUBJECT\`."
             echo "Proven by Chainsaw: the artifact pulled by that exact tag with its signature verified,"
             echo "\`socle-root\` Ready, every module's \`health\` test green; then the socle uninstalled"
             echo "through \`tofu destroy\` and the cluster asserted empty."
@@ -236,11 +283,21 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(needs.discover.outputs.pairs) }}
+    # Both emulators, as in the root job.
     services:
       floci:
         image: floci/floci:2.1.0@sha256:f5aa8c18302cedb4f2385f5c4e455b3efc77fee6bf7b6e5d1712b2817ba102db
         ports:
           - 4566:4566
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock
+      floci-gcp:
+        image: floci/floci-gcp:0.11.0@sha256:eae9683d806ceb643bcb36aee97cdb8cad13c3e2959cd053bf40e481994fde12
+        env:
+          FLOCI_GCP_SERVICES_GKE_DEFAULT_IMAGE: >-
+            rancher/k3s:v1.34.1-k3s1@sha256:5e0707cfd1239b358ef73f3254bc3eadc027dd30cd5ec6ca41e29e47652a1b8c
+        ports:
+          - 4588:4588
         volumes:
           - /var/run/docker.sock:/var/run/docker.sock
     env:
@@ -263,11 +320,11 @@ jobs:
         uses: ./.github/actions/e2e-cluster
         with:
           mode: apply
+          cloud: ${{ matrix.cloud }}
           root: ${{ env.ROOT }}
           cluster: socle-e2e-catalog
           tag: ${{ inputs.tag }}
           cosign-identity: ${{ inputs.cosign_identity }}
-          floci: ${{ job.services.floci.id }}
       # Two runs, not one: Chainsaw orders tests arbitrarily, and the
       # module's `module` phase mutates what `health` asserts. Values are the
       # module's tests/e2e/values.yaml when it ships one.
@@ -340,6 +397,7 @@ jobs:
         uses: ./.github/actions/e2e-cluster
         with:
           mode: destroy-socle
+          cloud: ${{ matrix.cloud }}
           root: ${{ env.ROOT }}
           cluster: socle-e2e-catalog
           tag: ${{ inputs.tag }}
@@ -356,11 +414,11 @@ jobs:
         uses: ./.github/actions/e2e-cluster
         with:
           mode: destroy
+          cloud: ${{ matrix.cloud }}
           root: ${{ env.ROOT }}
           cluster: socle-e2e-catalog
           tag: ${{ inputs.tag }}
           cosign-identity: ${{ inputs.cosign_identity }}
-          floci: ${{ job.services.floci.id }}
       - name: The Checks tab names the failing step
         if: always()
         uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6.5.0
@@ -381,7 +439,7 @@ jobs:
           fi
           {
             echo "### $MODULE ($CLOUD) ✅"
-            echo "Applied \`$ROOT\` — a bare cluster plus the real bootstrap module — on floci's k3s"
+            echo "Applied \`$ROOT\` — a bare cluster plus the real bootstrap module — on the emulator's k3s"
             echo "against \`ghcr.io/do-now-io/socle/flux-modules:$TAG\`, signed as \`$SUBJECT\`. Proven by"
             echo "Chainsaw (\`$TESTS\`): the artifact pulled by that exact tag with its signature verified,"
             echo "\`socle-root\` Ready, the module's own suite green; then \`kube.${MODULE//-/_}.enabled=false\`"
@@ -438,11 +496,11 @@ jobs:
         uses: ./.github/actions/e2e-cluster
         with:
           mode: apply
+          cloud: aws
           root: ${{ env.ROOT }}
           cluster: socle-e2e-catalog
           tag: ${{ inputs.tag }}
           cosign-identity: ${{ inputs.cosign_identity }}
-          floci: ${{ job.services.floci.id }}
       - name: The socle converges, then both charts run under Enforce
         run: |
           mkdir -p "$RUNNER_TEMP/reports"
@@ -459,6 +517,7 @@ jobs:
         uses: ./.github/actions/e2e-cluster
         with:
           mode: destroy-socle
+          cloud: aws
           root: ${{ env.ROOT }}
           cluster: socle-e2e-catalog
           tag: ${{ inputs.tag }}
@@ -468,11 +527,11 @@ jobs:
         uses: ./.github/actions/e2e-cluster
         with:
           mode: destroy
+          cloud: aws
           root: ${{ env.ROOT }}
           cluster: socle-e2e-catalog
           tag: ${{ inputs.tag }}
           cosign-identity: ${{ inputs.cosign_identity }}
-          floci: ${{ job.services.floci.id }}
       - name: The Checks tab names the failing step
         if: always()
         uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6.5.0

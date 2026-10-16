@@ -2,23 +2,29 @@
 # The one place the e2e touches a shell: the cluster a Chainsaw suite runs
 # against, brought up and torn down with the two CLIs the product is made of.
 #
-#   mode: apply     floci is up, a registered IAM key, `tofu init` and `apply`
-#                   of the root, a kubeconfig. Exports KUBECONFIG, the AWS
-#                   credentials and FLOCI_IP to the job.
+#   mode: apply     the cloud's emulator is up, `tofu init` and `apply` of the
+#                   root, a kubeconfig. Exports KUBECONFIG and FLOCI_IP (the
+#                   emulator as a pod sees it) to the job, and on aws the
+#                   credentials of a registered IAM key.
 #   mode: destroy   `tofu destroy` of the same root, with the same variables.
 #                   -target narrows it to the socle (module.socle): the
 #                   envelope, the instance, the operator — what a client
 #                   uninstalls, leaving the cluster for the suite to inspect.
 #
-# What it proves: that the root applies from a checkout against floci's real
-# k3s, with the artifact pulled by its exact tag from the public package —
-# no pull secret, no credential anywhere near OpenTofu (the package went
-# public on 2026-10-01; anonymous pull measured 200). Nothing about the
-# modules: that is Chainsaw's, in the job.
-# What it cannot: floci's k3s is one node with flannel and CoreDNS already
-# there (cilium.enabled = false on every root it applies), and floci
-# validates nothing of what IAM grants. k3s's own metrics-server is removed,
-# so the socle's runs as it would on EKS, which ships none.
+# One emulator per cloud, each a service container of the job, found here by
+# the port it publishes: floci on 4566 (aws, a real k3s behind an emulated
+# EKS), floci-gcp on 4588 (gcp, a real k3s behind an emulated GKE).
+#
+# What it proves: that the root applies from a checkout against the
+# emulator's real k3s, with the artifact pulled by its exact tag from the
+# public package — no pull secret, no credential anywhere near OpenTofu (the
+# package went public on 2026-10-01; anonymous pull measured 200). Nothing
+# about the modules: that is Chainsaw's, in the job.
+# What it cannot: the k3s is one node with flannel and CoreDNS already there
+# (cilium.enabled = false on every aws root it applies; gcp installs none),
+# and neither emulator validates what IAM grants. On aws, k3s's own
+# metrics-server is removed, so the socle's runs as it would on EKS, which
+# ships none; on gcp it stays, in the place of GKE's own.
 #
 # floci 2.x facts this encodes, measured on 2.1.0 (2026-09-30):
 # - the EKS token webhook rejects the well-known `test`/`test` pair, so a
@@ -29,12 +35,19 @@
 # - the k3s container joins floci's own Docker network (auto-detected), so a
 #   pod reaches floci at FLOCI_IP, never at the runner's localhost;
 # - HTTP on 4566 is the default; TLS is opt-in (FLOCI_TLS_ENABLED), untouched.
+# floci-gcp facts (0.11.0, docs/services/gke.md upstream): k3s hands any
+# bearer token it does not know to floci-gcp's webhook, which maps it to
+# cluster-admin, so the kubeconfig carries a fixed token; the API server is
+# advertised as localhost:<port> with k3s's own CA.
 name: e2e cluster
 description: Bring up (or tear down) the socle on floci's real k3s for a Chainsaw suite.
 
 inputs:
   mode:
     description: apply, destroy-socle or destroy.
+    required: true
+  cloud:
+    description: The cloud the root targets, aws or gcp; it picks the emulator.
     required: true
   root:
     description: The OpenTofu root, relative to the workspace.
@@ -46,7 +59,7 @@ inputs:
     description: The `kube` variable, as HCL. Empty leaves the root's own value.
     default: ''
   cluster:
-    description: Name of the EKS cluster the root creates (kubeconfig).
+    description: Name of the cluster the root creates (kubeconfig, k3s container).
     required: true
   tag:
     description: The artifact tag the root pins.
@@ -54,9 +67,6 @@ inputs:
   cosign-identity:
     description: The identity Flux verifies against, as the HCL object the roots take.
     required: true
-  floci:
-    description: Id of the floci service container (`job.services.floci.id`); modes apply and destroy read it.
-    default: floci
 
 runs:
   using: composite
@@ -73,19 +83,41 @@ runs:
         echo "free on /: $free"
         echo "| Runner free disk | $free |" >> "$GITHUB_STEP_SUMMARY"
 
-    - name: floci answers, and a registered IAM key
+    # The emulator is the job's service container that publishes the cloud's
+    # port: found by it, so the workflow names no container per cloud.
+    - name: The emulator answers
       if: inputs.mode == 'apply'
       shell: bash
       env:
-        FLOCI: ${{ inputs.floci }}
+        CLOUD: ${{ inputs.cloud }}
       run: |
+        case "$CLOUD" in
+          aws) port=4566 health=/_floci/health ;;
+          gcp) port=4588 health=/_floci-gcp/health ;;
+          *) echo "::error::no emulator for cloud $CLOUD"; exit 1 ;;
+        esac
+        emulator="$(docker ps -q --filter "publish=$port")"
+        [ -n "$emulator" ] || { echo "::error::no service container publishes $port for $CLOUD"; exit 1; }
         for _ in $(seq 1 60); do
-          curl -fs http://localhost:4566/_floci/health > /dev/null && break
+          curl -fs "http://localhost:$port$health" > /dev/null && break
           sleep 2
         done
-        curl -fs http://localhost:4566/_floci/health > /dev/null \
-          || { echo "::error::floci never became healthy"; docker logs "$FLOCI"; exit 1; }
-        ip="$(docker inspect "$FLOCI" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' | awk '{print $1}')"
+        curl -fs "http://localhost:$port$health" > /dev/null \
+          || { echo "::error::the $CLOUD emulator never became healthy"; docker logs "$emulator"; exit 1; }
+        ip="$(docker inspect "$emulator" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' | awk '{print $1}')"
+        {
+          echo "FLOCI_IP=$ip"
+          echo "KUBECONFIG=$RUNNER_TEMP/e2e.kubeconfig"
+        } >> "$GITHUB_ENV"
+        version="$(curl -s "http://localhost:$port$health" | python3 -c 'import sys,json; print(json.load(sys.stdin)["version"])')"
+        image="$(docker inspect "$emulator" --format '{{.Config.Image}}')"
+        echo "${image%%@*} $version at $ip"
+        echo "| Emulator | \`${image%%@*}\` $version at $ip |" >> "$GITHUB_STEP_SUMMARY"
+
+    - name: A registered IAM key
+      if: inputs.mode == 'apply' && inputs.cloud == 'aws'
+      shell: bash
+      run: |
         # floci 2.x rejects test/test on the EKS token webhook: the key the
         # helm provider's exec plugin and kubectl sign with is a real one.
         aws iam create-user --user-name e2e > /dev/null
@@ -93,12 +125,8 @@ runs:
         {
           echo "AWS_ACCESS_KEY_ID=${key%%	*}"
           echo "AWS_SECRET_ACCESS_KEY=${key##*	}"
-          echo "FLOCI_IP=$ip"
-          echo "KUBECONFIG=$RUNNER_TEMP/e2e.kubeconfig"
         } >> "$GITHUB_ENV"
-        version="$(curl -s http://localhost:4566/_floci/health | python3 -c 'import sys,json; print(json.load(sys.stdin)["version"])')"
-        echo "floci $version at $ip, key ${key%%	*}"
-        echo "| floci | $version at $ip |" >> "$GITHUB_STEP_SUMMARY"
+        echo "key ${key%%	*}"
 
     # floci's k3s ships a metrics-server; EKS ships none, and the socle's
     # metrics_server module installs its own, on by default. The two cannot
@@ -109,7 +137,8 @@ runs:
     # apply, when the catalog may already be rendering. A .skip beside each
     # packaged manifest keeps k3s from re-applying it at its next start (a
     # .skip alone removes nothing), then the delete. A k3s that ships none
-    # leaves nothing to do. docs/catalog/metrics-server.md.
+    # leaves nothing to do. docs/catalog/metrics-server.md. On gcp it stays:
+    # GKE ships a metrics-server and the socle installs none there.
     - name: tofu init and apply
       if: inputs.mode == 'apply'
       shell: bash
@@ -120,11 +149,18 @@ runs:
         TAG: ${{ inputs.tag }}
         COSIGN: ${{ inputs.cosign-identity }}
         CLUSTER: ${{ inputs.cluster }}
+        CLOUD: ${{ inputs.cloud }}
       run: |
         args=(-input=false -var "socle_version=$TAG" -var "cosign_identity=$COSIGN")
         [ -z "$VAR_FILE" ] || args+=(-var-file "$GITHUB_WORKSPACE/$VAR_FILE")
         [ -z "$KUBE" ] || args+=(-var "kube=$KUBE")
         tofu init -input=false > /dev/null
+        if [ "$CLOUD" != aws ]; then
+          SECONDS=0
+          tofu apply -auto-approve "${args[@]}"
+          echo "| \`tofu apply\` of \`${{ inputs.root }}\` | ${SECONDS}s |" >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+        fi
         k3s_metrics_server() {
           c="floci-eks-$CLUSTER" dir=/var/lib/rancher/k3s/server/manifests/metrics-server
           for _ in $(seq 1 300); do
@@ -151,32 +187,47 @@ runs:
         [ "$status" = 0 ] || { echo "::error::k3s's own metrics-server could not be removed"; exit 1; }
         echo "| k3s's own metrics-server | removed while the apply ran |" >> "$GITHUB_STEP_SUMMARY"
 
-    # The kubeconfig Chainsaw reads carries a ServiceAccount token, not the
-    # `aws eks get-token` exec plugin `update-kubeconfig` writes: floci 2.x
-    # refuses that presigned token after 60 s and Chainsaw's client does not
-    # re-run the plugin on a 401, so every assert died at 60 s whatever its
-    # timeout (measured: an assert with a 100 s timeout ends at 61 s through
-    # the exec plugin, at 100 s through a static token). kubectl re-runs
-    # the plugin, which is why the aws-native flow below still works for it.
+    # On aws, the kubeconfig Chainsaw reads carries a ServiceAccount token,
+    # not the `aws eks get-token` exec plugin `update-kubeconfig` writes:
+    # floci 2.x refuses that presigned token after 60 s and Chainsaw's client
+    # does not re-run the plugin on a 401, so every assert died at 60 s
+    # whatever its timeout (measured: an assert with a 100 s timeout ends at
+    # 61 s through the exec plugin, at 100 s through a static token).
+    # On gcp, floci-gcp's k3s takes any bearer token as cluster-admin: the
+    # kubeconfig is written from the fixture root's two outputs.
     - name: kubeconfig
       if: inputs.mode == 'apply'
       shell: bash
+      working-directory: ${{ inputs.root }}
       env:
         CLUSTER: ${{ inputs.cluster }}
+        CLOUD: ${{ inputs.cloud }}
       run: |
-        aws eks update-kubeconfig --name "$CLUSTER" --kubeconfig "$RUNNER_TEMP/eks.kubeconfig" > /dev/null
-        export KUBECONFIG="$RUNNER_TEMP/eks.kubeconfig"
-        kubectl get nodes -o wide
-        kubectl -n kube-system create serviceaccount e2e
-        kubectl create clusterrolebinding e2e --clusterrole=cluster-admin --serviceaccount=kube-system:e2e
-        token="$(kubectl -n kube-system create token e2e --duration=3h)"
-        kubectl config view --raw --minify --flatten -o json | python3 -c '
+        case "$CLOUD" in
+          aws)
+            aws eks update-kubeconfig --name "$CLUSTER" --kubeconfig "$RUNNER_TEMP/eks.kubeconfig" > /dev/null
+            export KUBECONFIG="$RUNNER_TEMP/eks.kubeconfig"
+            kubectl -n kube-system create serviceaccount e2e
+            kubectl create clusterrolebinding e2e --clusterrole=cluster-admin --serviceaccount=kube-system:e2e
+            token="$(kubectl -n kube-system create token e2e --duration=3h)"
+            kubectl config view --raw --minify --flatten -o json | python3 -c '
         import sys, json
         c = json.load(sys.stdin)
         c["users"] = [{"name": "e2e", "user": {"token": sys.argv[1]}}]
         c["contexts"][0]["context"]["user"] = "e2e"
         print(json.dumps(c))' "$token" > "$RUNNER_TEMP/e2e.kubeconfig"
-        export KUBECONFIG="$RUNNER_TEMP/e2e.kubeconfig"
+            export KUBECONFIG="$RUNNER_TEMP/e2e.kubeconfig"
+            ;;
+          gcp)
+            tofu output -raw cluster_ca_certificate | base64 -d > "$RUNNER_TEMP/k3s-ca.crt"
+            kubectl config set-cluster "$CLUSTER" --server "https://$(tofu output -raw endpoint)" \
+              --certificate-authority "$RUNNER_TEMP/k3s-ca.crt" --embed-certs > /dev/null
+            kubectl config set-credentials e2e --token floci-gcp > /dev/null
+            kubectl config set-context e2e --cluster "$CLUSTER" --user e2e > /dev/null
+            kubectl config use-context e2e > /dev/null
+            ;;
+        esac
+        kubectl get nodes -o wide
         kubectl auth whoami
 
     - name: tofu destroy
@@ -204,21 +255,22 @@ runs:
     # DeleteCluster stops the node and leaves the registry running, with its
     # endpoint on the job's network, so the runner's own cleanup logged
     # "Docker network rm failed with exit code 1" on every job (measured,
-    # run 36869897012, `has active endpoints`). Everything on floci's
-    # networks that is not floci goes, so the runner's `docker network rm`
-    # finds the network empty (measured, run 36875732463: one container
-    # removed, `/floci-ecr-registry`, no warning).
-    - name: Remove what floci left on the job network
+    # run 36869897012, `has active endpoints`). Everything on the emulators'
+    # networks that is not an emulator goes — the service containers are
+    # the job's, and the runner removes them — so the runner's
+    # `docker network rm` finds the network empty (measured, run 36875732463:
+    # one container removed, `/floci-ecr-registry`, no warning).
+    - name: Remove what the emulator left on the job network
       if: always() && inputs.mode == 'destroy'
       shell: bash
-      env:
-        FLOCI: ${{ inputs.floci }}
       run: |
-        self="$(docker inspect "$FLOCI" --format '{{.Id}}')"
-        for network in $(docker inspect "$FLOCI" --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}'); do
-          for container in $(docker network inspect "$network" --format '{{range $id, $_ := .Containers}}{{$id}} {{end}}'); do
-            [ "$container" = "$self" ] && continue
-            echo "removing $(docker inspect "$container" --format '{{.Name}}') from $network"
-            docker rm --force "$container" > /dev/null
+        services=" $(docker ps -aq --no-trunc --filter publish=4566) $(docker ps -aq --no-trunc --filter publish=4588) "
+        for service in $services; do
+          for network in $(docker inspect "$service" --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}'); do
+            for container in $(docker network inspect "$network" --format '{{range $id, $_ := .Containers}}{{$id}} {{end}}'); do
+              case "$services" in *" $container "*) continue ;; esac
+              echo "removing $(docker inspect "$container" --format '{{.Name}}') from $network"
+              docker rm --force "$container" > /dev/null
+            done
           done
         done
