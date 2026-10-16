@@ -611,3 +611,30 @@ Workload Identity Federation, the GKE Gateways, Cloud DNS — the
 images; the idle one costs each job a few seconds.
 
 **Sources.** [CONTRIBUTING, Testing](../contributing.md#testing) · #61.
+
+## SOCLE-35: Every artifact upgrades a cluster from the previous release, binding from 1.0.0
+
+**accepted** · 2026-10-16 · [`.github/workflows/e2e.yaml`](../../.github/workflows/e2e.yaml) (`upgrade`), [`.github/e2e/aws/main.tf`](../../.github/e2e/aws/main.tf)
+
+**Decision.** The e2e's `upgrade (<cloud>)` job applies the previous
+release's fixture root, as that release shipped it, with its own artifact
+and its own `root` suite; then HEAD's fixture on the same state, the
+bootstrap module pulled from the candidate's published module package
+(`var.bootstrap_source`, evaluated at init), and HEAD's whole proof. The
+previous release is the newest `X.Y.Z` tag reachable from the commit and not
+on it. No release, or no fixture for the cloud at that release: the job
+says so and passes. A red upgrade fails the job from 1.0.0 only; before, it
+is reported in the summary and the Checks tab.
+
+**Context.** The upgrade path was never exercised (#61, M1). HEAD's fixture
+does not apply on an older bootstrap (a module key it does not know), so N-1
+is applied with N-1's own fixture, as a client's root was. 0.1.0 was cut as
+an unofficial release, with no compatibility promise and no migration.
+
+**Consequences.** A client's `tofu init -upgrade` from the published package
+is proven on every artifact. The real root does not upgrade on floci, which
+cannot re-apply it; the foundations' upgrade is proven by hand on the
+sandbox. Making the job binding before 1.0.0, or adding migration scripts,
+is a new decision.
+
+**Sources.** [CONTRIBUTING, Testing](../contributing.md#testing) · #61.
