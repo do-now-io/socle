@@ -82,5 +82,12 @@ From each `oci/catalog/<module>/resourceset.yaml`. Offered is not proven: CI app
 | What floci does not run | Cilium (every e2e root sets `cilium.enabled = false`), the EKS add-ons, Pod Identity, IAM enforcement, more than one node |
 | Integration plans | floci `2.3.0` (AWS), floci-gcp `0.11.0`, floci-az `0.15.0` (red, not blocking); Scaleway plans its minimal example offline |
 
-Chart versions in the templates, `cilium.tf`, `eks_addons.tf` and
-`operator_version` move by hand: Renovate does not read them.
+Renovate reads every pin above but three: the Kubernetes minors (SOCLE-05),
+the EKS add-ons (no datasource lists them; `aws eks describe-addon-versions`
+does) and the SHA256 beside each CI tool's version, which move by hand. Its
+custom managers (`renovate.json`) cover the charts' `tag:` and `version:` in
+the ResourceSets, the images and Crossplane packages in the catalog and the
+clouds' patches, the Gateway API commit, the rule and dashboard sources,
+`cilium.tf`, `operator_version`, and the CI tools. A chart's `# appVersion`
+comment is not Renovate's to write: pr-static fails while it is not the
+pinned chart's, and names the value (`.github/scripts/check-app-versions.py`).

@@ -89,8 +89,9 @@ collectors, are `VMRule`s in their modules, checked with `vmalert -dryRun` in
 CI. `defaultRules.sources` is refused in `values`.
 
 **Consequences.** A cluster needs egress to raw.githubusercontent.com, or
-loads no upstream rule and no dashboard. Renovate does not see tags in URLs:
-they move with the chart, by hand, in the same change. vmalert selects every
+loads no upstream rule and no dashboard. Renovate reads the tags in the URLs
+(#103) and groups them with the chart in one `monitoring` update; they still
+move to the versions the chart runs, not past them. vmalert selects every
 `VMRule`; the operator's webhook refuses one that does not parse, so a
 client's typo silences nothing else.
 

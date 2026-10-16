@@ -6,29 +6,217 @@
   ],
   "dependencyDashboardApproval": true,
   "timezone": "Europe/Paris",
-  "schedule": ["before 6am on monday"],
-  "labels": ["dependencies"],
+  "schedule": [
+    "before 6am on monday"
+  ],
+  "labels": [
+    "dependencies"
+  ],
   "packageRules": [
     {
       "description": "One weekly PR for all GitHub Actions bumps",
-      "matchManagers": ["github-actions"],
+      "matchManagers": [
+        "github-actions"
+      ],
       "groupName": "github-actions"
     },
     {
       "description": "One weekly PR for OpenTofu provider bumps",
-      "matchManagers": ["terraform"],
+      "matchManagers": [
+        "terraform"
+      ],
       "groupName": "opentofu-providers"
     },
     {
       "description": "One weekly PR for the documentation site (Astro, Starlight and their plugins)",
-      "matchManagers": ["npm"],
-      "matchFileNames": ["site/package.json"],
+      "matchManagers": [
+        "npm"
+      ],
+      "matchFileNames": [
+        "site/package.json"
+      ],
       "groupName": "docs-site"
     },
     {
+      "description": "flux-operator: the bootstrap's default and the CI's CLI move together",
+      "matchPackageNames": [
+        "ghcr.io/controlplaneio-fluxcd/charts/flux-operator",
+        "controlplaneio-fluxcd/flux-operator"
+      ],
+      "groupName": "flux-operator"
+    },
+    {
+      "description": "The monitoring chart and the rule sources pinned to the versions it runs move together",
+      "matchPackageNames": [
+        "ghcr.io/victoriametrics/helm-charts/victoria-metrics-k8s-stack",
+        "VictoriaMetrics/VictoriaMetrics",
+        "VictoriaMetrics/operator",
+        "VictoriaMetrics/VictoriaLogs",
+        "VictoriaMetrics/VictoriaTraces",
+        "prometheus-operator/kube-prometheus"
+      ],
+      "groupName": "monitoring"
+    },
+    {
+      "description": "The Gateway API CRDs follow the Gateway API release the pinned Cilium minor documents: patches only",
+      "matchPackageNames": [
+        "kubernetes-sigs/gateway-api"
+      ],
+      "matchUpdateTypes": [
+        "major",
+        "minor"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "The custom managers pin by tag (or carry their digest themselves): no digest pinning on top",
+      "matchManagers": [
+        "custom.regex"
+      ],
+      "matchUpdateTypes": [
+        "pinDigest"
+      ],
+      "enabled": false
+    },
+    {
       "description": "Automerge patch, pin and digest updates once required checks pass",
-      "matchUpdateTypes": ["patch", "pin", "pinDigest", "digest"],
+      "matchUpdateTypes": [
+        "patch",
+        "pin",
+        "pinDigest",
+        "digest"
+      ],
       "automerge": true
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "A module's chart from an OCI registry: the OCIRepository's url and its ref.tag (the # appVersion comment is checked by pr-static, check-app-versions.py)",
+      "managerFilePatterns": [
+        "/^oci/catalog/[^/]+/resourceset\\.yaml$/"
+      ],
+      "matchStrings": [
+        "url: oci://(?<depName>[^\\s]+)\\n(?:[^\\n]*\\n){0,8}?\\s+tag: (?<currentValue>[^\\s]+)"
+      ],
+      "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "A module's chart from a Helm repository: the HelmRepository's url, the HelmRelease's chart and version",
+      "managerFilePatterns": [
+        "/^oci/catalog/[^/]+/resourceset\\.yaml$/"
+      ],
+      "matchStringsStrategy": "combination",
+      "matchStrings": [
+        "kind: HelmRepository\\n(?:[^\\n]*\\n){0,8}?\\s+url: (?<registryUrl>https://[^\\s]+)\\n",
+        "chart: (?<depName>[^\\s]+)\\n\\s+version: (?<currentValue>[^\\s]+)"
+      ],
+      "datasourceTemplate": "helm"
+    },
+    {
+      "customType": "regex",
+      "description": "Images and Crossplane packages the catalog and the clouds' patches name by tag",
+      "managerFilePatterns": [
+        "/^oci/(catalog|clusters)/.+\\.yaml$/"
+      ],
+      "matchStrings": [
+        "(?:image|package): (?<depName>[a-z0-9.-]+/[^\\s:@]+):(?<currentValue>v?[0-9][^\\s@]*)\\s"
+      ],
+      "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "Images the catalog pins by digest, their version in the comment above",
+      "managerFilePatterns": [
+        "/^oci/catalog/.+\\.yaml$/"
+      ],
+      "matchStrings": [
+        "# (?<currentValue>v[0-9][^\\s]*)\\n\\s+image: (?<depName>[^\\s@]+)@(?<currentDigest>sha256:[a-f0-9]{64})"
+      ],
+      "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "The Gateway API CRDs, a GitRepository pinned by commit, the tag in the comment above",
+      "managerFilePatterns": [
+        "/^oci/catalog/gateway-api/resourceset\\.yaml$/"
+      ],
+      "matchStrings": [
+        "url: https://github\\.com/(?<depName>[^\\s]+)\\n\\s+ref:\\n\\s+# (?<currentValue>v[0-9.]+) [^\\n]*\\n(?:[^\\n]*\\n){0,3}?\\s+commit: (?<currentDigest>[0-9a-f]{40})"
+      ],
+      "datasourceTemplate": "github-tags"
+    },
+    {
+      "customType": "regex",
+      "description": "Upstream rules and dashboards fetched at a pinned tag",
+      "managerFilePatterns": [
+        "/^oci/catalog/monitoring/resourceset\\.yaml$/",
+        "/^\\.github/scripts/upstream-monitoring\\.sh$/"
+      ],
+      "matchStrings": [
+        "https://raw\\.githubusercontent\\.com/(?<depName>[^/\\s]+/[^/\\s]+)/(?<currentValue>v[0-9][0-9.]*)/"
+      ],
+      "datasourceTemplate": "github-tags"
+    },
+    {
+      "customType": "regex",
+      "description": "Grafana's VictoriaLogs datasource plugin",
+      "managerFilePatterns": [
+        "/^oci/catalog/monitoring/resourceset\\.yaml$/"
+      ],
+      "matchStrings": [
+        "victoriametrics-logs-datasource@(?<currentValue>[0-9][^\\s]*)"
+      ],
+      "depNameTemplate": "VictoriaMetrics/victorialogs-datasource",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.+)$"
+    },
+    {
+      "customType": "regex",
+      "description": "Cilium and CoreDNS, the bootstrap's Helm releases",
+      "managerFilePatterns": [
+        "/^opentofu/bootstrap/cilium\\.tf$/"
+      ],
+      "matchStrings": [
+        "(?<depName>cilium|coredns)_chart_version\\s+= \"(?<currentValue>[^\"]+)\""
+      ],
+      "registryUrlTemplate": "{{#if (equals depName 'cilium')}}https://helm.cilium.io{{else}}https://coredns.github.io/helm{{/if}}",
+      "datasourceTemplate": "helm"
+    },
+    {
+      "customType": "regex",
+      "description": "flux-operator, the bootstrap's operator_version default",
+      "managerFilePatterns": [
+        "/^opentofu/bootstrap/variables\\.tf$/"
+      ],
+      "matchStrings": [
+        "variable \"operator_version\" \\{[^}]*?default\\s+= \"(?<currentValue>[^\"]+)\""
+      ],
+      "depNameTemplate": "ghcr.io/controlplaneio-fluxcd/charts/flux-operator",
+      "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "CI tools installed by version, each named in a # renovate: comment (their SHA256 beside them moves by hand)",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/.+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: extractVersion=(?<extractVersion>\\S+))?\\n\\s*[A-Z_]+: (?<currentValue>\\S+)"
+      ],
+      "extractVersionTemplate": "{{#if extractVersion}}{{{extractVersion}}}{{/if}}"
+    },
+    {
+      "customType": "regex",
+      "description": "The integration tests' cloud emulators",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/integration\\.yaml$/"
+      ],
+      "matchStrings": [
+        "emulator: (?<depName>floci/[a-z-]+):(?<currentValue>[^\\s]+)"
+      ],
+      "datasourceTemplate": "docker"
     }
   ]
 }
