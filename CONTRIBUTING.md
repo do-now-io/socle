@@ -100,7 +100,7 @@ Three levels:
 2. **Integration**, in `integration.yaml`: a plan of each foundations module
    against an emulator.
 3. **e2e**, in `e2e.yaml`, called by `publish-artifact.yaml` with the tag it
-   just pushed: the artifact applied on floci 2.3.0's real k3s, proven by
+   just pushed: the artifact applied on floci 2.1.0's real k3s, proven by
    [Chainsaw](https://kyverno.github.io/chainsaw/).
 
 The e2e jobs:
@@ -126,9 +126,8 @@ What floci cannot prove, and the e2e therefore does not claim:
 - **One node, flannel, kube-proxy and CoreDNS already there.** Every root it
   applies sets `cilium.enabled = false`; Cilium, ENI IPAM and Gateway API on
   Cilium are not exercised.
-- **No EBS CSI or snapshot add-on** in floci 2.3.0, whose add-on API knows
-  vpc-cni, coredns, kube-proxy and eks-pod-identity-agent only: the add-ons
-  are off on both fixture roots, and Pod Identity is not served.
+- **No EKS add-on API** in floci 2.1.0: the add-ons are off on both fixture
+  roots, and Pod Identity is not served.
 - **IAM is accepted, not enforced**: a role reaches floci's IAM, its
   permissions are not tested.
 - **A second apply of the real root fails**: floci does not read back several

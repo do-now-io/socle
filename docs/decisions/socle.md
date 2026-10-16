@@ -387,9 +387,8 @@ identities runs before the first catalog module.
 **Context.** The add-ons need nodes and network, which the foundations stop
 short of; without the agent, Crossplane's AWS providers hang silently (#48).
 
-**Consequences.** The bootstrap needs the `aws` provider on aws. floci 2.3.0's
-add-on API has neither the EBS CSI driver nor the snapshot controller, so the
-e2e leaves them off.
+**Consequences.** The bootstrap needs the `aws` provider on aws. floci 2.1.0
+has no add-on API, so the e2e leaves them off.
 
 **Sources.** [Cilium before Flux](../architecture/cilium-before-flux.md#the-order-of-the-releases) · #48.
 
