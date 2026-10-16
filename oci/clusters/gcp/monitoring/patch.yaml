@@ -1,0 +1,67 @@
+# The monitoring module on gcp: no node-exporter, which GKE Autopilot refuses,
+# and Grafana health-checked where GKE's load balancer can see it healthy
+# (docs/catalog/monitoring.md, Per cloud).
+- op: test
+  path: /spec/steps/1/name
+  value: workload
+- op: add
+  path: /spec/steps/1
+  value:
+    name: cloud
+    resourcesTemplate: |
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: monitoring-cloud-values
+        namespace: monitoring
+        labels:
+          reconcile.fluxcd.io/watch: Enabled
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.monitoring.enabled >>enabled<< else >>disabled<< end >>
+      data:
+        values.yaml: |
+          # node-exporter runs with hostNetwork, hostPID and the node's root
+          # filesystem mounted: Autopilot blocks host namespaces and admits no
+          # hostPath but /var/log, read-only (docs.cloud.google.com/
+          # kubernetes-engine/docs/concepts/autopilot-security), so Warden
+          # refuses the DaemonSet and the release never gets Ready. Its rules
+          # and its dashboard follow it off (the chart's
+          # defaultRules.rules.node-exporter and defaultDashboards
+          # node-exporter-full read prometheus-node-exporter.enabled). GKE
+          # collects the node's metrics itself on Autopilot, into Cloud
+          # Monitoring, not into this VictoriaMetrics.
+          prometheus-node-exporter:
+            enabled: false
+- op: add
+  path: /spec/steps/-
+  value:
+    name: health-check
+    resourcesTemplate: |
+      << $g := inputs.modules.monitoring.grafana ->>
+      << if and inputs.modules.monitoring.enabled $g.enabled $g.domain $g.gateway inputs.gateway.shared >>
+      # GKE's load balancer health-checks every backend itself, on `/` by
+      # default and accepting only a 200, where Grafana answers 302 to /login:
+      # without this policy the backend is unhealthy and the route answers
+      # 502. /api/health is
+      # Grafana's unauthenticated 200, on the pod's port (USE_SERVING_PORT: the
+      # NEG endpoint's, 3000). Present while the HTTPRoute is.
+      # https://cloud.google.com/kubernetes-engine/docs/how-to/configure-gateway-resources#configure_health_check
+      apiVersion: networking.gke.io/v1
+      kind: HealthCheckPolicy
+      metadata:
+        name: grafana
+        namespace: monitoring
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.monitoring.enabled >>enabled<< else >>disabled<< end >>
+      spec:
+        default:
+          config:
+            type: HTTP
+            httpHealthCheck:
+              portSpecification: USE_SERVING_PORT
+              requestPath: /api/health
+        targetRef:
+          group: ""
+          kind: Service
+          name: grafana
+      << end >>

@@ -31,12 +31,23 @@ bootstrap and Flux.
 | GKE cost allocation on from creation | default |
 | `owner`, `environment`, `socle-version` labels on every billable resource | enforced |
 | Deletion protection on | default |
+| No Google service account: every workload, Crossplane included, a federated principal named by the project number ([GCP-14](../../decisions/gcp.md#gcp-14-workload-identity-federation-direct-principals-no-google-service-account)) | enforced |
+| Crossplane's identity off unless asked; when on, it grants only `allowed_roles`, buckets under `<cluster_name>-` only and never deleted, nothing of Cloud DNS ([GCP-15](../../decisions/gcp.md#gcp-15-crossplanes-grants-bounded-by-the-roles-the-client-allows)) | opt-in |
+| Gateway TLS at the load balancer: a Certificate Manager map for the public Gateway, a regional certificate for the private one, DNS-authorised ([GCP-16](../../decisions/gcp.md#gcp-16-gateway-tls-at-the-load-balancer-with-google-managed-certificates)) | opt-in |
 
 <details>
 <summary>Under the hood</summary>
 
 - Private nodes flip Autopilot's default; the IP endpoints are off.
 - Minimum sizes: Pods `/17`, proxy-only `/26`.
+- Crossplane's principal is `crossplane-system/provider-gcp`, granted
+  before the cluster has a node. `allowed_roles` takes at most nine roles;
+  owner, editor, viewer, `iam.*`, `resourcemanager.*` and predefined admin or
+  owner roles are refused at plan. The DNS records role, created here, is
+  what Crossplane grants external-dns on the project: a zone's own IAM is
+  never honoured.
+- `project_number` is read from the API unless you pass it; it names every
+  principal.
 - The network is the module's (`create_network = true`) or yours
   (`network_name`). In a Shared VPC whose subnets the network team owns, set
   `create_subnetwork = false` with `subnetwork_name` and `pod_range_name`,
@@ -58,8 +69,26 @@ bootstrap and Flux.
 
 ## Measured
 
-Nothing measured on a real GCP project: CI plans the module against
-floci-gcp, which implements no Compute Engine API.
+On a GKE Autopilot sandbox project, 2026-10-07 (PR #84), through
+[`opentofu/clusters/gcp`](../../../opentofu/clusters/gcp/README.md):
+
+- Under Crossplane's Project IAM Admin condition, granting an allowed role
+  succeeded and granting `roles/owner` was denied; under the bucket
+  condition, a bucket inside the prefix was created and one outside denied,
+  `roles/storage.objectAdmin` on a bucket granted and `roles/storage.admin`
+  denied.
+- A managed zone's `getIamPolicy` and `setIamPolicy`, granted on the zone by
+  a custom role and by `roles/dns.admin`, were never honoured (403 for
+  minutes); record operations granted there were.
+- Both certificates were issued once their authorization records resolved,
+  and both shared Gateways programmed.
+- A destroy takes two runs: GKE removes the Gateways' load balancers after
+  the cluster, so the first fails on the certificate map, the regional
+  certificate and the proxy-only subnetwork; the second completes, no
+  Workload Identity binding left in the project policy.
+
+CI also plans the module against floci-gcp, which implements no Compute
+Engine API.
 
 ## Reference
 

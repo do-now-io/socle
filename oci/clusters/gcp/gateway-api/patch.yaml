@@ -1,0 +1,130 @@
+# The gateway_api module on gcp: no CRD and no class of the socle's, only the
+# two shared Gateways, on GKE's own classes.
+# docs/catalog/gateway-api.md is the module's page.
+#
+# GKE owns Gateway API: its controller, and the standard-channel CRDs it
+# installs and upgrades with the cluster (the foundations'
+# gateway_api_config), and it serves only its own GatewayClasses. So the
+# module's crds step, which fetches the upstream CRDs and, where Cilium
+# serves Gateway API, the `cilium` class, is removed here, behind a `test`
+# op that fails the build if the module's first step is ever anything else.
+# Removed, not left to apply: Flux would otherwise take over CRDs GKE
+# manages, and fight its upgrades (GATEWAY-API-05).
+- op: test
+  path: /spec/steps/0/name
+  value: crds
+- op: remove
+  path: /spec/steps/0
+# Where inputs.gateway.shared says so, the two shared Gateways every module
+# and the client route through: `public`, internet-facing, and `private`,
+# internal, in gateway-system (docs/catalog/gateway-api.md). A child
+# ResourceSet, because a Gateway can only be applied once its class exists:
+# it dependsOn GKE's two classes being Accepted. Routes attach to `https` on
+# 443. The Gateways are the socle's own: disabling the module or
+# kube.gateway_api.gateways deletes them, and their load balancers with them.
+#
+# On gcp there is no Service: GKE's controller builds a Google load balancer
+# from each Gateway, by its class. `public` is on inputs.gateway.className,
+# gke-l7-global-external-managed, a global external Application Load
+# Balancer; `private` on gke-l7-rilb, a regional internal one — GKE has no
+# internal variant of the global class — which needs the proxy-only
+# subnetwork the foundations create. TLS terminates at the load balancer
+# with the foundations' Certificate Manager certificates, so no key exists
+# in the cluster; the two classes take them differently (Google Cloud,
+# "Secure a Gateway"). The load balancer has a forwarding rule and target
+# proxy per protocol, and GKE attaches a route to the listener its
+# sectionName names, so `http` on 80 redirects to https, as on azure
+# (measured on GKE Autopilot, 2026-10-07: 301 on 80, the certificate on
+# 443).
+- op: add
+  path: /spec/steps/-
+  value:
+    name: gateways
+    resourcesTemplate: |
+      << if inputs.gateway.shared >>
+      apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSet
+      metadata:
+        name: gateway-api-gateways
+        namespace: flux-system
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.gateway_api.enabled >>enabled<< else >>disabled<< end >>
+      spec:
+        dependsOn:
+          # GKE's classes, which exist once its Gateway API controller runs;
+          # Accepted, because a Gateway on a class GKE has not accepted would
+          # never be programmed.
+          << range $class := list inputs.gateway.className "gke-l7-rilb" >>
+          - apiVersion: gateway.networking.k8s.io/v1
+            kind: GatewayClass
+            name: << $class >>
+            ready: true
+            readyExpr: status.conditions.exists(c, c.type == 'Accepted' && c.status == 'True')
+          << end >>
+        # The wait ends once the Gateways are applied, not once their load
+        # balancers exist: a Gateway has no Ready condition for the health
+        # check to read, and GKE programs it minutes after accepting it.
+        wait: true
+        resources:
+          - apiVersion: v1
+            kind: Namespace
+            metadata:
+              name: << inputs.gateway.namespace >>
+          << range $gw := list "public" "private" >>
+          - apiVersion: gateway.networking.k8s.io/v1
+            kind: Gateway
+            metadata:
+              name: << $gw >>
+              namespace: << inputs.gateway.namespace >>
+              << if eq $gw "public" >>
+              # The global load balancer takes its certificates from a
+              # Certificate Manager map, named by this annotation.
+              annotations:
+                networking.gke.io/certmap: << inputs.gateway.certificateMap | quote >>
+              << end >>
+            spec:
+              gatewayClassName: << if eq $gw "public" >><< inputs.gateway.className >><< else >>gke-l7-rilb<< end >>
+              listeners:
+                # Only the redirect below attaches here.
+                - name: http
+                  protocol: HTTP
+                  port: 80
+                  allowedRoutes:
+                    namespaces:
+                      from: Same
+                - name: https
+                  port: 443
+                  protocol: HTTPS
+                  << if eq $gw "private" >>
+                  # A regional Gateway takes no certificate map: its regional
+                  # Certificate Manager certificate is named in a listener
+                  # option, not an annotation.
+                  tls:
+                    mode: Terminate
+                    options:
+                      networking.gke.io/cert-manager-certs: << inputs.gateway.regionalCertificate | quote >>
+                  << end >>
+                  allowedRoutes:
+                    namespaces:
+                      from: All
+          << end >>
+          # GKE supports the redirect filter on both classes (Google Cloud,
+          # "GatewayClass capabilities").
+          - apiVersion: gateway.networking.k8s.io/v1
+            kind: HTTPRoute
+            metadata:
+              name: https-redirect
+              namespace: << inputs.gateway.namespace >>
+            spec:
+              parentRefs:
+                - name: public
+                  sectionName: http
+                - name: private
+                  sectionName: http
+              rules:
+                - filters:
+                    - type: RequestRedirect
+                      requestRedirect:
+                        scheme: https
+                        statusCode: 301
+      << end >>

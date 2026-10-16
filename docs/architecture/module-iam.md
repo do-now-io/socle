@@ -35,20 +35,44 @@ foundations grant it once, the same for every client, bounded by shape
 A module on a new service needs one word in `allowed_services`: a reviewed
 change. The root wires the boundary into `kube.crossplane.permissions_boundary`.
 
+On GCP there is no role to create and no boundary to carry: a module's
+identity is its Kubernetes ServiceAccount itself, a Workload Identity
+Federation principal named by the project number, and no Google service
+account exists ([GCP-14](../decisions/gcp.md#gcp-14-workload-identity-federation-direct-principals-no-google-service-account)).
+What bounds Crossplane is a condition on its own grant
+([`opentofu/gcp`](../../opentofu/gcp/iam.tf), variable `crossplane`,
+[GCP-15](../decisions/gcp.md#gcp-15-crossplanes-grants-bounded-by-the-roles-the-client-allows)):
+
+- Project IAM Admin, under `modifiedGrantsByRole.hasOnly(...)`: it may grant
+  and revoke only `gcp.crossplane.allowed_roles` (empty by default, at most
+  nine) and the socle's DNS records role, never Project IAM Admin itself;
+- buckets under `<cluster_name>-` only, created and configured, never
+  deleted, never read;
+- nothing of Cloud DNS: external-dns gets the project custom role
+  `socleDnsRecords_<cluster>`, created by the foundations, which the root
+  wires into `kube.crossplane.dns_records_role`.
+
+A module that needs a new role needs one line in `allowed_roles`: a reviewed
+change. Owner, editor, viewer, `iam.*`, `resourcemanager.*` and predefined
+admin or owner roles are refused at plan.
+
 ## The ordering chain
 
 ```text
-foundations: cluster, Crossplane's role and boundary
+foundations: cluster, Crossplane's role and boundary (GCP: its conditional grants)
   └▶ bootstrap: Cilium, CoreDNS, Pod Identity Agent, then Flux
        └▶ crossplane module: core, then the cloud's providers and provider config
-            └▶ <module>, step cloud: its role and Pod Identity association,
+            └▶ <module>, step cloud: its role and Pod Identity association (GCP: its bindings),
                healthy once <module>-access sees them Ready
                  └▶ <module>, step workload: the chart
 ```
 
 On AWS the role must exist before the pod: Pod Identity injects credentials
 at admission only, so a pod admitted earlier runs without them until it is
-recreated.
+recreated. On GCP the step `cloud` holds the module's bindings
+(`ProjectIAMMember`, or `Bucket` and `BucketIAMMember`) on its own
+principal, and the workload waits for them through `<module>-access`, as
+on AWS.
 
 <details>
 <summary>Under the hood</summary>
@@ -75,6 +99,7 @@ installed before `flux-operator`.
 | Cloud | Crossplane providers | A module that needs access |
 | --- | --- | --- |
 | AWS | IAM, EKS and S3, on Pod Identity | declares its role, policy and association. Refused at plan when the role is required and Crossplane is off (`keda.services`, `velero`, `argocd_image_updater.repositories`) or the region is missing; a service missing from `allowed_services` fails at IAM, on the Role's `Synced` condition |
-| GCP, Azure, Scaleway | none yet | runs without a socle-made role; you bring a credential, as its page says |
+| GCP | Cloud Platform and Storage, on Workload Identity Federation (InjectedIdentity, no Google service account) | binds its own ServiceAccount's principal: ProjectIAMMember, or Bucket and BucketIAMMember; a role missing from gcp.crossplane.allowed_roles fails at IAM, the binding never Ready |
+| Azure, Scaleway | none yet | runs without a socle-made role; you bring a credential, as its page says |
 
-Versions and the AWS contract: [crossplane](../catalog/crossplane.md).
+Versions and the AWS and GCP contracts: [crossplane](../catalog/crossplane.md).

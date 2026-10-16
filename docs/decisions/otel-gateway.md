@@ -114,3 +114,19 @@ One replica stays the default: two would read every Kubernetes event twice.
 
 **Sources.** awesome-prometheus-alerts `_data/rules.yml` at 822af1e; the
 `opentelemetry-collector` chart 0.173.1; measured on k3s, 2026-10-12.
+
+## OTEL-GATEWAY-06: A disk request, on every cloud
+
+**accepted** · 2026-10-16 · [`oci/catalog/otel-gateway/resourceset.yaml`](../../oci/catalog/otel-gateway/resourceset.yaml)
+
+**Decision.** The gateway asks 64Mi of ephemeral storage beside its 100m /
+128Mi: its rotated logs and scratch. Its exporters queue in memory.
+
+**Context.** GKE Autopilot reserves 1 GiB of disk for a container that
+states none, and makes the request the limit
+([MONITORING-13](monitoring.md#monitoring-13-requests-on-every-container-disk-included-on-every-cloud)).
+
+**Consequences.** A client who adds a `file_storage` queue raises the
+request in `values`.
+
+**Sources.** [Resource requests in Autopilot](https://docs.cloud.google.com/kubernetes-engine/docs/concepts/autopilot-resource-requests).

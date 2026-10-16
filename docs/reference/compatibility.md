@@ -57,21 +57,21 @@ From each `oci/catalog/<module>/resourceset.yaml`. Offered is not proven: CI app
 | Module | Chart | Version | App version | Clouds |
 | --- | --- | --- | --- | --- |
 | `hello` | `podinfo`, `oci://ghcr.io/stefanprodan/charts` | `6.15.0` | | all |
-| `gateway_api` | no chart | | | aws, azure, scaleway |
-| `crossplane` | `crossplane`, `https://charts.crossplane.io/stable` | `2.4.2` | v2.4.2; AWS providers v2.8.1 | all (providers on aws only) |
+| `gateway_api` | no chart | | | all |
+| `crossplane` | `crossplane`, `https://charts.crossplane.io/stable` | `2.4.2` | v2.4.2; AWS providers v2.8.1; GCP providers v3.0.0 (`provider-family-gcp`, `provider-gcp-cloudplatform`, `provider-gcp-storage`) | all (providers on aws and gcp) |
 | `external_dns` | `external-dns`, `https://kubernetes-sigs.github.io/external-dns/` | `1.22.0` | 0.22.0 | all |
 | `argocd` | `argo-cd`, `oci://ghcr.io/argoproj/argo-helm` | `10.9.2` | v3.5.3 | all |
-| `argocd_image_updater` | `argocd-image-updater`, `oci://ghcr.io/argoproj/argo-helm` | `1.3.1` | v1.3.0 | all (`repositories` on aws only) |
+| `argocd_image_updater` | `argocd-image-updater`, `oci://ghcr.io/argoproj/argo-helm` | `1.3.1` | v1.3.0 | all (`repositories` on aws and gcp) |
 | `monitoring` | `victoria-metrics-k8s-stack`, `oci://ghcr.io/victoriametrics/helm-charts` | `0.95.2` | VictoriaMetrics v1.153.0; operator v0.75.0; VictoriaLogs v1.53.0; VictoriaTraces v0.10.0; Alertmanager v0.34.0; kube-state-metrics 2.20.0; node-exporter 1.12.1; Grafana 13.2.3 | all |
 | `otel_agent` | `opentelemetry-collector`, `oci://ghcr.io/open-telemetry/opentelemetry-helm-charts` | `0.173.1` | 0.160.0 | all |
 | `otel_gateway` | `opentelemetry-collector`, same | `0.173.1` | 0.160.0 | all |
-| `keda` | `keda`, `https://kedacore.github.io/charts` | `2.21.0` | 2.21.0 | all (`services` on aws only) |
+| `keda` | `keda`, `https://kedacore.github.io/charts` | `2.21.0` | 2.21.0 | all (`services` on aws and gcp) |
 | `metrics_server` | `metrics-server`, `https://kubernetes-sigs.github.io/metrics-server/` | `3.14.0` | 0.9.0 | aws |
 | `kyverno` | `kyverno`, `oci://ghcr.io/kyverno/charts` | `3.9.1` | v1.19.1 | all |
 | `kyverno_policies` | `kyverno-policies`, `oci://ghcr.io/kyverno/charts` | `3.9.1` | v1.19.1 | all |
-| `external_secrets` | `external-secrets`, `oci://ghcr.io/external-secrets/charts` | `2.11.0` | v2.11.0 | all (its role and store on aws only) |
+| `external_secrets` | `external-secrets`, `oci://ghcr.io/external-secrets/charts` | `2.11.0` | v2.11.0 | all (its role and store on aws and gcp) |
 | `reloader` | `reloader`, `oci://ghcr.io/stakater/charts` | `2.2.18` | v1.4.22 | all |
-| `velero` | `velero`, `https://vmware-tanzu.github.io/helm-charts` | `12.2.0` | 1.18.2; `velero-plugin-for-aws` v1.14.4 | aws |
+| `velero` | `velero`, `https://vmware-tanzu.github.io/helm-charts` | `12.2.0` | 1.18.2; `velero-plugin-for-aws` v1.14.4; `velero-plugin-for-gcp` v1.14.4 | aws, gcp |
 
 ### Where it was tested
 

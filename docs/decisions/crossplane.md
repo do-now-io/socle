@@ -85,3 +85,58 @@ moved tag reaches every cluster on its next reconcile. The alternative is a
 signed mirror in the socle's registry, or packages pinned by digest.
 
 **Sources.** The charts' upstream publication; Flux `HelmRepository` and `OCIRepository` verification.
+
+## CROSSPLANE-05: On gcp, two provider families on the providers' own principal
+
+**accepted** · 2026-10-16 · [`oci/clusters/gcp/crossplane/patch.yaml`](../../oci/clusters/gcp/crossplane/patch.yaml)
+
+**Decision.** On gcp the module installs `provider-family-gcp`,
+`provider-gcp-cloudplatform` and `provider-gcp-storage` (v3.0.0), every pod
+on the ServiceAccount `crossplane-system/provider-gcp`, and a
+`ClusterProviderConfig default` with `credentials.source: InjectedIdentity`.
+No Google service account, no Cloud DNS and no Secret Manager provider.
+
+**Context.** Workload Identity Federation for GKE lets a Kubernetes
+ServiceAccount be an IAM principal itself, named by the project number, the
+pool and `ns/<ns>/sa/<sa>`; `InjectedIdentity` makes the provider take
+Application Default Credentials from the GKE metadata server, the pod's own
+token. What the modules declare on gcp is bindings of their own principals:
+`ProjectIAMMember` for project roles, under an IAM condition when the scope
+is a prefix (external-secrets), and `Bucket` with `BucketIAMMember` for a
+bucket a module owns (velero). On the sandbox project (2026-10-07), zone-level
+`getIamPolicy` and `setIamPolicy` on a Cloud DNS managed zone were never
+honoured, even granted by `roles/dns.admin`, so external-dns's binding is a
+project-level `ProjectIAMMember` as well, and Crossplane holds no Cloud DNS
+permission. A secret cannot be bound by name prefix, so external-secrets
+binds at project level too: no module declares a Secret Manager resource.
+
+**Consequences.** No key, nothing to rotate, nothing to impersonate; the
+foundations bind the one principal before the cluster has a node. A
+principal names the project and never the cluster, so two socle clusters in
+one project would share every module's grants: one socle cluster per
+project. Each provider pod costs about 320Mi requested on Autopilot, so a
+family no module uses is not installed; a module that needs one adds it here
+and to the `crossplane-provider-config` child's `dependsOn`.
+
+**Sources.** [Workload Identity Federation for GKE](https://cloud.google.com/kubernetes-engine/docs/concepts/workload-identity); `provider-upjet-gcp` v3.0.0 CRDs (`cloudplatform.gcp.m.upbound.io`, `storage.gcp.m.upbound.io`, `gcp.m.upbound.io`); the GKE Autopilot sandbox runs of 2026-10-07 (PR #84) and 2026-10-16 (`crossplane-module-gke`, artifact `0.0.0-feat-gcp-parity.d896756`).
+
+## CROSSPLANE-06: Every container states its disk, on every cloud
+
+**accepted** · 2026-10-16 · [`oci/catalog/crossplane/resourceset.yaml`](../../oci/catalog/crossplane/resourceset.yaml), [`oci/clusters/gcp/crossplane/patch.yaml`](../../oci/clusters/gcp/crossplane/patch.yaml)
+
+**Decision.** The core requests 50m / 192Mi / 128Mi of ephemeral storage, the
+RBAC manager 10m / 32Mi / 64Mi, in the catalog for every cloud; the gcp
+providers 100m / 320Mi / 256Mi.
+
+**Context.** GKE Autopilot gives a container that states no request 500m of
+CPU, 2 GiB of memory and 1 GiB of ephemeral storage, and bills what is
+requested. On the sandbox (2026-10-07), with the gcp providers' CRDs loaded,
+the core's working set was 176Mi and the RBAC manager's 18Mi; the providers
+165–222Mi each. The core's package cache is an emptyDir the chart caps at
+20Mi, and GKE rotates logs at 5 × 10Mi.
+
+**Consequences.** The same requests on every cloud, the core's memory up
+64Mi on aws as well. The gcp providers' CPU is 100m, not aws's 50m, to stay
+inside Autopilot's CPU-to-memory ratio (1:1 to 1:6.5).
+
+**Sources.** [Autopilot resource requests](https://cloud.google.com/kubernetes-engine/docs/concepts/autopilot-resource-requests); the module page's measurements.

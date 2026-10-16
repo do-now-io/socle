@@ -4,9 +4,11 @@
 # docs/reference/catalog-module-standard.md apply: inputsFrom the one provider, the reconcile
 # toggle on EACH resource, values tested never presence.
 #
-# What is the same on every cloud. On aws, the operator's own IAM role is
-# aws's, in oci/clusters/aws/keda/patch.yaml: a step named cloud that aws
-# inserts before workload (docs/decisions/socle.md, SOCLE-32).
+# What is the same on every cloud. The operator's own cloud access is the
+# cloud's, a step named cloud that the cloud inserts before workload
+# (docs/decisions/socle.md, SOCLE-32): on aws its IAM role,
+# oci/clusters/aws/keda/patch.yaml; on gcp a Cloud Monitoring binding on its
+# Workload Identity principal, oci/clusters/gcp/keda/patch.yaml.
 #
 # Values, in the order helm-controller merges them, later winning
 # (docs/decisions/socle.md#socle-06-the-clients-values-win): keda-socle-values, the socle's defaults below;
@@ -19,8 +21,9 @@
 # KEDA's operator reads queue metrics on behalf of the client's workloads, so
 # by default it has no cloud role at all: KEDA does nothing until a client
 # writes a ScaledObject, and a cron or Prometheus trigger needs no cloud.
-# kube.keda.services names the AWS services the operator's own role may READ
-# — sqs, cloudwatch, kinesis, dynamodb — and only those, never `*`.
+# kube.keda.services names the services of the cluster's cloud the
+# operator's own identity may READ — on aws sqs, cloudwatch, kinesis,
+# dynamodb; on gcp pubsub — and only those, never `*`.
 #
 # Steps, each applied once the one before is healthy: namespace, then
 # workload — the chart. A cloud's step between them is healthy only once
@@ -127,20 +130,25 @@ spec:
                 prometheus.io/scrape: "true"
                 prometheus.io/port: "8080"
             # Requests sized for an idle KEDA; the chart's limits (1 CPU, 1000Mi
-            # each) are kept as a ceiling.
+            # each) are kept as a ceiling. ephemeral-storage declared on every
+            # cloud: GKE Autopilot reserves 1Gi for a container that declares
+            # none (docs/decisions/gcp.md, GCP-01).
             resources:
               operator:
                 requests:
                   cpu: 50m
                   memory: 128Mi
+                  ephemeral-storage: 64Mi
               metricServer:
                 requests:
                   cpu: 25m
                   memory: 64Mi
+                  ephemeral-storage: 64Mi
               webhooks:
                 requests:
                   cpu: 10m
                   memory: 32Mi
+                  ephemeral-storage: 64Mi
         ---
         # The client's own chart values, as written in kube.keda.values.
         # OpenTofu refuses secrets in there.

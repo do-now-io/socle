@@ -39,13 +39,17 @@ fi
 # release-please does not list is never rewritten, and stays behind on the
 # next release.
 python3 - "$want" <<'PY' || fail=1
-import json, re, subprocess, sys
+import json, os, re, subprocess, sys
 want = sys.argv[1]
 listed = {f["path"] for f in json.load(open("release-please-config.json"))["extra-files"]}
 annotated = re.compile(r"(#|//)[^\n]*x-release-please-version\s*$")
 semver = re.compile(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?")
 bad = 0
 for path in subprocess.run(["git", "ls-files"], capture_output=True, text=True, check=True).stdout.split():
+    # A symlink reads as its target, which is a tracked file checked on its
+    # own: opentofu/clusters/gcp/tests/example.auto.tfvars is the example.
+    if os.path.islink(path):
+        continue
     try:
         lines = open(path, encoding="utf-8").read().splitlines()
     except (UnicodeDecodeError, IsADirectoryError, FileNotFoundError):

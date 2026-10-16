@@ -39,9 +39,29 @@ In the same root as the foundations module, in one apply — see
 `opentofu/clusters/<cloud>/`. It configures no provider itself; the root passes
 the foundations module's `helm_kubernetes` output to the `helm` provider, and
 on aws its own `aws` provider serves both modules. Elsewhere `aws` has no
-resource here and is never configured. The root also passes
-`cluster_network` and, on aws, `schedulable_nodes` and
-`gateway_certificate_arn` from the foundations' outputs.
+resource here and makes no call, but OpenTofu still configures every provider
+a configuration names — even one whose resources all have `count = 0` — and an
+unconfigured `aws` provider looks for credentials and calls STS. A root on
+another cloud therefore declares a stub that skips every check
+(`tests/defaults.tftest.hcl`, `gcp_plans_without_an_aws_provider_call`, proves
+a gcp plan through it reaches no AWS endpoint):
+
+```hcl
+provider "aws" {
+  region                      = "us-east-1"
+  access_key                  = "unused"
+  secret_key                  = "unused"
+  skip_credentials_validation = true
+  skip_requesting_account_id  = true
+  skip_metadata_api_check     = true
+  skip_region_validation      = true
+}
+```
+
+The root also passes `cluster_network` and, on aws, `schedulable_nodes` and
+`gateway_certificate_arn` from the foundations' outputs; on gcp, their
+`project_id` and `project_number` as `project`, and their
+`gateway_certificate_map` and `gateway_regional_certificate`.
 
 ## What the client sets
 
@@ -149,11 +169,14 @@ No modules.
 | <a name="input_flux_components"></a> [flux\_components](#input\_flux\_components) | Flux controllers to install. The image automation pair is absent by default: the socle's version moves through a reviewed tfvars change, not through a controller rewriting tags. | `list(string)` | <pre>[<br/>  "source-controller",<br/>  "kustomize-controller",<br/>  "helm-controller",<br/>  "notification-controller"<br/>]</pre> | no |
 | <a name="input_flux_version"></a> [flux\_version](#input\_flux\_version) | Flux version the operator installs and keeps converged. 2.x tracks the latest 2 series; an exact version pins it. | `string` | `"2.x"` | no |
 | <a name="input_gateway_certificate_arn"></a> [gateway\_certificate\_arn](#input\_gateway\_certificate\_arn) | On aws, the ACM certificate the shared Gateways' load balancers terminate<br/>TLS with — the foundations' gateway\_certificate\_arn output, never the<br/>client's. Null or empty on aws means no shared Gateway, and no route<br/>attached to one. Unknown at plan on the apply that issues it, which is<br/>why nothing validates it here. Ignored elsewhere. | `string` | `null` | no |
+| <a name="input_gateway_certificate_map"></a> [gateway\_certificate\_map](#input\_gateway\_certificate\_map) | On gcp, the Certificate Manager map the public shared Gateway's global<br/>load balancer terminates TLS with — the foundations'<br/>gateway\_certificate\_map output, never the client's. Null or empty on gcp<br/>means no shared Gateway, and no route attached to one. Unknown at plan on<br/>the apply that creates it, which is why nothing validates it here.<br/>Ignored elsewhere. | `string` | `null` | no |
+| <a name="input_gateway_regional_certificate"></a> [gateway\_regional\_certificate](#input\_gateway\_regional\_certificate) | On gcp, the regional Certificate Manager certificate the private shared<br/>Gateway's internal load balancer terminates TLS with — the foundations'<br/>gateway\_regional\_certificate output, never the client's. Null or empty<br/>on gcp means no shared Gateway either: a private listener without it<br/>would never be programmed. Unknown at plan on the apply that creates it,<br/>which is why nothing validates it here. Ignored elsewhere. | `string` | `null` | no |
 | <a name="input_helm_timeout_seconds"></a> [helm\_timeout\_seconds](#input\_helm\_timeout\_seconds) | How long to wait for each release to become ready. The instance release is the slow one: its health check waits for the operator to converge the controllers. | `number` | `600` | no |
 | <a name="input_instance_size"></a> [instance\_size](#input\_instance\_size) | Resource profile the operator applies to the controllers. Empty is the operator's own default; small, medium and large scale requests and limits together. | `string` | `""` | no |
 | <a name="input_kube"></a> [kube](#input\_kube) | The catalog modules this cluster enables and their values, as<br/>`{ <module> = { <attribute> = <value> } }`. List only what differs from<br/>the catalog's defaults; an absent module is at its default. Module names<br/>are snake\_case. Typed `any` on purpose: a map(any) refuses two modules with<br/>different attributes, and an object type silently drops a misspelt<br/>attribute — the validations below are what makes a typo an error at plan.<br/>The schema is catalog.tf; docs/reference/inputs.md lists it module by module. | `any` | `{}` | no |
 | <a name="input_network_policy"></a> [network\_policy](#input\_network\_policy) | Let the operator install network policies isolating the Flux namespace. On by default; Cilium enforces them on every cloud we ship. | `bool` | `true` | no |
 | <a name="input_operator_version"></a> [operator\_version](#input\_operator\_version) | Chart version of flux-operator, which is also the operator's own version. Pinned exactly: the operator is pre-1.0 and its minors are not a stable contract. | `string` | `"0.60.0"` | no |
+| <a name="input_project"></a> [project](#input\_project) | On gcp, the project the cluster runs in, as `{ id, number }` — the<br/>foundations' project\_id and project\_number outputs, never the client's.<br/>Exposed to the catalog as inputs.cluster.projectId and projectNumber: a<br/>module's Workload Identity principal names the project number, and the<br/>pool named after the project id. Required on gcp, refused elsewhere. | <pre>object({<br/>    id     = string<br/>    number = string<br/>  })</pre> | `null` | no |
 | <a name="input_region"></a> [region](#input\_region) | Region the cluster runs in, exposed to the catalog as inputs.cluster.region. Regional cloud APIs need it — on AWS the Pod Identity associations the crossplane module creates. Empty when the caller does not know it; a module that needs it says so. | `string` | `""` | no |
 | <a name="input_schedulable_nodes"></a> [schedulable\_nodes](#input\_schedulable\_nodes) | How many nodes the foundations give the cluster before this module<br/>starts — on aws, the bootstrap node group's size. Everything but Cilium<br/>waits for it: Cilium's DaemonSet is what makes those nodes Ready, so it<br/>is installed beside them, and CoreDNS and the Flux operator, the first<br/>releases that need a scheduled pod, come after. Zero fails the plan with<br/>that reason, instead of Helm waiting helm\_timeout\_seconds for a node.<br/>Null skips the check, on a cluster whose compute this module cannot see. | `number` | `null` | no |
 | <a name="input_socle_version"></a> [socle\_version](#input\_socle\_version) | Tag of the socle artifact to pull. Null means this module's own version, so that one bump of the module tag moves module and artifact together. Set it only on a dev cluster testing a branch build, together with cosign\_identity. | `string` | `null` | no |

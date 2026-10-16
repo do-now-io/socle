@@ -1,0 +1,93 @@
+# The otel_agent module on gcp: the agent's logs read the way GKE Autopilot
+# admits, and a priority so the agent is never left Pending on a full node
+# (docs/catalog/otel-agent.md, Per cloud).
+- op: test
+  path: /spec/steps/1/name
+  value: workload
+- op: add
+  path: /spec/steps/1
+  value:
+    name: cloud
+    resourcesTemplate: |
+      << $on := and inputs.modules.otel_agent.enabled inputs.modules.monitoring.enabled inputs.modules.monitoring.logs.enabled ->>
+      # A DaemonSet pod is bound to its node: when that node is full —
+      # Autopilot's 32 pods, or its CPU and memory — it stays Pending for good,
+      # the ResourceSet never Ready (measured on the GKE sandbox: a node at
+      # 32 pods left its agent on `Too many pods`). With a priority above every ordinary pod's 0 it preempts one instead,
+      # and the autoscaler reschedules that one elsewhere: Google's advice for
+      # DaemonSets on Autopilot. Not system-node-critical: the system classes
+      # (2000000000 and up) are the cluster's own components', not a
+      # client-facing module's. And below 1000000000, the highest a custom
+      # class may take on GKE. In this step, before workload, so it exists by
+      # the time helm-controller creates the DaemonSet.
+      apiVersion: scheduling.k8s.io/v1
+      kind: PriorityClass
+      metadata:
+        name: socle-node-agent
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if $on >>enabled<< else >>disabled<< end >>
+      value: 1000000
+      preemptionPolicy: PreemptLowerPriority
+      globalDefault: false
+      description: >-
+        The socle's node agents (otel-agent): one pod per node that must run on
+        every node, so it preempts an ordinary pod rather than stay Pending on a
+        full one.
+      ---
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: otel-agent-cloud-values
+        namespace: otel-agent
+        labels:
+          reconcile.fluxcd.io/watch: Enabled
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if $on >>enabled<< else >>disabled<< end >>
+      data:
+        values.yaml: |
+          # The PriorityClass above: on a full node the agent preempts an
+          # ordinary pod instead of staying Pending.
+          priorityClassName: socle-node-agent
+          # GKE Autopilot admits a hostPath under /var/log, read-only, and
+          # nothing else (docs.cloud.google.com/kubernetes-engine/docs/concepts/
+          # autopilot-security). The logsCollection preset always mounts
+          # /var/lib/docker/containers beside /var/log/pods — a Docker-era path
+          # containerd never writes to — and Autopilot refuses the whole pod
+          # for it. So the preset is off here and the one volume it needs,
+          # /var/log/pods read-only, is mounted below; its file_log receiver is
+          # written out as chart 0.173.1 writes it. Still no checkpoints:
+          # nothing is written anywhere.
+          presets:
+            logsCollection:
+              enabled: false
+          extraVolumes:
+            - name: varlogpods
+              hostPath:
+                path: /var/log/pods
+          extraVolumeMounts:
+            - name: varlogpods
+              mountPath: /var/log/pods
+              readOnly: true
+          config:
+            receivers:
+              # Every container's log but the agent's own, from the end of
+              # each file.
+              file_log:
+                include:
+                  - /var/log/pods/*/*/*.log
+                exclude:
+                  - /var/log/pods/otel-agent_otel-agent*_*/opentelemetry-collector/*.log
+                start_at: end
+                retry_on_failure:
+                  enabled: true
+                include_file_path: true
+                include_file_name: false
+                operators:
+                  - type: container
+                    id: container-parser
+                    max_log_size: 102400
+            service:
+              pipelines:
+                logs:
+                  # What the preset would have added to the socle's empty list.
+                  receivers: [file_log]

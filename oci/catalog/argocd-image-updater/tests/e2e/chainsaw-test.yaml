@@ -19,6 +19,13 @@
 #              gets the registry token and reads the repositories named,
 #              nothing else; the association never syncs on floci, so the
 #              workload is withheld; off deletes the role.
+#   module     on gcp (GKE, the sandbox), the module as its tfvars leave it,
+#              repositories named: the ProjectIAMMember binding Artifact
+#              Registry Reader to the controller's own principal, the
+#              workload after it with the socle's Artifact Registry entry,
+#              and the update loop on a private repository of the sandbox,
+#              read with the token the login script takes from the metadata
+#              server.
 # No destroyed phase: off by default, the module never runs in the job that
 # uninstalls the default socle, so no CRD is there to survive it; the CRD
 # kept when the module turns off is proven in the module phase, as keda's.
@@ -961,3 +968,314 @@ spec:
             namespace: flux-system
             selector: app.kubernetes.io/name=flux-operator
             tail: 40
+---
+# On gcp (GKE, the sandbox), the module as its tfvars leave it: enabled,
+# Crossplane on, repositories naming LOCATION/REPOSITORY of the sandbox's
+# project, the first of which holds podinfo at from_tag and to_tag, copied
+# from GHCR (docs/catalog/argocd-image-updater.md, Measured). The member
+# binding Artifact Registry Reader to the controller's own principal, the
+# workload after it, then the loop on that repository: Image Updater lists
+# its tags with the token its login script takes from the metadata server,
+# and moves the Application. Whether the nodes may pull the new image is the
+# project's node identity, not this module: the Deployment's rollout is not
+# asserted.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: argocd-image-updater-module-gke
+  labels:
+    phase: module
+    cloud: gcp
+    platform: gke
+spec:
+  description: >-
+    The controller's own principal reads the project's Artifact Registry, and
+    an ImageUpdater moves an Application to a newer tag of a sandbox
+    repository with the token the login script gets from the metadata server.
+  timeouts:
+    # Chainsaw's defaults (apply 5s, assert 30s) are too short on GKE: a call
+    # through the cluster's DNS endpoint can outlast 5 s (context deadline
+    # exceeded) and an Autopilot pod takes minutes to restart. Every gke test
+    # holds at least apply 30s, assert 180s, error 60s, delete 60s, cleanup
+    # 120s and exec 30s (measured on the sandbox, 2026-10-16).
+    apply: 30s
+    cleanup: 120s
+    exec: 30s
+    # Autopilot provisions a node for a pod that does not fit, minutes before
+    # a Deployment is Available; IAM takes up to minutes to propagate.
+    assert: 10m
+    error: 3m
+    delete: 3m
+  bindings:
+    - name: inputs
+      value: (x_k8s_get($client, 'fluxcd.controlplane.io/v1', 'ResourceSetInputProvider', 'flux-system', 'socle').spec.defaultValues)
+    - name: project
+      value: ($inputs.cluster.projectId)
+    - name: principal
+      value: >-
+        (join('', ['principal://iam.googleapis.com/projects/', $inputs.cluster.projectNumber,
+        '/locations/global/workloadIdentityPools/', $project, '.svc.id.goog/subject/ns/argocd-image-updater/sa/argocd-image-updater']))
+    # LOCATION/REPOSITORY, the first one named.
+    - name: repository
+      value: (split($inputs.modules.argocd_image_updater.repositories[0], '/'))
+    - name: host
+      value: (join('', [$repository[0], '-docker.pkg.dev']))
+    - name: image
+      value: (join('/', [$host, $project, $repository[1], 'podinfo']))
+  steps:
+    # The binding the module declares, read from the spec Crossplane applies:
+    # the one read-only role, on the project, for the controller's own
+    # principal. No Google service account anywhere.
+    - name: the ProjectIAMMember binds roles/artifactregistry.reader to the controller's principal, Ready
+      try:
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: projectiammembers.cloudplatform.gcp.m.upbound.io
+              status:
+                (conditions[?type == 'Established'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: cloudplatform.gcp.m.upbound.io/v1beta1
+              kind: ProjectIAMMember
+              metadata:
+                name: argocd-image-updater
+                namespace: argocd-image-updater
+              spec:
+                forProvider:
+                  project: ($project)
+                  role: roles/artifactregistry.reader
+                  member: ($principal)
+              status:
+                (conditions[?type == 'Synced'] || `[]`):
+                  - status: 'True'
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: cloudplatform.gcp.m.upbound.io/v1beta1
+            kind: ProjectIAMMember
+            namespace: argocd-image-updater
+            name: argocd-image-updater
+        - podLogs:
+            namespace: crossplane-system
+            selector: pkg.crossplane.io/provider=provider-gcp-cloudplatform
+            tail: 40
+    # The chart only after the binding (gcp's cloud step, healthy once
+    # argocd-image-updater-access is), the controller on its own
+    # ServiceAccount with no iam.gke.io/gcp-service-account annotation, its
+    # requests whole for Autopilot, the socle's entry for the repository's
+    # host, the login script mounted.
+    - name: the workload converges after the binding, as its own ServiceAccount, with the Artifact Registry entry
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: argocd-image-updater-access
+                namespace: flux-system
+              spec:
+                (dependsOn[?kind == 'ProjectIAMMember'] || `[]`):
+                  - name: argocd-image-updater
+                    namespace: argocd-image-updater
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: argocd-image-updater
+                namespace: argocd-image-updater
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ServiceAccount
+              metadata:
+                name: argocd-image-updater
+                namespace: argocd-image-updater
+                (contains(keys(annotations || `{}`), 'iam.gke.io/gcp-service-account')): false
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: argocd-image-updater-controller
+                namespace: argocd-image-updater
+              spec:
+                template:
+                  spec:
+                    serviceAccountName: argocd-image-updater
+                    (containers[0].resources.requests || `{}`):
+                      (length(cpu || '') > `0`): true
+                      (length(memory || '') > `0`): true
+                      (length("ephemeral-storage" || '') > `0`): true
+              status:
+                (conditions[?type == 'Available'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: argocd-image-updater-config
+                namespace: argocd-image-updater
+              data:
+                # registries.conf is one key: quoted, JMESPath does not read a path.
+                '(contains("registries.conf", join('''', [''prefix: '', $host])))': true
+                '(contains("registries.conf", ''credentials: ext:/scripts/artifact-registry-login.sh''))': true
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: argocd-image-updater-authscripts
+                namespace: argocd-image-updater
+              data:
+                '(contains("artifact-registry-login.sh", ''Metadata-Flavor: Google''))': true
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: argocd-image-updater-access
+        - describe:
+            apiVersion: helm.toolkit.fluxcd.io/v2
+            kind: HelmRelease
+            namespace: argocd-image-updater
+            name: argocd-image-updater
+        - events:
+            namespace: argocd-image-updater
+        - podLogs:
+            namespace: argocd-image-updater
+            tail: 40
+    # A client's application on the sandbox repository, as the aws test's on
+    # GHCR: the podinfo chart from its OCI registry, the image at
+    # $image:from_tag by parameters.
+    - name: an Application points podinfo at the repository's old tag
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: podinfo-e2e-charts
+                namespace: argocd
+                labels:
+                  argocd.argoproj.io/secret-type: repository
+              stringData:
+                name: podinfo-e2e-charts
+                type: helm
+                url: ghcr.io/stefanprodan/charts
+                enableOCI: 'true'
+        - apply:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Application
+              metadata:
+                name: podinfo-e2e
+                namespace: argocd
+              spec:
+                project: default
+                source:
+                  repoURL: ghcr.io/stefanprodan/charts
+                  chart: podinfo
+                  targetRevision: 6.15.0
+                  helm:
+                    parameters:
+                      - name: image.repository
+                        value: ($image)
+                      - name: image.tag
+                        value: ($values.from_tag)
+                destination:
+                  server: https://kubernetes.default.svc
+                  namespace: ($namespace)
+                syncPolicy:
+                  automated: {}
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: podinfo-e2e
+                namespace: ($namespace)
+              spec:
+                template:
+                  spec:
+                    (containers[0].image): (join(':', [$image, $values.from_tag]))
+      catch:
+        - describe:
+            apiVersion: argoproj.io/v1alpha1
+            kind: Application
+            namespace: argocd
+            name: podinfo-e2e
+    # The loop (ARGOCD-IMAGE-UPDATER-08): the repository is private to the
+    # project, so listing its tags needs the login script's token and the
+    # member's role. The override reaching to_tag proves both; Git untouched.
+    - name: an ImageUpdater moves the Application to the repository's newest allowed tag
+      try:
+        - apply:
+            resource:
+              apiVersion: argocd-image-updater.argoproj.io/v1alpha1
+              kind: ImageUpdater
+              metadata:
+                name: podinfo-e2e
+                namespace: argocd
+              spec:
+                applicationRefs:
+                  - namePattern: podinfo-e2e
+                    images:
+                      - alias: podinfo
+                        imageName: ($image)
+                        commonUpdateSettings:
+                          updateStrategy: semver
+                          allowTags: regexp:^6\.9\.[0-9]+$
+                        manifestTargets:
+                          helm:
+                            name: image.repository
+                            tag: image.tag
+        - assert:
+            resource:
+              apiVersion: argocd-image-updater.argoproj.io/v1alpha1
+              kind: ImageUpdater
+              metadata:
+                name: podinfo-e2e
+                namespace: argocd
+              status:
+                applicationsMatched: 1
+        - assert:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Application
+              metadata:
+                name: podinfo-e2e
+                namespace: argocd
+              spec:
+                source:
+                  helm:
+                    (parameters[?name == 'image.tag'] || `[]`):
+                      - value: ($values.to_tag)
+                    (parameters[?name == 'image.repository'] || `[]`):
+                      - value: ($image)
+      catch:
+        - describe:
+            apiVersion: argocd-image-updater.argoproj.io/v1alpha1
+            kind: ImageUpdater
+            namespace: argocd
+            name: podinfo-e2e
+        - describe:
+            apiVersion: argoproj.io/v1alpha1
+            kind: Application
+            namespace: argocd
+            name: podinfo-e2e
+        - podLogs:
+            namespace: argocd-image-updater
+            tail: 80

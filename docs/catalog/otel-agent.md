@@ -70,8 +70,11 @@ kube = {
   exporter headers, `extraEnvs`, a `Secret` in `extraManifests`). Write
   `${env:NAME}` (`$${env:NAME}` in HCL), with `NAME` set from a Secret by
   `extraEnvs` `valueFrom`.
-- **On GKE Autopilot each agent is billed** by its requests, 50m CPU and
-  128Mi, on every node.
+- **On GKE Autopilot each agent is billed** by its requests, 50m CPU,
+  128Mi and 64Mi of disk, on every node. It runs there under the
+  `socle-node-agent` PriorityClass, so on a full node it preempts an
+  ordinary pod rather than stay `Pending`, and mounts `/var/log/pods` alone,
+  read-only: the only `hostPath` Autopilot admits.
 - **Its health is watched** by otel-gateway's collector rules, once
   monitoring's alerting is on ([every rule](../reference/alert-rules.md)).
 - **Upgrades**: write the current component names (`otlp_http`,
@@ -88,7 +91,12 @@ port, no `hostPort`.
 **What the socle sets**: `file_log` on `/var/log/pods` and `k8s_attributes`,
 exported to `vlsingle-monitoring.monitoring.svc:9428`; no metrics pipeline;
 its own telemetry on port 8888, annotated `prometheus.io/scrape` for
-monitoring's vmagent. Requests 50m CPU and 128Mi, a 512Mi memory limit.
+monitoring's vmagent. Requests 50m CPU, 128Mi and 64Mi of ephemeral
+storage, a 512Mi memory limit. On gcp, from
+`oci/clusters/gcp/otel-agent/patch.yaml`: `PriorityClass/socle-node-agent`
+(1000000, not the default) and the chart's `logsCollection` preset replaced
+by its own `file_log` receiver and one read-only mount
+([OTEL-AGENT-07](../decisions/otel-agent.md#otel-agent-07-on-gcp-the-logs-without-the-charts-preset-and-a-priority-for-the-agent)).
 
 **Cloud access**: none.
 

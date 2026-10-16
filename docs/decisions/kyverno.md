@@ -61,3 +61,28 @@ comes from the same project. The cost is a `PolicyReport` per evaluated
 resource in etcd.
 
 **Sources.** Kyverno and OPA Gatekeeper documentation.
+
+## KYVERNO-04: On GCP, GKE's own namespaces are out of the webhooks
+
+**accepted** · 2026-10-16 · [`oci/clusters/gcp/kyverno/patch.yaml`](../../oci/clusters/gcp/kyverno/patch.yaml), [`oci/catalog/kyverno/resourceset.yaml`](../../oci/catalog/kyverno/resourceset.yaml)
+
+**Context.** GKE runs components in namespaces of its own (`gke-managed-*`,
+`gke-gmp-system`, `gmp-*`, `kube-node-lease`) and rewrites a mutating
+webhook configuration that reaches them; Kyverno, which owns its webhook
+configurations, would rewrite it back on every reconcile. A
+`namespaceSelector` matches no prefix. These namespaces exist on GKE only,
+and the catalog never reads the cloud
+([SOCLE-32](socle.md#socle-32-what-only-one-cloud-has-that-cloud-adds-to-the-module-as-steps)).
+
+**Decision.** On gcp, a step `cloud` publishes `kyverno-cloud-values`, which
+restates the catalog's webhook `namespaceSelector` whole and adds each GKE
+namespace by name: those `kubectl get ns` showed on a 1.35 Autopilot cluster
+(sandbox, 2026-10-07), plus `gke-managed-cim` and `gmp-system`, which GKE
+documents.
+
+**Consequences.** Helm replaces a list, so the catalog's expressions are
+written twice, in the catalog and in the gcp step; a change to one is made to
+both. A namespace a later GKE version adds is judged until it joins the list.
+The client who sets his own selector on GCP keeps GKE's names in it.
+
+**Sources.** Measured on GKE Autopilot 1.35, sandbox-2bace, 2026-10-07 · [Autopilot security capabilities](https://cloud.google.com/kubernetes-engine/docs/concepts/autopilot-security).

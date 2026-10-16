@@ -5,6 +5,8 @@
     owner: platform
     region: eu-west-3
     accountId: "123456789012"
+    projectId: ""
+    projectNumber: ""
   socle:
     url: oci://x/y
     version: 0.1.0 # x-release-please-version
@@ -22,6 +24,7 @@
             memory: 256Mi
       values_secret: crossplane-values
       permissions_boundary: arn:aws:iam::123456789012:policy/socle/t/t-crossplane-boundary
+      dns_records_role: ""
     external_dns:
       enabled: true
       domain_filters: [acme.example]
@@ -190,3 +193,5 @@
     shared: true
     namespace: gateway-system
     certificateArn: arn:aws:acm:eu-west-3:123456789012:certificate/00000000-0000-0000-0000-000000000000
+    certificateMap: ""
+    regionalCertificate: ""

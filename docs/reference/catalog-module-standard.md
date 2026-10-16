@@ -62,6 +62,7 @@ root is applied once, in `root (<cloud>)`.
 | `phase: destroyed` | after the uninstall | what must survive it |
 | `cloud: any` / `cloud: <cloud>` | every cloud, or one | a per-cloud assertion is its own `Test` |
 | `platform: any` / `platform: floci` | everywhere, or floci only | what only floci can state |
+| `platform: gke` | the GKE sandbox, run by hand; the floci CI never selects it | what only a real GKE can state; the Test carries its own `spec.timeouts`, at least apply 30s, assert 180s, error 60s, delete 60s, cleanup 120s and exec 30s: Chainsaw's defaults are too short for calls through the DNS endpoint and Autopilot's restarts (measured 2026-10-16) |
 
 The `module` phase proves at least:
 

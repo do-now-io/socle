@@ -360,3 +360,95 @@ spec:
             name: otel-agent
         - events:
             namespace: otel-agent
+---
+# The GCP proof, run against the sandbox's GKE Autopilot (no GKE in CI):
+# what oci/clusters/gcp/otel-agent/patch.yaml adds. Autopilot admits the
+# agent with /var/log/pods as its one hostPath, read-only, and the agent
+# preempts its way onto a full node under the module's PriorityClass.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: otel-agent-health-gke
+  labels:
+    phase: health
+    cloud: gcp
+    platform: gke
+spec:
+  description: >-
+    On GKE Autopilot the agent mounts /var/log/pods alone, read-only, and
+    runs under the socle-node-agent PriorityClass.
+  timeouts:
+    # Chainsaw's defaults (apply 5s, assert 30s) are too short on GKE: a call
+    # through the cluster's DNS endpoint can outlast 5 s (context deadline
+    # exceeded) and an Autopilot pod takes minutes to restart. Every gke test
+    # holds at least apply 30s, assert 180s, error 60s, delete 60s, cleanup
+    # 120s and exec 30s (measured on the sandbox, 2026-10-16).
+    apply: 30s
+    cleanup: 120s
+    delete: 60s
+    exec: 30s
+    assert: 5m
+    error: 5m
+  steps:
+    - name: one read-only hostPath, /var/log/pods, and every agent pod at the module's priority
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: otel-agent-agent
+                namespace: otel-agent
+              spec:
+                template:
+                  spec:
+                    priorityClassName: socle-node-agent
+                    (volumes[?hostPath].hostPath.path): [/var/log/pods]
+                    (containers[0].volumeMounts[?mountPath == '/var/log/pods'].readOnly): [true]
+              status:
+                (desiredNumberScheduled > `0` && numberReady == desiredNumberScheduled): true
+        # The priority admission resolved from the class (1000000) proves the
+        # class existed when the pods were created. The assert finds one such
+        # pod; the error, that none runs without it.
+        - assert:
+            resource:
+              apiVersion: scheduling.k8s.io/v1
+              kind: PriorityClass
+              metadata:
+                name: socle-node-agent
+              value: 1000000
+              preemptionPolicy: PreemptLowerPriority
+              # The API server drops globalDefault when it is false.
+              (globalDefault || `false`): false
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: otel-agent
+                labels:
+                  app.kubernetes.io/instance: otel-agent
+                  component: agent-collector
+              spec:
+                priorityClassName: socle-node-agent
+                priority: 1000000
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: otel-agent
+                labels:
+                  app.kubernetes.io/instance: otel-agent
+                  component: agent-collector
+              spec:
+                # to_number: the API's integer never equals a JMESPath literal.
+                (priorityClassName != 'socle-node-agent' || to_number(priority) != `1000000`): true
+      catch:
+        - describe:
+            apiVersion: apps/v1
+            kind: DaemonSet
+            namespace: otel-agent
+            name: otel-agent-agent
+        - events:
+            namespace: otel-agent

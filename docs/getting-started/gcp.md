@@ -1,169 +1,137 @@
 ---
 title: 'Quickstart: GCP'
-description: From zero to a converged GKE cluster with the socle.
+description: From an empty GCP project to a GKE Autopilot cluster where the socle has converged, in one apply.
 sidebar:
   order: 2
 ---
 
-One `tofu apply` of a root you write: a GKE Autopilot cluster in your
-project, Flux on it, and the catalog reconciled from the signed artifact.
+One `tofu apply` of the GCP root builds the VPC, its Cloud NAT and the GKE
+Autopilot cluster, installs Flux; Flux then converges the catalog. GKE runs
+the network (Dataplane V2), the cluster DNS and the nodes: there is nothing
+to size.
 
 ## Before you start
 
-From [GCP prerequisites](../clouds/gcp/prerequisites.md):
+From [Prerequisites](../clouds/gcp/prerequisites.md):
 
-- a billed project for this environment, its APIs enabled, a state bucket;
-- on the principal that applies: `roles/container.admin`,
-  `roles/compute.networkAdmin`, `roles/resourcemanager.projectIamAdmin`,
-  `roles/pubsub.admin`, `roles/bigquery.admin`, and
-  `roles/storage.objectAdmin` on the state bucket;
+- a billed project with its APIs enabled, and **one socle cluster per
+  project**: every Workload Identity principal names the project, never the
+  cluster;
+- a GCS state bucket;
+- a principal with the
+  [apply roles](../clouds/gcp/prerequisites.md#permissions-for-the-apply),
+  logged in for both the provider (Application Default Credentials) and
+  `gke-gcloud-auth-plugin`;
+- [quotas](../clouds/gcp/prerequisites.md#quotas) raised: a fresh project's
+  CPU and SSD quotas are not enough;
 - OpenTofu 1.10 or later, `gcloud`, `gke-gcloud-auth-plugin`, `kubectl`.
 
-## Write your tfvars
+## Write your main.tf
 
-There is no GCP root in the repository: yours calls the foundations, then
-the bootstrap. `main.tf`:
+One file in an empty directory: the state backend, then the socle's GCP root
+called as a module. Change the names, the region and the window, keep the
+rest:
 
-```hcl
+```hcl title="main.tf"
 terraform {
-  required_version = ">= 1.10"
-
-  required_providers {
-    google = { source = "hashicorp/google", version = ">= 8.0, < 9.0" }
-    helm   = { source = "hashicorp/helm", version = ">= 3.0, < 4.0" }
-  }
-
   backend "gcs" {
-    bucket = "my-project-dev-tofu-state"
-    prefix = "socle/gcp/dev"
+    bucket = "acme-prod-tofu-state"
+    prefix = "socle/gcp/acme-prod"
   }
 }
 
-variable "socle_version" { type = string }
-variable "project_id" { type = string }
-variable "region" { type = string }
-variable "cluster_name" { type = string }
-variable "environment" { type = string }
-variable "owner" { type = string }
-variable "maintenance_window" {
-  type = object({ start_time = string, end_time = string, recurrence = string })
-}
-variable "kube" {
-  type    = any
-  default = {}
-}
-
-provider "google" {
-  project = var.project_id
-  region  = var.region
-}
-
-module "foundations" {
-  source = "oci://ghcr.io/do-now-io/socle/opentofu-modules//opentofu/gcp?tag=${var.socle_version}"
-
-  project_id   = var.project_id
-  region       = var.region
-  cluster_name = var.cluster_name
-  owner        = var.owner
-  environment  = var.environment
-
-  create_network     = true
-  maintenance_window = var.maintenance_window
-
-  # The dataset the detailed billing export lands in. Linking the billing
-  # account to it is a Console step, after the apply.
-  billing_export_dataset_id = "billing_export"
-}
-
-# No credential: gke-gcloud-auth-plugin gets a short-lived token from the
-# active gcloud account at call time.
-provider "helm" {
-  kubernetes = module.foundations.helm_kubernetes
-}
-
-# The bootstrap requires the aws provider for its EKS add-ons, and OpenTofu
-# configures it even when cloud = "gcp" plans no AWS resource. This block
-# satisfies it without calling AWS.
-provider "aws" {
-  region                      = "eu-west-1"
-  access_key                  = "unused"
-  secret_key                  = "unused"
-  skip_credentials_validation = true
-  skip_requesting_account_id  = true
-  skip_metadata_api_check     = true
+locals {
+  socle_version = "0.1.0" # x-release-please-version
 }
 
 module "socle" {
-  source = "oci://ghcr.io/do-now-io/socle/opentofu-modules//opentofu/bootstrap?tag=${var.socle_version}"
+  source = "oci://ghcr.io/do-now-io/socle/opentofu-modules//opentofu/clusters/gcp?tag=${local.socle_version}"
 
-  cloud        = "gcp"
-  cluster_name = var.cluster_name
-  environment  = var.environment
-  owner        = var.owner
-  region       = var.region
+  socle_version = local.socle_version
 
-  kube = var.kube
+  gcp = {
+    project_id   = "acme-prod"
+    region       = "europe-west1"
+    cluster_name = "acme-prod"
+    owner        = "platform"
+    environment  = "prod"
+
+    # When GKE may upgrade the cluster, at least four hours: here Saturday
+    # 02:00-14:00 UTC.
+    maintenance_window = {
+      start_time = "2026-01-03T02:00:00Z"
+      end_time   = "2026-01-03T14:00:00Z"
+      recurrence = "FREQ=WEEKLY;BYDAY=SA"
+    }
+
+    # Create the VPC, its subnetwork, NAT and proxy-only subnet. Without it,
+    # network_name names a VPC you already own.
+    create_network = true
+  }
+}
+
+output "cluster_name" {
+  value = module.socle.cluster_name
 }
 ```
 
-No `cilium`, `cluster_network` or `schedulable_nodes`: GKE runs Dataplane V2
-and Autopilot provisions nodes. `terraform.tfvars`:
+- `socle_version` is the only line an [upgrade](../guides/upgrade.md) touches:
+  it moves the module source and the Flux artifact together.
+- `maintenance_window` has no default: GKE upgrades the cluster on its own,
+  you choose when. The day orders the rings, for example dev on Tuesday,
+  staging on Wednesday, prod on Saturday.
+- No Kubernetes version: the `REGULAR` release channel decides
+  (`release_channel`, `kubernetes_min_version` to raise the floor).
+
+To serve routes on your domain and let modules have their own Google Cloud
+access, add under `gcp`:
 
 ```hcl
-socle_version = "0.1.0" # x-release-please-version
+    # The Google-managed certificates of the two shared Gateways, authorised
+    # by DNS in the managed zone acme-example of this project. Without it no
+    # Gateway is created.
+    gateway_certificate = { dns_zone = "acme-example", domains = ["acme.example", "*.acme.example"] }
 
-project_id   = "my-project-dev"
-region       = "europe-west1"
-cluster_name = "socle-dev"
-environment  = "dev"
-owner        = "platform"
-
-# Required, no default. The day of the week orders the rings: dev on
-# Tuesday, staging on Wednesday, prod on Saturday.
-maintenance_window = {
-  start_time = "2026-01-06T02:00:00Z"
-  end_time   = "2026-01-06T14:00:00Z"
-  recurrence = "FREQ=WEEKLY;BYDAY=TU"
-}
-
-# Catalog modules that differ from their defaults.
-kube = {}
+    # Crossplane's grants; allowed_roles is the ceiling of every role a
+    # catalog module gets. Empty still grants external-dns its DNS records role.
+    crossplane = { allowed_roles = [] }
 ```
 
-Every input: [GCP foundations](../clouds/gcp/foundations.md#reference) and
+With both and `crossplane = { enabled = true }` under `kube`, external-dns
+turns on for those domains. The role each module needs in `allowed_roles`:
+[Crossplane's allowed roles](../clouds/gcp/prerequisites.md#crossplanes-allowed-roles).
+Every other key: [Foundations](../clouds/gcp/foundations.md) and
 [Configure](../guides/configure.md).
 
 ## Apply
 
 ```sh
-gcloud auth login
-gcloud auth application-default login
-gcloud auth application-default set-quota-project my-project-dev
-
 tofu init
 tofu apply
 ```
 
-Then, in the Cloud Console, **Billing › Billing export › BigQuery export**:
-set the detailed usage cost export to the project and the `billing_export`
-dataset. No apply can do it; without it, no cost data arrives.
+The apply ends once Flux's objects are in the cluster; Flux converges the
+catalog after that.
 
 ## Check it converged
 
 ```sh
-gcloud container clusters get-credentials socle-dev \
-  --region europe-west1 --project my-project-dev --dns-endpoint
-
-kubectl -n flux-system get ocirepository socle   # pulled digest, SourceVerified
-kubectl -n flux-system get resourceset           # socle-root and one per module, Ready
+gcloud container clusters get-credentials acme-prod \
+  --region europe-west1 --project acme-prod --dns-endpoint
+kubectl -n flux-system get resourceset
+kubectl -n flux-system get ocirepository socle
 ```
 
-`socle-root` Ready means the catalog converged; if not, see
-[Troubleshooting](../guides/troubleshooting.md).
+`socle-root` at `READY True` means every module's `ResourceSet` is applied
+and healthy; the `OCIRepository` shows the pulled digest and
+`SourceVerified`. If `socle-root` stays not Ready, the module's `ResourceSet`
+names what is waiting: see [Troubleshooting](../guides/troubleshooting.md).
 
 ## Next steps
 
-- [Enable a module](../guides/enable-a-module.md) through `kube`.
-- [Upgrade](../guides/upgrade.md) by moving `socle_version`.
-- What Autopilot forbids and what GCP lacks: [GCP limits](../clouds/gcp/limits.md).
-- Staging and prod: their own projects, Wednesday and Saturday windows.
+- [Enable a module](../guides/enable-a-module.md) and
+  [Configure](../guides/configure.md) it.
+- [Upgrade](../guides/upgrade.md): one line, `socle_version`.
+- [Foundations](../clouds/gcp/foundations.md) and
+  [Limits](../clouds/gcp/limits.md) on GCP.
+- [Uninstall](../guides/uninstall.md).

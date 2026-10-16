@@ -5,8 +5,9 @@ sidebar:
   order: 1
 ---
 
-Tick these before `tofu apply` runs the GCP foundations. The module creates
-none of it. The commands use these variables:
+Tick these before `tofu apply` runs the GCP foundations, alone or through
+the whole root [`opentofu/clusters/gcp`](../../../opentofu/clusters/gcp/README.md).
+Neither creates any of it. The commands use these variables:
 
 ```sh
 PROJECT_ID=my-project-dev
@@ -19,13 +20,36 @@ PRINCIPAL=user:you@example.com   # or serviceAccount:…, principalSet://… for
 ## Account
 
 - [ ] **One project per environment**, its ID matching
-  `^[a-z][a-z0-9-]{4,28}[a-z0-9]$`.
+  `^[a-z][a-z0-9-]{4,28}[a-z0-9]$`, and **one socle cluster per project**: a
+  workload's principal names the project, its namespace and its
+  ServiceAccount, never the cluster, so two socle clusters in one project
+  would be the same principal for every module, and what Crossplane grants
+  one would serve the other.
 - [ ] A billing account linked, and a budget with alert thresholds.
 - [ ] Org policies that permit private GKE nodes, Cloud NAT and external NAT
-  addresses.
-- [ ] The APIs enabled: `cloudresourcemanager`, `serviceusage`, `compute`,
-  `container`, `pubsub` (upgrade notifications, on by default), `bigquery`
-  (only with `billing_export_dataset_id`).
+  addresses. No service account is created: every workload, Crossplane
+  included, is a Workload Identity Federation principal of its own
+  ([GCP-14](../../decisions/gcp.md#gcp-14-workload-identity-federation-direct-principals-no-google-service-account)).
+- [ ] The APIs enabled:
+
+| API | Needed for |
+| --- | --- |
+| `cloudresourcemanager` | project IAM bindings: the apply's, and those Crossplane makes for modules |
+| `serviceusage` | enabling the others |
+| `compute` | VPC, subnetworks, router, Cloud NAT, the Gateways' load balancers |
+| `container` | the Autopilot cluster |
+| `iam` | Crossplane's bucket role and the DNS records role |
+| `sts` | every workload's federated token: a pod's Kubernetes token exchanged for a Google one |
+| `iamcredentials` | a CI identity impersonating the service account that runs OpenTofu |
+| `logging` | GKE's system and workload logs (`logging_components`) |
+| `monitoring` | GKE's system metrics; what KEDA's `pubsub` scaler reads |
+| `dns` | the certificate's DNS authorizations, external-dns |
+| `certificatemanager` | the shared Gateways' Google-managed certificates (`gateway_certificate`) |
+| `storage` | the state bucket, and the buckets modules own (Velero's) |
+| `secretmanager` | the external-secrets module |
+| `artifactregistry` | Argo CD Image Updater reading `kube.argocd_image_updater.repositories` |
+| `pubsub` | only with `enable_upgrade_notifications` (on by default) |
+| `bigquery` | only with `billing_export_dataset_id` |
 
 ```sh
 gcloud projects create "$PROJECT_ID"                  # when it does not exist
@@ -33,6 +57,11 @@ gcloud billing projects link "$PROJECT_ID" --billing-account="$BILLING_ACCOUNT"
 gcloud services enable \
   cloudresourcemanager.googleapis.com serviceusage.googleapis.com \
   compute.googleapis.com container.googleapis.com \
+  iam.googleapis.com sts.googleapis.com iamcredentials.googleapis.com \
+  logging.googleapis.com monitoring.googleapis.com \
+  dns.googleapis.com certificatemanager.googleapis.com \
+  storage.googleapis.com secretmanager.googleapis.com \
+  artifactregistry.googleapis.com \
   pubsub.googleapis.com bigquery.googleapis.com \
   --project="$PROJECT_ID"
 ```
@@ -42,6 +71,11 @@ gcloud services enable \
 
 - Workload Identity builds a principal from project, namespace and service
   account: two clusters in one project share principals.
+- Enable only what the configuration uses: drop `pubsub` without upgrade
+  notifications, `bigquery` without an export dataset, `secretmanager`
+  without external-secrets, `certificatemanager` without
+  `gateway_certificate`, `artifactregistry` without Image Updater's
+  repositories.
 - Autopilot bills Pod requests; without a budget a runaway workload is
   silent.
 - A deleted project ID cannot be reused: archive the state first.
@@ -60,7 +94,10 @@ gcloud services enable \
 | --- | --- |
 | `roles/container.admin` | the cluster, and the Helm releases in it |
 | `roles/compute.networkAdmin` | VPC, subnetworks, router, NAT |
-| `roles/resourcemanager.projectIamAdmin` | the `observability_reader_members` bindings |
+| `roles/resourcemanager.projectIamAdmin` | the `observability_reader_members` bindings, and Crossplane's conditional grants when `crossplane` is set |
+| `roles/iam.roleAdmin` | Crossplane's bucket role and the DNS records role; only with `crossplane` |
+| `roles/dns.admin` | the certificate's authorization records; only with `gateway_certificate` |
+| `roles/certificatemanager.editor` | only with `gateway_certificate` |
 | `roles/pubsub.admin` | the upgrade notification topic |
 | `roles/bigquery.admin` | only with `billing_export_dataset_id` |
 | `roles/storage.objectAdmin` | state, **on the state bucket**, not the project |
@@ -70,6 +107,9 @@ for ROLE in \
   roles/container.admin \
   roles/compute.networkAdmin \
   roles/resourcemanager.projectIamAdmin \
+  roles/iam.roleAdmin \
+  roles/dns.admin \
+  roles/certificatemanager.editor \
   roles/pubsub.admin \
   roles/bigquery.admin
 do
@@ -165,14 +205,72 @@ terraform {
 - [ ] `cosign`, to verify the modules package: OpenTofu does not verify OCI
   signatures ([distribution](../../architecture/distribution.md)).
 
+## Crossplane's allowed roles
+
+- [ ] With `gcp.crossplane` set, `allowed_roles` names every role a catalog
+  module's principal may be granted, at most nine (the DNS records role is
+  the tenth). Crossplane grants nothing else, and a module whose role is
+  missing never gets its binding Ready:
+
+| Module | Role in `allowed_roles` |
+| --- | --- |
+| `external_dns` | none: the socle's own `socleDnsRecords_<cluster>` role, always granted |
+| `external_secrets` | `roles/secretmanager.secretAccessor` |
+| `keda` (`services = ["pubsub"]`) | `roles/monitoring.viewer` |
+| `velero` | `roles/storage.objectAdmin` |
+| `argocd_image_updater` (`repositories`) | `roles/artifactregistry.reader` |
+
+<details>
+<summary>Under the hood</summary>
+
+- `owner`, `editor`, `viewer`, `iam.*`, `resourcemanager.*` and every
+  predefined admin or owner role are refused at plan: each carries a
+  `setIamPolicy` permission Crossplane could grant to itself. The one
+  exception is `roles/storage.objectAdmin`, harmless on a bucket with
+  uniform bucket-level access.
+- The bound is a `modifiedGrantsByRole` condition on Crossplane's own grant
+  of Project IAM Admin
+  ([Google](https://cloud.google.com/iam/docs/setting-limits-on-granting-roles)).
+
+</details>
+
 ## Quotas
 
 - [ ] Regional CPUs and persistent disk SSD: Autopilot nodes draw on them.
+  A fresh project is not enough for the whole catalog. Measured on the
+  sandbox, a project created in October 2026 on a new billing account: 12
+  `CPUS_ALL_REGIONS` (ask for about 32) and 250 GB of `SSD_TOTAL_GB` in the
+  region (ask for about 1000). The SSD quota is the one that binds: 250 GB
+  is two nodes, too few for every module on (2026-10-16,
+  [sizing](sizing.md#what-fits-a-fresh-project)); without the increase, turn
+  on only the modules you need. Ask before the first apply: on a fresh
+  billing account Google refused automatic increases ("cannot grant at this
+  moment") and sent the CPU request to review; the Console (IAM & Admin →
+  Quotas & System Limits) or a paid billing account then does it.
 - [ ] In-use external IP addresses: Cloud NAT allocates its own.
 - [ ] One proxy-only subnetwork per region and VPC: a second cluster there
   sets `create_proxy_only_subnet = false`.
 
 ```sh
+gcloud compute project-info describe --project="$PROJECT_ID" \
+  --flatten=quotas --format="table(quotas.metric,quotas.usage,quotas.limit)" | grep CPUS_ALL_REGIONS
 gcloud compute regions describe "$REGION" --project="$PROJECT_ID" \
   --flatten=quotas --format="table(quotas.metric,quotas.usage,quotas.limit)"
 ```
+
+<details>
+<summary>Under the hood</summary>
+
+- Every Autopilot node boots on a 100 GB `pd-balanced` disk, the only boot
+  disk type Autopilot accepts, and `pd-balanced` counts against
+  `SSD_TOTAL_GB`. So do the claims on the default StorageClass,
+  `standard-rwo`: 250 GB is two nodes and a few claims.
+- Autopilot caps a node at 32 pods, and GKE's own DaemonSets and system
+  pods take 13 of them on an `e2-standard-2` node and 25 on the
+  `ek-standard-8` system node. Two nodes leave about 26 places for Flux and
+  the catalog, which runs about 41 pods with every module on. The 12 vCPUs
+  were not the limit (sandbox, 2026-10-16).
+- What the catalog itself requests, every module on:
+  [sizing](sizing.md).
+
+</details>

@@ -8,10 +8,13 @@
 #
 # What is the same on every cloud. On aws the module's own IAM role and the
 # socle's ClusterSecretStore on it are aws's, in
-# oci/clusters/aws/external-secrets/patch.yaml: a step named cloud inserted
-# before workload, and a step named store after it (docs/decisions/socle.md,
-# SOCLE-32). Anywhere else the operator is installed alone and the client
-# brings his stores (docs/catalog/external-secrets.md).
+# oci/clusters/aws/external-secrets/patch.yaml; on gcp its Secret Manager
+# bindings for the controller's own principal and the same store, in
+# oci/clusters/gcp/external-secrets/patch.yaml: each a step named cloud
+# inserted before workload, and a step named store after it
+# (docs/decisions/socle.md, SOCLE-32). Anywhere else the operator is
+# installed alone and the client brings his stores
+# (docs/catalog/external-secrets.md).
 #
 # Values, in the order helm-controller merges them, later winning
 # (docs/decisions/socle.md#socle-06-the-clients-values-win): external-secrets-socle-values, the socle's
@@ -106,10 +109,15 @@ spec:
             # The role is read-only; nothing in the cluster writes to the cloud.
             processPushSecret: false
             processClusterPushSecret: false
+            # Each of the three containers states cpu, memory and
+            # ephemeral-storage, on every cloud: GKE Autopilot reserves
+            # 500m, 2Gi and 1Gi for a container that leaves one out. 64Mi of
+            # disk, a long-running container's, none writes to an emptyDir.
             resources:
               requests:
                 cpu: 10m
                 memory: 64Mi
+                ephemeral-storage: 64Mi
               limits:
                 memory: 256Mi
             # The controller's, the webhook's and the cert controller's metrics
@@ -133,6 +141,7 @@ spec:
                 requests:
                   cpu: 10m
                   memory: 32Mi
+                  ephemeral-storage: 64Mi
                 limits:
                   memory: 128Mi
             certController:
@@ -143,6 +152,7 @@ spec:
                 requests:
                   cpu: 10m
                   memory: 32Mi
+                  ephemeral-storage: 64Mi
                 limits:
                   memory: 128Mi
         ---

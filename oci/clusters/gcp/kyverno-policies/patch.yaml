@@ -1,0 +1,42 @@
+# The kyverno_policies module on gcp: the namespaces GKE runs, out of every
+# policy (docs/catalog/kyverno-policies.md, Good to know).
+- op: test
+  path: /spec/steps/1/name
+  value: workload
+- op: add
+  path: /spec/steps/1
+  value:
+    name: cloud
+    resourcesTemplate: |
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: kyverno-policies-cloud-values
+        namespace: kyverno-policies
+        labels:
+          reconcile.fluxcd.io/watch: Enabled
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.kyverno_policies.enabled >>enabled<< else >>disabled<< end >>
+      data:
+        values.yaml: |
+          # The catalog's three names, restated whole — Helm replaces a list,
+          # it does not merge it — and GKE's own namespaces, the kyverno
+          # module's list (oci/clusters/gcp/kyverno/patch.yaml). GKE keeps
+          # mutating webhooks out of them, not a native
+          # ValidatingAdmissionPolicy: an Enforce policy would judge, and
+          # could refuse, the pods GKE runs there.
+          vpolExclude:
+            excludeNamespaces:
+              - kube-system
+              - flux-system
+              - kyverno
+              - kube-node-lease
+              - gke-managed-system
+              - gke-managed-cim
+              - gke-managed-filestorecsi
+              - gke-managed-networking-dra-driver
+              - gke-managed-parallelstorecsi
+              - gke-managed-volumepopulator
+              - gke-gmp-system
+              - gmp-system
+              - gmp-public

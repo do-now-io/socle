@@ -69,7 +69,7 @@ kubectl -n flux-system get resourceset socle-root
 | Cloud | Quickstart | State |
 | --- | --- | --- |
 | AWS · EKS | [Get started on AWS](aws.md) | foundations and the one-apply root |
-| GCP · GKE | [Get started on GCP](gcp.md) | foundations; no root yet |
+| GCP · GKE | [Get started on GCP](gcp.md) | foundations and the one-apply root |
 | Azure · AKS | [Get started on Azure](azure.md) | foundations; no root yet |
 | Scaleway · Kapsule | [Get started on Scaleway](scaleway.md) | foundations; no root yet |
 

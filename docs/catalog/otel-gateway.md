@@ -85,7 +85,8 @@ has installed its CRD.
 Kubernetes events while monitoring's logs are on; each exporter and the logs
 and traces pipelines follow monitoring's parts, `nop` for metrics with
 monitoring off; its own telemetry on port 8888, annotated for vmagent.
-Requests 100m CPU and 128Mi, a 1Gi memory limit.
+Requests 100m CPU, 128Mi and 64Mi of ephemeral storage, a 1Gi memory
+limit.
 
 **Cloud access**: none.
 

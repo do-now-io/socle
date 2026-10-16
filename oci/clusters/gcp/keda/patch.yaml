@@ -1,0 +1,102 @@
+# The keda module on gcp: with Crossplane on and pubsub named in
+# kube.keda.services, one project-level binding of roles/monitoring.viewer on
+# the operator's own Workload Identity principal — no Google service account
+# (docs/catalog/keda.md, docs/decisions/keda.md, KEDA-02); and the annotation
+# that rolls the operator when that access changes.
+- op: add
+  path: /spec/dependsOn
+  value:
+    # The ProjectIAMMember kind comes from Crossplane's gcp providers.
+    - apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSet
+      name: crossplane
+      namespace: flux-system
+      ready: true
+- op: test
+  path: /spec/steps/1/name
+  value: workload
+- op: add
+  path: /spec/steps/1
+  value:
+    name: cloud
+    resourcesTemplate: |
+      << if and inputs.modules.crossplane.enabled (has "pubsub" inputs.modules.keda.services) >>
+      # The module's own GCP access, docs/decisions/keda.md, KEDA-02: a binding
+      # on the operator's principal, no Google service account. KEDA's
+      # gcp-pubsub scaler asks Cloud Monitoring for the subscription's
+      # pubsub.googleapis.com/subscription/num_undelivered_messages
+      # (QueryTimeSeries, pkg/scalers/gcp/gcp_stackdriver_client.go, v2.21.0)
+      # and never calls Pub/Sub: monitoring.viewer is the whole of it, the
+      # narrowest predefined role holding monitoring.timeSeries.list. Project
+      # level, because the subscriptions are named in the client's
+      # ScaledObjects, which the socle does not read: it reads every metric of
+      # the project, never a message. Crossplane's own grant refuses the
+      # binding unless roles/monitoring.viewer is in gcp.crossplane.allowed_roles
+      # — the client's tfvars, reviewed.
+      #
+      # The principal is the pod's Kubernetes ServiceAccount itself, by project
+      # NUMBER: with podIdentity.provider gcp, KEDA builds its Monitoring
+      # clients from Application Default Credentials, which the GKE metadata
+      # server answers for keda/keda-operator.
+      << $principal := printf
+        "principal://iam.googleapis.com/projects/%s/locations/global/workloadIdentityPools/%s.svc.id.goog/subject/ns/%s/sa/%s"
+        inputs.cluster.projectNumber inputs.cluster.projectId "keda" "keda-operator" ->>
+      apiVersion: cloudplatform.gcp.m.upbound.io/v1beta1
+      kind: ProjectIAMMember
+      metadata:
+        name: keda-operator
+        namespace: keda
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.keda.enabled >>enabled<< else >>disabled<< end >>
+      spec:
+        forProvider:
+          project: << inputs.cluster.projectId | quote >>
+          role: roles/monitoring.viewer
+          member: << $principal | quote >>
+      ---
+      # Healthy only once the binding is Ready, so the workload step starts
+      # after it. GKE hands out tokens at call time, not at admission, so here
+      # the order only spares the operator minutes of denied reads; it is kept,
+      # the same chain as on aws. A dependsOn with a readyExpr, because a
+      # managed resource not yet created carries no Ready condition at all,
+      # which the step's own health check reads as healthy (measured on floci
+      # by external-dns).
+      apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSet
+      metadata:
+        name: keda-access
+        namespace: flux-system
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.keda.enabled >>enabled<< else >>disabled<< end >>
+      spec:
+        dependsOn:
+          - apiVersion: cloudplatform.gcp.m.upbound.io/v1beta1
+            kind: ProjectIAMMember
+            name: keda-operator
+            namespace: keda
+            ready: true
+            readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
+        resources: []
+      ---
+      << end >>
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: keda-cloud-values
+        namespace: keda
+        labels:
+          reconcile.fluxcd.io/watch: Enabled
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if inputs.modules.keda.enabled >>enabled<< else >>disabled<< end >>
+      data:
+        values.yaml: |
+          # podIdentity.gcp stays off: it annotates the ServiceAccount with
+          # iam.gke.io/gcp-service-account, which would make the operator
+          # impersonate a Google service account the binding does not name.
+          podAnnotations:
+            keda:
+              # The services the operator's principal may read, so that a
+              # change rolls the operator, as on aws. GKE needs no roll for
+              # the credentials; the pod still shows its access. Empty when
+              # it has no binding.
+              socle.do-now.io/cloud-access: << inputs.modules.keda.services | sortAlpha | join "," | quote >>

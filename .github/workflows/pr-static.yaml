@@ -197,10 +197,31 @@ jobs:
             kind="$(basename "${f}" -fluxcd-v1.json)"
             cp "${f}" "schemas/fluxcd.controlplane.io/${kind}_v1.json"
           done
+      - name: Install yq and helm
+        if: steps.detect.outputs.found == 'true'
+        env:
+          YQ_VERSION: 4.47.2
+          YQ_SHA256: 1bb99e1019e23de33c7e6afc23e93dad72aad6cf2cb03c797f068ea79814ddb0
+          # The charts job's helm, so the repository runs one.
+          HELM_VERSION: 4.2.4
+          HELM_SHA256: c306b46f719b0a4da32d0f78ee21bf90ce8d602f15b22ab753f0674d1670a7f3
+        run: |
+          # Pinned rather than the runner image's, which move with the image:
+          # the child-resource extraction, the CRD schemas and the requests
+          # guard rely on yq's expression syntax, and the guard templates
+          # every chart of the catalog with helm, which renders the envelope.
+          curl -sSLo /tmp/yq "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64"
+          echo "${YQ_SHA256}  /tmp/yq" | sha256sum -c -
+          sudo install -m 0755 /tmp/yq /usr/local/bin/yq
+          yq --version
+          curl -sSLo /tmp/helm.tgz "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  /tmp/helm.tgz" | sha256sum -c -
+          sudo tar xzf /tmp/helm.tgz -C /usr/local/bin --strip-components 1 linux-amd64/helm
+          helm version
       - name: Render the catalog and the bootstrap envelope
         if: steps.detect.outputs.found == 'true'
         run: |
-          mkdir -p rendered
+          mkdir -p rendered/nested
           # One ResourceSet per catalog module, rendered with the committed
           # sample inputs — the same shape OpenTofu deposits at bootstrap.
           for rs in oci/catalog/*/resourceset.yaml; do
@@ -210,19 +231,32 @@ jobs:
           done
           # Each module as each cloud patches it (SOCLE-32): the overlay built,
           # split one ResourceSet per file, and the patched ones rendered from
-          # the same inputs — none reads inputs.cloud, so the sample serves
-          # every cloud.
+          # that cloud's sample, oci/.ci/inputs-sample-<cloud>.yaml, or from
+          # inputs-sample.yaml for a cloud that has none yet. The catalog's
+          # part reads no inputs.cloud; a cloud's steps read what is its own
+          # (a gcp project, a Certificate Manager map), which only its sample
+          # holds with real values.
           for dir in oci/clusters/*/; do
             cloud="$(basename "${dir}")"
             grep -q '^patches:' "${dir}kustomization.yaml" || continue
+            inputs=oci/.ci/inputs-sample.yaml
+            [ ! -f "oci/.ci/inputs-sample-${cloud}.yaml" ] || inputs="oci/.ci/inputs-sample-${cloud}.yaml"
             mkdir -p "/tmp/overlay-${cloud}"
             kubectl kustomize --load-restrictor LoadRestrictionsNone "${dir}" \
               | awk -v out="/tmp/overlay-${cloud}" 'BEGIN { n = 0 } /^---$/ { n++; next } { print > (out "/" n ".yaml") }'
-            for module in $(sed -n 's|^  - path: \([a-z0-9-]*\)/patch.yaml$|\1|p' "${dir}kustomization.yaml"); do
-              rs="$(grep -l "^  name: ${module}$" /tmp/overlay-"${cloud}"/*.yaml)"
-              flux-operator build rset -f "${rs}" --inputs-from oci/.ci/inputs-sample.yaml \
-                > "rendered/${cloud}-${module}.yaml"
-            done
+            sed -n 's|^  - path: \([a-z0-9-]*\)/patch.yaml$|\1|p' "${dir}kustomization.yaml" \
+              | while read -r module; do
+                rs="$(grep -l "^  name: ${module}$" /tmp/overlay-"${cloud}"/*.yaml)"
+                flux-operator build rset -f "${rs}" --inputs-from "${inputs}" \
+                  > "rendered/${cloud}-${module}.yaml"
+              done
+          done
+          # A child ResourceSet's resources (a store, a provider config, the
+          # shared Gateways) are objects too: pulled out to nested/ so
+          # kubeconform reads them, and not only their parent's schema.
+          for f in rendered/*.yaml; do
+            nested="$(yq 'select(.kind == "ResourceSet") | .spec.resources[] | split_doc' "${f}")"
+            [ -z "${nested}" ] || echo "${nested}" > "rendered/nested/$(basename "${f}")"
           done
           # The bootstrap envelope Helm deposits: the literal templates (the
           # << >> operator syntax stays as text — Helm never touches it) ...
@@ -240,6 +274,41 @@ jobs:
           flux-operator build rset -f /tmp/envelope-root.yaml \
             --inputs-from-provider /tmp/envelope-inputs.yaml \
             > rendered/envelope-root-built.yaml
+      - name: Fetch the CRD schemas the datree catalog lacks
+        if: steps.detect.outputs.found == 'true'
+        run: |
+          # The GCP provider's namespaced (.m) kinds: the datree catalog has
+          # none, so every one the render holds is read from the provider's
+          # own CRD, at the version the gcp crossplane step installs. A kind
+          # is found by its apiVersion, so a patch that starts using a new one
+          # needs nothing here.
+          version="$(sed -n 's|.*/provider-family-gcp:\(v[0-9][0-9.]*\).*|\1|p' \
+            oci/clusters/gcp/crossplane/patch.yaml 2>/dev/null | head -1)"
+          kinds="$(find rendered -name '*.yaml' -print0 | xargs -0 yq e -N \
+            'select(.apiVersion == "gcp.m.upbound.io/*" or .apiVersion == "*.gcp.m.upbound.io/*")
+              | (.apiVersion | split("/") | .[0]) + " " + .kind' | sort -u)"
+          if [ -n "${kinds}" ]; then
+            if [ -z "${version}" ]; then
+              echo "::error file=oci/clusters/gcp/crossplane/patch.yaml::GCP provider kinds rendered, no provider-family-gcp version here"
+              exit 1
+            fi
+            base="https://raw.githubusercontent.com/crossplane-contrib/provider-upjet-gcp/${version}/package/crds"
+            while read -r group kind; do
+              # The CRD's file is <group>_<plural>; upjet's plurals are the
+              # kind lowercased, then -ies for a final y, -es for a final s.
+              plural="$(printf '%s' "${kind}" | tr '[:upper:]' '[:lower:]' \
+                | sed -e 's/y$/ies/;t' -e 's/s$/ses/;t' -e 's/$/s/')"
+              .github/scripts/crd-schema.sh "${base}/${group}_${plural}.yaml" schemas
+            done <<< "${kinds}"
+          fi
+          # The datree catalog's ClusterSecretStore, regenerated on 2026-10-08
+          # (datreeio/CRDs-catalog#988), no longer compiles in kubeconform:
+          # "could not find schema". So it comes from external-secrets' own
+          # CRD, at the appVersion of the chart the module pins.
+          version="$(sed -n 's/.*# appVersion \(v[0-9][0-9.]*\).*/\1/p' \
+            oci/catalog/external-secrets/resourceset.yaml | head -1)"
+          base="https://raw.githubusercontent.com/external-secrets/external-secrets/${version}/config/crds/bases"
+          .github/scripts/crd-schema.sh "${base}/external-secrets.io_clustersecretstores.yaml" schemas
       - name: kubeconform the render (strict)
         if: steps.detect.outputs.found == 'true'
         run: |
@@ -279,18 +348,63 @@ jobs:
             echo "==> ${dir}"
             kubectl kustomize --load-restrictor LoadRestrictionsNone "${dir}" > /dev/null
           done
-      - name: Summary
+      - name: Cache the catalog's charts
+        if: steps.detect.outputs.found == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /tmp/charts
+          # The pinned chart versions live in the modules' ResourceSets and
+          # in the clouds' patches.
+          key: catalog-charts-${{ hashFiles('oci/catalog/*/resourceset.yaml', 'oci/clusters/*/*/patch.yaml') }}
+      - name: Every container the catalog runs states its requests
         if: steps.detect.outputs.found == 'true'
         run: |
+          # Every ResourceSet a cloud's overlay deploys, rendered from that
+          # cloud's sample, and each HelmRelease there templated at its pinned
+          # chart with the socle's values: a container with no cpu, memory or
+          # ephemeral-storage request fails here (docs/clouds/gcp/sizing.md).
+          # A third render, aws with every `ha` input on (argocd's Redis HA
+          # and replicas, metrics-server's), checks the containers only HA
+          # brings. These renders are not kubeconform'd: the step above
+          # validates the same objects.
+          export CHART_CACHE=/tmp/charts
+          yq '(.. | select(tag == "!!map" and has("ha")) | .ha) = true' \
+            oci/.ci/inputs-sample.yaml > /tmp/inputs-sample-ha.yaml
+          render() { # <cloud> <inputs> <out-dir>
+            local split="/tmp/requests-overlay-$1" f
+            mkdir -p "${split}" "$3"
+            kubectl kustomize --load-restrictor LoadRestrictionsNone "oci/clusters/$1" \
+              | awk -v out="${split}" 'BEGIN { n = 0 } /^---$/ { n++; next } { print > (out "/" n ".yaml") }'
+            for f in "${split}"/*.yaml; do
+              flux-operator build rset -f "${f}" --inputs-from "$2" > "$3/$(yq '.metadata.name' "${f}").yaml"
+            done
+          }
+          render aws oci/.ci/inputs-sample.yaml requests/aws
+          render gcp oci/.ci/inputs-sample-gcp.yaml requests/gcp
+          render aws /tmp/inputs-sample-ha.yaml requests/aws-ha
+          rc=0
+          for dir in requests/aws requests/gcp requests/aws-ha; do
+            echo "==> ${dir}" | tee -a requests.out
+            .github/scripts/check-catalog-requests.sh "${dir}" | tee -a requests.out || rc=1
+          done
+          exit "${rc}"
+      - name: Summary
+        if: always() && steps.detect.outputs.found == 'true'
+        run: |
           {
-            echo "### kubeconform ✅"
-            echo "Rendered (\`flux-operator build rset\` + \`helm template\`, strict):"
+            echo "### kubeconform"
+            echo "Rendered, child ResourceSets' resources included, each cloud's"
+            echo "patched modules from its own sample (\`flux-operator build rset\` + \`helm template\`, strict):"
             echo '```'
-            tail -1 kubeconform-rendered.out
+            tail -1 kubeconform-rendered.out 2>/dev/null || echo "did not run"
             echo '```'
             echo "Artifact templates (\`oci/catalog\`, \`oci/clusters\`, missing schemas ignored):"
             echo '```'
-            tail -1 kubeconform-oci.out
+            tail -1 kubeconform-oci.out 2>/dev/null || echo "did not run"
+            echo '```'
+            echo "Requests (aws, gcp, then aws with ha — every container of every chart, templated):"
+            echo '```'
+            grep -v '^::error::' requests.out 2>/dev/null || echo "did not run"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -399,6 +513,9 @@ jobs:
       - name: Trivy misconfiguration scan (SARIF)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          # Pinned above the action's default (v0.70.0), whose GKE adapter
+          # panics on a grouped root's null labels (opentofu/clusters/gcp).
+          version: v0.75.0
           scan-type: config
           scan-ref: .
           # Ignores for YAML manifests, which take no inline #trivy:ignore.
@@ -415,6 +532,7 @@ jobs:
         if: env.CAN_UPLOAD != 'true'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          version: v0.75.0
           scan-type: config
           scan-ref: .
           trivyignores: .trivyignore.yaml
@@ -424,6 +542,7 @@ jobs:
       - name: Trivy secret scan (always gates — a leaked secret is never a finding to triage)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          version: v0.75.0
           scan-type: fs
           scan-ref: .
           scanners: secret

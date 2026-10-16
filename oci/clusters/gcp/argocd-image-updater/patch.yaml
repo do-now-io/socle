@@ -1,0 +1,139 @@
+# The argocd-image-updater module on gcp: with Crossplane on and
+# repositories named, Artifact Registry Reader on the cluster's project for
+# the module's own principal, and the socle's entry for the Artifact Registry
+# host of each location named, its token taken from the metadata server
+# (docs/catalog/argocd-image-updater.md, docs/decisions/argocd-image-updater.md,
+# ARGOCD-IMAGE-UPDATER-08).
+- op: add
+  path: /spec/dependsOn/-
+  value:
+    # The IAM member's kind comes from Crossplane's providers.
+    apiVersion: fluxcd.controlplane.io/v1
+    kind: ResourceSet
+    name: crossplane
+    namespace: flux-system
+    ready: true
+- op: test
+  path: /spec/steps/1/name
+  value: workload
+- op: add
+  path: /spec/steps/1
+  value:
+    name: cloud
+    resourcesTemplate: |
+      << $m := inputs.modules.argocd_image_updater ->>
+      << if and inputs.modules.crossplane.enabled $m.repositories >>
+      << $principal := printf
+           "principal://iam.googleapis.com/projects/%s/locations/global/workloadIdentityPools/%s.svc.id.goog/subject/ns/%s/sa/%s"
+           inputs.cluster.projectNumber inputs.cluster.projectId "argocd-image-updater" "argocd-image-updater" ->>
+      # The module's own GCP access, docs/architecture/module-iam.md: no Google
+      # service account, the ServiceAccount argocd-image-updater/argocd-image-updater
+      # is the principal itself (Workload Identity Federation for GKE). Its one
+      # role is among what the foundations let Crossplane grant
+      # (crossplane.allowed_roles), and nothing else is.
+      #
+      # Read-only, and on the project, not on each repository named: Artifact
+      # Registry recognises neither iam.googleapis.com/modifiedGrantsByRole
+      # nor resource.name in IAM conditions
+      # (https://docs.cloud.google.com/iam/docs/conditions-attribute-reference,
+      # https://docs.cloud.google.com/iam/docs/conditions-resource-attributes),
+      # so a repository's IAM policy is one Crossplane could only set unbounded
+      # — writer or admin to itself, on every repository. The project grant
+      # stays under the foundations' hasOnly() condition. It reads every
+      # repository of the project: one socle cluster per project
+      # (docs/decisions/argocd-image-updater.md, ARGOCD-IMAGE-UPDATER-08).
+      apiVersion: cloudplatform.gcp.m.upbound.io/v1beta1
+      kind: ProjectIAMMember
+      metadata:
+        name: argocd-image-updater
+        namespace: argocd-image-updater
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if $m.enabled >>enabled<< else >>disabled<< end >>
+      spec:
+        forProvider:
+          project: << inputs.cluster.projectId | quote >>
+          role: roles/artifactregistry.reader
+          member: << $principal | quote >>
+      ---
+      # Healthy only once the member is Ready, so the workload step starts
+      # with its access: the first scans would otherwise read 403s, counted as
+      # skipped images with errors=0. A dependsOn with a readyExpr, because a
+      # managed resource not yet created carries no Ready condition at all,
+      # which the step's own health check reads as healthy.
+      apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSet
+      metadata:
+        name: argocd-image-updater-access
+        namespace: flux-system
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if $m.enabled >>enabled<< else >>disabled<< end >>
+      spec:
+        dependsOn:
+          - apiVersion: cloudplatform.gcp.m.upbound.io/v1beta1
+            kind: ProjectIAMMember
+            name: argocd-image-updater
+            namespace: argocd-image-updater
+            ready: true
+            readyExpr: status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
+        resources: []
+      ---
+      # The socle's entries, one per location named — Artifact Registry serves
+      # each location from its own host, LOCATION-docker.pkg.dev — then the
+      # client's registries: one list, which a later values document replaces
+      # whole, so this one is complete (ARGOCD-IMAGE-UPDATER-04, -07). The
+      # prefix is the host, as aws's: Image Updater takes an exact host match
+      # before any longer prefix, and registers an anonymous host entry for an
+      # image no entry matches, which would then win over a path prefix
+      # (registry-scanner/pkg/registry/endpoints.go, v1.3.0).
+      << $locations := list ->>
+      << range $m.repositories ->>
+      << $locations = append $locations (first (splitList "/" .)) ->>
+      << end ->>
+      << $registries := list ->>
+      << range uniq $locations ->>
+      << $host := printf "%s-docker.pkg.dev" . ->>
+      << $entry := dict "name" (printf "artifact-registry-%s" .) "prefix" $host "api_url" (printf "https://%s" $host) ->>
+      << $_ := set $entry "credentials" "ext:/scripts/artifact-registry-login.sh" ->>
+      << $_ = set $entry "credsexpire" "5m" ->>
+      << $registries = append $registries $entry ->>
+      << end ->>
+      << range $m.registries ->>
+      << $registries = append $registries . ->>
+      << end ->>
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: argocd-image-updater-cloud-values
+        namespace: argocd-image-updater
+        labels:
+          reconcile.fluxcd.io/watch: Enabled
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if $m.enabled >>enabled<< else >>disabled<< end >>
+      data:
+        values.yaml: |
+          # The whole list, the Artifact Registry entries first (above).
+          config:
+            registries: << $registries | toJson >>
+          # Prints oauth2accesstoken:<token>, Artifact Registry's access-token
+          # login (https://docs.cloud.google.com/artifact-registry/docs/docker/authentication),
+          # with the federated token the GKE metadata server exchanges for the
+          # pod's ServiceAccount token: no key, no gcloud. The image is Alpine
+          # with neither curl nor gcloud; busybox's wget and sed are there
+          # (quay.io/argoprojlabs/argocd-image-updater:v1.3.0). The token lives
+          # one hour and the metadata server hands out a cached one whose
+          # remaining life the script does not read, so the entries re-run it
+          # every 5 minutes; a 401 or 403 before then clears the cached
+          # credential and runs it again (registry-scanner/pkg/registry/registry.go,
+          # v1.3.0). Image Updater kills it after 10 seconds.
+          authScripts:
+            enabled: true
+            scripts:
+              artifact-registry-login.sh: |
+                #!/bin/sh
+                set -eu
+                token=$(wget -q -O - --header 'Metadata-Flavor: Google' \
+                  http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token \
+                  | sed -n 's/.*"access_token" *: *"\([^"]*\)".*/\1/p')
+                [ -n "$token" ]
+                printf 'oauth2accesstoken:%s' "$token"
+      << end >>

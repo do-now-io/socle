@@ -65,7 +65,9 @@ kube = {
 **Installed**: chart `podinfo` 6.15.0 from
 `oci://ghcr.io/stefanprodan/charts/podinfo`, in the `hello` namespace.
 
-**What the socle sets**: `replicaCount` from `replicas`; from the cloud step's
+**What the socle sets**: `replicaCount` from `replicas`; requests 10m CPU,
+32Mi and 64Mi of ephemeral storage (the chart's 1m / 16Mi is outside GKE
+Autopilot's CPU:memory ratio); from the cloud step's
 `hello-cloud-values` ConfigMap, `ui.color` and `ui.message` — `message` with
 the cluster name and the cloud appended.
 

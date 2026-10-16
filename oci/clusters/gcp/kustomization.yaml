@@ -8,6 +8,7 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
+  - ../../catalog/gateway-api/resourceset.yaml
   - ../../catalog/crossplane/resourceset.yaml
   - ../../catalog/external-dns/resourceset.yaml
   - ../../catalog/argocd/resourceset.yaml
@@ -20,13 +21,54 @@ resources:
   - ../../catalog/kyverno-policies/resourceset.yaml
   - ../../catalog/external-secrets/resourceset.yaml
   - ../../catalog/reloader/resourceset.yaml
+  - ../../catalog/velero/resourceset.yaml
   - ../../catalog/hello/resourceset.yaml
 patches:
+  - path: gateway-api/patch.yaml
+    target:
+      kind: ResourceSet
+      name: gateway-api
+  - path: crossplane/patch.yaml
+    target:
+      kind: ResourceSet
+      name: crossplane
   - path: external-dns/patch.yaml
     target:
       kind: ResourceSet
       name: external-dns
+  - path: external-secrets/patch.yaml
+    target:
+      kind: ResourceSet
+      name: external-secrets
   - path: hello/patch.yaml
     target:
       kind: ResourceSet
       name: hello
+  - path: velero/patch.yaml
+    target:
+      kind: ResourceSet
+      name: velero
+  - path: keda/patch.yaml
+    target:
+      kind: ResourceSet
+      name: keda
+  - path: kyverno/patch.yaml
+    target:
+      kind: ResourceSet
+      name: kyverno
+  - path: kyverno-policies/patch.yaml
+    target:
+      kind: ResourceSet
+      name: kyverno-policies
+  - path: argocd-image-updater/patch.yaml
+    target:
+      kind: ResourceSet
+      name: argocd-image-updater
+  - path: monitoring/patch.yaml
+    target:
+      kind: ResourceSet
+      name: monitoring
+  - path: otel-agent/patch.yaml
+    target:
+      kind: ResourceSet
+      name: otel-agent

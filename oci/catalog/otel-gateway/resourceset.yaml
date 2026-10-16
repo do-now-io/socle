@@ -192,6 +192,8 @@ spec:
           requests:
             cpu: 100m
             memory: 128Mi
+            # Logs and scratch: no file storage, the sending queue in memory.
+            ephemeral-storage: 64Mi
           # A limit, as otel_agent and for the same reason: GOMEMLIMIT and the
           # memory_limiter read it. Larger: this one replica carries every
           # application's OTLP.

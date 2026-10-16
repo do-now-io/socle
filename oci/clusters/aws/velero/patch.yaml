@@ -257,6 +257,12 @@
             - name: velero-plugin-for-aws
               image: docker.io/velero/velero-plugin-for-aws:v1.14.4
               imagePullPolicy: IfNotPresent
+              # It copies one binary and exits (VELERO-07).
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                  ephemeral-storage: 32Mi
               volumeMounts:
                 - mountPath: /target
                   name: plugins

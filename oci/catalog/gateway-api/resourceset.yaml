@@ -3,11 +3,12 @@
 # Cilium's Gateway API turned on. docs/catalog/gateway-api.md,
 # docs/decisions/gateway-api.md.
 #
-# One step here, crds, the same on every cloud. The two shared Gateways take
-# the shape of the load balancer in front of them, which is the cloud's: a
-# step named gateways that the cloud appends, in
+# One step here, crds, the same on every cloud that installs them. The two
+# shared Gateways take the shape of the load balancer in front of them, which
+# is the cloud's: a step named gateways that the cloud appends, in
 # oci/clusters/<cloud>/gateway-api/patch.yaml (docs/decisions/socle.md,
-# SOCLE-32).
+# SOCLE-32). gcp's patch also removes crds: GKE owns the CRDs and serves only
+# its own classes (GATEWAY-API-05).
 #
 # Nothing is vendored. The CRDs come from upstream, kubernetes-sigs/
 # gateway-api, pinned by commit: the release tag's commit is content-

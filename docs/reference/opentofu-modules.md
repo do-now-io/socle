@@ -17,7 +17,7 @@ VPC, EKS with no CNI, bootstrap nodes, identities, Crossplane's role. [AWS](../c
 
 ## gcp
 
-A GKE Autopilot cluster in its own network. [GCP](../clouds/gcp/index.md).
+A GKE Autopilot cluster in its own network, Crossplane's bounded grants, the Gateways' certificates. [GCP](../clouds/gcp/index.md).
 
 ::include{file="opentofu/gcp/README.md" section="tf-docs"}
 
@@ -44,3 +44,9 @@ What runs before the catalog, then Flux and the inputs. Its `kube` schema: [Inpu
 The AWS root your `main.tf` calls: foundations and bootstrap in one apply.
 
 ::include{file="opentofu/clusters/aws/README.md" section="tf-docs"}
+
+## clusters/gcp
+
+The GCP root your `main.tf` calls: foundations and bootstrap in one apply.
+
+::include{file="opentofu/clusters/gcp/README.md" section="tf-docs"}

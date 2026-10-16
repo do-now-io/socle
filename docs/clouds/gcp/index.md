@@ -11,10 +11,14 @@ sidebar:
 [`opentofu/gcp`](../../../opentofu/gcp/README.md) builds, in your project, a regional GKE
 Autopilot cluster with private nodes and a DNS-only control plane endpoint, a
 VPC (or yours) with Cloud NAT, GKE's Gateway API controller, an upgrade
-notification topic and cost allocation. No key: workloads use Workload
-Identity Federation. The [bootstrap](../../reference/opentofu-modules.md)
-then installs Flux (no Cilium: Dataplane V2 is GKE's), and Flux renders the
-catalog.
+notification topic and cost allocation. No key and no Google service
+account: every workload is a Workload Identity Federation principal of its
+own, and Crossplane's grants are bounded by the roles you allow. With
+`gateway_certificate`, Google-managed certificates for the shared Gateways.
+The [bootstrap](../../reference/opentofu-modules.md) then installs Flux (no
+Cilium: Dataplane V2 is GKE's), and Flux renders the catalog.
+[`opentofu/clusters/gcp`](../../../opentofu/clusters/gcp/README.md) runs
+both in one apply.
 
 Start with [Prerequisites](prerequisites.md), then the
 [GCP quickstart](../../getting-started/gcp.md). What is decided for you is in
@@ -45,10 +49,16 @@ Autopilot bills Pod requests, not nodes. US dollars, us-central1 list prices,
 
 ## Status
 
-- **Built**: the foundations module. No `opentofu/clusters/gcp` root: you
-  write it, as the [quickstart](../../getting-started/gcp.md) shows.
-- **Proven in CI**: a plan against floci-gcp, which runs no Compute Engine
-  API. Never applied on a real project; catalog convergence on Autopilot
-  unproven.
-- **Not offered yet**: Velero, Crossplane providers, `kube.keda.services`,
-  the shared Gateways ([limits](limits.md)).
+- **Built**: the foundations module and the
+  [`opentofu/clusters/gcp`](../../../opentofu/clusters/gcp/README.md) root;
+  on gcp the catalog offers every module but `metrics_server` (GKE serves
+  `metrics.k8s.io` itself), with Crossplane's Cloud Platform and Storage
+  providers, the shared Gateways, Velero and `kube.keda.services = ["pubsub"]`.
+- **Proven**: in CI, a plan against floci-gcp, which runs no Compute Engine
+  API; on a real GKE Autopilot sandbox project (2026-10-07, PR #84), the
+  root applied, every catalog module converged, and destroyed in two runs;
+  on 2026-10-16 (artifact `0.0.0-feat-gcp-parity.d896756`), every `platform: gke` test passed and
+  Grafana answered over https, the modules turned on in four waves because a
+  fresh project's quotas do not hold the whole catalog at once
+  ([sizing](sizing.md#what-fits-a-fresh-project)).
+- **Not offered yet**: what [limits](limits.md) lists.
