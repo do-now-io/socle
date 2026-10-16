@@ -52,6 +52,19 @@ run "owner_refuses_spaces" {
   expect_failures = [var.owner]
 }
 
+# A Kubernetes label value starts and ends with an alphanumeric character.
+run "owner_refuses_a_leading_dash" {
+  command = plan
+  variables { owner = "-platform" }
+  expect_failures = [var.owner]
+}
+
+run "owner_refuses_a_trailing_underscore" {
+  command = plan
+  variables { owner = "platform_" }
+  expect_failures = [var.owner]
+}
+
 run "kube_refuses_a_module_that_is_not_an_object" {
   command = plan
   variables { kube = { hello = "yes" } }
@@ -184,6 +197,41 @@ run "cosign_identity_refuses_an_empty_subject" {
   expect_failures = [var.cosign_identity]
 }
 
+# Flux matches the identity as regexes: without its anchors, a pattern
+# accepts any workflow whose identity merely contains it.
+run "cosign_identity_refuses_an_unanchored_subject" {
+  command = plan
+  variables {
+    cosign_identity = {
+      issuer  = "^https://token\\.actions\\.githubusercontent\\.com$"
+      subject = "https://github\\.com/do-now-io/socle/"
+    }
+  }
+  expect_failures = [var.cosign_identity]
+}
+
+run "cosign_identity_refuses_a_subject_whose_dollar_is_escaped" {
+  command = plan
+  variables {
+    cosign_identity = {
+      issuer  = "^https://token\\.actions\\.githubusercontent\\.com$"
+      subject = "^https://github\\.com/do-now-io/socle/\\$"
+    }
+  }
+  expect_failures = [var.cosign_identity]
+}
+
+run "cosign_identity_refuses_a_wildcard_issuer" {
+  command = plan
+  variables {
+    cosign_identity = {
+      issuer  = "^.*$"
+      subject = "^https://github\\.com/do-now-io/socle/\\.github/workflows/publish-artifact\\.yaml@refs/heads/main$"
+    }
+  }
+  expect_failures = [var.cosign_identity]
+}
+
 run "operator_version_refuses_a_range" {
   command = plan
   variables { operator_version = "0.60" }
@@ -193,6 +241,20 @@ run "operator_version_refuses_a_range" {
 run "flux_version_refuses_a_major_that_is_not_two" {
   command = plan
   variables { flux_version = "3.0.0" }
+  expect_failures = [var.flux_version]
+}
+
+# What the message names, and nothing else: 2.y alone or a stray x is not one
+# of the three forms.
+run "flux_version_refuses_a_bare_minor" {
+  command = plan
+  variables { flux_version = "2.8" }
+  expect_failures = [var.flux_version]
+}
+
+run "flux_version_refuses_an_x_inside_a_number" {
+  command = plan
+  variables { flux_version = "2.8x.0" }
   expect_failures = [var.flux_version]
 }
 
