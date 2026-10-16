@@ -1,6 +1,6 @@
 ---
 title: Configure a cluster
-description: One main.tf per cluster calling the socle's root, choose the catalog with kube, and pass chart values and secrets.
+description: One main.tf per cluster calling the socle's root on AWS or GCP, choose the catalog with kube, and pass chart values and secrets.
 sidebar:
   order: 0
 ---
@@ -8,8 +8,11 @@ sidebar:
 A cluster is one `main.tf`, in a directory of its own, that calls the socle's
 root for its cloud.
 
-**Before you start:** your cloud's [prerequisites](../clouds/aws/prerequisites.md)
-are met. AWS is the only cloud with a root today.
+**Before you start:** your cloud's prerequisites are met
+([AWS](../clouds/aws/prerequisites.md), [GCP](../clouds/gcp/prerequisites.md)).
+AWS and GCP have a root; on Azure and Scaleway, the foundations take a
+tfvars file of their own ([Azure](../getting-started/azure.md),
+[Scaleway](../getting-started/scaleway.md)).
 
 ## 1. One directory per cluster
 
@@ -23,6 +26,8 @@ Each has its own state key, so a plan on dev never touches prod. Commit the
 `.terraform.lock.hcl` `tofu init` writes next to it.
 
 ## 2. Write its main.tf
+
+### On AWS
 
 ```hcl title="clusters/prod/main.tf"
 terraform {
@@ -61,10 +66,58 @@ module "socle" {
 }
 ```
 
+### On GCP
+
+```hcl title="clusters/prod/main.tf"
+terraform {
+  backend "gcs" {
+    bucket = "acme-prod-tofu-state"
+    prefix = "socle/gcp/acme-prod"
+  }
+}
+
+locals {
+  socle_version = "0.1.0" # x-release-please-version
+}
+
+module "socle" {
+  source = "oci://ghcr.io/do-now-io/socle/opentofu-modules//opentofu/clusters/gcp?tag=${local.socle_version}"
+
+  socle_version = local.socle_version
+
+  gcp = {
+    project_id     = "acme-prod"
+    region         = "europe-west1"
+    cluster_name   = "acme-prod"
+    owner          = "platform"
+    environment    = "prod"
+    create_network = true
+    maintenance_window = {
+      start_time = "2026-01-03T02:00:00Z"
+      end_time   = "2026-01-03T14:00:00Z"
+      recurrence = "FREQ=WEEKLY;BYDAY=SA"
+    }
+    gateway_certificate = { dns_zone = "acme-example", domains = ["acme.example", "*.acme.example"] }
+  }
+
+  kube = {
+    argocd  = { domain = "argocd.acme.example" }
+    kyverno = { enabled = true }
+  }
+}
+```
+
+One socle cluster per project: every module's Workload Identity principal
+names the project, never the cluster
+([GCP prerequisites](../clouds/gcp/prerequisites.md)).
+
+### The blocks
+
 | Block | What it holds |
 | --- | --- |
 | `socle_version` | A released version, never `latest` or `main`; the only line an [upgrade](upgrade.md) touches, source included. |
-| `aws` | The foundations' variables. Keys without a default, `kubernetes_version` among them, are required. Every option: [`prod.tfvars.example`](../../opentofu/clusters/aws/prod.tfvars.example), written as tfvars; the same keys go in the module block. |
+| `aws` | The AWS foundations' variables. Keys without a default, `kubernetes_version` among them, are required. Every option: [`prod.tfvars.example`](../../opentofu/clusters/aws/prod.tfvars.example), written as tfvars; the same keys go in the module block. |
+| `gcp` | The GCP foundations' variables. Keys without a default, `maintenance_window` among them, are required; there is no Kubernetes version, the release channel decides. Every option: [`prod.tfvars.example`](../../opentofu/clusters/gcp/prod.tfvars.example). |
 | `kube` | Only what differs from the catalog's defaults, in `snake_case`. Defaults: [Inputs](../reference/inputs.md#the-catalog-schema); modules: [catalog](../catalog/index.mdx). |
 
 ## 3. Pass chart values
@@ -101,7 +154,7 @@ OpenTofu never reads it.
 
 ## 4. Adjust what precedes Flux, if you need to
 
-On aws the root also takes `cilium`, `coredns` and `eks_addons`, every key
+On AWS the root also takes `cilium`, `coredns` and `eks_addons`, every key
 optional ([Inputs](../reference/inputs.md#cilium-coredns-and-the-eks-add-ons)),
 beside `aws` and `kube` in the module block:
 
@@ -113,6 +166,9 @@ beside `aws` and `kube` in the module block:
 
 Leave `cilium.enabled` at `true` on a real EKS: the cluster has no other
 network.
+
+On GCP there is nothing to adjust: GKE Autopilot runs the network (Dataplane
+V2), the cluster DNS and the nodes, and the root takes none of these blocks.
 
 ## 5. Plan and apply
 

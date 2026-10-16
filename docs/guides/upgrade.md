@@ -46,10 +46,18 @@ kubectl -n flux-system get resourceset socle-root  # Ready
 An object the new artifact no longer carries leaves the cluster. Move one
 ring at a time: dev, then staging, then prod.
 
+`socle_version` does not move Kubernetes. On AWS the version is yours,
+`aws.kubernetes_version`, a foundations change of its own. On GCP the release
+channel upgrades the cluster in your `gcp.maintenance_window`; the day of the
+window orders the rings.
+
 ### When the upgrade replaces the cluster
 
-A ForceNew change of the foundations (listed in their README) leaves the
-helm provider unable to refresh. Apply the foundations first:
+A change that replaces the cluster (listed in the root's README:
+[AWS](../../opentofu/clusters/aws/README.md),
+[GCP](../../opentofu/clusters/gcp/README.md)) leaves the helm provider unable
+to refresh. Apply the foundations first; the target is the same on both
+roots:
 
 ```sh
 tofu apply -target=module.socle.module.foundations

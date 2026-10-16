@@ -34,8 +34,8 @@ kube = { argocd = { domian = "argocd.acme.example" } }
 kube = { hello = { replicas = "three" } }
 → kube: an attribute has the wrong type. Each value must have the type of its catalog default: …
 
-kube = { velero = { enabled = true } }        # on gcp
-→ kube: a module is not offered on gcp. Cloud-bound modules: {"gateway_api":["aws","azure","scaleway"],"metrics_server":["aws"],"velero":["aws"]}
+kube = { metrics_server = { enabled = true } }        # on gcp
+→ kube: a module is not offered on gcp. Cloud-bound modules: {"gateway_api":["aws","azure","gcp","scaleway"],"metrics_server":["aws"],"velero":["aws","gcp"]}
 ```
 
 **Why:** `kube` is validated against the catalog at plan. Modules add their
@@ -49,19 +49,25 @@ secret-bearing path in `values`.
 
 ### The plan warns that Crossplane has no identity
 
-**What you see:** `kube.crossplane.enabled is set without aws.crossplane: the AWS provider runs with no identity, and every CloudAccess will fail.`
+**What you see:** on AWS,
+`kube.crossplane.enabled is set without aws.crossplane: the AWS provider runs with no identity, and every CloudAccess will fail.`;
+on GCP,
+`kube.crossplane.enabled is set without gcp.crossplane: the Google Cloud providers run as a principal with no grant, and every binding a module declares will fail.`
 
-**Why:** Crossplane converges, but every module role then fails at the AWS
-API.
+**Why:** Crossplane converges, but every module role (AWS) or binding (GCP)
+then fails at the cloud's API.
 
 **Fix:** `aws.crossplane = { allowed_services = [ … ] }` with the services
-your modules use, or keep Crossplane off.
+your modules use, or `gcp.crossplane = { allowed_roles = [ … ] }` with their
+roles ([GCP prerequisites](../clouds/gcp/prerequisites.md#crossplanes-allowed-roles));
+or keep Crossplane off.
 
 ### The plan refuses a cluster with no node
 
 **What you see:** `bootstrap_node_count must be a whole number of at least 1: a cluster with no node runs nothing, the socle included.`
 
-**Why:** the foundations' `bootstrap_node_count` is 0 (on aws).
+**Why:** the foundations' `bootstrap_node_count` is 0 (on AWS; GKE
+Autopilot has no node group to size).
 
 **Fix:** set `bootstrap_node_count` to at least 1.
 
@@ -76,6 +82,19 @@ its association existed.
 **Fix:** set `eks_addons.pod_identity_agent = true` and check
 `aws eks describe-addon --cluster-name <cluster> --addon-name eks-pod-identity-agent`;
 delete a pod admitted too early so it is recreated.
+
+### A module's binding never gets Ready on GCP
+
+**What you see:** the module's `cloud` step waits; its
+`ProjectIAMMember` or `BucketIAMMember` stays not `Ready`, its conditions
+carrying the error IAM returned.
+
+**Why:** the role the module needs is not in `gcp.crossplane.allowed_roles`:
+Crossplane may grant nothing else.
+
+**Fix:** add the role from
+[Crossplane's allowed roles](../clouds/gcp/prerequisites.md#crossplanes-allowed-roles)
+and apply.
 
 ### A Crossplane provider stays Healthy=False while its pods are Ready
 
@@ -132,11 +151,22 @@ their tags.
 
 ### When one apply is not enough
 
-- **Replacing the cluster.** A ForceNew foundations change leaves the helm
-  provider unable to refresh. Fix: apply the foundations alone first
-  (`-target=module.socle.module.foundations` with the AWS root), then a full
+- **Replacing the cluster.** A change that replaces the cluster leaves the
+  helm provider unable to refresh. Fix: apply the foundations alone first
+  (`-target=module.socle.module.foundations`, on both roots), then a full
   apply.
 - **Destroying with the API unreachable.** The releases need the API to go.
   Fix: drop the bootstrap from the state first
-  (`tofu state rm module.socle.module.socle` with the AWS root)
+  (`tofu state rm module.socle.module.socle`, on both roots)
   ([Uninstall](uninstall.md#everything)).
+- **Destroying on GCP.** The first `tofu destroy` refuses while
+  `gcp.deletion_protection` is on: set it to `false` and apply. Once it is
+  off, the first destroy still fails on the certificate map, the regional
+  certificate and the proxy-only subnetwork, which GKE's load balancers
+  release after the cluster. Fix: run `tofu destroy` again a few minutes
+  later.
+- **Changing `gcp.gateway_certificate.domains`.** The internal Gateway moves
+  to the new certificate only once Flux reconciles it, so deleting the old
+  one fails "in use". Fix: wait for the Gateway to name the new certificate,
+  then apply again
+  ([GCP root](../../opentofu/clusters/gcp/README.md#when-one-apply-is-not-enough)).

@@ -48,18 +48,29 @@ suite).
 
 ## Everything
 
+On GCP, the cluster carries deletion protection: set
+`gcp.deletion_protection = false` and apply first. Then, on both:
+
 ```sh
 tofu destroy
 ```
 
+On GCP a first destroy fails on the certificate map, the regional
+certificate and the proxy-only subnetwork: GKE removes the Gateways' load
+balancers after the cluster. Run `tofu destroy` again a few minutes later
+(measured on a sandbox, 2026-10-07).
+
 The releases go before the cluster, which needs the API. If the runner can no
-longer reach it (it left `cluster_endpoint_public_access_cidrs`, say), drop
-the releases from the state first:
+longer reach it (on AWS it left `cluster_endpoint_public_access_cidrs`, say),
+drop the releases from the state first:
 
 ```sh
 tofu state rm module.socle.module.socle
 tofu destroy
 ```
+
+Nothing then deletes the module access Crossplane created: see the table
+below.
 
 ## What is left behind, by design
 
@@ -67,8 +78,9 @@ tofu destroy
 | --- | --- | --- |
 | The Gateway API CRDs | deleting a CRD deletes every Gateway and route | by hand once unused, or with the cluster |
 | The CRDs of `external_secrets`, `keda`, `velero`, `crossplane`, `argocd_image_updater` | they hold your objects | as above |
-| Module roles, when `crossplane` went first | nothing is left to delete them | delete the roles under `/socle/<cluster>/` in IAM |
-| Velero's bucket | Crossplane may not delete a bucket of data | in the cloud, once its backups are not needed |
+| Module roles (AWS), when `crossplane` went first or the bootstrap left the state | nothing is left to delete them | delete the roles under `/socle/<cluster>/` in IAM |
+| Module bindings (GCP), when `crossplane` went first or the bootstrap left the state | nothing is left to delete them; a socle created in the project next inherits them | remove the `principal://…` members of the project's IAM policy |
+| Velero's bucket (S3 on AWS, GCS on GCP) | Crossplane may not delete a bucket of data | in the cloud, once its backups are not needed |
 | A pending Velero `Restore` | its finalizer holds the namespace | delete the `Restore` ([Restore a backup](restore-a-backup.md)) |
 | `ImageUpdater` objects in `argocd`, once `argocd_image_updater` is off | their finalizer holds them, and the `argocd` namespace, with no controller to release it | delete them before turning the module off, or release them: `kubectl -n argocd patch imageupdater <name> --type merge -p '{"metadata":{"finalizers":[]}}'` |
 | A mirror's pull secret | `flux-system` outlives the operator's release | with the cluster |
