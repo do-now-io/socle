@@ -154,6 +154,29 @@ runs:
         [ -z "$VAR_FILE" ] || args+=(-var-file "$GITHUB_WORKSPACE/$VAR_FILE")
         [ -z "$KUBE" ] || args+=(-var "kube=$KUBE")
         tofu init -input=false > /dev/null
+        # gcp: floci-gcp reports the cluster RUNNING seconds after k3s starts,
+        # before its API server presents the certificate the returned CA
+        # signs — the helm provider, a second later, got "x509: certificate
+        # signed by unknown authority" (run 38926527396). So the cluster
+        # first, then its API answering /readyz over TLS verified with that
+        # CA, then the rest.
+        if [ "$CLOUD" = gcp ]; then
+          SECONDS=0
+          tofu apply -auto-approve "${args[@]}" -target=google_container_cluster.e2e > /dev/null
+          tofu output -raw cluster_ca_certificate | base64 -d > "$RUNNER_TEMP/k3s-ca.crt"
+          endpoint="$(tofu output -raw endpoint)"
+          for _ in $(seq 1 90); do
+            curl -fsS --cacert "$RUNNER_TEMP/k3s-ca.crt" -H "Authorization: Bearer floci-gcp" \
+              "https://$endpoint/readyz" > /dev/null 2>&1 && break
+            sleep 2
+          done
+          curl -fsS --cacert "$RUNNER_TEMP/k3s-ca.crt" -H "Authorization: Bearer floci-gcp" "https://$endpoint/readyz" \
+            || { openssl s_client -connect "$endpoint" -showcerts < /dev/null 2>&1 | grep -E 'subject=|issuer='
+                 openssl x509 -in "$RUNNER_TEMP/k3s-ca.crt" -noout -subject
+                 echo "::error::k3s at $endpoint never presented a certificate its CA verifies"; exit 1; }
+          echo
+          echo "| k3s API verified after | ${SECONDS}s |" >> "$GITHUB_STEP_SUMMARY"
+        fi
         if [ "$CLOUD" != aws ]; then
           SECONDS=0
           tofu apply -auto-approve "${args[@]}"
