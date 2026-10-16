@@ -18,8 +18,9 @@
 #
 # Values, in the order helm-controller merges them, later winning
 # (docs/decisions/socle.md#socle-06-the-clients-values-win): external-secrets-socle-values, the socle's
-# defaults below; external-secrets-client-values, kube.external_secrets.values;
-# then the client's Secret when they name one. No inline `values:` on the
+# defaults below; external-secrets-cloud-values, the cloud step's;
+# external-secrets-client-values, kube.external_secrets.values; then the
+# client's Secret when they name one. No inline `values:` on the
 # HelmRelease — helm-controller merges it last, so it would beat the client on
 # every key.
 #
@@ -190,6 +191,11 @@ spec:
             - kind: ConfigMap
               name: external-secrets-socle-values
               valuesKey: values.yaml
+            # The cloud step's, when the cloud has values for the chart.
+            - kind: ConfigMap
+              name: external-secrets-cloud-values
+              valuesKey: values.yaml
+              optional: true
             - kind: ConfigMap
               name: external-secrets-client-values
               valuesKey: values.yaml
