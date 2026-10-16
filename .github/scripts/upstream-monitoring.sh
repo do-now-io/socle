@@ -27,6 +27,8 @@ argocd|dashboard|dashboard-argocd|https://raw.githubusercontent.com/argoproj/arg
 argocd-image-updater|dashboard|dashboard-argocd-image-updater|https://raw.githubusercontent.com/argoproj-labs/argocd-image-updater/v1.3.0/config/example-grafana-dashboard.json
 crossplane|dashboard|dashboard-crossplane|https://grafana.com/api/dashboards/24549/revisions/3/download
 external-dns|dashboard|dashboard-external-dns|https://grafana.com/api/dashboards/23969/revisions/1/download
+karpenter|dashboard|dashboard-karpenter-capacity|https://raw.githubusercontent.com/aws/karpenter-provider-aws/v1.15.0/website/content/en/preview/getting-started/getting-started-with-karpenter/karpenter-capacity-dashboard.json
+karpenter|dashboard|dashboard-karpenter-performance|https://raw.githubusercontent.com/aws/karpenter-provider-aws/v1.15.0/website/content/en/preview/getting-started/getting-started-with-karpenter/karpenter-performance-dashboard.json
 keda|dashboard|dashboard-keda|https://raw.githubusercontent.com/kedacore/keda/v2.21.0/config/grafana/keda-dashboard.json
 velero|dashboard|dashboard-velero|https://grafana.com/api/dashboards/16829/revisions/5/download
 EOF

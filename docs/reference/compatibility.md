@@ -58,7 +58,7 @@ From each `oci/catalog/<module>/resourceset.yaml`. Offered is not proven: CI app
 | --- | --- | --- | --- | --- |
 | `hello` | `podinfo`, `oci://ghcr.io/stefanprodan/charts` | `6.15.0` | | all |
 | `gateway_api` | no chart | | | all |
-| `crossplane` | `crossplane`, `https://charts.crossplane.io/stable` | `2.4.2` | v2.4.2; AWS providers v2.8.1; GCP providers v3.0.0 (`provider-family-gcp`, `provider-gcp-cloudplatform`, `provider-gcp-storage`) | all (providers on aws and gcp) |
+| `crossplane` | `crossplane`, `https://charts.crossplane.io/stable` | `2.4.2` | v2.4.2; AWS providers v2.8.1 (`provider-family-aws`, `provider-aws-iam`, `provider-aws-eks`, `provider-aws-s3`, `provider-aws-sqs`, `provider-aws-cloudwatchevents`); GCP providers v3.0.0 (`provider-family-gcp`, `provider-gcp-cloudplatform`, `provider-gcp-storage`) | all (providers on aws and gcp) |
 | `external_dns` | `external-dns`, `https://kubernetes-sigs.github.io/external-dns/` | `1.22.0` | 0.22.0 | all |
 | `argocd` | `argo-cd`, `oci://ghcr.io/argoproj/argo-helm` | `10.9.2` | v3.5.3 | all |
 | `argocd_image_updater` | `argocd-image-updater`, `oci://ghcr.io/argoproj/argo-helm` | `1.3.1` | v1.3.0 | all (`repositories` on aws and gcp) |
@@ -67,6 +67,7 @@ From each `oci/catalog/<module>/resourceset.yaml`. Offered is not proven: CI app
 | `otel_gateway` | `opentelemetry-collector`, same | `0.173.1` | 0.160.0 | all |
 | `keda` | `keda`, `https://kedacore.github.io/charts` | `2.21.0` | 2.21.0 | all (`services` on aws and gcp) |
 | `metrics_server` | `metrics-server`, `https://kubernetes-sigs.github.io/metrics-server/` | `3.14.0` | 0.9.0 | aws |
+| `karpenter` | `karpenter`, `oci://public.ecr.aws/karpenter` | `1.15.0` | 1.15.0 | aws |
 | `kyverno` | `kyverno`, `oci://ghcr.io/kyverno/charts` | `3.9.1` | v1.19.1 | all |
 | `kyverno_policies` | `kyverno-policies`, `oci://ghcr.io/kyverno/charts` | `3.9.1` | v1.19.1 | all |
 | `external_secrets` | `external-secrets`, `oci://ghcr.io/external-secrets/charts` | `2.11.0` | v2.11.0 | all (its role and store on aws and gcp) |

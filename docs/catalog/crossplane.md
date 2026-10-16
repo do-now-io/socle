@@ -8,8 +8,8 @@ requires: []
 Crossplane is the tooling a module that needs a cloud service uses to declare
 its own role, beside its workload. It grants nothing by itself. **Off by
 default**; turn it on when a module you want needs cloud access (external-dns,
-external-secrets, keda with `services`, velero, argocd-image-updater with
-`repositories`). Providers exist on aws and gcp.
+external-secrets, keda with `services`, velero, karpenter,
+argocd-image-updater with `repositories`). Providers exist on aws and gcp.
 
 ## Getting started
 
@@ -29,7 +29,7 @@ kube = {
 ```
 
 Then `kubectl get providers.pkg.crossplane.io` shows the providers `Healthy`:
-four on aws, three on gcp.
+six on aws, three on gcp.
 
 ## Settings
 
@@ -88,7 +88,7 @@ kube = {
   or an `extraEnvVars*` entry named like a password, token or key. Use
   `values_secret`.
 - **Upgrades**: the chart moves with `socle_version`, and its CRDs with it
-  (Crossplane applies them at start). The four providers move together, on
+  (Crossplane applies them at start). The providers move together, on
   one tag on each cloud.
 - **Coming from an alpha before 0.1.0?** Once 0.1.0 is applied, strip the
   owners the old providers left on their ServiceAccount, once, or the garbage
@@ -100,7 +100,8 @@ kube = {
 
 **Installed**: chart `crossplane` 2.4.2 from `https://charts.crossplane.io/stable`,
 in `crossplane-system`. On aws, the providers `provider-family-aws`,
-`provider-aws-iam`, `provider-aws-eks` and `provider-aws-s3` (v2.8.1), then
+`provider-aws-iam`, `provider-aws-eks`, `provider-aws-s3`, `provider-aws-sqs`
+and `provider-aws-cloudwatchevents` (v2.8.1), then
 `ClusterProviderConfig/default` on EKS Pod Identity, once they are `Healthy`.
 On gcp, `provider-family-gcp`, `provider-gcp-cloudplatform` and
 `provider-gcp-storage` (v3.0.0), then `ClusterProviderConfig/default` on
@@ -122,7 +123,11 @@ write a billed line of the EKS audit log
 **Cloud access**: on aws, the foundations' role for
 `crossplane-system/provider-aws` creates roles only under `/socle/<cluster>/`
 and only with the boundary, which allows `allowed_services` and always denies
-`iam`, `sts` and the account services. On gcp there is no Google service
+`iam`, `sts` and the account services — but for one exception with `ec2`
+allowed: passing the bootstrap nodes' role to EC2, what Karpenter launches
+its nodes with ([AWS-21](../decisions/aws.md#aws-21-the-boundarys-one-iam-exception-the-node-role-passed-to-ec2)).
+Beside roles, it manages buckets, SQS queues and EventBridge rules under
+`<cluster>-` only, and never deletes a bucket. On gcp there is no Google service
 account: the providers' own ServiceAccount is the principal,
 `principal://iam.googleapis.com/projects/<number>/locations/global/workloadIdentityPools/<project>.svc.id.goog/subject/ns/crossplane-system/sa/provider-gcp`,
 and `InjectedIdentity` makes the provider take its token from the GKE metadata

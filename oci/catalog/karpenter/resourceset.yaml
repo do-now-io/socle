@@ -1,0 +1,349 @@
+# The karpenter module: the autoscaler that owns every node but the bootstrap
+# group's. A pod that fits nowhere gets a node sized for it, Spot and
+# Graviton first; an empty or under-used node goes. docs/catalog/karpenter.md
+# is the module's page, docs/decisions/karpenter.md its decisions; the rules
+# of docs/reference/catalog-module-standard.md apply: inputsFrom the one
+# provider, the reconcile toggle on EACH resource, values tested never
+# presence.
+#
+# aws only (catalog_clouds): Karpenter is EC2's. Its cloud access — the
+# controller's IAM role, its Pod Identity association, the interruption queue
+# and the EventBridge rules feeding it — is a step named cloud that aws
+# inserts before workload (oci/clusters/aws/karpenter/patch.yaml, SOCLE-32).
+#
+# Values, in the order helm-controller merges them, later winning
+# (docs/decisions/socle.md#socle-06-the-clients-values-win):
+# karpenter-socle-values, the socle's defaults below; karpenter-cloud-values,
+# the cloud step's (on aws, its ServiceAccount); karpenter-client-values,
+# kube.karpenter.values; then the client's Secret when they name one. No
+# inline `values:` on the HelmRelease — helm-controller merges it last, so it
+# would beat the client on every key.
+#
+# Steps, each applied once the one before is healthy: namespace; workload —
+# the chart, its CRDs among it; nodes — the default EC2NodeClass and NodePool,
+# which need those CRDs.
+#
+# Uninstall order — the one structural decision here (KARPENTER-04). Nodes
+# Karpenter launched are in no OpenTofu state: only Karpenter terminates them,
+# when their NodePool goes, and only while it runs. flux-operator deletes what
+# a ResourceSet rendered in two stages: the Flux objects (Kustomizations,
+# HelmReleases) first, waiting up to a minute for them to go, then everything
+# else. So the NodePool and the EC2NodeClass are in a Kustomization,
+# karpenter-nodes, deleted in the first stage, which waits for them
+# (deletionPolicy: WaitForTermination) while Karpenter drains and terminates
+# their nodes; and the controller's HelmRelease is in a child ResourceSet,
+# karpenter-controller, which is not a Flux object, so it goes in the second.
+# Turning the module off and destroying the socle both take that order.
+#
+# resourcesTemplate rather than resources: the optional Secret entry is
+# conditional text, which the structured list cannot carry.
+#
+# Fixed by decision, not exposed through a named attribute (values can still
+# override any of it):
+# - the chart from Karpenter's own OCI registry on ECR Public, pinned exactly.
+# - the ServiceAccount is karpenter/karpenter, the subject the module's own
+#   AWS identity is bound to.
+# - two replicas, never on a node Karpenter manages, preferably one per
+#   bootstrap node and zone; one node is enough for both.
+# - the CRDs created and replaced with the chart, on install and upgrade
+#   (Flux's CreateReplace): Karpenter's CRDs ship in the chart's crds/, which
+#   Helm alone never upgrades. Helm never deletes them either: they stay when
+#   the module is off, with whatever NodePools a client wrote.
+# - the interruption queue named <cluster>-karpenter, the one the aws step
+#   creates; the API endpoint and the service range from DescribeCluster
+#   (eksControlPlane), what nodeadm needs on AL2023.
+apiVersion: fluxcd.controlplane.io/v1
+kind: ResourceSet
+metadata:
+  name: karpenter
+  namespace: flux-system
+spec:
+  inputsFrom:
+    - apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSetInputProvider
+      name: socle
+  wait: true
+  steps:
+    - name: namespace
+      resourcesTemplate: |
+        apiVersion: v1
+        kind: Namespace
+        metadata:
+          name: karpenter
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if inputs.modules.karpenter.enabled >>enabled<< else >>disabled<< end >>
+          labels:
+            # The controller runs non-root, read-only, no capabilities,
+            # default seccomp: restricted holds, and pins it.
+            pod-security.kubernetes.io/enforce: restricted
+    - name: workload
+      resourcesTemplate: |
+        apiVersion: source.toolkit.fluxcd.io/v1
+        kind: OCIRepository
+        metadata:
+          name: karpenter-chart
+          namespace: karpenter
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if inputs.modules.karpenter.enabled >>enabled<< else >>disabled<< end >>
+        spec:
+          interval: 1h
+          url: oci://public.ecr.aws/karpenter/karpenter
+          layerSelector:
+            mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+            operation: copy
+          ref:
+            tag: 1.15.0  # appVersion 1.15.0
+        ---
+        # The socle's defaults. Everything the client may override through values.
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: karpenter-socle-values
+          namespace: karpenter
+          labels:
+            reconcile.fluxcd.io/watch: Enabled
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if inputs.modules.karpenter.enabled >>enabled<< else >>disabled<< end >>
+        data:
+          values.yaml: |
+            # The identity the aws step binds the controller's role to.
+            # Renaming it through values breaks that binding.
+            serviceAccount:
+              name: karpenter
+            settings:
+              clusterName: << inputs.cluster.name | quote >>
+              # The endpoint, the CA and the service range from
+              # DescribeCluster: AL2023's nodeadm needs the range, which
+              # nothing else gives Karpenter.
+              eksControlPlane: true
+              # The queue the aws step creates and EventBridge fills: Spot
+              # interruptions, rebalance recommendations, instance state
+              # changes, scheduled maintenance. Each drains its node ahead
+              # of the event instead of losing it.
+              interruptionQueue: << printf "%s-karpenter" inputs.cluster.name | quote >>
+            replicas: 2
+            # Never on a node Karpenter manages, so it is never the one to
+            # remove the node it runs on; preferably on the bootstrap group,
+            # one replica per node and per zone. Preferred, not required: a
+            # cluster of one bootstrap node runs both replicas on it.
+            affinity:
+              nodeAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                  nodeSelectorTerms:
+                    - matchExpressions:
+                        - key: karpenter.sh/nodepool
+                          operator: DoesNotExist
+                preferredDuringSchedulingIgnoredDuringExecution:
+                  - weight: 100
+                    preference:
+                      matchExpressions:
+                        - key: eks.amazonaws.com/nodegroup
+                          operator: Exists
+              podAntiAffinity:
+                # null removes the chart's own required anti-affinity, which
+                # Helm would otherwise merge beside this one.
+                requiredDuringSchedulingIgnoredDuringExecution: null
+                preferredDuringSchedulingIgnoredDuringExecution:
+                  - weight: 100
+                    podAffinityTerm:
+                      topologyKey: kubernetes.io/hostname
+                      labelSelector:
+                        matchLabels:
+                          app.kubernetes.io/name: karpenter
+                          app.kubernetes.io/instance: karpenter
+            topologySpreadConstraints:
+              - maxSkew: 1
+                topologyKey: topology.kubernetes.io/zone
+                whenUnsatisfiable: ScheduleAnyway
+            # Requests sized for a small fleet; no limit, which would be a
+            # guess that kills the one thing adding capacity when it is
+            # needed. ephemeral-storage declared, as everywhere in the socle.
+            controller:
+              # Karpenter asks instance metadata for its region when none is
+              # set, which a pod cannot reach on these nodes (IMDSv2, one hop).
+              # A client's controller.env replaces this list: keep it there.
+              env:
+                - name: AWS_REGION
+                  value: << inputs.cluster.region | quote >>
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                  ephemeral-storage: 64Mi
+            # Metrics for the monitoring module's vmagent, over plain HTTP on
+            # 8080: the scrape of annotated pods.
+            podAnnotations:
+              prometheus.io/scrape: "true"
+              prometheus.io/port: "8080"
+        ---
+        # The client's own chart values, as written in kube.karpenter.values.
+        # OpenTofu refuses credentials in there.
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: karpenter-client-values
+          namespace: karpenter
+          labels:
+            # helm-controller watches a valuesFrom ConfigMap only with this label;
+            # without it, a change here waits for the next interval (10m).
+            reconcile.fluxcd.io/watch: Enabled
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if inputs.modules.karpenter.enabled >>enabled<< else >>disabled<< end >>
+        data:
+          values.yaml: |<< toYaml inputs.modules.karpenter.values | nindent 8 >>
+        ---
+        # The controller, alone in a child ResourceSet: deleted after the
+        # nodes, never with them (the header, KARPENTER-04). Rendered here,
+        # nothing is templated inside it.
+        apiVersion: fluxcd.controlplane.io/v1
+        kind: ResourceSet
+        metadata:
+          name: karpenter-controller
+          namespace: flux-system
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if inputs.modules.karpenter.enabled >>enabled<< else >>disabled<< end >>
+        spec:
+          wait: true
+          resources:
+            - apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: karpenter
+                namespace: karpenter
+              spec:
+                interval: 10m
+                releaseName: karpenter
+                chartRef:
+                  kind: OCIRepository
+                  name: karpenter-chart
+                install:
+                  crds: CreateReplace
+                  remediation:
+                    retries: 3
+                upgrade:
+                  crds: CreateReplace
+                  remediation:
+                    retries: 3
+                # Merged in this order, later wins; nothing inline after them. The
+                # client's Secret needs the reconcile.fluxcd.io/watch: Enabled label
+                # too for a change to apply before the next interval.
+                valuesFrom:
+                  - kind: ConfigMap
+                    name: karpenter-socle-values
+                    valuesKey: values.yaml
+                  # The cloud step's, when the cloud has values for the chart.
+                  - kind: ConfigMap
+                    name: karpenter-cloud-values
+                    valuesKey: values.yaml
+                    optional: true
+                  - kind: ConfigMap
+                    name: karpenter-client-values
+                    valuesKey: values.yaml
+                  << if inputs.modules.karpenter.values_secret >>
+                  - kind: Secret
+                    name: << inputs.modules.karpenter.values_secret | quote >>
+                    valuesKey: values.yaml
+                    optional: true
+                  << end >>
+        << $monitored := and inputs.modules.karpenter.enabled inputs.modules.monitoring.enabled ->>
+        ---
+        # The module's monitoring — its alert rules and its dashboards, from
+        # monitoring/ in the socle artifact: VMRules and ConfigMaps Grafana's
+        # sidecar loads. Present only while both this module and the
+        # monitoring module are on: monitoring brings the VMRule CRD, and
+        # until it has the Kustomization fails and retries every minute
+        # (docs/decisions/monitoring.md, MONITORING-12).
+        apiVersion: kustomize.toolkit.fluxcd.io/v1
+        kind: Kustomization
+        metadata:
+          name: karpenter-monitoring
+          namespace: flux-system
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if $monitored >>enabled<< else >>disabled<< end >>
+        spec:
+          interval: 1h
+          retryInterval: 1m
+          sourceRef:
+            kind: OCIRepository
+            name: socle
+          path: ./catalog/karpenter/monitoring
+          targetNamespace: karpenter
+          prune: true
+          wait: true
+          timeout: 2m
+    - name: nodes
+      resourcesTemplate: |
+        # The default EC2NodeClass and NodePool, from nodes/ in the socle
+        # artifact, patched with the cluster's names and kube.karpenter.node_pool. A Kustomization so
+        # that they go first and are waited for on uninstall (the header).
+        # wait: false — a NodePool is Ready once its EC2NodeClass has resolved
+        # AMIs, subnets, security groups and the instance profile against
+        # EC2; the alert KarpenterNodeClassNotReady says when it has not.
+        # Flux applies any kind named *Class first and waits for it whatever
+        # wait says (fluxcd/pkg ssa, ApplyAllStaged): once the EC2NodeClass
+        # has a status, the NodePool is applied, or changed, only while the
+        # EC2NodeClass is Ready.
+        apiVersion: kustomize.toolkit.fluxcd.io/v1
+        kind: Kustomization
+        metadata:
+          name: karpenter-nodes
+          namespace: flux-system
+          annotations:
+            fluxcd.controlplane.io/reconcile: << if inputs.modules.karpenter.enabled >>enabled<< else >>disabled<< end >>
+        spec:
+          interval: 1h
+          retryInterval: 1m
+          sourceRef:
+            kind: OCIRepository
+            name: socle
+          path: ./catalog/karpenter/nodes
+          prune: true
+          wait: false
+          # Deleted, it holds until the NodePool is gone — and the NodePool
+          # until Karpenter has drained and terminated every node of it.
+          deletionPolicy: WaitForTermination
+          timeout: 10m
+          # What is this cluster's, over the defaults nodes/ holds. JSON
+          # values, so a list stays a list.
+          << $cluster := inputs.cluster.name ->>
+          << $pool := inputs.modules.karpenter.node_pool ->>
+          << $owned := printf "kubernetes.io/cluster/%s" $cluster ->>
+          << $subnets := list (dict "tags" (dict $owned "owned" "kubernetes.io/role/internal-elb" "1")) ->>
+          << $groups := list (dict "tags" (dict $owned "owned")) ->>
+          << $tags := dict "owner" inputs.cluster.owner "environment" inputs.cluster.environment ->>
+          patches:
+            - target:
+                kind: EC2NodeClass
+                name: default
+              patch: |
+                - op: replace
+                  path: /spec/instanceProfile
+                  value: << printf "%s-bootstrap-node" $cluster | toJson >>
+                - op: replace
+                  path: /spec/amiSelectorTerms/0/alias
+                  value: << $pool.ami | toJson >>
+                - op: replace
+                  path: /spec/subnetSelectorTerms
+                  value: << $subnets | toJson >>
+                - op: replace
+                  path: /spec/securityGroupSelectorTerms
+                  value: << $groups | toJson >>
+                - op: replace
+                  path: /spec/tags
+                  value: << $tags | toJson >>
+            - target:
+                kind: NodePool
+                name: default
+              patch: |
+                - op: replace
+                  path: /spec/template/spec/requirements/0/values
+                  value: << $pool.capacity_types | toJson >>
+                - op: replace
+                  path: /spec/template/spec/requirements/1/values
+                  value: << $pool.architectures | toJson >>
+                - op: replace
+                  path: /spec/limits
+                  value: << dict "cpu" ($pool.cpu | toString) "memory" $pool.memory | toJson >>
+                - op: replace
+                  path: /spec/disruption/consolidateAfter
+                  value: << $pool.consolidate_after | toJson >>

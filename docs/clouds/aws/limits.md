@@ -23,9 +23,9 @@ sidebar:
 - **An existing VPC** (`create_vpc = false`) gets no VPC endpoints and no flow logs.
 - **The NLBs' TLS policy is AWS's default**; the socle sets none.
 - **Elastic IPs**: one per AZ per cluster, 5 per region by default ([Prerequisites](prerequisites.md#quotas)).
+- **Capacity for workloads comes from [karpenter](../../catalog/karpenter.md)**, off by default: without it everything runs on the two bootstrap Spot nodes. Its launch of a node, Cilium on it and consolidation are proven on the sandbox only: floci launches no EC2 node.
 
 ## What the socle does not offer here yet
 
-- **Capacity for workloads**: no Karpenter ([#53](https://github.com/do-now-io/socle/issues/53)); everything runs on the two bootstrap Spot nodes.
 - **Backups outside the cluster's account and region** ([velero](../../catalog/velero.md)).
 - **The Upgrade Insights pre-check** and **cloud-resource observability**: proposed, not built.
