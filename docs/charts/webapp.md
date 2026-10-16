@@ -101,12 +101,12 @@ spec:
   manager is available.
 - **Name a store**: `secretStoreRef` has no default. The socle's
   `ClusterSecretStore` `secret-manager` exists where
-  [external_secrets](../catalog/external-secrets.md) creates it; elsewhere,
-  your own store.
+  [external_secrets](../catalog/external-secrets.md) creates it, on aws and
+  gcp with crossplane on; elsewhere, your own store.
 - **Name a Gateway**: a route's `parentRefs` has no default, since the
   Gateways' names and namespaces differ per cluster. Where
-  [gateway_api](../catalog/gateway-api.md) creates them: `public` or
-  `private` in `gateway-system`, listener `https`.
+  [gateway_api](../catalog/gateway-api.md) creates them, on aws, azure and
+  gcp: `public` or `private` in `gateway-system`, listener `https`.
 - **Reloader** rolls the pods when a ConfigMap or Secret they read changes
   (`reloader.enabled`, on), with [reloader](../catalog/reloader.md) on.
 - **A `ReadWriteOnce` disk** attaches to one node at a time: keep one
@@ -114,7 +114,7 @@ spec:
 - **A PodDisruptionBudget** renders only from two guaranteed pods
   (`replicas`, or `autoscaling.minReplicas`): with one, it would protect
   nothing or block every node drain.
-- **Per cloud, gcp**: the socle creates no shared Gateway on GKE, and GKE's
+- **Per cloud, gcp**: the shared Gateways are on GKE's own classes, so GKE's
   load balancer checks `/` on the serving port, not the pod's probes. An
   application that answers only on another path needs a `HealthCheckPolicy`,
   which the chart does not render: yours, beside it.
@@ -133,7 +133,10 @@ render; every fixture's pods against the kyverno_policies module's own
 policies, `restricted` with the socle's own, through the Kyverno CLI; on
 floci, installed with every policy enforced, the Deployment `Available` and
 its ExternalSecret `Ready`. Not provable on floci: a route `Accepted`, since
-floci runs no Gateway.
+floci runs no Gateway. On gcp, `charts-gke` (`platform: gke`), run by hand on
+the sandbox's GKE Autopilot: both charts under every policy enforced, the
+route `Accepted` by `private` and its backend resolved, the ExternalSecret
+`Ready` through `secret-manager`.
 
 **Published** at each release as `oci://ghcr.io/do-now-io/charts/webapp`,
 signed ([Artifacts](../reference/artifacts.md)).
