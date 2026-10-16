@@ -89,6 +89,8 @@ https://github.com/do-now-io/socle/.github/workflows/publish-artifact.yaml@refs/
 
 - **Flux verifies** the artifact on every reconciliation against
   `cosign_identity`, which trusts `main` by default and cannot be turned off.
+  Its issuer and subject are regexes: the plan refuses one not anchored at
+  both ends, or only a wildcard, which would accept any signer.
 - **OpenTofu does not.** Run [the command](../reference/artifacts.md#verify-a-signature)
   in CI before `init`; nothing forces it.
 - **Renaming `publish-artifact.yaml`** breaks every deployed verification.

@@ -131,6 +131,14 @@ run "defaults_are_the_recommended_position" {
     error_message = "the FluxInstance must carry no sync block: the root source is our own ResourceSet."
   }
   assert {
+    condition     = yamldecode(helm_release.instance.values[0]).instance.distribution.artifact == ""
+    error_message = "the FluxInstance must build Flux from the operator's embedded distribution, not re-pull the chart's flux-operator-manifests:latest: the Flux a cluster runs moves only with operator_version."
+  }
+  assert {
+    condition     = yamldecode(helm_release.instance.values[0]).healthcheck.timeout == "570s"
+    error_message = "the health check must time out before Helm's own wait (helm_timeout_seconds, 600 s), so its report is the one that surfaces."
+  }
+  assert {
     condition     = output.inputs.modules.crossplane.dns_records_role == "" && !contains(keys(output.inputs.modules.crossplane), "dns_zones")
     error_message = "crossplane's gcp attribute must be present and empty off gcp: the templates test values, never presence. No zone list: Crossplane holds nothing of Cloud DNS."
   }
@@ -1625,3 +1633,31 @@ run "argocd_image_updater_on_gcp_reads_artifact_registry" {
   }
 }
 
+
+# The two narrower forms flux_version names, on gcp too: the pin of the
+# distribution does not depend on the cloud.
+run "flux_version_takes_a_patch_range_and_an_exact_version" {
+  command = plan
+  variables {
+    cloud           = "gcp"
+    cluster_network = null
+    project         = { id = "sandbox-2bace", number = "123456789012" }
+    region          = "europe-west1"
+    flux_version    = "2.8.x"
+  }
+
+  assert {
+    condition     = yamldecode(helm_release.instance.values[0]).instance.distribution.version == "2.8.x" && yamldecode(helm_release.instance.values[0]).instance.distribution.artifact == ""
+    error_message = "flux_version 2.8.x must reach the FluxInstance as written, built from the operator's embedded distribution on gcp as on aws."
+  }
+}
+
+run "flux_version_takes_an_exact_version" {
+  command = plan
+  variables { flux_version = "2.8.1" }
+
+  assert {
+    condition     = yamldecode(helm_release.instance.values[0]).instance.distribution.version == "2.8.1"
+    error_message = "an exact flux_version must reach the FluxInstance as written."
+  }
+}

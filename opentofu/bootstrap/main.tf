@@ -186,9 +186,15 @@ resource "helm_release" "instance" {
 
   values = [yamlencode({
     instance = {
+      # artifact empty: the operator builds Flux from the distribution
+      # manifests embedded in its own image, not from the chart's default
+      # flux-operator-manifests:latest, which it would re-pull on every
+      # interval. The Flux a cluster runs is then fixed by operator_version,
+      # i.e. by the socle version, and moves only with a reviewed bump.
       distribution = {
         version  = var.flux_version
         registry = "ghcr.io/fluxcd"
+        artifact = ""
       }
       components = var.flux_components
       cluster = {
@@ -204,9 +210,13 @@ resource "helm_release" "instance" {
       commonMetadata = { labels = { for k, v in local.common_labels : k => v if k != "app.kubernetes.io/part-of" } }
       storage        = { class = var.storage_class }
     }
+    # The check is a post-install hook Job that Helm waits on for the
+    # release's own timeout: thirty seconds less, so a Flux that does not
+    # converge fails the check with its own report, not Helm's generic
+    # timeout racing it.
     healthcheck = {
       enabled = true
-      timeout = "${var.helm_timeout_seconds}s"
+      timeout = "${var.helm_timeout_seconds - 30}s"
     }
     commonLabels = local.common_labels
   })]

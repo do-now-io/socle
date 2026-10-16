@@ -41,7 +41,7 @@ staging, then prod, never into a cloud's extended support.
 | Component | Version | Where | Pinned in |
 | --- | --- | --- | --- |
 | flux-operator, flux-instance charts | `0.60.0`, exact | every cloud | `operator_version` |
-| Flux | `2.x`, the latest 2 series | every cloud | `flux_version` |
+| Flux | `2.x`, the latest 2 series the operator embeds | every cloud | `flux_version`, bounded by `operator_version` |
 | Cilium chart | `1.20.2` | aws, azure | `opentofu/bootstrap/cilium.tf` |
 | CoreDNS chart | `1.47.1` (CoreDNS 1.14.6) | aws | `opentofu/bootstrap/cilium.tf` |
 | `eks-pod-identity-agent` | `v1.4.0-eksbuild.2` | aws | `opentofu/bootstrap/eks_addons.tf` |

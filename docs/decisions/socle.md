@@ -282,7 +282,10 @@ defaults to the release workflow on `refs/heads/main`. It cannot be turned off.
 builds are signed by their branch's identity.
 
 **Consequences.** Running a branch build needs a reviewed override. Renaming
-`publish-artifact.yaml` breaks every deployed verification.
+`publish-artifact.yaml` breaks every deployed verification. The override is
+held to anchored regexes, `^…$`, and not a bare wildcard: Flux matches
+unanchored, so `.*` or a subject without its `$` would trust any workflow, a
+fork's included.
 
 **Sources.** [Distribution](../architecture/distribution.md#signatures).
 
@@ -556,3 +559,28 @@ times. `inputs.cloud` keeps one reader: the root `Kustomization`'s path,
 `./clusters/<cloud>`.
 
 **Sources.** flux-operator v0.60.0 `internal/controller/resourceset_controller.go` (`apply`, `waitForStep`) · kustomize JSON 6902 patches (`add`, `test`) · [Module IAM](../architecture/module-iam.md) · [Catalog module standard](../reference/catalog-module-standard.md).
+
+## SOCLE-33: Flux comes from the operator's embedded distribution
+
+**accepted** · 2026-10-16 · [`opentofu/bootstrap/main.tf`](../../opentofu/bootstrap/main.tf) (`helm_release.instance`, `distribution.artifact`)
+
+**Decision.** The `FluxInstance` sets `distribution.artifact` empty: the
+operator builds Flux from the distribution manifests embedded in its own
+image, not from `flux-operator-manifests:latest`, the flux-instance chart's
+default.
+
+**Context.** With an artifact, the operator re-pulls it on every interval and
+picks the newest Flux build it holds, CVE patches included; `latest` moves
+under every cluster without a change on our side, and two clusters of the
+same socle version can run different Flux builds. Without one, the operator
+uses the manifests baked into its image — the setting the operator's docs
+recommend for air-gapped clusters. Pinning a tag of the artifact
+(`v<operator_version>`) was the other way to the same pin; it keeps a pull
+from ghcr.io for nothing the image does not already carry.
+
+**Consequences.** The Flux a cluster runs is fixed by `operator_version`, so
+by the socle version; `flux_version = "2.x"` resolves within what that
+operator ships. A Flux CVE patch reaches clusters through an operator bump
+and a socle release, not on its own.
+
+**Sources.** flux-operator v0.60.0 `docs/api/v1/fluxinstance.md` (Distribution artifact) · flux-instance chart 0.60.0 `values.yaml` (`instance.distribution.artifact`).

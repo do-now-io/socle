@@ -44,8 +44,8 @@ variable "owner" {
   type        = string
 
   validation {
-    condition     = can(regex("^[a-z0-9_-]{1,63}$", var.owner))
-    error_message = "owner must be 1 to 63 characters of lowercase letters, digits, dashes and underscores."
+    condition     = can(regex("^[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?$", var.owner))
+    error_message = "owner must be a Kubernetes label value: 1 to 63 characters of lowercase letters, digits, dashes and underscores, starting and ending with a letter or a digit."
   }
 }
 
@@ -1373,6 +1373,18 @@ variable "cosign_identity" {
     condition     = try(length(var.cosign_identity.issuer) > 0 && length(var.cosign_identity.subject) > 0, false)
     error_message = "cosign_identity needs a non-empty issuer and subject. Verification cannot be turned off."
   }
+
+  # Flux matches these as regexes, unanchored: `.*`, or a subject without
+  # its `$`, accepts any workflow of any repository — or of a fork whose
+  # name merely starts with ours. Both ends anchored, and something between
+  # them that is not only a wildcard.
+  validation {
+    condition = alltrue([
+      for p in [var.cosign_identity.issuer, var.cosign_identity.subject] :
+      startswith(p, "^") && endswith(p, "$") && !endswith(p, "\\$") && !can(regex("^\\^[.*+?]*\\$$", p))
+    ])
+    error_message = "cosign_identity issuer and subject must each be anchored, starting with ^ and ending with $, and name something: an unanchored or wildcard-only pattern accepts any signer."
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -1392,13 +1404,13 @@ variable "operator_version" {
 }
 
 variable "flux_version" {
-  description = "Flux version the operator installs and keeps converged. 2.x tracks the latest 2 series; an exact version pins it."
+  description = "Flux version the operator installs and keeps converged. 2.x tracks the latest 2 series the operator ships (its embedded distribution, so operator_version bounds it); 2.y.x the latest patch of 2.y; an exact 2.y.z pins it."
   type        = string
   default     = "2.x"
   nullable    = false
 
   validation {
-    condition     = can(regex("^2(\\.[0-9x]+){0,2}$", var.flux_version))
+    condition     = can(regex("^2\\.(x|(0|[1-9][0-9]*)\\.(x|0|[1-9][0-9]*))$", var.flux_version))
     error_message = "flux_version must be 2.x, 2.y.x or an exact 2.y.z."
   }
 }
