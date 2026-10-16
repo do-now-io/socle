@@ -115,7 +115,10 @@ so the boundary's deny on `sts` leaves it whole. Each failure is a new pod,
 and a Job that exhausts its six retries is recreated on the next reconcile
 (`recreateOnFailure`). A completed Job stays, and runs again only when its
 template changes. If `kube.kyverno_policies.allowed_registries` is set, it
-must include `public.ecr.aws`.
+must include `public.ecr.aws`. One way bypasses the injection: an optional
+Secret `<module>-aws` (static keys, `AWS_ENDPOINT_URL`) that the Job reads
+with `envFrom`. external-dns's workload reads the same Secret. The floci e2e
+uses it, because floci's Pod Identity credentials reach AWS's own endpoints.
 
 For the Job to run before the chart, the module's ServiceAccount on AWS is the
 cloud step's, not the chart's (`serviceAccount.create: false` in
