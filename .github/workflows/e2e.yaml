@@ -222,7 +222,7 @@ jobs:
           {
             echo "### root ($CLOUD) ✅"
             echo "Applied \`opentofu/clusters/$CLOUD\` — the real root, foundations included — once on"
-            echo "floci's k3s against \`ghcr.io/do-now-io/socle/flux-modules:$TAG\`, signed as \`$SUBJECT\`."
+            echo "floci's k3s against \`ghcr.io/${GITHUB_REPOSITORY,,}/flux-modules:$TAG\`, signed as \`$SUBJECT\`."
             echo "Proven by Chainsaw: the artifact pulled by that exact tag with its signature verified,"
             echo "\`socle-root\` Ready, every module's \`health\` test green; then the socle uninstalled"
             echo "through \`tofu destroy\` and the cluster asserted empty."
@@ -390,7 +390,7 @@ jobs:
           {
             echo "### $MODULE ($CLOUD) ✅"
             echo "Applied \`$ROOT\` — a bare cluster plus the real bootstrap module — on floci's k3s"
-            echo "against \`ghcr.io/do-now-io/socle/flux-modules:$TAG\`, signed as \`$SUBJECT\`. Proven by"
+            echo "against \`ghcr.io/${GITHUB_REPOSITORY,,}/flux-modules:$TAG\`, signed as \`$SUBJECT\`. Proven by"
             echo "Chainsaw (\`$TESTS\`): the artifact pulled by that exact tag with its signature verified,"
             echo "\`socle-root\` Ready, the module's own suite green; then \`kube.${MODULE//-/_}.enabled=false\`"
             echo "through OpenTofu garbage-collecting it, the defaults bringing it back, a second \`tofu plan\`"

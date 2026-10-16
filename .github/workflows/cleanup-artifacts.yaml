@@ -42,13 +42,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: [socle%2Fflux-modules, socle%2Fopentofu-modules]
+        package: [flux-modules, opentofu-modules]
     env:
       GH_TOKEN: ${{ github.token }}
-      ORG: do-now-io
-      # Nested package names travel %2F-encoded in the packages API path.
-      PACKAGE: ${{ matrix.package }}
+      # The repository's owner, not ours written out: a fork collects its
+      # own packages. The packages API is case-insensitive.
+      ORG: ${{ github.repository_owner }}
     steps:
+      # The packages publish-artifact.yaml names after the repository,
+      # <repo>/<package>: nested, so %2F-encoded in the packages API path.
+      - name: Name the package after this repository
+        env:
+          SUFFIX: ${{ matrix.package }}
+        run: echo "PACKAGE=${GITHUB_REPOSITORY#*/}%2F${SUFFIX}" >> "$GITHUB_ENV"
       - name: Decide what to delete
         id: scope
         env:
