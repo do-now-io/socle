@@ -20,7 +20,7 @@ module "foundations" {
   environment  = "prod"
 
   availability_zones                   = ["eu-west-3a", "eu-west-3b"]
-  kubernetes_version                   = "1.34"
+  kubernetes_version                   = "1.37"
   cluster_endpoint_public_access_cidrs = ["203.0.113.10/32"]
 }
 ```
@@ -52,7 +52,7 @@ asserted, with the provider's credentials stubbed. CI also plans this module aga
 ## Requirements
 
 | Name | Version |
-|------|---------|
+| ---- | ------- |
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.10 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | >= 6.0, < 7.0 |
 
@@ -63,7 +63,7 @@ No modules.
 ## Resources
 
 | Name | Type |
-|------|------|
+| ---- | ---- |
 | [aws_acm_certificate.gateway](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/acm_certificate) | resource |
 | [aws_acm_certificate_validation.gateway](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/acm_certificate_validation) | resource |
 | [aws_cloudwatch_log_group.cluster](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_log_group) | resource |
@@ -109,7 +109,7 @@ No modules.
 ## Inputs
 
 | Name | Description | Type | Default | Required |
-|------|-------------|------|---------|:--------:|
+| ---- | ----------- | ---- | ------- | :------: |
 | <a name="input_availability_zones"></a> [availability\_zones](#input\_availability\_zones) | AZs the VPC's public and private subnets are spread across. Every VPC<br/>gets at least one public and one private subnet per AZ — never a flat,<br/>all-public layout — to satisfy ISO 27001 A.8.22 and SOC 2 CC6 network<br/>segregation. There is no all-public escape hatch: the private tier is<br/>structural, whether or not a client's workloads use it. | `list(string)` | n/a | yes |
 | <a name="input_cluster_endpoint_public_access_cidrs"></a> [cluster\_endpoint\_public\_access\_cidrs](#input\_cluster\_endpoint\_public\_access\_cidrs) | CIDRs allowed to reach the public EKS API endpoint. Required, no<br/>default: the endpoint is restricted by CIDR rather than left open or<br/>made fully private-only (AWS's own recommended pattern for this case),<br/>and there is no globally correct default to authorize on a client's<br/>behalf. | `list(string)` | n/a | yes |
 | <a name="input_cluster_name"></a> [cluster\_name](#input\_cluster\_name) | Name shared by the VPC, the EKS cluster and every resource this module creates around them. | `string` | n/a | yes |
@@ -138,7 +138,7 @@ No modules.
 ## Outputs
 
 | Name | Description |
-|------|-------------|
+| ---- | ----------- |
 | <a name="output_bootstrap_node_group"></a> [bootstrap\_node\_group](#output\_bootstrap\_node\_group) | The bootstrap node group, once its nodes have joined. node\_count is what the bootstrap module checks before it installs anything that needs a node; referencing it is also what orders those releases after the group. |
 | <a name="output_cilium_operator_policy_json"></a> [cilium\_operator\_policy\_json](#output\_cilium\_operator\_policy\_json) | IAM policy the Cilium operator needs in ENI mode — the bootstrap module installs Cilium on this cluster before Flux. The bootstrap nodes' role already carries it; any other node role the operator may be scheduled on needs it too. |
 | <a name="output_cluster_ca_certificate"></a> [cluster\_ca\_certificate](#output\_cluster\_ca\_certificate) | Base64-encoded cluster CA certificate, for building a kubeconfig. |

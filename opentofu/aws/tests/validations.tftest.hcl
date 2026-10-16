@@ -35,7 +35,7 @@ variables {
 
   create_vpc = true
 
-  kubernetes_version                   = "1.34"
+  kubernetes_version                   = "1.37"
   cluster_endpoint_public_access_cidrs = ["203.0.113.0/32"]
 }
 
@@ -147,7 +147,7 @@ run "kubernetes_version_rejects_a_patch_component" {
   command = plan
 
   variables {
-    kubernetes_version = "1.34.2"
+    kubernetes_version = "1.37.2"
   }
 
   expect_failures = [var.kubernetes_version]

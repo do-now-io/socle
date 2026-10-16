@@ -11,7 +11,8 @@ one. Most come from upstream, the rules kube-prometheus-stack installs and
 VictoriaMetrics' for the stack itself, downloaded by the chart's sync job at
 the tags the socle pins; a few are the socle's, for what upstream does not
 cover. Measured on k3s, 2026-10-12: 211 rules loaded and healthy, 158 of them
-alerting, with logs on.
+alerting, with logs on; 209 since the chart 0.96.0, which drops the two
+`kube-prometheus-general.rules`.
 
 **Severity** is upstream's. `info` goes to the socle's `null` receiver, and a
 `critical` alert holds back the `warning` of the same name and namespace.
@@ -39,11 +40,13 @@ kube-state-metrics, node-exporter, the kubelets and cAdvisor.
 
 Recording rules feed them and Grafana's dashboards: `k8s.rules.*`,
 `node-exporter.rules`, `node.rules`, `kubelet.rules`,
-`kube-prometheus-general.rules`, `kube-prometheus-node-recording.rules`.
+`kube-prometheus-node-recording.rules`. The chart turns
+`kube-prometheus-general.rules` (`count:up1`, `count:up0`) off since 0.96.0;
+no dashboard reads them.
 
 ## From VictoriaMetrics
 
-VictoriaMetrics v1.153.0, the operator v0.75.0, VictoriaLogs v1.53.0 and
+VictoriaMetrics v1.154.0, the operator v0.75.0, VictoriaLogs v1.53.0 and
 VictoriaTraces v0.10.0, for the stack itself.
 
 | Group | Alerts | Watches |

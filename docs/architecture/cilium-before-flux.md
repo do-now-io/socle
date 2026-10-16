@@ -33,11 +33,11 @@ On GKE and Kapsule the `cilium` variable is refused at plan.
 
 On aws, in one apply:
 
-1. **`cilium`** (chart 1.20.2). It follows the cluster, not the node group:
+1. **`cilium`** (chart 1.20.3). It follows the cluster, not the node group:
    the nodes become Ready only once Cilium runs on them.
 2. **The Pod Identity Agent**, without which Crossplane's AWS providers hang
    on `169.254.170.23`.
-3. **`coredns`** (chart 1.47.1), once Cilium gives its pods a network.
+3. **`coredns`** (chart 1.48.2), once Cilium gives its pods a network.
 4. **`flux-operator`**, then the instance and the envelope
    ([The Flux catalog](flux-catalog.md#what-opentofu-deposits)). Alongside
    it, after CoreDNS: **`snapshot-controller`**, the **EBS CSI** driver and,
@@ -89,7 +89,7 @@ On azure AKS deploys its own once Cilium runs.
 kube-dns`) at the `.10` address of the foundations' `service_cidr`, the
 kubelet's `clusterDNS`; two replicas spread across nodes;
 `system-cluster-critical`; a disruption budget of one; the add-on's requests
-and limits. Chart 1.47.1 ships CoreDNS 1.14.6: the socle tracks which
+and limits. Chart 1.48.2 ships CoreDNS 1.14.7: the socle tracks which
 CoreDNS runs on which Kubernetes minor.
 
 </details>

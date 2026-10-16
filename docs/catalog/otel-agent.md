@@ -42,7 +42,7 @@ kube = {
   otel_agent = {
     enabled = true # on by default; runs while monitoring's logs are on
 
-    # Any value of the opentelemetry-collector chart 0.173.1; yours win over the socle's.
+    # Any value of the opentelemetry-collector chart 0.176.0; yours win over the socle's.
     values = {
       tolerations = [{ operator = "Exists" }]
       resources   = { limits = { memory = "1Gi" } }
@@ -83,7 +83,7 @@ kube = {
 <details>
 <summary>Under the hood</summary>
 
-**Installed**: chart `opentelemetry-collector` 0.173.1 (collector 0.160.0,
+**Installed**: chart `opentelemetry-collector` 0.176.0 (collector 0.162.0,
 `otelcol-k8s`) from `oci://ghcr.io/open-telemetry/opentelemetry-helm-charts`,
 in `daemonset` mode, in the `otel-agent` namespace. It receives nothing: no
 port, no `hostPort`.

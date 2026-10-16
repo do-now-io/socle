@@ -21,7 +21,7 @@ aws = {
   cluster_name       = "acme-prod"
   owner              = "platform"
   environment        = "prod"
-  kubernetes_version = "1.34"
+  kubernetes_version = "1.37"
   availability_zones = ["eu-west-3a", "eu-west-3b", "eu-west-3c"]
   cluster_endpoint_public_access_cidrs = ["203.0.113.0/24"]
 }

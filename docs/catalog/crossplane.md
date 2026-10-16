@@ -100,10 +100,10 @@ kube = {
 
 **Installed**: chart `crossplane` 2.4.2 from `https://charts.crossplane.io/stable`,
 in `crossplane-system`. On aws, the providers `provider-family-aws`,
-`provider-aws-iam`, `provider-aws-eks` and `provider-aws-s3` (v2.8.1), then
+`provider-aws-iam`, `provider-aws-eks` and `provider-aws-s3` (v2.9.0), then
 `ClusterProviderConfig/default` on EKS Pod Identity, once they are `Healthy`.
 On gcp, `provider-family-gcp`, `provider-gcp-cloudplatform` and
-`provider-gcp-storage` (v3.0.0), then `ClusterProviderConfig/default` on
+`provider-gcp-storage` (v3.1.0), then `ClusterProviderConfig/default` on
 `InjectedIdentity` for the cluster's project, once they are `Healthy`.
 
 **What the socle sets**: requests with no limits, disk included on every

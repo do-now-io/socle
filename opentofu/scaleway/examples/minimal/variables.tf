@@ -30,7 +30,7 @@ variable "environment" {
 variable "kubernetes_version" {
   description = "Kubernetes minor to deploy. Explicit by design: Scaleway has no release channel."
   type        = string
-  default     = "1.35"
+  default     = "1.37"
 }
 
 variable "cluster_endpoint_public_access_cidrs" {

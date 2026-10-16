@@ -104,7 +104,7 @@ Three objects, each `any`, validated like `kube`; every key optional.
 | `coredns` | where the socle installs no CoreDNS |
 | `eks_addons` | on every cloud but aws |
 | `ebs_csi`, `efs_csi` | with `pod_identity_agent = false` |
-| in `cilium.values` (chart 1.20.2) | `tls.ca.key`, `hubble.tls.server.key`, `hubble.relay.tls.client.key`, `hubble.relay.tls.server.key`, `hubble.ui.tls.client.key`, `hubble.metrics.tls.server.key`, `clustermesh.config.clusters[*].tls.key` |
+| in `cilium.values` (chart 1.20.3) | `tls.ca.key`, `hubble.tls.server.key`, `hubble.relay.tls.client.key`, `hubble.relay.tls.server.key`, `hubble.ui.tls.client.key`, `hubble.metrics.tls.server.key`, `clustermesh.config.clusters[*].tls.key` |
 
 - **Not attributes**: chart versions, IPAM and routing mode, kube-proxy
   replacement, operator replicas, resources, the GatewayClass name; all but

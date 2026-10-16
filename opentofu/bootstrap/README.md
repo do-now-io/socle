@@ -122,7 +122,7 @@ CNI and has no add-on API. See
 ## Requirements
 
 | Name | Version |
-|------|---------|
+| ---- | ------- |
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.10 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | >= 6.0, < 7.0 |
 | <a name="requirement_helm"></a> [helm](#requirement\_helm) | >= 3.0, < 4.0 |
@@ -134,7 +134,7 @@ No modules.
 ## Resources
 
 | Name | Type |
-|------|------|
+| ---- | ---- |
 | [aws_eks_addon.ebs_csi](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_addon) | resource |
 | [aws_eks_addon.efs_csi](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_addon) | resource |
 | [aws_eks_addon.pod_identity_agent](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_addon) | resource |
@@ -154,7 +154,7 @@ No modules.
 ## Inputs
 
 | Name | Description | Type | Default | Required |
-|------|-------------|------|---------|:--------:|
+| ---- | ----------- | ---- | ------- | :------: |
 | <a name="input_cloud"></a> [cloud](#input\_cloud) | Which cloud this cluster runs on. Selects the artifact's clusters/<cloud> overlay and the operator's workload identity wiring. Scaleway has no federation the operator knows, so it runs as a plain kubernetes cluster. | `string` | n/a | yes |
 | <a name="input_cluster_name"></a> [cluster\_name](#input\_cluster\_name) | Cluster this socle serves. Stamped on every object the operator creates, and exposed to the catalog as inputs.cluster.name. | `string` | n/a | yes |
 | <a name="input_environment"></a> [environment](#input\_environment) | Environment this cluster serves. Stamped as a label, exposed as inputs.cluster.environment, and the axis the upgrade rings follow. | `string` | n/a | yes |
@@ -175,7 +175,7 @@ No modules.
 | <a name="input_instance_size"></a> [instance\_size](#input\_instance\_size) | Resource profile the operator applies to the controllers. Empty is the operator's own default; small, medium and large scale requests and limits together. | `string` | `""` | no |
 | <a name="input_kube"></a> [kube](#input\_kube) | The catalog modules this cluster enables and their values, as<br/>`{ <module> = { <attribute> = <value> } }`. List only what differs from<br/>the catalog's defaults; an absent module is at its default. Module names<br/>are snake\_case. Typed `any` on purpose: a map(any) refuses two modules with<br/>different attributes, and an object type silently drops a misspelt<br/>attribute — the validations below are what makes a typo an error at plan.<br/>The schema is catalog.tf; docs/reference/inputs.md lists it module by module. | `any` | `{}` | no |
 | <a name="input_network_policy"></a> [network\_policy](#input\_network\_policy) | Let the operator install network policies isolating the Flux namespace. On by default; Cilium enforces them on every cloud we ship. | `bool` | `true` | no |
-| <a name="input_operator_version"></a> [operator\_version](#input\_operator\_version) | Chart version of flux-operator, which is also the operator's own version. Pinned exactly: the operator is pre-1.0 and its minors are not a stable contract. | `string` | `"0.60.0"` | no |
+| <a name="input_operator_version"></a> [operator\_version](#input\_operator\_version) | Chart version of flux-operator, which is also the operator's own version. Pinned exactly: the operator is pre-1.0 and its minors are not a stable contract. | `string` | `"0.61.0"` | no |
 | <a name="input_project"></a> [project](#input\_project) | On gcp, the project the cluster runs in, as `{ id, number }` — the<br/>foundations' project\_id and project\_number outputs, never the client's.<br/>Exposed to the catalog as inputs.cluster.projectId and projectNumber: a<br/>module's Workload Identity principal names the project number, and the<br/>pool named after the project id. Required on gcp, refused elsewhere. | <pre>object({<br/>    id     = string<br/>    number = string<br/>  })</pre> | `null` | no |
 | <a name="input_region"></a> [region](#input\_region) | Region the cluster runs in, exposed to the catalog as inputs.cluster.region. Regional cloud APIs need it — on AWS the Pod Identity associations the crossplane module creates. Empty when the caller does not know it; a module that needs it says so. | `string` | `""` | no |
 | <a name="input_schedulable_nodes"></a> [schedulable\_nodes](#input\_schedulable\_nodes) | How many nodes the foundations give the cluster before this module<br/>starts — on aws, the bootstrap node group's size. Everything but Cilium<br/>waits for it: Cilium's DaemonSet is what makes those nodes Ready, so it<br/>is installed beside them, and CoreDNS and the Flux operator, the first<br/>releases that need a scheduled pod, come after. Zero fails the plan with<br/>that reason, instead of Helm waiting helm\_timeout\_seconds for a node.<br/>Null skips the check, on a cluster whose compute this module cannot see. | `number` | `null` | no |
@@ -185,7 +185,7 @@ No modules.
 ## Outputs
 
 | Name | Description |
-|------|-------------|
+| ---- | ----------- |
 | <a name="output_artifact"></a> [artifact](#output\_artifact) | The socle artifact, as OCI URL and tag. |
 | <a name="output_cilium"></a> [cilium](#output\_cilium) | Whether this module installed Cilium (aws, azure: the clouds whose foundations create a cluster with no CNI), with the chart versions it pinned. installed is false where the cloud operates Cilium, or when cilium.enabled is false. |
 | <a name="output_cosign_identity"></a> [cosign\_identity](#output\_cosign\_identity) | Keyless identity the artifact's signature is verified against, on every reconciliation. |

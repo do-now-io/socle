@@ -87,7 +87,7 @@ reports whether they converged.
 ## Requirements
 
 | Name | Version |
-|------|---------|
+| ---- | ------- |
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.10 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | >= 6.0, < 7.0 |
 | <a name="requirement_helm"></a> [helm](#requirement\_helm) | >= 3.0, < 4.0 |
@@ -95,7 +95,7 @@ reports whether they converged.
 ## Modules
 
 | Name | Source | Version |
-|------|--------|---------|
+| ---- | ------ | ------- |
 | <a name="module_foundations"></a> [foundations](#module\_foundations) | ../../aws | n/a |
 | <a name="module_socle"></a> [socle](#module\_socle) | ../../bootstrap | n/a |
 
@@ -106,7 +106,7 @@ No resources.
 ## Inputs
 
 | Name | Description | Type | Default | Required |
-|------|-------------|------|---------|:--------:|
+| ---- | ----------- | ---- | ------- | :------: |
 | <a name="input_aws"></a> [aws](#input\_aws) | The foundations module's inputs, grouped, plus the region for the aws provider. Required keys are the ones the module leaves without a default; every other key is optional and passes through as-is. | <pre>object({<br/>    region                               = string<br/>    cluster_name                         = string<br/>    owner                                = string<br/>    environment                          = string<br/>    availability_zones                   = list(string)<br/>    cluster_endpoint_public_access_cidrs = list(string)<br/>    kubernetes_version                   = string<br/>    additional_tags                      = optional(map(string))<br/>    create_vpc                           = optional(bool)<br/>    vpc_id                               = optional(string)<br/>    private_subnet_ids                   = optional(list(string))<br/>    public_subnet_ids                    = optional(list(string))<br/>    vpc_cidr                             = optional(string)<br/>    create_nat_gateway                   = optional(bool)<br/>    vpc_flow_logs_enabled                = optional(bool)<br/>    secrets_encryption_enabled           = optional(bool)<br/>    secrets_encryption_kms_key_arn       = optional(string)<br/>    cluster_log_types                    = optional(list(string))<br/>    log_retention_days                   = optional(number)<br/>    force_update_version                 = optional(bool)<br/>    bootstrap_node_instance_types        = optional(list(string))<br/>    bootstrap_node_capacity_type         = optional(string)<br/>    bootstrap_node_count                 = optional(number)<br/>    crossplane                           = optional(object({ allowed_services = optional(list(string), []) }))<br/>    gateway_certificate                  = optional(object({ domain = string, zone = optional(string) }))<br/>  })</pre> | n/a | yes |
 | <a name="input_socle_version"></a> [socle\_version](#input\_socle\_version) | The socle release this cluster runs. In a client's copy this variable is also in both module sources (?tag=), so this one line moves foundations, bootstrap and the artifact together. | `string` | n/a | yes |
 | <a name="input_artifact_pull_secret"></a> [artifact\_pull\_secret](#input\_artifact\_pull\_secret) | Name of an existing dockerconfigjson Secret in flux-system for a private registry. Empty for a public one; the Secret is created outside OpenTofu. | `string` | `""` | no |
@@ -120,7 +120,7 @@ No resources.
 ## Outputs
 
 | Name | Description |
-|------|-------------|
+| ---- | ----------- |
 | <a name="output_artifact"></a> [artifact](#output\_artifact) | The socle artifact this cluster pulls, as URL and tag. |
 | <a name="output_cluster_endpoint"></a> [cluster\_endpoint](#output\_cluster\_endpoint) | The control plane's API endpoint. |
 | <a name="output_cluster_name"></a> [cluster\_name](#output\_cluster\_name) | Name of the EKS cluster. |

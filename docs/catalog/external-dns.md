@@ -52,7 +52,7 @@ kube = {
     policy         = "upsert-only" # "upsert-only" never deletes; "sync" deletes the records it owns
     txt_owner_id   = "acme-prod"   # default: the cluster's name
 
-    # Any value of the external-dns chart 1.22.0; yours win over the socle's.
+    # Any value of the external-dns chart 1.23.0; yours win over the socle's.
     values = {
       interval       = "5m"
       excludeDomains = ["internal.acme.example"]
@@ -94,7 +94,7 @@ kube = {
 <details>
 <summary>Under the hood</summary>
 
-**Installed**: chart `external-dns` 1.22.0 (external-dns 0.22.0) from
+**Installed**: chart `external-dns` 1.23.0 (external-dns 0.23.0) from
 `https://kubernetes-sigs.github.io/external-dns/`, in `external-dns` (Pod
 Security `restricted`), as the ServiceAccount `external-dns/external-dns` on
 every cloud. On aws with crossplane on, `Role/external-dns` and
