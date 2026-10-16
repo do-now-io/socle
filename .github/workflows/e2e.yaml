@@ -572,13 +572,247 @@ jobs:
             echo "Not provable on floci: the route Accepted (no Gateway without Cilium)."
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # M1 of #61: a cluster on the previous release upgrades to this artifact.
+  # One state, two applies, on each cloud's fixture root:
+  #   N-1  the fixture as the previous release shipped it (git archive of its
+  #        tag), applied with its own bootstrap module and artifact, and proven
+  #        by its own generic suite — what that release promised, not HEAD's
+  #        newer expectations.
+  #   N    HEAD's fixture on the same state, the bootstrap module pulled from
+  #        this run's published module package (what a client's `tofu init
+  #        -upgrade` does), the plan kept as an artifact, then HEAD's full
+  #        proof: the generic suite, every module's health, a second plan
+  #        empty, the socle uninstalled, the cluster asserted empty.
+  # The previous release is the newest X.Y.Z tag reachable from this commit
+  # and not on it. No release, or a cloud with no fixture at that release:
+  # the job says so in its summary and passes, never skipped by an `if:` — a
+  # required check that never reports blocks forever.
+  # Binding from 1.0.0 only: before it, a release carries no compatibility
+  # promise and no migration (0.1.0 was cut unofficial), so a red upgrade is
+  # reported — summary, Checks tab — without failing the job.
+  # What floci cannot upgrade: the real root, which floci cannot even re-apply
+  # (the root job says why); the foundations' upgrade is proven by hand on the sandbox.
+  upgrade:
+    name: upgrade (${{ matrix.cloud }})
+    runs-on: ubuntu-24.04
+    needs: discover
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      checks: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.discover.outputs.roots) }}
+    services:
+      floci:
+        image: floci/floci:2.1.0@sha256:f5aa8c18302cedb4f2385f5c4e455b3efc77fee6bf7b6e5d1712b2817ba102db
+        ports:
+          - 4566:4566
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock
+      floci-gcp:
+        image: floci/floci-gcp:0.11.0@sha256:eae9683d806ceb643bcb36aee97cdb8cad13c3e2959cd053bf40e481994fde12
+        env:
+          FLOCI_GCP_SERVICES_GKE_DEFAULT_IMAGE: >-
+            rancher/k3s:v1.34.1-k3s1@sha256:5e0707cfd1239b358ef73f3254bc3eadc027dd30cd5ec6ca41e29e47652a1b8c
+        ports:
+          - 4588:4588
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock
+    env:
+      TAG: ${{ inputs.tag }}
+      CLOUD: ${{ matrix.cloud }}
+      CLUSTER: socle-e2e-catalog
+      FIXTURE: .github/e2e/${{ matrix.cloud }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+      - uses: kyverno/action-install-chainsaw@1223ef75bedeb59c4e7b5455463d4316e76dff01 # v0.2.15
+      - name: The previous release
+        id: previous
+        run: |
+          mkdir -p "$RUNNER_TEMP/reports"
+          previous="$(git tag --merged HEAD --sort=-v:refname | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
+            | grep -vxF -f <(git tag --points-at HEAD) | head -1 || true)"
+          skip=""
+          if [ -z "$previous" ]; then
+            skip="no release to upgrade from"
+          elif ! git cat-file -e "$previous:$FIXTURE/main.tf" 2> /dev/null; then
+            skip="$CLOUD had no e2e fixture at $previous"
+          fi
+          binding=false
+          [ -z "$previous" ] || [ "${previous%%.*}" -lt 1 ] || binding=true
+          # The release's own identity: its alpha was built and signed on main.
+          # Written as publish-artifact.yaml writes the candidate's.
+          subject="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/publish-artifact.yaml@refs/heads/main"
+          issuer_re='^https://token\\.actions\\.githubusercontent\\.com$'
+          subject_re="^$(printf '%s' "$subject" | sed 's/[.]/\\\\./g')\$"
+          {
+            echo "version=$previous"
+            echo "skip=$skip"
+            echo "binding=$binding"
+            echo "cosign_identity={issuer=\"$issuer_re\",subject=\"$subject_re\"}"
+          } >> "$GITHUB_OUTPUT"
+          echo "PREVIOUS_TREE=$RUNNER_TEMP/previous" >> "$GITHUB_ENV"
+          if [ -n "$skip" ]; then
+            echo "### upgrade ($CLOUD) — not run: $skip" >> "$GITHUB_STEP_SUMMARY"
+          else
+            mkdir -p "$RUNNER_TEMP/previous"
+            git archive "$previous" | tar -x -C "$RUNNER_TEMP/previous"
+            echo "upgrading from $previous (binding: $binding)"
+          fi
+      - name: Apply the previous release's fixture, as it shipped
+        id: apply
+        if: steps.previous.outputs.skip == ''
+        continue-on-error: ${{ steps.previous.outputs.binding != 'true' }}
+        uses: ./.github/actions/e2e-cluster
+        with:
+          mode: apply
+          cloud: ${{ matrix.cloud }}
+          root: ${{ runner.temp }}/previous/.github/e2e/${{ matrix.cloud }}
+          cluster: socle-e2e-catalog
+          tag: ${{ steps.previous.outputs.version }}
+          cosign-identity: ${{ steps.previous.outputs.cosign_identity }}
+      - name: The previous release converges, by its own suite
+        id: n1
+        if: steps.apply.outcome == 'success'
+        continue-on-error: ${{ steps.previous.outputs.binding != 'true' }}
+        env:
+          PREVIOUS: ${{ steps.previous.outputs.version }}
+        run: |
+          chainsaw test "$PREVIOUS_TREE/oci/tests/e2e" \
+            --selector "phase=root, cloud in ($CLOUD, any), platform in (floci, any)" \
+            --set "tag=$PREVIOUS" --set "cloud=$CLOUD" --set "cluster=$CLUSTER" --set "floci_ip=$FLOCI_IP" \
+            --report-format JUNIT-STEP --report-name previous --report-path "$RUNNER_TEMP/reports"
+      # Same state, HEAD's fixture: a client edits its root between releases
+      # too. TF_VAR_bootstrap_source stays in the job's environment, so every
+      # later plan, apply and destroy reads the module from where init did.
+      - name: Upgrade to this artifact, from the published module package
+        id: upgrade
+        if: steps.n1.outcome == 'success'
+        continue-on-error: ${{ steps.previous.outputs.binding != 'true' }}
+        working-directory: ${{ env.FIXTURE }}
+        env:
+          COSIGN: ${{ inputs.cosign_identity }}
+        run: |
+          cp "$PREVIOUS_TREE/$FIXTURE/terraform.tfstate" terraform.tfstate
+          source="oci://ghcr.io/${GITHUB_REPOSITORY,,}/opentofu-modules//opentofu/bootstrap?tag=$TAG"
+          echo "TF_VAR_bootstrap_source=$source" >> "$GITHUB_ENV"
+          export TF_VAR_bootstrap_source="$source"
+          tofu init -input=false -upgrade > /dev/null
+          tofu plan -input=false -out=upgrade.tfplan -var "socle_version=$TAG" -var "cosign_identity=$COSIGN" > /dev/null
+          tofu show -no-color upgrade.tfplan > "$RUNNER_TEMP/upgrade-plan.txt"
+          SECONDS=0
+          tofu apply -input=false upgrade.tfplan
+          echo "| upgrade \`tofu apply\` | ${SECONDS}s |" >> "$GITHUB_STEP_SUMMARY"
+      - name: The plan a reviewer reads
+        if: always() && steps.upgrade.outcome != 'skipped'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: upgrade-plan-${{ matrix.cloud }}
+          path: ${{ runner.temp }}/upgrade-plan.txt
+          if-no-files-found: ignore
+      - name: This artifact converges, every module healthy, a second plan empty
+        id: n
+        if: steps.upgrade.outcome == 'success'
+        continue-on-error: ${{ steps.previous.outputs.binding != 'true' }}
+        env:
+          COSIGN: ${{ inputs.cosign_identity }}
+        run: |
+          chainsaw test oci/tests/e2e \
+            --selector "phase=root, cloud in ($CLOUD, any), platform in (floci, any)" \
+            --set "tag=$TAG" --set "cloud=$CLOUD" --set "cluster=$CLUSTER" --set "floci_ip=$FLOCI_IP" \
+            --report-format JUNIT-STEP --report-name upgraded-root --report-path "$RUNNER_TEMP/reports"
+          chainsaw test oci/catalog/*/tests/e2e \
+            --selector "phase=health, cloud in ($CLOUD, any), platform in (floci, any)" \
+            --set "tag=$TAG" --set "cloud=$CLOUD" --set "cluster=$CLUSTER" --set "floci_ip=$FLOCI_IP" \
+            --report-format JUNIT-STEP --report-name upgraded-health --report-path "$RUNNER_TEMP/reports"
+          (cd "$FIXTURE" && tofu plan -input=false -detailed-exitcode -var "socle_version=$TAG" \
+            -var "cosign_identity=$COSIGN" > /dev/null)
+          echo "| second \`tofu plan\` after the upgrade | empty (exit 0) |" >> "$GITHUB_STEP_SUMMARY"
+      - name: Uninstall the socle
+        if: always() && steps.upgrade.outcome != 'skipped'
+        continue-on-error: ${{ steps.previous.outputs.binding != 'true' }}
+        uses: ./.github/actions/e2e-cluster
+        with:
+          mode: destroy-socle
+          cloud: ${{ matrix.cloud }}
+          root: ${{ env.FIXTURE }}
+          cluster: socle-e2e-catalog
+          tag: ${{ inputs.tag }}
+          cosign-identity: ${{ inputs.cosign_identity }}
+      - name: The cluster is empty
+        if: always() && steps.upgrade.outcome == 'success'
+        continue-on-error: ${{ steps.previous.outputs.binding != 'true' }}
+        run: |
+          chainsaw test oci/tests/e2e oci/catalog/*/tests/e2e \
+            --selector "phase=destroyed, cloud in ($CLOUD, any), platform in (floci, any)" \
+            --set "tag=$TAG" --set "cloud=$CLOUD" --set "cluster=$CLUSTER" \
+            --report-format JUNIT-STEP --report-name destroyed --report-path "$RUNNER_TEMP/reports"
+      # Whichever fixture holds the state: HEAD's once the upgrade ran,
+      # the previous release's if it never got that far.
+      - name: Destroy the cluster
+        if: always() && steps.previous.outputs.skip == ''
+        continue-on-error: ${{ steps.previous.outputs.binding != 'true' }}
+        uses: ./.github/actions/e2e-cluster
+        with:
+          mode: destroy
+          cloud: ${{ matrix.cloud }}
+          root: >-
+            ${{ steps.upgrade.outcome == 'skipped' && format('{0}/previous/{1}', runner.temp, env.FIXTURE) || env.FIXTURE }}
+          cluster: socle-e2e-catalog
+          tag: ${{ steps.upgrade.outcome == 'skipped' && steps.previous.outputs.version || inputs.tag }}
+          cosign-identity: >-
+            ${{ steps.upgrade.outcome == 'skipped' && steps.previous.outputs.cosign_identity || inputs.cosign_identity }}
+      - name: The Checks tab names the failing step
+        if: always() && steps.previous.outputs.skip == ''
+        uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6.5.0
+        with:
+          report_paths: ${{ runner.temp }}/reports/*.xml
+          check_name: e2e upgrade (${{ matrix.cloud }})
+          include_passed: true
+      - name: Summary
+        if: always() && steps.previous.outputs.skip == ''
+        env:
+          PREVIOUS: ${{ steps.previous.outputs.version }}
+          BINDING: ${{ steps.previous.outputs.binding }}
+          OUTCOMES: >-
+            ${{ steps.apply.outcome }} ${{ steps.n1.outcome }} ${{ steps.upgrade.outcome }} ${{ steps.n.outcome }}
+        run: |
+          if [ "$OUTCOMES" != "success success success success" ]; then
+            if [ "$BINDING" = true ]; then
+              echo "### upgrade $PREVIOUS → $TAG ($CLOUD) ❌ — see the failed step" >> "$GITHUB_STEP_SUMMARY"
+            else
+              {
+                echo "### upgrade $PREVIOUS → $TAG ($CLOUD) ❌, not binding"
+                echo "$PREVIOUS predates 1.0.0: no compatibility promise, no migration."
+                echo "Reported, not failed."
+                echo "Steps (apply, N-1 suite, upgrade, N suites): \`$OUTCOMES\`."
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+            exit 0
+          fi
+          {
+            echo "### upgrade $PREVIOUS → $TAG ($CLOUD) ✅"
+            echo "\`$FIXTURE\` as $PREVIOUS shipped it, applied with its artifact and proven by its own suite;"
+            echo "then HEAD's fixture on the same state, the bootstrap module from"
+            echo "\`opentofu-modules:$TAG\`, applied, proven by the generic suite and every module's health,"
+            echo "a second plan empty, the socle uninstalled and the cluster asserted empty."
+            echo "The plan is the run's \`upgrade-plan-$CLOUD\` artifact."
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # The one context a ruleset can require (M1): red if any job above is.
   # `if: always()` so that it reports whatever happened above; a job that
   # never reports would leave a PR waiting forever.
   e2e:
     name: e2e
     runs-on: ubuntu-24.04
-    needs: [discover, root, module, charts]
+    needs: [discover, root, module, upgrade, charts]
     if: always()
     steps:
       - name: Every job above is green
