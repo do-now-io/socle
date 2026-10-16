@@ -209,6 +209,17 @@
     },
     {
       "customType": "regex",
+      "description": "terraform-docs, run by image in pr-static (one tag per architecture since 0.21: the runners' amd64)",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/pr-static\\.yaml$/"
+      ],
+      "matchStrings": [
+        "image=(?<depName>quay\\.io/terraform-docs/terraform-docs):(?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[a-f0-9]{64})"
+      ],
+      "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
       "description": "The integration tests' cloud emulators",
       "managerFilePatterns": [
         "/^\\.github/workflows/integration\\.yaml$/"

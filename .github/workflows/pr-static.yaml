@@ -135,7 +135,7 @@ jobs:
       - name: terraform-docs is current (every module that generates docs)
         if: steps.detect.outputs.found == 'true'
         run: |
-          image=quay.io/terraform-docs/terraform-docs:0.20.0@sha256:37329e2dc2518e7f719a986a3954b10771c3fe000f50f83fd4d98d489df2eae2
+          image=quay.io/terraform-docs/terraform-docs:0.24.0-amd64@sha256:16990b28302390f7c4ae398b371a46762b6b3eb8534e75eeee8185caa8029b8c
           for cfg in opentofu/*/.terraform-docs.yml opentofu/*/examples/*/.terraform-docs.yml opentofu/clusters/*/.terraform-docs.yml; do
             [ -f "${cfg}" ] || continue
             dir="$(dirname "${cfg}")"

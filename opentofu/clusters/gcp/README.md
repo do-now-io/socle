@@ -133,7 +133,7 @@ reports whether they converged.
 ## Requirements
 
 | Name | Version |
-|------|---------|
+| ---- | ------- |
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.10 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | >= 6.0, < 7.0 |
 | <a name="requirement_google"></a> [google](#requirement\_google) | >= 8.0, < 9.0 |
@@ -142,7 +142,7 @@ reports whether they converged.
 ## Modules
 
 | Name | Source | Version |
-|------|--------|---------|
+| ---- | ------ | ------- |
 | <a name="module_foundations"></a> [foundations](#module\_foundations) | ../../gcp | n/a |
 | <a name="module_socle"></a> [socle](#module\_socle) | ../../bootstrap | n/a |
 
@@ -153,7 +153,7 @@ No resources.
 ## Inputs
 
 | Name | Description | Type | Default | Required |
-|------|-------------|------|---------|:--------:|
+| ---- | ----------- | ---- | ------- | :------: |
 | <a name="input_gcp"></a> [gcp](#input\_gcp) | The foundations module's inputs, grouped; project\_id and region also configure the google provider. Required keys are the ones the module leaves without a default; every other key is optional and passes through as-is. | <pre>object({<br/>    project_id                               = string<br/>    region                                   = string<br/>    cluster_name                             = string<br/>    owner                                    = string<br/>    environment                              = string<br/>    maintenance_window                       = object({ start_time = string, end_time = string, recurrence = string })<br/>    project_number                           = optional(string)<br/>    additional_labels                        = optional(map(string))<br/>    network_name                             = optional(string)<br/>    create_network                           = optional(bool)<br/>    create_subnetwork                        = optional(bool)<br/>    subnetwork_name                          = optional(string)<br/>    pod_range_name                           = optional(string)<br/>    node_range_cidr                          = optional(string)<br/>    pod_range_cidr                           = optional(string)<br/>    proxy_only_range_cidr                    = optional(string)<br/>    create_proxy_only_subnet                 = optional(bool)<br/>    create_nat                               = optional(bool)<br/>    subnet_flow_logs_enabled                 = optional(bool)<br/>    enable_private_nodes                     = optional(bool)<br/>    control_plane_ip_endpoints_enabled       = optional(bool)<br/>    control_plane_dns_allow_external_traffic = optional(bool)<br/>    gateway_api_enabled                      = optional(bool)<br/>    release_channel                          = optional(string)<br/>    maintenance_exclusions                   = optional(list(object({ name = string, start_time = string, end_time = string, scope = string })))<br/>    kubernetes_min_version                   = optional(string)<br/>    enable_upgrade_notifications             = optional(bool)<br/>    logging_components                       = optional(list(string))<br/>    monitoring_components                    = optional(list(string))<br/>    cost_allocation_enabled                  = optional(bool)<br/>    backup_agent_enabled                     = optional(bool)<br/>    billing_export_dataset_id                = optional(string)<br/>    billing_export_dataset_location          = optional(string)<br/>    observability_reader_members             = optional(list(string))<br/>    deletion_protection                      = optional(bool)<br/>    crossplane                               = optional(object({ allowed_roles = optional(list(string), []) }))<br/>    gateway_certificate                      = optional(object({ dns_zone = string, domains = list(string) }))<br/>  })</pre> | n/a | yes |
 | <a name="input_socle_version"></a> [socle\_version](#input\_socle\_version) | The socle release this cluster runs. In a client's copy this variable is also in both module sources (?tag=), so this one line moves foundations, bootstrap and the artifact together. | `string` | n/a | yes |
 | <a name="input_artifact_pull_secret"></a> [artifact\_pull\_secret](#input\_artifact\_pull\_secret) | Name of an existing dockerconfigjson Secret in flux-system for a private registry. Empty for a public one; the Secret is created outside OpenTofu. | `string` | `""` | no |
@@ -164,7 +164,7 @@ No resources.
 ## Outputs
 
 | Name | Description |
-|------|-------------|
+| ---- | ----------- |
 | <a name="output_artifact"></a> [artifact](#output\_artifact) | The socle artifact this cluster pulls, as URL and tag. |
 | <a name="output_cluster_dns_endpoint"></a> [cluster\_dns\_endpoint](#output\_cluster\_dns\_endpoint) | The control plane's DNS endpoint, the access path the socle and its automation use. |
 | <a name="output_cluster_name"></a> [cluster\_name](#output\_cluster\_name) | Name of the GKE cluster. |

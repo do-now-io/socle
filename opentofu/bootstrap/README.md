@@ -122,7 +122,7 @@ CNI and has no add-on API. See
 ## Requirements
 
 | Name | Version |
-|------|---------|
+| ---- | ------- |
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.10 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | >= 6.0, < 7.0 |
 | <a name="requirement_helm"></a> [helm](#requirement\_helm) | >= 3.0, < 4.0 |
@@ -134,7 +134,7 @@ No modules.
 ## Resources
 
 | Name | Type |
-|------|------|
+| ---- | ---- |
 | [aws_eks_addon.ebs_csi](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_addon) | resource |
 | [aws_eks_addon.efs_csi](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_addon) | resource |
 | [aws_eks_addon.pod_identity_agent](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_addon) | resource |
@@ -154,7 +154,7 @@ No modules.
 ## Inputs
 
 | Name | Description | Type | Default | Required |
-|------|-------------|------|---------|:--------:|
+| ---- | ----------- | ---- | ------- | :------: |
 | <a name="input_cloud"></a> [cloud](#input\_cloud) | Which cloud this cluster runs on. Selects the artifact's clusters/<cloud> overlay and the operator's workload identity wiring. Scaleway has no federation the operator knows, so it runs as a plain kubernetes cluster. | `string` | n/a | yes |
 | <a name="input_cluster_name"></a> [cluster\_name](#input\_cluster\_name) | Cluster this socle serves. Stamped on every object the operator creates, and exposed to the catalog as inputs.cluster.name. | `string` | n/a | yes |
 | <a name="input_environment"></a> [environment](#input\_environment) | Environment this cluster serves. Stamped as a label, exposed as inputs.cluster.environment, and the axis the upgrade rings follow. | `string` | n/a | yes |
@@ -185,7 +185,7 @@ No modules.
 ## Outputs
 
 | Name | Description |
-|------|-------------|
+| ---- | ----------- |
 | <a name="output_artifact"></a> [artifact](#output\_artifact) | The socle artifact, as OCI URL and tag. |
 | <a name="output_cilium"></a> [cilium](#output\_cilium) | Whether this module installed Cilium (aws, azure: the clouds whose foundations create a cluster with no CNI), with the chart versions it pinned. installed is false where the cloud operates Cilium, or when cilium.enabled is false. |
 | <a name="output_cosign_identity"></a> [cosign\_identity](#output\_cosign\_identity) | Keyless identity the artifact's signature is verified against, on every reconciliation. |
