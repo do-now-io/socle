@@ -51,8 +51,10 @@ Models: `hello` for structure and tests, `argocd` for chart values.
 ## The e2e proof
 
 `e2e.yaml` runs one job per (module, cloud) whose overlay lists the module,
-each on its own floci with the fixture root `.github/e2e/<cloud>/`; the real
-root is applied once, in `root (<cloud>)`.
+each on its own emulator (floci for aws, floci-gcp for gcp) with the fixture
+root `.github/e2e/<cloud>/`; the real root is applied once, in
+`root (<cloud>)`, where the emulator can apply it (aws; gcp's job applies
+the fixture root).
 `chainsaw-test.yaml` holds one `Test` per phase, selected by label:
 
 | Label | Runs | Holds |

@@ -42,7 +42,7 @@ Every foundations module, and the bootstrap module, passes this checklist.
 - [ ] **Every `validation` has a test that trips it.** *Verify:* review.
 - [ ] **Integration: a plan against an emulator** (`integration.yaml`: floci, floci-gcp, floci-az;
       Scaleway offline; Azure `continue-on-error`). *Verify:* green, or the summary says why.
-- [ ] **Convergence: an apply on floci's k3s** (`e2e.yaml`), ending in `tofu destroy`; AWS only today.
+- [ ] **Convergence: an apply on an emulator's k3s** (`e2e.yaml`), ending in `tofu destroy`; AWS on floci, GCP on floci-gcp (the bootstrap module on a bare cluster: the GCP root's DNS endpoint is not emulated).
       *Verify:* the `e2e` check is green.
 - [ ] **A leg that cannot apply says why** in the run summary. *Verify:* review.
 

@@ -54,8 +54,10 @@ Autopilot bills Pod requests, not nodes. US dollars, us-central1 list prices,
   on gcp the catalog offers every module but `metrics_server` (GKE serves
   `metrics.k8s.io` itself), with Crossplane's Cloud Platform and Storage
   providers, the shared Gateways, Velero and `kube.keda.services = ["pubsub"]`.
-- **Proven**: in CI, a plan against floci-gcp, which runs no Compute Engine
-  API; on a real GKE Autopilot sandbox project (2026-10-07, PR #84), the
+- **Proven**: in CI, a plan against floci-gcp; on every published artifact,
+  the bootstrap module on floci-gcp's k3s, every module the gcp overlay
+  offers converged and checked by Chainsaw, then uninstalled and destroyed
+  ([`e2e.yaml`](../../../.github/workflows/e2e.yaml)); on a real GKE Autopilot sandbox project (2026-10-07, PR #84), the
   root applied, every catalog module converged, and destroyed in two runs;
   on 2026-10-16 (artifact `0.0.0-feat-gcp-parity.d896756`), every `platform: gke` test passed and
   Grafana answered over https, the modules turned on in four waves because a

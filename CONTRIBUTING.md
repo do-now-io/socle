@@ -37,7 +37,7 @@ docs/                               # the documentation, rendered by site/
 site/                               # the site's generator: Astro + Starlight
 .github/
 ├── workflows/                      # the checks below
-├── actions/e2e-cluster/            # brings a floci cluster up and down for an e2e job
+├── actions/e2e-cluster/            # brings an emulator's cluster up and down for an e2e job
 ├── scripts/                        # what the workflows run; runnable locally
 └── e2e/<cloud>/                    # one e2e fixture root per cloud
 ```
@@ -100,7 +100,8 @@ Three levels:
 2. **Integration**, in `integration.yaml`: a plan of each foundations module
    against an emulator.
 3. **e2e**, in `e2e.yaml`, called by `publish-artifact.yaml` with the tag it
-   just pushed: the artifact applied on floci 2.1.0's real k3s, proven by
+   just pushed: the artifact applied on an emulator's real k3s — floci 2.3.0
+   for aws, floci-gcp 0.11.0 for gcp — proven by
    [Chainsaw](https://kyverno.github.io/chainsaw/).
 
 The e2e jobs:
@@ -108,7 +109,9 @@ The e2e jobs:
 - **`root (<cloud>)`** applies the real `opentofu/clusters/<cloud>` once with
   `.github/e2e/<cloud>/floci.tfvars`, runs the socle's `root` suite and every
   module's `health` tests, uninstalls the socle, asserts the cluster empty,
-  and destroys it.
+  and destroys it. A cloud without a `floci.tfvars` — gcp, whose root reaches
+  GKE's DNS endpoint through `gke-gcloud-auth-plugin`, which floci-gcp does
+  not serve — applies its bare fixture root there instead.
 - **`<module> (<cloud>)`**, one per module the cloud's overlay deploys,
   applies the bare fixture root `.github/e2e/<cloud>/`, runs the `root` suite
   and the module's `health` tests, then its `module` tests alone, then turns
@@ -117,27 +120,39 @@ The e2e jobs:
 
 What a module's suite holds, its labels, and the habits every suite keeps
 are in the [Catalog module standard](docs/reference/catalog-module-standard.md).
-`.github/actions/e2e-cluster` brings floci up and tears it down. A module's
+`.github/actions/e2e-cluster` brings the cloud's emulator up and tears it
+down; every job runs both emulators as service containers and the action
+picks its cloud's by the port it publishes. A module's
 `tests/e2e` may hold a shell helper only for what Chainsaw cannot assert
 itself, such as a query to a backend or an AWS API call.
 
-What floci cannot prove, and the e2e therefore does not claim:
+What the emulators cannot prove, and the e2e therefore does not claim:
 
 - **One node, flannel, kube-proxy and CoreDNS already there.** Every root it
   applies sets `cilium.enabled = false`; Cilium, ENI IPAM and Gateway API on
   Cilium are not exercised.
-- **No EKS add-on API** in floci 2.1.0: the add-ons are off on both fixture
-  roots, and Pod Identity is not served.
+- **EKS add-ons as metadata only**: floci 2.3.0 records them and runs
+  nothing, so they are off on both aws fixture roots.
+- **Pod Identity reaches floci's API, not floci**: the association syncs and
+  the module's workload follows it, but the credentials a pod would get
+  point at AWS's own endpoints, so each module's AWS resources are pointed
+  at floci by a `ClusterProviderConfig` of the test's own (`floci`).
+- **No GKE beyond the API**: floci-gcp's k3s has no Autopilot, no Workload
+  Identity Federation, no Gateway controller, no Cloud DNS; the gcp jobs
+  prove the catalog's gcp overlay renders and converges, and the
+  `platform: gke` tests stay the sandbox's.
 - **IAM is accepted, not enforced**: a role reaches floci's IAM, its
   permissions are not tested.
 - **A second apply of the real root fails**: floci does not read back several
   EKS attributes (logging, encryption config, upgrade policy). Hence one
   apply in the `root` job, and a bare fixture root for the mutations.
 - **floci 2.x specifics**: the EKS token webhook rejects the `test`/`test`
-  key, so the action registers an IAM user first; floci refuses a presigned
-  token after 60 s, so Chainsaw's kubeconfig carries a ServiceAccount token;
-  a pod reaches floci at the container's IP (`FLOCI_IP`), not at
-  `localhost`.
+  key, so the action registers an IAM user first; a pod reaches floci at the
+  container's IP (`FLOCI_IP`), not at `localhost`.
+- **floci-gcp specifics**: k3s takes any bearer token as cluster-admin, so
+  the kubeconfig carries a fixed one; the cluster is RUNNING before its API
+  presents its certificate, so the action waits for `/readyz` verified with
+  the returned CA before the helm releases.
 
 ## Documentation
 
