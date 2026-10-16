@@ -1,7 +1,8 @@
 ---
 // How the catalog's modules depend on each other, drawn from the repository
 // at build time (src/catalog.mjs): `requires` from each module page's
-// frontmatter, `after` from its ResourceSet's spec.dependsOn, `uses` from
+// frontmatter, `after` from its ResourceSet's spec.dependsOn (with what each
+// cloud's patch.yaml adds), `uses` from
 // the other modules its templates read. Selecting a module says, in a
 // sentence, what turning it on does and does not bring. Filterable by cloud:
 // a module not offered there, or a requirement that only holds elsewhere,
@@ -21,13 +22,13 @@ const offered = (page: string, cloud: string) => {
 // One edge per pair, with its kind on each cloud ('' where it does not hold).
 const edges: { from: string; to: string; kinds: Record<string, Kind | ''> }[] = [];
 for (const m of modules) {
-  const targets = new Set([...m.requires.map((r) => r.module.replace(/_/g, '-')), ...m.after, ...m.uses]);
+  const targets = new Set([...m.requires.map((r) => r.module.replace(/_/g, '-')), ...Object.values(m.afterOn).flat(), ...m.uses]);
   for (const to of targets) {
     if (!byPage.has(to)) continue;
     const kinds: Record<string, Kind | ''> = {};
     for (const cloud of CLOUDS) {
       const required = m.requires.some((r) => r.module.replace(/_/g, '-') === to && (r.clouds === null || r.clouds.includes(cloud)));
-      const kind: Kind = required ? 'requires' : m.after.includes(to) ? 'after' : 'uses';
+      const kind: Kind | '' = required ? 'requires' : m.afterOn[cloud]?.includes(to) ? 'after' : m.uses.includes(to) ? 'uses' : '';
       kinds[cloud] = offered(m.page, cloud) && offered(to, cloud) ? kind : '';
     }
     const rank = { requires: 3, after: 2, uses: 1, '': 0 };

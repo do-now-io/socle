@@ -1,10 +1,11 @@
 ---
 // The catalog as bricks: one per module, its mark, category, one line, its
-// default and where it runs, filterable by category. Read at build time
+// default, where it runs and the upstream chart it ships, filterable by
+// category and by cloud. Read at build time
 // from the repository (src/catalog.mjs). Used by the landing page and by
 // docs/catalog/index.mdx. `not-content` keeps Starlight's Markdown styles
 // off it.
-import { modules } from '../catalog.mjs';
+import { clouds, modules } from '../catalog.mjs';
 import argo from '../logos/argo.svg?raw';
 import crossplane from '../logos/crossplane.svg?raw';
 import keda from '../logos/keda.svg?raw';
@@ -47,13 +48,23 @@ const needs = (requires: { module: string; clouds: string[] | null }[]) =>
 ---
 
 <div class:list={['not-content catalog-bricks', { compact }]}>
-  <div class="filters" role="group" aria-label="Show one category" hidden>
-    <button type="button" aria-pressed="true" data-category="">All</button>
+  <div class="filters" role="group" aria-label="Show one cloud" data-filter="cloud" hidden>
+    <button type="button" aria-pressed="true" data-value="">Every cloud</button>
+    {
+      clouds.map((c) => (
+        <button type="button" aria-pressed="false" data-value={c}>
+          {c}
+        </button>
+      ))
+    }
+  </div>
+  <div class="filters" role="group" aria-label="Show one category" data-filter="category" hidden>
+    <button type="button" aria-pressed="true" data-value="">All</button>
     {
       categories
         .filter((c) => modules.some((m) => m.category === c))
         .map((c) => (
-          <button type="button" aria-pressed="false" data-category={c}>
+          <button type="button" aria-pressed="false" data-value={c}>
             {c}
           </button>
         ))
@@ -62,7 +73,7 @@ const needs = (requires: { module: string; clouds: string[] | null }[]) =>
   <ul class="bricks">
     {
       bricks.map((m) => (
-        <li data-category={m.category}>
+        <li data-category={m.category} data-clouds={(m.clouds ?? clouds).join(' ')}>
           <a href={`${base}/catalog/${m.page}/`}>
             <span class="brick-head">
               {marks[m.page] ? (
@@ -79,6 +90,11 @@ const needs = (requires: { module: string; clouds: string[] | null }[]) =>
             <span class="brick-name">{m.page}</span>
             <span class="brick-category">{m.category}</span>
             <span class="brick-desc">{m.description}</span>
+            {m.chart && (
+              <span class="brick-chart">
+                {m.chart.name} <span class="version">{m.chart.version}</span>
+              </span>
+            )}
             <span class="brick-clouds">
               {where(m.clouds)}
               {m.requires.length > 0 && <span class="needs"> · {needs(m.requires)}</span>}
@@ -91,26 +107,33 @@ const needs = (requires: { module: string; clouds: string[] | null }[]) =>
 </div>
 
 <script>
-  // The category filter. Without script every brick shows, and the
-  // buttons stay hidden.
-  const group = document.querySelector<HTMLElement>('.catalog-bricks .filters');
-  const bricks = document.querySelectorAll<HTMLElement>('.catalog-bricks .bricks li');
-  if (group) {
-    group.hidden = false;
-    group.addEventListener('click', (event) => {
-      const button = (event.target as HTMLElement).closest('button');
-      if (!button) return;
-      const category = button.dataset.category ?? '';
-      for (const b of group.querySelectorAll('button')) b.setAttribute('aria-pressed', String(b === button));
-      for (const brick of bricks) brick.hidden = category !== '' && brick.dataset.category !== category;
-    });
+  // The cloud and category filters, combined. Without script every brick
+  // shows, and the buttons stay hidden.
+  for (const root of document.querySelectorAll<HTMLElement>('.catalog-bricks')) {
+    const bricks = root.querySelectorAll<HTMLElement>('.bricks li');
+    const chosen = { cloud: '', category: '' };
+    for (const group of root.querySelectorAll<HTMLElement>('.filters')) {
+      const filter = group.dataset.filter as keyof typeof chosen;
+      group.hidden = false;
+      group.addEventListener('click', (event) => {
+        const button = (event.target as HTMLElement).closest('button');
+        if (!button) return;
+        chosen[filter] = button.dataset.value ?? '';
+        for (const b of group.querySelectorAll('button')) b.setAttribute('aria-pressed', String(b === button));
+        for (const brick of bricks) {
+          brick.hidden =
+            (chosen.category !== '' && brick.dataset.category !== chosen.category) ||
+            (chosen.cloud !== '' && !(brick.dataset.clouds ?? '').split(' ').includes(chosen.cloud));
+        }
+      });
+    }
   }
 </script>
 
 <style>
 .catalog-bricks {
   display: grid;
-  gap: 1.5rem;
+  gap: 0.75rem;
 }
 .filters {
   display: flex;
@@ -136,7 +159,7 @@ const needs = (requires: { module: string; clouds: string[] | null }[]) =>
    cards above: a raised face standing on a heavy bottom edge. */
 .bricks {
   list-style: none;
-  margin: 0;
+  margin: 0.75rem 0 0;
   padding: 0;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(15.5rem, 1fr));
@@ -148,7 +171,7 @@ const needs = (requires: { module: string; clouds: string[] | null }[]) =>
 .bricks a {
   height: 100%;
   display: grid;
-  grid-template-rows: auto auto auto 1fr auto;
+  grid-template-rows: auto auto auto 1fr auto auto;
   gap: 0.2rem;
   padding: 1rem 1.1rem 0.9rem;
   background: var(--stone-raised);
@@ -229,6 +252,15 @@ const needs = (requires: { module: string; clouds: string[] | null }[]) =>
   -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+.brick-chart {
+  margin-top: 0.5rem;
+  font: 0.75rem/1.3 var(--font-mono);
+  color: var(--basalt-muted);
+  overflow-wrap: anywhere;
+}
+.brick-chart .version {
+  color: var(--accent);
 }
 .brick-clouds {
   margin-top: 0.6rem;

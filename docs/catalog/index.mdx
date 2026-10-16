@@ -15,8 +15,11 @@ from your `kube` block. Some are on by default; the others wait for you.
 <CatalogBricks compact />
 
 
-- **The foot of each brick** is the clouds the module is offered on;
-  elsewhere `tofu plan` refuses it. CI proves every module on AWS only.
+- **The foot of each brick** is the upstream chart and the version the
+  module pins, then the clouds it is offered on; elsewhere `tofu plan`
+  refuses it. CI proves every module on AWS only.
+- **The same data, for tooling**: <a href={`${import.meta.env.BASE_URL.replace(/\/$/, '')}/catalog.json`}><code>catalog.json</code></a>,
+  generated with this page.
 - **Observability** is three modules, the stack and its two collectors:
   [how they fit](../architecture/observability.md).
 - **Cilium, CoreDNS and the EKS add-ons** are not modules: they run
