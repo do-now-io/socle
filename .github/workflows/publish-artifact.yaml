@@ -240,10 +240,11 @@ jobs:
   # and proven by Chainsaw — one job per catalog module, discovered from
   # oci/catalog/*/tests/e2e, plus the real root applied once. e2e.yaml says
   # what each job proves; its `e2e` job is the one context a ruleset can
-  # require.
+  # require. It waits for the module package too: the upgrade job inits
+  # from it, as a client does.
   e2e:
     name: e2e
-    needs: publish
+    needs: [publish, publish-modules]
     uses: ./.github/workflows/e2e.yaml
     permissions:
       contents: read
@@ -261,6 +262,15 @@ jobs:
   # release instead, and `promote` below gives the alpha its release tag.
   # Needs the repository setting "Allow GitHub Actions to create and approve
   # pull requests" (Settings → Actions → General).
+  #
+  # Under the socle-release GitHub App once vars.RELEASE_APP_ID names it (#61,
+  # M1): what GITHUB_TOKEN pushes and opens starts no workflow, so the release
+  # PR got no CI at all — its pull_request runs ended action_required and
+  # no Publish artifact ran on its branch. Under the App, the release PR
+  # runs pr-static, integration and Publish artifact like any branch: its
+  # pre-release is built, signed and proven before the merge that releases.
+  # The App needs contents and pull-requests write on this repository, its
+  # key in secrets.RELEASE_APP_PRIVATE_KEY. Without it, GITHUB_TOKEN as before.
   release-please:
     name: Release PR, or release
     runs-on: ubuntu-24.04
@@ -276,9 +286,16 @@ jobs:
       sha: ${{ steps.rp.outputs.sha }}
       html_url: ${{ steps.rp.outputs.html_url }}
     steps:
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app
+        if: vars.RELEASE_APP_ID != ''
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         id: rp
         with:
+          token: ${{ steps.app.outputs.token || github.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
       - name: Summary

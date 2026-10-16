@@ -20,6 +20,15 @@ variable "kube" {
   type    = any
   default = {}
 }
+# Where the bootstrap module comes from: this checkout, for every job but
+# the upgrade, which inits from the candidate's published module package —
+# oci://ghcr.io/do-now-io/socle/opentofu-modules//opentofu/bootstrap?tag=<tag>
+# — as a client's root does. A variable in a module source is evaluated at
+# init (OpenTofu 1.8+), so -var on `tofu init` picks it.
+variable "bootstrap_source" {
+  type    = string
+  default = "../../../opentofu/bootstrap"
+}
 variable "artifact_pull_secret" {
   type    = string
   default = ""
@@ -75,7 +84,7 @@ provider "helm" {
   }
 }
 module "socle" {
-  source       = "../../../opentofu/bootstrap"
+  source       = var.bootstrap_source
   cloud        = "aws"
   cluster_name = "socle-e2e-catalog"
   environment  = "dev"
