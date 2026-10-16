@@ -341,3 +341,33 @@ kept; ISO 27001 A.8.15 and SOC 2 CC7 clients opt in. Trivy's AVD-AWS-0038 is
 ignored on the cluster, with this as its reason.
 
 **Sources.** [EKS control plane logs](https://docs.aws.amazon.com/eks/latest/userguide/control-plane-logs.html) · #80.
+
+## AWS-20: A destroy leaves no log group behind
+
+**accepted** · 2026-10-16 · [`opentofu/aws/network.tf`](../../opentofu/aws/network.tf) (`aws_iam_role_policy.flow_logs`), [`opentofu/aws/cluster.tf`](../../opentofu/aws/cluster.tf) (`time_sleep.cluster_logs_drain`)
+
+**Context.** Both log groups ([AWS-16](#aws-16-the-account-keeps-custody-of-the-logs))
+are also created by the service that writes to them, when it delivers. VPC
+Flow Logs keeps delivering for several minutes after the flow log is deleted,
+and EKS delivers control-plane logs "within a few minutes … best effort". A
+`tofu destroy` deleted `/aws/vpc/socle-dev/flow-logs`, the last records
+recreated it a minute later with no retention and no key, and the next apply
+of the same `cluster_name` failed on `ResourceAlreadyExistsException` (#98).
+The flow logs' writer is the module's own role; the control plane's is EKS's
+service-linked role, whose policy is AWS's.
+
+**Decision.** The flow logs' role has the four actions of AWS's documented
+policy that write into a group, not `logs:CreateLogGroup`: the module creates
+the group before the flow log, and a late delivery to a deleted group fails.
+The control-plane group is deleted five minutes after the cluster when a log
+type is on, through a `time_sleep` between the two; with none, EKS sends
+nothing and the destroy does not wait.
+
+**Consequences.** Flow records still in flight at destroy are dropped, not
+kept. A destroy with control-plane logs on takes five more minutes, and stays
+a margin on a best-effort delivery: an interrupted wait, or a delivery later
+than that, leaves the group behind ([Uninstall](../guides/uninstall.md#what-is-left-behind-by-design)).
+Delivering to S3 instead was set aside: the flow logs would leave CloudWatch
+Logs Insights, and the control plane has no S3 destination.
+
+**Sources.** [VPC Flow Logs troubleshooting](https://docs.aws.amazon.com/vpc/latest/userguide/flow-logs-troubleshooting.html#flow-logs-troubleshooting-no-log-group) · [IAM role for flow logs](https://docs.aws.amazon.com/vpc/latest/userguide/flow-logs-iam-role.html) · [Delete a flow log](https://docs.aws.amazon.com/vpc/latest/userguide/working-with-flow-logs.html#delete-flow-log) · [EKS control plane logs](https://docs.aws.amazon.com/eks/latest/userguide/control-plane-logs.html) · [AmazonEKSServiceRolePolicy](https://docs.aws.amazon.com/aws-managed-policy/latest/reference/AmazonEKSServiceRolePolicy.html) · #98.
