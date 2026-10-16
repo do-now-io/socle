@@ -196,8 +196,19 @@ run "helm_kubernetes_is_credential_free_and_uses_the_gke_exec_plugin" {
   command = plan
 
   assert {
-    condition     = output.helm_kubernetes.exec.command == "gke-gcloud-auth-plugin"
+    condition     = output.helm_kubernetes.exec.command == "gke-gcloud-auth-plugin" && output.helm_kubernetes.exec.api_version == "client.authentication.k8s.io/v1beta1"
     error_message = "helm_kubernetes must obtain its token at call time through gke-gcloud-auth-plugin, never carry one."
+  }
+  # The sweep, not a list of forbidden names: anything beyond the endpoint,
+  # its CA and the exec plugin — a token, a client key or certificate, a
+  # password, an exec env carrying one — is a credential in the state.
+  assert {
+    condition     = length(setsubtract(keys(nonsensitive(output.helm_kubernetes)), ["host", "cluster_ca_certificate", "exec"])) == 0
+    error_message = "helm_kubernetes must carry the endpoint, its CA and the exec plugin, nothing else: any other attribute is a credential."
+  }
+  assert {
+    condition     = toset(keys(nonsensitive(output.helm_kubernetes).exec)) == toset(["api_version", "command", "args"])
+    error_message = "helm_kubernetes.exec must carry no env: the plugin reads the caller's ambient credentials, the state none."
   }
 }
 
