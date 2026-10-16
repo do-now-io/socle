@@ -24,7 +24,7 @@ From [Prerequisites](../clouds/gcp/prerequisites.md):
   `gke-gcloud-auth-plugin`;
 - [quotas](../clouds/gcp/prerequisites.md#quotas) raised: a fresh project's
   CPU and SSD quotas are not enough;
-- OpenTofu 1.10 or later, `gcloud`, `gke-gcloud-auth-plugin`, `kubectl`.
+- OpenTofu 1.13 or later, `gcloud`, `gke-gcloud-auth-plugin`, `kubectl`.
 
 ## Write your main.tf
 

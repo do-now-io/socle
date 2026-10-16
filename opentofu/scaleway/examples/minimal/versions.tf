@@ -5,7 +5,7 @@
 # own account, and the module neither creates nor assumes one.
 
 terraform {
-  required_version = ">= 1.10"
+  required_version = ">= 1.13"
 
   required_providers {
     scaleway = {

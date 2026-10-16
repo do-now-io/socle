@@ -14,7 +14,7 @@ What one socle version pins and requires; they move with `socle_version`
 
 | Component | Version | Source |
 | --- | --- | --- |
-| OpenTofu | `>= 1.10` | every `versions.tf` |
+| OpenTofu | `>= 1.13`; CI runs `1.13.0` | every `versions.tf`; `tofu_version` in the workflows |
 | `hashicorp/aws` | `>= 6.0, < 7.0` | `opentofu/aws`, `opentofu/bootstrap`, `opentofu/clusters/aws` |
 | `hashicorp/helm` | `>= 3.0, < 4.0` | `opentofu/bootstrap`, `opentofu/clusters/aws` |
 | `hashicorp/google` | `>= 8.0, < 9.0` | `opentofu/gcp` |

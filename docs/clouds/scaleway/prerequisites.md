@@ -163,7 +163,7 @@ nobody can manage.
 
 ## Tooling
 
-- [ ] OpenTofu 1.10 or later (OCI module sources).
+- [ ] OpenTofu 1.13 or later: below it, `tofu init` of the public OCI modules fails with a 403 ([Distribution](../../architecture/distribution.md#visibility)).
 - [ ] The `scaleway/scaleway` provider `>= 2.82, < 3.0`, fetched by `tofu init`.
 - [ ] The `scw` CLI, initialised.
 - [ ] The `aws` CLI, for the bucket lifecycle.

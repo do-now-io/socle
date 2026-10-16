@@ -23,7 +23,7 @@ From [prerequisites](../clouds/scaleway/prerequisites.md):
   ```
 
 - a versioned Object Storage state bucket ([prerequisites](../clouds/scaleway/prerequisites.md#state));
-- OpenTofu 1.10 or later, and `kubectl`.
+- OpenTofu 1.13 or later, and `kubectl`.
 
 ## Write your tfvars
 
@@ -31,7 +31,7 @@ The root, `main.tf`. Step 1 is the foundations alone:
 
 ```hcl
 terraform {
-  required_version = ">= 1.10"
+  required_version = ">= 1.13"
 
   backend "s3" {
     bucket                      = "my-tofu-state"

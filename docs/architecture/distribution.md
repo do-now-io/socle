@@ -95,6 +95,16 @@ https://github.com/do-now-io/socle/.github/workflows/publish-artifact.yaml@refs/
 
 ## Visibility
 
-Both packages are public: `tofu init`, `cosign verify` and the cluster pull
-with no credential. A private mirror is the one case that needs one
+Both packages, `flux-modules` and `opentofu-modules`, are public: `tofu init`,
+`cosign verify` and the cluster pull with no credential. A private mirror is
+the one case that needs one
 ([Pull from a private registry](../guides/private-registry.md)).
+
+Anonymous `tofu init` needs OpenTofu 1.13 or later, the floor every
+`versions.tf` declares. Before 1.13, OpenTofu pings `/v2/` before it asks for
+the repository; ghcr answers with a challenge for a placeholder scope and
+refuses an anonymous token for it, and the init fails with a 403 that reads
+like an access problem
+([opentofu/opentofu#3316](https://github.com/opentofu/opentofu/issues/3316),
+fixed in 1.13.0, not backported to 1.12). With the floor, a 1.12 user gets
+"Unsupported OpenTofu Core version" instead.
