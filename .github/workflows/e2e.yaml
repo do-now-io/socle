@@ -127,6 +127,10 @@ jobs:
         with:
           persist-credentials: false
       - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          # The floor every versions.tf declares (issue #89): CI proves it, and
+          # moves only when the floor does.
+          tofu_version: 1.13.0
       - uses: kyverno/action-install-chainsaw@1223ef75bedeb59c4e7b5455463d4316e76dff01 # v0.2.15
       - name: Apply the real root, once
         id: apply
@@ -257,6 +261,10 @@ jobs:
         with:
           persist-credentials: false
       - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          # The floor every versions.tf declares (issue #89): CI proves it, and
+          # moves only when the floor does.
+          tofu_version: 1.13.0
       - uses: kyverno/action-install-chainsaw@1223ef75bedeb59c4e7b5455463d4316e76dff01 # v0.2.15
       - name: Apply the fixture root
         id: apply
@@ -420,6 +428,10 @@ jobs:
         with:
           persist-credentials: false
       - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          # The floor every versions.tf declares (issue #89): CI proves it, and
+          # moves only when the floor does.
+          tofu_version: 1.13.0
       - uses: kyverno/action-install-chainsaw@1223ef75bedeb59c4e7b5455463d4316e76dff01 # v0.2.15
       - name: Render both charts' e2e fixtures
         run: |
