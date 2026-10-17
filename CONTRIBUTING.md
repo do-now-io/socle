@@ -118,6 +118,16 @@ The e2e jobs:
   and the module's `health` tests, then its `module` tests alone, then turns
   the module off and on through `tofu apply` with a second plan that must be
   empty, then uninstalls the socle and destroys the cluster.
+- **`upgrade (<cloud>)`** upgrades a cluster from the previous release: the
+  fixture root as that release shipped it (`git archive` of its tag),
+  applied with its artifact and proven by its own `root` suite; then HEAD's
+  fixture on the same state, its bootstrap module pulled from this run's
+  published module package, the plan kept as the run's `upgrade-plan-<cloud>`
+  artifact, the `root` suite and every module's `health` tests, a second plan
+  empty, the socle uninstalled and the cluster destroyed. It says so and
+  passes when there is no release, or no fixture for the cloud at that
+  release; before 1.0.0 a red upgrade is reported, not failed — a 0.x
+  release promises no compatibility and ships no migration.
 
 What a module's suite holds, its labels, and the habits every suite keeps
 are in the [Catalog module standard](docs/reference/catalog-module-standard.md).
@@ -277,6 +287,14 @@ What this needs from the repository and from you:
 - **Settings → Actions → General → "Allow GitHub Actions to create and
   approve pull requests"**: release-please opens its PR with the workflow
   token.
+- **The release PR gets CI only under a GitHub App.** What the workflow token
+  pushes or opens starts no workflow, so with it the release PR runs no check
+  and no pre-release is built from it. Create a `socle-release` App in
+  `do-now-io` (repository permissions: contents and pull requests, read and
+  write), install it on this repository, set the variable `RELEASE_APP_ID`
+  and the secret `RELEASE_APP_PRIVATE_KEY`: release-please then runs under it
+  and its PR runs `pr-static`, `integration` and `Publish artifact` like any
+  branch. Without the variable, the workflow token as before.
 - **Rebase merges only.** Every commit must land on `main` with its own
   conventional message: a merge commit, or a squash titled otherwise, is
   invisible to the version bump.
