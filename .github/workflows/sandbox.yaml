@@ -62,11 +62,9 @@ defaults:
 jobs:
   sandbox:
     name: sandbox (${{ matrix.cloud }})
-    # The release PR only, or by hand. A job skipped by its own if: reports
-    # "skipped", which a required check accepts.
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.head_ref == 'release-please--branches--main'
+    # Runs on every PR to main and says in seconds when it is not the release
+    # PR: a job skipped by a job-level if: reports its matrix name unexpanded,
+    # "sandbox (${{ matrix.cloud }})", which no ruleset could require.
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     permissions:
@@ -89,10 +87,18 @@ jobs:
       - name: Set up, or say why not
         id: gate
         env:
+          EVENT: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
           ENABLED: ${{ vars.SANDBOX_E2E }}
           AWS_ROLE: ${{ vars.SANDBOX_AWS_ROLE_ARN }}
           GCP_PROVIDER: ${{ vars.SANDBOX_GCP_WORKLOAD_IDENTITY_PROVIDER }}
         run: |
+          # The release PR only, or by hand.
+          if [ "$EVENT" != workflow_dispatch ] && [ "$HEAD_REF" != release-please--branches--main ]; then
+            echo "### sandbox ($CLOUD) — not the release PR: nothing to prove here" >> "$GITHUB_STEP_SUMMARY"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           trust="$AWS_ROLE"
           [ "$CLOUD" = gcp ] && trust="$GCP_PROVIDER"
           if [ "$ENABLED" != on ] || [ -z "$trust" ]; then

@@ -70,7 +70,7 @@ the repository: `check-version.sh`, `check-catalog-clouds.sh`,
 | `publish-artifact.yaml` | every push, every branch | both packages are pushed to GHCR and signed; the artifact converges on floci's k3s through `e2e.yaml` (one job per module and cloud, each ending in `tofu destroy`). On `main` only: release-please refreshes its PR, and on the release, `promote` tags the alpha |
 | `cleanup-artifacts.yaml` | branch deletion, manual dispatch, nightly | pre-release tags are deleted: a branch's when it goes or after 7 days, alphas after 30. Release tags are never touched |
 | `renovate.yaml` | hourly, Dependency Dashboard edits | dependency updates, opened only once their box is ticked on the dashboard. Skipped until the `RENOVATE_APP_ID` variable and the `RENOVATE_APP_PRIVATE_KEY` secret exist |
-| `sandbox.yaml` | the release PR, manual dispatch | the release candidate applied on real AWS and GCP from the published module package, proven by Chainsaw, destroyed, and nothing left behind (#61, M4). Says so and passes while `SANDBOX_E2E` is not `on` |
+| `sandbox.yaml` | every PR to `main` (it proves the release PR only, and says so in seconds on any other), manual dispatch | the release candidate applied on real AWS and GCP from the published module package, proven by Chainsaw, destroyed, and nothing left behind (#61, M4). Says so and passes while `SANDBOX_E2E` is not `on` |
 | `scorecard.yaml` | weekly, every push to `main` | the OpenSSF Scorecard of the repository |
 
 Workflows follow the same rules everywhere: actions pinned by commit SHA,
