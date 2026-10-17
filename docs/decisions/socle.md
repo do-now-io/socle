@@ -584,3 +584,27 @@ operator ships. A Flux CVE patch reaches clusters through an operator bump
 and a socle release, not on its own.
 
 **Sources.** flux-operator v0.60.0 `docs/api/v1/fluxinstance.md` (Distribution artifact) · flux-instance chart 0.60.0 `values.yaml` (`instance.distribution.artifact`).
+
+## SOCLE-36: The release is proven on real AWS and GCP, on the release PR only
+
+**proposed** · 2026-10-17 · [`.github/workflows/sandbox.yaml`](../../.github/workflows/sandbox.yaml), [`.github/sandbox/`](../../.github/sandbox/)
+
+**Decision.** `sandbox.yaml` applies the release candidate in each cloud's
+sandbox — the client root, from the published module package, at the
+candidate's tag — proves it with Chainsaw, destroys it and audits what is
+left, on the release PR only, through OIDC trusts the repository is given
+once. Off (`SANDBOX_E2E` not `on`), it says the release was not proven on
+real cloud and passes.
+
+**Context.** floci and floci-gcp run none of Pod Identity, Workload Identity,
+the EKS add-ons, Cilium on real nodes, Autopilot, the Gateways and their
+certificates, external-dns against real zones (#61, M4). Running a real
+cluster on every push would cost every push; the release PR is the one merge
+that publishes a version.
+
+**Consequences.** Proposed until it has run: it needs the release PR to get
+CI (the `socle-release` App) and both trusts. The gcp sandbox runs a reduced
+catalog, a fresh project's quotas being what they are. The upgrade is
+floci's until 1.0.0 (SOCLE-35).
+
+**Sources.** [CONTRIBUTING, The sandbox](../contributing.md#the-sandbox) · #61.

@@ -70,6 +70,7 @@ the repository: `check-version.sh`, `check-catalog-clouds.sh`,
 | `publish-artifact.yaml` | every push, every branch | both packages are pushed to GHCR and signed; the artifact converges on floci's k3s through `e2e.yaml` (one job per module and cloud, each ending in `tofu destroy`). On `main` only: release-please refreshes its PR, and on the release, `promote` tags the alpha |
 | `cleanup-artifacts.yaml` | branch deletion, manual dispatch, nightly | pre-release tags are deleted: a branch's when it goes or after 7 days, alphas after 30. Release tags are never touched |
 | `renovate.yaml` | hourly, Dependency Dashboard edits | dependency updates, opened only once their box is ticked on the dashboard. Skipped until the `RENOVATE_APP_ID` variable and the `RENOVATE_APP_PRIVATE_KEY` secret exist |
+| `sandbox.yaml` | every PR to `main` (it proves the release PR only, and says so in seconds on any other), manual dispatch | the release candidate applied on real AWS and GCP from the published module package, proven by Chainsaw, destroyed, and nothing left behind (#61, M4). Says so and passes while `SANDBOX_E2E` is not `on` |
 | `scorecard.yaml` | weekly, every push to `main` | the OpenSSF Scorecard of the repository |
 
 Workflows follow the same rules everywhere: actions pinned by commit SHA,
@@ -139,6 +140,40 @@ What floci cannot prove, and the e2e therefore does not claim:
   token after 60 s, so Chainsaw's kubeconfig carries a ServiceAccount token;
   a pod reaches floci at the container's IP (`FLOCI_IP`), not at
   `localhost`.
+
+### The sandbox
+
+`sandbox.yaml` proves the release on real clouds, on the release PR only:
+`.github/sandbox/<cloud>`, the client root called from the module package at
+the candidate's tag, applied in the sandbox, the generic suite and every
+module's `health` tests (`platform: gke` ones on gcp), `tofu destroy` (twice
+on gcp, #86), then an audit that fails on anything `socle-sandbox` still
+owns. About an hour per cloud; EKS with two small nodes costs under 2 € a
+run. It needs the release PR to get CI (the `socle-release` App, see
+[Releases](#releases)) and, once, a trust each cloud gives this repository —
+OIDC, no stored credential:
+
+- **AWS** (account 007026193270): an IAM role trusting
+  `token.actions.githubusercontent.com` with `aud` `sts.amazonaws.com` and
+  `sub` `repo:do-now-io/socle:pull_request` (the release PR) and
+  `repo:do-now-io/socle:ref:refs/heads/main` (a dispatch), allowed to create
+  and delete what the root creates; its ARN in the variable
+  `SANDBOX_AWS_ROLE_ARN`.
+- **GCP** (project `sandbox-2bace`): a workload identity pool with a GitHub
+  provider (`attribute.repository = assertion.repository`, condition
+  `assertion.repository == 'do-now-io/socle'`), and the project role the
+  root needs granted to
+  `principalSet://iam.googleapis.com/projects/320449067541/locations/global/workloadIdentityPools/<pool>/attribute.repository/do-now-io/socle`
+  — no service account, as everywhere in the socle; the provider's full name
+  in `SANDBOX_GCP_WORKLOAD_IDENTITY_PROVIDER` (`SANDBOX_GCP_SERVICE_ACCOUNT`
+  stays empty).
+- `SANDBOX_E2E=on`. Set back to anything else, every run says the release
+  was not proven on real cloud, and passes.
+
+The gcp sandbox runs the catalog's defaults without ArgoCD and the
+monitoring stack: a fresh project's quotas do not hold the whole catalog at
+once ([sizing](docs/clouds/gcp/sizing.md)). The upgrade from the previous
+release is floci's (`upgrade` in `e2e.yaml`) until 1.0.0.
 
 ## Documentation
 
