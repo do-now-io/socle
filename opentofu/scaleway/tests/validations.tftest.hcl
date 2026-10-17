@@ -255,6 +255,16 @@ run "pop2_node_types_refuse_a_zone_that_has_none" {
   expect_failures = [var.node_type]
 }
 
+run "pool_min_size_must_be_a_whole_number_of_nodes" {
+  command = plan
+
+  variables {
+    pool_min_size = 1.5
+  }
+
+  expect_failures = [var.pool_min_size]
+}
+
 run "pool_max_size_must_not_sit_below_the_minimum" {
   command = plan
 

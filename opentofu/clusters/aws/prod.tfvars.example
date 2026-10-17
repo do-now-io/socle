@@ -9,10 +9,10 @@ socle_version = "0.1.0" # x-release-please-version
 # artifact_pull_secret = "ghcr-auth"
 
 aws = {
-  region             = "eu-west-3"
-  cluster_name       = "acme-prod"
-  owner              = "platform"
-  environment        = "prod"
+  region       = "eu-west-3"
+  cluster_name = "acme-prod"
+  owner        = "platform"
+  environment  = "prod"
   # Kubernetes minor to run; the foundations module has no default for it.
   kubernetes_version = "1.34"
   availability_zones = ["eu-west-3a", "eu-west-3b", "eu-west-3c"]

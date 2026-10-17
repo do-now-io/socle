@@ -90,6 +90,19 @@ run "attaching_an_existing_vpc_needs_matching_subnet_counts" {
   expect_failures = [var.private_subnet_ids]
 }
 
+run "attaching_an_existing_vpc_needs_one_public_subnet_per_az" {
+  command = plan
+
+  variables {
+    create_vpc         = false
+    vpc_id             = "vpc-0123456789abcdef0"
+    private_subnet_ids = ["subnet-priv-a", "subnet-priv-b"]
+    public_subnet_ids  = ["subnet-pub-a"]
+  }
+
+  expect_failures = [var.public_subnet_ids]
+}
+
 run "creating_a_vpc_without_a_nat_gateway_is_incoherent" {
   command = plan
 

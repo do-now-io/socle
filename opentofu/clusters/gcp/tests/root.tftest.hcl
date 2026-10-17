@@ -238,3 +238,79 @@ run "the_catalog_depends_on_crossplane_grants" {
     error_message = "the catalog's envelope must depend on Crossplane's grants, so a destroy uninstalls the catalog before it removes them."
   }
 }
+
+run "socle_version_reaches_the_artifact" {
+  command = plan
+
+  assert {
+    condition     = output.artifact.tag == "0.0.0" && output.inputs.socle.version == "0.0.0" && output.cluster_name == "socle-test"
+    error_message = "socle_version reaches the artifact the cluster pulls and the inputs; cluster_name is the foundations'."
+  }
+}
+
+# The DNS endpoint exists once GKE has created the cluster: read from the
+# foundations' outputs, given here as a real apply returns them. The override
+# needs an attached network and the project number given: what the
+# foundations' locals index or read, an overridden module never creates.
+run "the_dns_endpoint_is_the_foundations" {
+  command = plan
+
+  variables {
+    gcp = {
+      project_id        = "socle-test-project"
+      region            = "europe-west1"
+      cluster_name      = "socle-test"
+      owner             = "platform"
+      environment       = "prod"
+      create_network    = false
+      network_name      = "default"
+      create_subnetwork = false
+      subnetwork_name   = "default"
+      pod_range_name    = "pods"
+      project_number    = "123456789012"
+      maintenance_window = {
+        start_time = "2026-01-03T02:00:00Z"
+        end_time   = "2026-01-03T14:00:00Z"
+        recurrence = "FREQ=WEEKLY;BYDAY=SA"
+      }
+    }
+  }
+
+  override_module {
+    target = module.foundations
+    outputs = {
+      cluster_name                 = "socle-test"
+      cluster_dns_endpoint         = "gke-0123456789abcdef-123456789012.europe-west1.gke.goog"
+      project_id                   = "socle-test-project"
+      project_number               = "123456789012"
+      region                       = "europe-west1"
+      crossplane_principal         = null
+      dns_records_role             = ""
+      gateway_certificate_map      = ""
+      gateway_regional_certificate = ""
+      helm_kubernetes = {
+        host = "https://gke-0123456789abcdef-123456789012.europe-west1.gke.goog"
+        exec = {
+          api_version = "client.authentication.k8s.io/v1beta1"
+          command     = "gke-gcloud-auth-plugin"
+          args        = []
+        }
+      }
+    }
+  }
+
+  assert {
+    condition     = output.cluster_dns_endpoint == "gke-0123456789abcdef-123456789012.europe-west1.gke.goog"
+    error_message = "cluster_dns_endpoint is the foundations'."
+  }
+}
+
+run "socle_version_refuses_what_is_not_semver" {
+  command = plan
+
+  variables {
+    socle_version = "latest"
+  }
+
+  expect_failures = [var.socle_version]
+}

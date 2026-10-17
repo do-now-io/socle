@@ -17,3 +17,8 @@ output "inputs" {
   description = "What the catalog renders from, after normalisation. Compare with kubectl -n flux-system get resourcesetinputprovider socle -o yaml."
   value       = module.socle.inputs
 }
+
+output "cilium" {
+  description = "Whether the bootstrap installed Cilium and CoreDNS before Flux, with their chart versions — what cilium.enabled decided."
+  value       = module.socle.cilium
+}
