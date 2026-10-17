@@ -429,3 +429,43 @@ minutes old. The providers `provider-aws-sqs` and
 `provider-aws-cloudwatchevents` run on every aws cluster with Crossplane on.
 
 **Sources.** [Karpenter interruption handling](https://karpenter.sh/docs/concepts/disruption/#interruption) · [SQS actions](https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazonsqs.html) · [EventBridge actions](https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazoneventbridge.html).
+
+## AWS-23: Public nodes: their own security group, and Cilium masquerading out of the VPC
+
+**accepted** · 2026-10-17 · [`opentofu/aws/nodes.tf`](../../opentofu/aws/nodes.tf), [`opentofu/bootstrap/cilium.tf`](../../opentofu/bootstrap/cilium.tf), [`oci/catalog/karpenter/nodes/ec2nodeclass-public.yaml`](../../oci/catalog/karpenter/nodes/ec2nodeclass-public.yaml)
+
+**Decision.** The foundations create the security group
+`<cluster>-public-nodes`: in from the VPC's CIDR — the control plane's
+ENIs and every node — out to anywhere; the cluster security group admits it
+back (on an emulated EKS that reports no cluster security group, floci, that
+rule lands on the group itself). Not
+tagged for the cluster. Karpenter's public nodes run in it alone, and their
+kubelet registers them labelled
+`node.kubernetes.io/exclude-from-external-load-balancers`. On aws Cilium
+masquerades what leaves the VPC to the node's primary address
+(`enableIPv4Masquerade`, `ipv4NativeRoutingCIDR` the VPC's CIDR,
+`egressMasqueradeInterfaces: ens+`), on every node.
+
+**Context.** Measured on the sandbox, 2026-10-17, with a public NodePool:
+a pod's address is an ENI's secondary one, which the Internet Gateway never
+translates, so a pod on a public node reached nothing outside the VPC until
+Cilium masqueraded it; Cilium refuses masquerading in ENI mode without
+`egressMasqueradeInterfaces` (the agents crashed). EKS's in-tree load
+balancer controller opened a Service's NodePort to `0.0.0.0/0` in the
+security group of every node it targets: on the cluster security group, the
+public node's NodePort answered from the internet. With their own group and
+the exclusion label set by Karpenter, the controller still targeted a new
+node in the seconds before the label arrived, opened the NodePort in that
+group, and never closed it; Karpenter keeps `kubernetes.io` labels off the
+kubelet's flags, so the label goes in an AL2023 `NodeConfig`, which the
+kubelet may set (`node.kubernetes.io/` is a kubelet label domain). With
+both, a public node was never a target and its NodePort stayed closed.
+
+**Consequences.** A Gateway's traffic reaches pods on public nodes through
+the private nodes. Pods on private nodes leave with their node's address too,
+so the NAT Gateway and the flow logs show nodes, not pods, for what leaves
+the VPC; inside it nothing changes. With `create_vpc = false`, `vpc_cidr`
+must be the VPC's primary CIDR. The primary interface is `ens5` on AL2023 on
+Nitro; another AMI family would need its name.
+
+**Sources.** [Cilium ENI mode, masquerading](https://docs.cilium.io/en/stable/network/concepts/ipam/eni/) · [cloud-provider-aws, `findSecurityGroupForInstance`](https://github.com/kubernetes/cloud-provider-aws/blob/master/pkg/providers/v1/aws.go) · [Well-known label `node.kubernetes.io/exclude-from-external-load-balancers`](https://kubernetes.io/docs/reference/labels-annotations-taints/#node-kubernetes-io-exclude-from-external-load-balancers) · [AL2023 NodeConfig](https://awslabs.github.io/amazon-eks-ami/nodeadm/) · #53.

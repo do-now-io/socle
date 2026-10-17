@@ -82,6 +82,16 @@ output "bootstrap_node_group" {
   }
 }
 
+output "vpc_cidr" {
+  description = "The VPC's CIDR, vpc_cidr — with create_vpc = false, as the client declared it. Pods take their addresses from it (Cilium's ENI IPAM): Cilium masquerades only what leaves it."
+  value       = var.vpc_cidr
+}
+
+output "public_nodes_security_group" {
+  description = "Name of the security group of Karpenter's public nodes, which its public EC2NodeClass selects: from the VPC, nothing from the internet."
+  value       = aws_security_group.public_nodes.name
+}
+
 output "node_instance_profile" {
   description = "Name of the instance profile carrying the bootstrap nodes' role, the identity of every node of the cluster: the bootstrap group's, and those the catalog's Karpenter launches (its EC2NodeClass names it)."
   value       = aws_iam_instance_profile.node.name

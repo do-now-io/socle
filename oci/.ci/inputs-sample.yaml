@@ -180,12 +180,19 @@
       values_secret: metrics-server-values
     karpenter:
       enabled: true
-      node_pool:
+      private_pool:
         capacity_types: [spot, on-demand]
         architectures: [arm64, amd64]
         cpu: 32
         memory: 128Gi
         consolidate_after: 1m
+        ami: al2023@latest
+      public_pool:
+        capacity_types: [spot]
+        architectures: [arm64]
+        cpu: 16
+        memory: 64Gi
+        consolidate_after: 5m
         ami: al2023@latest
       values:
         logLevel: debug

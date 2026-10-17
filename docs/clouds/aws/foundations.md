@@ -32,6 +32,7 @@ module together with the bootstrap.
 | Two Spot Graviton bootstrap nodes, untainted, not autoscaled | default |
 | Bootstrap nodes on AL2023, IMDSv2 hop limit 1, encrypted gp3, private subnets | enforced |
 | An instance profile for the bootstrap nodes' role, the identity Karpenter's nodes run as | enforced |
+| A security group for Karpenter's public nodes: the VPC in, nothing from the internet | enforced |
 | Crossplane's role and permissions boundary, only when `crossplane` is set; with `ec2` allowed, the boundary lets a role pass the nodes' role to EC2, nothing else of IAM | default |
 
 <details>

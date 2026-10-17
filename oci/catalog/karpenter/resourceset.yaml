@@ -20,8 +20,11 @@
 # would beat the client on every key.
 #
 # Steps, each applied once the one before is healthy: namespace; workload —
-# the chart, its CRDs among it; nodes — the default EC2NodeClass and NodePool,
-# which need those CRDs.
+# the chart, its CRDs among it; nodes — the private and public
+# EC2NodeClasses and NodePools, which need those CRDs. Private is where a pod
+# goes by default, its egress through the NAT Gateway; public, tainted, takes
+# the workloads costly in network traffic that ask for it, their egress
+# through the Internet Gateway (KARPENTER-03).
 #
 # Uninstall order — the one structural decision here (KARPENTER-04). Nodes
 # Karpenter launched are in no OpenTofu state: only Karpenter terminates them,
@@ -273,16 +276,17 @@ spec:
           timeout: 2m
     - name: nodes
       resourcesTemplate: |
-        # The default EC2NodeClass and NodePool, from nodes/ in the socle
-        # artifact, patched with the cluster's names and kube.karpenter.node_pool. A Kustomization so
-        # that they go first and are waited for on uninstall (the header).
+        # The private and public EC2NodeClasses and NodePools, from nodes/ in
+        # the socle artifact, patched with the cluster's names and
+        # kube.karpenter.private_pool and public_pool. A Kustomization so that
+        # they go first and are waited for on uninstall (the header).
         # wait: false — a NodePool is Ready once its EC2NodeClass has resolved
         # AMIs, subnets, security groups and the instance profile against
         # EC2; the alert KarpenterNodeClassNotReady says when it has not.
         # Flux applies any kind named *Class first and waits for it whatever
         # wait says (fluxcd/pkg ssa, ApplyAllStaged): once the EC2NodeClass
-        # has a status, the NodePool is applied, or changed, only while the
-        # EC2NodeClass is Ready.
+        # has a status, the NodePools are applied, or changed, only while the
+        # EC2NodeClasses are Ready.
         apiVersion: kustomize.toolkit.fluxcd.io/v1
         kind: Kustomization
         metadata:
@@ -306,15 +310,18 @@ spec:
           # What is this cluster's, over the defaults nodes/ holds. JSON
           # values, so a list stays a list.
           << $cluster := inputs.cluster.name ->>
-          << $pool := inputs.modules.karpenter.node_pool ->>
           << $owned := printf "kubernetes.io/cluster/%s" $cluster ->>
-          << $subnets := list (dict "tags" (dict $owned "owned" "kubernetes.io/role/internal-elb" "1")) ->>
-          << $groups := list (dict "tags" (dict $owned "owned")) ->>
           << $tags := dict "owner" inputs.cluster.owner "environment" inputs.cluster.environment ->>
+          << $tiers := dict
+            "private" (dict "pool" inputs.modules.karpenter.private_pool "role" "kubernetes.io/role/internal-elb")
+            "public" (dict "pool" inputs.modules.karpenter.public_pool "role" "kubernetes.io/role/elb") ->>
           patches:
+            << range $tier := list "private" "public" ->>
+            << $t := get $tiers $tier ->>
+            << $pool := $t.pool ->>
             - target:
                 kind: EC2NodeClass
-                name: default
+                name: << $tier >>
               patch: |
                 - op: replace
                   path: /spec/instanceProfile
@@ -324,16 +331,20 @@ spec:
                   value: << $pool.ami | toJson >>
                 - op: replace
                   path: /spec/subnetSelectorTerms
-                  value: << $subnets | toJson >>
+                  value: << list (dict "tags" (dict $owned "owned" $t.role "1")) | toJson >>
                 - op: replace
                   path: /spec/securityGroupSelectorTerms
-                  value: << $groups | toJson >>
+                  << if eq $tier "public" ->>
+                  value: << list (dict "name" (printf "%s-public-nodes" $cluster)) | toJson >>
+                  << else ->>
+                  value: << list (dict "tags" (dict $owned "owned")) | toJson >>
+                  << end >>
                 - op: replace
                   path: /spec/tags
                   value: << $tags | toJson >>
             - target:
                 kind: NodePool
-                name: default
+                name: << $tier >>
               patch: |
                 - op: replace
                   path: /spec/template/spec/requirements/0/values
@@ -347,3 +358,4 @@ spec:
                 - op: replace
                   path: /spec/disruption/consolidateAfter
                   value: << $pool.consolidate_after | toJson >>
+            << end >>

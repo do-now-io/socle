@@ -1,18 +1,26 @@
-# The one NodePool the socle renders: what every pod that does not fit on the
-# bootstrap group gets a node from. The module's patches put
-# kube.karpenter.node_pool in it (docs/catalog/karpenter.md); a client writes
-# more NodePools beside it.
+# The public NodePool: for a workload costly in network traffic, whose egress
+# then goes through the Internet Gateway, not the NAT Gateway. Tainted: a pod
+# lands here only if it tolerates socle.do-now.io/node-pool=public and
+# selects the label — everything else stays private. The module's patches
+# put kube.karpenter.public_pool in it (docs/catalog/karpenter.md).
 apiVersion: karpenter.sh/v1
 kind: NodePool
 metadata:
-  name: default
+  name: public
 spec:
   template:
+    metadata:
+      labels:
+        socle.do-now.io/node-pool: public
     spec:
       nodeClassRef:
         group: karpenter.k8s.aws
         kind: EC2NodeClass
-        name: default
+        name: public
+      taints:
+        - key: socle.do-now.io/node-pool
+          value: public
+          effect: NoSchedule
       requirements:
         # Karpenter launches the cheapest instance that fits among these:
         # Spot before on demand, Graviton before x86, as for the bootstrap

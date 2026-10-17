@@ -93,6 +93,67 @@ resource "aws_iam_instance_profile" "node" {
   tags = local.tags
 }
 
+# The security group of the nodes Karpenter launches in the public subnets,
+# with a public IP: what a workload costly in network traffic runs on, its
+# egress through the Internet Gateway instead of the NAT Gateway
+# (docs/catalog/karpenter.md, AWS-23). They do not carry the cluster
+# security group: EKS's in-tree load balancer controller opens a Service's
+# NodePort to 0.0.0.0/0 in the security group of every node it targets, and
+# on a node with a public IP that is the NodePort itself on the internet —
+# measured on the sandbox, 2026-10-17. This group takes no rule from it:
+# those nodes register already labelled
+# node.kubernetes.io/exclude-from-external-load-balancers, so no load
+# balancer targets them. It admits the VPC — the control plane's ENIs, every
+# node — and nothing from the internet. Named, not tagged for the cluster:
+# Karpenter selects it by name, and a cluster tag would make the controller
+# take it for the cluster's.
+resource "aws_security_group" "public_nodes" {
+  name        = "${var.cluster_name}-public-nodes"
+  description = "Karpenter public nodes: from the VPC, to anywhere."
+  vpc_id      = local.vpc_id
+
+  tags = merge(local.tags, { Name = "${var.cluster_name}-public-nodes" })
+}
+
+resource "aws_security_group_rule" "public_nodes_from_the_vpc" {
+  description       = "From the VPC: the control plane, the other nodes, nothing from the internet"
+  type              = "ingress"
+  from_port         = 0
+  to_port           = 0
+  protocol          = "-1"
+  security_group_id = aws_security_group.public_nodes.id
+  cidr_blocks       = [var.vpc_cidr]
+}
+
+# Their reason to exist: the internet, straight through the Internet
+# Gateway. AVD-AWS-0104 flags egress to 0.0.0.0/0; the cluster security
+# group EKS gives every other node allows the same.
+#trivy:ignore:AVD-AWS-0104
+resource "aws_security_group_rule" "public_nodes_to_anywhere" {
+  description       = "To anywhere: the internet through the Internet Gateway, the VPC"
+  type              = "egress"
+  from_port         = 0
+  to_port           = 0
+  protocol          = "-1"
+  security_group_id = aws_security_group.public_nodes.id
+  cidr_blocks       = ["0.0.0.0/0"]
+}
+
+# And the way back: the control plane and the other nodes accept the public
+# nodes, on the cluster security group EKS creates and attaches to both.
+# An emulated EKS reports none (floci 2.1.0): the rule then lands on the
+# public nodes' own group, where the VPC rule above already admits them —
+# an EKS cluster always has one.
+resource "aws_security_group_rule" "cluster_from_public_nodes" {
+  description              = "From the Karpenter public nodes"
+  type                     = "ingress"
+  from_port                = 0
+  to_port                  = 0
+  protocol                 = "-1"
+  security_group_id        = coalesce(aws_eks_cluster.socle.vpc_config[0].cluster_security_group_id, aws_security_group.public_nodes.id)
+  source_security_group_id = aws_security_group.public_nodes.id
+}
+
 # Instance metadata answers only on the node itself (one hop): a pod that is
 # not hostNetwork cannot borrow the node's role. IMDSv2 only, and an
 # encrypted root volume. No variable: none of it is a client's call.

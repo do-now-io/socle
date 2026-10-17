@@ -1928,55 +1928,55 @@ run "kube_refuses_karpenter_on_gcp" {
 
 run "kube_refuses_a_karpenter_capacity_type_karpenter_does_not_know" {
   command = plan
-  variables { kube = { karpenter = { node_pool = { capacity_types = ["spot", "preemptible"] } } } }
+  variables { kube = { karpenter = { private_pool = { capacity_types = ["spot", "preemptible"] } } } }
   expect_failures = [var.kube]
 }
 
 run "kube_refuses_no_karpenter_capacity_type" {
   command = plan
-  variables { kube = { karpenter = { node_pool = { capacity_types = [] } } } }
+  variables { kube = { karpenter = { public_pool = { capacity_types = [] } } } }
   expect_failures = [var.kube]
 }
 
 run "kube_refuses_a_karpenter_architecture_that_is_not_kubernetes_arch" {
   command = plan
-  variables { kube = { karpenter = { node_pool = { architectures = ["x86_64"] } } } }
+  variables { kube = { karpenter = { private_pool = { architectures = ["x86_64"] } } } }
   expect_failures = [var.kube]
 }
 
 run "kube_refuses_a_karpenter_architecture_twice" {
   command = plan
-  variables { kube = { karpenter = { node_pool = { architectures = ["arm64", "arm64"] } } } }
+  variables { kube = { karpenter = { public_pool = { architectures = ["arm64", "arm64"] } } } }
   expect_failures = [var.kube]
 }
 
 run "kube_refuses_a_fractional_karpenter_cpu_limit" {
   command = plan
-  variables { kube = { karpenter = { node_pool = { cpu = 1.5 } } } }
+  variables { kube = { karpenter = { private_pool = { cpu = 1.5 } } } }
   expect_failures = [var.kube]
 }
 
 run "kube_refuses_a_karpenter_memory_limit_without_a_binary_unit" {
   command = plan
-  variables { kube = { karpenter = { node_pool = { memory = "128G" } } } }
+  variables { kube = { karpenter = { public_pool = { memory = "128G" } } } }
   expect_failures = [var.kube]
 }
 
 run "kube_refuses_a_karpenter_consolidate_after_that_is_not_a_duration" {
   command = plan
-  variables { kube = { karpenter = { node_pool = { consolidate_after = "1 minute" } } } }
+  variables { kube = { karpenter = { private_pool = { consolidate_after = "1 minute" } } } }
   expect_failures = [var.kube]
 }
 
 run "kube_refuses_a_karpenter_ami_outside_al2023" {
   command = plan
-  variables { kube = { karpenter = { node_pool = { ami = "bottlerocket@latest" } } } }
+  variables { kube = { karpenter = { public_pool = { ami = "bottlerocket@latest" } } } }
   expect_failures = [var.kube]
 }
 
-run "kube_refuses_an_unknown_karpenter_node_pool_key" {
+run "kube_refuses_an_unknown_karpenter_pool_key" {
   command = plan
-  variables { kube = { karpenter = { node_pool = { instance_types = ["m7g.large"] } } } }
+  variables { kube = { karpenter = { private_pool = { instance_types = ["m7g.large"] } } } }
   expect_failures = [var.kube]
 }
 
@@ -1990,4 +1990,15 @@ run "kube_refuses_karpenter_values_secret_that_is_not_a_secret_name" {
   command = plan
   variables { kube = { karpenter = { values_secret = "Karpenter_Values" } } }
   expect_failures = [var.kube]
+}
+
+run "cluster_network_refuses_aws_without_the_vpc_cidr" {
+  command = plan
+  variables {
+    cluster_network = {
+      api_endpoint = "https://ABCDEF.gr7.eu-west-3.eks.amazonaws.com"
+      service_cidr = "172.20.0.0/16"
+    }
+  }
+  expect_failures = [var.cluster_network]
 }

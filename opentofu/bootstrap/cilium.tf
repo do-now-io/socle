@@ -131,9 +131,23 @@ locals {
   # ENIs in the node's own subnet, the operator's default. aksbyocni.enabled
   # alone yields cluster-pool IPAM over VXLAN; the pool is the foundations'
   # pod_cidr, because the chart's own default, 10.0.0.0/8, contains the VNet.
+  #
+  # On aws, what leaves the VPC is masqueraded to the node's primary address
+  # (AWS-23). A pod's address is a secondary one of an ENI, which an
+  # Internet Gateway never translates: on a node in a public subnet, the
+  # Karpenter public pool's, a pod would reach nothing outside the VPC —
+  # measured on the sandbox, 2026-10-17, and its egress through the node's
+  # public IP once masqueraded. With masquerading on, Cilium routes only the
+  # VPC's range through each ENI and the rest through the primary interface,
+  # whose name it needs in ENI mode (AL2023 on Nitro: ens5). Inside the VPC
+  # nothing changes; in a private subnet the NAT Gateway now sees the node's
+  # address instead of the pod's.
   cilium_values_cloud = {
     aws = {
-      eni = { enabled = true }
+      eni                        = { enabled = true }
+      enableIPv4Masquerade       = true
+      egressMasqueradeInterfaces = "ens+"
+      ipv4NativeRoutingCIDR      = try(var.cluster_network.pod_cidr, null)
     }
     azure = {
       aksbyocni = { enabled = true }
