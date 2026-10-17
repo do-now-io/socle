@@ -77,7 +77,7 @@ From each `oci/catalog/<module>/resourceset.yaml`. Offered is not proven: CI app
 
 | | |
 | --- | --- |
-| e2e platform | floci `2.1.0` (a real k3s behind an emulated EKS), on `ubuntu-24.04` runners |
+| e2e platform | floci `2.1.0` (a real k3s behind an emulated EKS) and floci-gcp `0.11.0` (a real k3s `v1.34.1+k3s1` behind an emulated GKE), on `ubuntu-24.04` runners |
 | Flux CLI that pushes the artifact | `2.9.5` |
 | What floci does not run | Cilium (every e2e root sets `cilium.enabled = false`), the EKS add-ons, Pod Identity, IAM enforcement, more than one node |
 | Integration plans | floci `1.5.34` (AWS), floci-gcp `0.8.0`, floci-az `0.10.0` (red, not blocking); Scaleway plans its minimal example offline |
