@@ -112,10 +112,11 @@ jobs:
           tofu_version: 1.13.0
       - name: tofu fmt
         if: steps.detect.outputs.found == 'true'
-        # The e2e fixture roots (.github/e2e/<cloud>) are OpenTofu the CI
-        # applies: held to the same fmt, validate and tflint as the modules.
+        # The e2e fixture roots (.github/e2e/<cloud>) and the sandbox roots
+        # (.github/sandbox/<cloud>) are OpenTofu the CI applies: held to the
+        # same fmt, validate and tflint as the modules.
         # Not to terraform-docs or tofu test — no client reads or copies them.
-        run: tofu fmt -check -diff -recursive opentofu/ .github/e2e/
+        run: tofu fmt -check -diff -recursive opentofu/ .github/e2e/ .github/sandbox/
       - name: tofu validate (every root module)
         if: steps.detect.outputs.found == 'true'
         run: |
@@ -124,7 +125,7 @@ jobs:
             echo "| Root module | fmt | validate |"
             echo "|---|---|---|"
           } >> "$GITHUB_STEP_SUMMARY"
-          for dir in opentofu/*/ opentofu/clusters/*/ .github/e2e/*/; do
+          for dir in opentofu/*/ opentofu/clusters/*/ .github/e2e/*/ .github/sandbox/*/; do
             [ -n "$(ls "${dir}"*.tf 2>/dev/null)" ] || continue
             echo "==> ${dir}"
             (cd "${dir}" && tofu init -backend=false -input=false > /dev/null && tofu validate)
@@ -161,7 +162,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          for dir in opentofu/*/ opentofu/clusters/*/ .github/e2e/*/; do
+          for dir in opentofu/*/ opentofu/clusters/*/ .github/e2e/*/ .github/sandbox/*/; do
             [ -n "$(ls "${dir}"*.tf 2>/dev/null)" ] || continue
             echo "==> ${dir}"
             (cd "${dir}" && tflint --init > /dev/null && tflint --format compact)

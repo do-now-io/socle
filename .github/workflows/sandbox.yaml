@@ -1,0 +1,279 @@
+---
+# Level 4 of the socle test pyramid (#61, M4): the release's proof on real
+# clouds — what floci and floci-gcp cannot run (Pod Identity and Workload
+# Identity, the EKS add-ons, Cilium on real nodes, Autopilot, the Gateways and
+# their certificates, external-dns against real zones) — on the release PR
+# only: the one merge that publishes a version is the one that pays for a
+# real cluster. Never on every push.
+#
+# One job per cloud, in that cloud's sandbox (AWS 007026193270, zone
+# sandbox.kubemulus.com; GCP project sandbox-2bace, zone sandbox-gcp.do-now.io):
+#   1. the candidate's artifact and module package, published by
+#      Publish artifact on the same commit, waited for;
+#   2. .github/sandbox/<cloud>, the real client root called from the package
+#      at the candidate's tag, applied through OIDC — no stored credential;
+#   3. Chainsaw: the generic suite and every module's health, the
+#      `platform: gke` ones on gcp;
+#   4. tofu destroy (twice on gcp: GKE deletes the Gateways' load balancers
+#      after the cluster, #86), then a leftover audit that fails the job on
+#      anything the cluster's name still owns.
+#
+# Off until it is set up: the variable SANDBOX_E2E=on, and per cloud an OIDC
+# trust the repository's release PR may assume — SANDBOX_AWS_ROLE_ARN (an IAM
+# role trusting token.actions.githubusercontent.com for this repository), and
+# SANDBOX_GCP_WORKLOAD_IDENTITY_PROVIDER with SANDBOX_GCP_SERVICE_ACCOUNT or a
+# direct principal (CONTRIBUTING, The sandbox). Off, the job says the release
+# was not proven on real cloud and passes: a required check that never
+# reports blocks forever, a skipped one would not say why.
+#
+# The upgrade from the previous release is floci's (e2e.yaml, upgrade): here
+# from 1.0.0 only, the first release with a compatibility promise (SOCLE-35);
+# not before.
+name: Sandbox
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: An artifact tag already published (e.g. 0.2.0-alpha.9).
+        required: true
+        type: string
+      signed_ref:
+        description: The ref whose Publish artifact run signed it.
+        required: true
+        default: refs/heads/main
+        type: string
+
+permissions:
+  contents: read
+
+# One sandbox at a time, never cancelled: a cancelled run would leave a
+# cluster billing.
+concurrency:
+  group: sandbox
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  sandbox:
+    name: sandbox (${{ matrix.cloud }})
+    # The release PR only, or by hand. A job skipped by its own if: reports
+    # "skipped", which a required check accepts.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.head_ref == 'release-please--branches--main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    permissions:
+      contents: read
+      id-token: write
+      checks: write
+    strategy:
+      fail-fast: false
+      matrix:
+        cloud: [aws, gcp]
+    env:
+      CLOUD: ${{ matrix.cloud }}
+      ROOT: .github/sandbox/${{ matrix.cloud }}
+      CLUSTER: socle-sandbox
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up, or say why not
+        id: gate
+        env:
+          ENABLED: ${{ vars.SANDBOX_E2E }}
+          AWS_ROLE: ${{ vars.SANDBOX_AWS_ROLE_ARN }}
+          GCP_PROVIDER: ${{ vars.SANDBOX_GCP_WORKLOAD_IDENTITY_PROVIDER }}
+        run: |
+          trust="$AWS_ROLE"
+          [ "$CLOUD" = gcp ] && trust="$GCP_PROVIDER"
+          if [ "$ENABLED" != on ] || [ -z "$trust" ]; then
+            {
+              echo "### sandbox ($CLOUD) — not run"
+              state="unset"
+              [ -z "$trust" ] || state="set"
+              echo "This release is **not proven on real $CLOUD**: SANDBOX_E2E is \`${ENABLED:-unset}\`,"
+              echo "the $CLOUD trust is $state. CONTRIBUTING, The sandbox, says how to turn it on."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "run=true" >> "$GITHUB_OUTPUT"
+
+      # The candidate: on the release PR, the pre-release Publish artifact
+      # builds from its head commit; by hand, the tag given.
+      - name: The candidate, published and signed
+        id: candidate
+        if: steps.gate.outputs.run == 'true'
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_REF: ${{ inputs.signed_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ -n "$INPUT_TAG" ]; then
+            tag="$INPUT_TAG" ref="$INPUT_REF"
+          else
+            slug="$(printf '%s' "$HEAD_REF" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-//; s/-$//')"
+            tag="0.0.0-${slug}.${HEAD_SHA:0:7}" ref="refs/heads/$HEAD_REF"
+          fi
+          repository="${GITHUB_REPOSITORY,,}"
+          # Publish artifact runs on the same push: wait for both packages.
+          for package in flux-modules opentofu-modules; do
+            for _ in $(seq 1 60); do
+              token="$(curl -fs "https://ghcr.io/token?scope=repository:$repository/$package:pull" | jq -r .token)"
+              curl -fs -o /dev/null -H "Authorization: Bearer $token" \
+                -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+                "https://ghcr.io/v2/$repository/$package/manifests/$tag" && break
+              sleep 30
+            done
+            curl -fs -o /dev/null -H "Authorization: Bearer $token" \
+              -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+              "https://ghcr.io/v2/$repository/$package/manifests/$tag" \
+              || { echo "::error::$package:$tag never appeared"; exit 1; }
+          done
+          subject="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/publish-artifact.yaml@${ref}"
+          issuer_re='^https://token\\.actions\\.githubusercontent\\.com$'
+          subject_re="^$(printf '%s' "$subject" | sed 's/[.]/\\\\./g')\$"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          {
+            echo "TF_VAR_socle_version=$tag"
+            echo "TF_VAR_socle_source=oci://ghcr.io/$repository/opentofu-modules//opentofu/clusters/$CLOUD?tag=$tag"
+            echo "TF_VAR_cosign_identity={issuer=\"$issuer_re\",subject=\"$subject_re\"}"
+          } >> "$GITHUB_ENV"
+          echo "| Candidate | \`$tag\`, signed as \`$subject\` |" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        if: steps.gate.outputs.run == 'true' && matrix.cloud == 'aws'
+        with:
+          role-to-assume: ${{ vars.SANDBOX_AWS_ROLE_ARN }}
+          role-session-name: socle-sandbox-${{ github.run_id }}
+          aws-region: eu-west-3
+          role-duration-seconds: 10800
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        if: steps.gate.outputs.run == 'true' && matrix.cloud == 'gcp'
+        with:
+          workload_identity_provider: ${{ vars.SANDBOX_GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.SANDBOX_GCP_SERVICE_ACCOUNT }}
+          project_id: sandbox-2bace
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        if: steps.gate.outputs.run == 'true' && matrix.cloud == 'gcp'
+        with:
+          install_components: gke-gcloud-auth-plugin
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        if: steps.gate.outputs.run == 'true'
+        with:
+          tofu_version: 1.13.0
+          tofu_wrapper: false
+      - uses: kyverno/action-install-chainsaw@1223ef75bedeb59c4e7b5455463d4316e76dff01 # v0.2.15
+        if: steps.gate.outputs.run == 'true'
+
+      - name: Apply the root, from the package
+        id: apply
+        if: steps.gate.outputs.run == 'true'
+        working-directory: ${{ env.ROOT }}
+        run: |
+          args=(-input=false)
+          # The API endpoint of EKS is restricted to who applies: this runner.
+          if [ "$CLOUD" = aws ]; then
+            args+=(-var "api_cidrs=[\"$(curl -fs https://checkip.amazonaws.com)/32\"]")
+          fi
+          echo "${args[*]}" > "$RUNNER_TEMP/tofu-args"
+          tofu init -input=false -upgrade > /dev/null
+          SECONDS=0
+          tofu apply -auto-approve "${args[@]}"
+          echo "| \`tofu apply\` | ${SECONDS}s |" >> "$GITHUB_STEP_SUMMARY"
+          cluster="$(tofu output -raw cluster_name)"
+          if [ "$CLOUD" = aws ]; then
+            aws eks update-kubeconfig --name "$cluster" --region eu-west-3 > /dev/null
+          else
+            gcloud container clusters get-credentials "$cluster" --region europe-west1 \
+              --project sandbox-2bace --dns-endpoint > /dev/null
+          fi
+          kubectl get nodes
+
+      - name: The socle converges, and every module is healthy, on real ${{ matrix.cloud }}
+        id: proof
+        if: steps.apply.outcome == 'success'
+        env:
+          TAG: ${{ steps.candidate.outputs.tag }}
+        # On real clusters the platform is the cloud's: eks or gke; every
+        # `platform: any` test runs too.
+        run: |
+          platform=eks
+          [ "$CLOUD" = gcp ] && platform=gke
+          mkdir -p "$RUNNER_TEMP/reports"
+          chainsaw test oci/tests/e2e \
+            --selector "phase=root, cloud in ($CLOUD, any), platform in ($platform, any)" \
+            --set "tag=$TAG" --set "cloud=$CLOUD" --set "cluster=$CLUSTER" \
+            --report-format JUNIT-STEP --report-name root --report-path "$RUNNER_TEMP/reports"
+          chainsaw test oci/catalog/*/tests/e2e \
+            --selector "phase=health, cloud in ($CLOUD, any), platform in ($platform, any)" \
+            --set "tag=$TAG" --set "cloud=$CLOUD" --set "cluster=$CLUSTER" \
+            --report-format JUNIT-STEP --report-name health --report-path "$RUNNER_TEMP/reports"
+
+      # GKE deletes the shared Gateways' load balancers after the cluster, and
+      # the first destroy then fails on the network they still hold (#86): a
+      # second one finishes.
+      - name: Destroy
+        id: destroy
+        if: always() && steps.gate.outputs.run == 'true' && steps.candidate.outcome == 'success'
+        working-directory: ${{ env.ROOT }}
+        run: |
+          read -r -a args < "$RUNNER_TEMP/tofu-args" || args=(-input=false)
+          [ -d .terraform ] || tofu init -input=false -upgrade > /dev/null
+          SECONDS=0
+          tofu destroy -auto-approve "${args[@]}" \
+            || { echo "first destroy failed: once more (#86)"; sleep 120; tofu destroy -auto-approve "${args[@]}"; }
+          echo "| \`tofu destroy\` | ${SECONDS}s |" >> "$GITHUB_STEP_SUMMARY"
+
+      # What the cluster's name still owns after the destroy: a load balancer,
+      # a role, a record, a cluster. Anything is a red job — and a bill.
+      - name: Nothing is left
+        if: always() && steps.destroy.outcome != 'skipped'
+        run: |
+          left=()
+          if [ "$CLOUD" = aws ]; then
+            aws eks describe-cluster --name "$CLUSTER" > /dev/null 2>&1 && left+=("EKS cluster $CLUSTER")
+            while read -r role; do left+=("IAM role $role"); done < <(aws iam list-roles \
+              --path-prefix "/socle/$CLUSTER/" --query 'Roles[].RoleName' --output text | tr '\t' '\n' | grep . || true)
+            while read -r lb; do left+=("load balancer $lb"); done < <(aws resourcegroupstaggingapi get-resources \
+              --resource-type-filters elasticloadbalancing:loadbalancer \
+              --tag-filters "Key=elbv2.k8s.aws/cluster,Values=$CLUSTER" \
+              --query 'ResourceTagMappingList[].ResourceARN' --output text | tr '\t' '\n' | grep . || true)
+            zone="$(aws route53 list-hosted-zones-by-name --dns-name sandbox.kubemulus.com \
+              --query 'HostedZones[0].Id' --output text)"
+            while read -r record; do left+=("record $record"); done < <(aws route53 list-resource-record-sets \
+              --hosted-zone-id "$zone" --query "ResourceRecordSets[?Type=='TXT'].[Name, ResourceRecords[0].Value]" \
+              --output text | grep "external-dns/owner=$CLUSTER" | cut -f1 || true)
+          else
+            gcloud container clusters describe "$CLUSTER" --region europe-west1 --project sandbox-2bace \
+              > /dev/null 2>&1 && left+=("GKE cluster $CLUSTER")
+            while read -r rule; do left+=("forwarding rule $rule"); done < <(gcloud compute forwarding-rules list \
+              --project sandbox-2bace --format 'value(name)' --filter "name~^gkegw" || true)
+            while read -r record; do left+=("record $record"); done < <(gcloud dns record-sets list \
+              --zone sandbox-gcp-do-now-io --project sandbox-2bace --filter 'type=TXT' \
+              --format 'value(name,rrdatas)' | grep "external-dns/owner=$CLUSTER" | cut -f1 || true)
+          fi
+          if [ "${#left[@]}" -gt 0 ]; then
+            printf '::error::left behind: %s\n' "${left[@]}"
+            { echo "### sandbox ($CLOUD): left behind"; printf -- '- %s\n' "${left[@]}"; } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "| Leftovers | none |" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: The Checks tab names the failing step
+        if: always() && steps.proof.outcome != 'skipped'
+        uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6.5.0
+        with:
+          report_paths: ${{ runner.temp }}/reports/*.xml
+          check_name: sandbox (${{ matrix.cloud }})
+          include_passed: true
