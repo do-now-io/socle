@@ -69,7 +69,8 @@ level deep: a key written alone keeps its siblings at their default.
 | `metrics_server` | `enabled` | `true` | the `metrics.k8s.io` API behind `kubectl top` and HPAs on CPU or memory. aws only |
 | `metrics_server` | `ha` | `false` | two replicas on two nodes, with a disruption budget |
 | `karpenter` | `enabled` | `false` | Karpenter, the nodes for the workloads. aws only; needs `crossplane` on and `ec2`, `ssm`, `pricing`, `sqs`, `eks` in `aws.crossplane.allowed_services` |
-| `karpenter` | `node_pool` | `{ capacity_types = ["spot", "on-demand"], architectures = ["arm64", "amd64"], cpu = 32, memory = "128Gi", consolidate_after = "1m", ami = "al2023@latest" }` | the default NodePool: what it may launch, the ceiling of all its nodes together, how long a node stays empty or under-used before it goes, and the AL2023 alias |
+| `karpenter` | `private_pool` | `{ capacity_types = ["spot", "on-demand"], architectures = ["arm64", "amd64"], cpu = 32, memory = "128Gi", consolidate_after = "1m", ami = "al2023@latest" }` | the private NodePool, where a pod goes by default: what it may launch, the ceiling of all its nodes together, how long a node stays empty or under-used before it goes, and the AL2023 alias |
+| `karpenter` | `public_pool` | the same | the public NodePool, tainted `socle.do-now.io/node-pool=public`: public subnets, a public IP per node, egress through the Internet Gateway |
 | `kyverno` | `enabled` | `false` | the Kyverno engine, no policy |
 | `kyverno_policies` | `enabled` | `false` | the socle's policy set, every policy in Audit; needs `kyverno` |
 | `kyverno_policies` | `profile` | `"baseline"` | `baseline`, or `restricted` for baseline plus six |

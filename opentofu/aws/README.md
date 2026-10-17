@@ -96,7 +96,11 @@ No modules.
 | [aws_route_table.public](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route_table) | resource |
 | [aws_route_table_association.private](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route_table_association) | resource |
 | [aws_route_table_association.public](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route_table_association) | resource |
+| [aws_security_group.public_nodes](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
 | [aws_security_group.vpc_endpoints](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
+| [aws_security_group_rule.cluster_from_public_nodes](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
+| [aws_security_group_rule.public_nodes_from_the_vpc](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
+| [aws_security_group_rule.public_nodes_to_anywhere](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
 | [aws_subnet.private](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/subnet) | resource |
 | [aws_subnet.public](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/subnet) | resource |
 | [aws_vpc.socle](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc) | resource |
@@ -134,7 +138,7 @@ No modules.
 | <a name="input_public_subnet_ids"></a> [public\_subnet\_ids](#input\_public\_subnet\_ids) | Existing public subnet IDs, one per AZ in availability\_zones. Required when create\_vpc is false — same reasoning as private\_subnet\_ids. | `list(string)` | `[]` | no |
 | <a name="input_secrets_encryption_enabled"></a> [secrets\_encryption\_enabled](#input\_secrets\_encryption\_enabled) | Envelope-encrypt Kubernetes Secrets via KMS. On by default: essentially free (~$1/month per key, negligible per-request cost), and standard on Kubernetes 1.28+ already. | `bool` | `true` | no |
 | <a name="input_secrets_encryption_kms_key_arn"></a> [secrets\_encryption\_kms\_key\_arn](#input\_secrets\_encryption\_kms\_key\_arn) | Existing KMS key for Secrets envelope encryption. Leave unset and the module creates its own key. Ignored when secrets\_encryption\_enabled is false. | `string` | `null` | no |
-| <a name="input_vpc_cidr"></a> [vpc\_cidr](#input\_vpc\_cidr) | CIDR for the VPC when this module creates it. Arbitrary default (not a research decision) — a /16 large enough for any socle estate. | `string` | `"10.0.0.0/16"` | no |
+| <a name="input_vpc_cidr"></a> [vpc\_cidr](#input\_vpc\_cidr) | CIDR for the VPC when this module creates it. Arbitrary default (not a research decision) — a /16 large enough for any socle estate. With create\_vpc = false, set it to the existing VPC's primary CIDR: pods take their addresses from it, and Cilium masquerades only what leaves it (vpc\_cidr output). | `string` | `"10.0.0.0/16"` | no |
 | <a name="input_vpc_flow_logs_enabled"></a> [vpc\_flow\_logs\_enabled](#input\_vpc\_flow\_logs\_enabled) | Record accepted and rejected traffic on the VPC this module creates. On by default, aggregated over ten-minute windows to keep the volume down: it is the only record of who talked to whom, and the segmentation this VPC is built around is unauditable without it. | `bool` | `true` | no |
 | <a name="input_vpc_id"></a> [vpc\_id](#input\_vpc\_id) | Existing VPC to attach to. Required when create\_vpc is false, and incoherent to set when create\_vpc is true — this module cannot both create a VPC and attach to a different one. | `string` | `null` | no |
 
@@ -154,9 +158,11 @@ No modules.
 | <a name="output_node_instance_profile"></a> [node\_instance\_profile](#output\_node\_instance\_profile) | Name of the instance profile carrying the bootstrap nodes' role, the identity of every node of the cluster: the bootstrap group's, and those the catalog's Karpenter launches (its EC2NodeClass names it). |
 | <a name="output_oidc_issuer_url"></a> [oidc\_issuer\_url](#output\_oidc\_issuer\_url) | The cluster's OIDC issuer. Checklist requirement, not this module's identity mechanism — Pod Identity is, IRSA is absent, and nothing here provisions an OIDC trust relationship against it. Null on an emulated cluster that reports no identity (floci), so an apply there still converges. |
 | <a name="output_private_subnet_ids"></a> [private\_subnet\_ids](#output\_private\_subnet\_ids) | Private subnet IDs, one per AZ. |
+| <a name="output_public_nodes_security_group"></a> [public\_nodes\_security\_group](#output\_public\_nodes\_security\_group) | Name of the security group of Karpenter's public nodes, which its public EC2NodeClass selects: from the VPC, nothing from the internet. |
 | <a name="output_public_subnet_ids"></a> [public\_subnet\_ids](#output\_public\_subnet\_ids) | Public subnet IDs, one per AZ. |
 | <a name="output_region"></a> [region](#output\_region) | Region the cluster and VPC were created in, as resolved from the provider. |
 | <a name="output_service_cidr"></a> [service\_cidr](#output\_service\_cidr) | The Kubernetes service range EKS chose for this cluster (172.20.0.0/16 or 10.100.0.0/16, by VPC CIDR). The bootstrap module gives CoreDNS its .10 address, the one every node's kubelet is told to use. Null on an emulated cluster that reports none (floci). |
 | <a name="output_tags"></a> [tags](#output\_tags) | The standard tag set applied to every billable resource this module creates. |
+| <a name="output_vpc_cidr"></a> [vpc\_cidr](#output\_vpc\_cidr) | The VPC's CIDR, vpc\_cidr — with create\_vpc = false, as the client declared it. Pods take their addresses from it (Cilium's ENI IPAM): Cilium masquerades only what leaves it. |
 | <a name="output_vpc_id"></a> [vpc\_id](#output\_vpc\_id) | ID of the VPC the cluster is attached to, whether this module created it or not. |
 <!-- END_TF_DOCS -->

@@ -624,3 +624,34 @@ run "the_crossplane_boundary_is_named_after_its_cluster" {
     error_message = "the boundary's ARN, built without waiting for AWS, must name the policy as it is created."
   }
 }
+
+# docs/catalog/karpenter.md, AWS-23: the public nodes take nothing from the
+# internet, and the cluster takes them back.
+run "public_nodes_have_their_own_security_group_closed_to_the_internet" {
+  command = plan
+
+  assert {
+    condition     = aws_security_group.public_nodes.name == "socle-test-public-nodes" && output.public_nodes_security_group == "socle-test-public-nodes"
+    error_message = "Karpenter's public EC2NodeClass selects the group by name, <cluster>-public-nodes."
+  }
+  assert {
+    condition     = !contains(keys(aws_security_group.public_nodes.tags), "kubernetes.io/cluster/socle-test")
+    error_message = "the group must not carry the cluster tag: EKS's load balancer controller would take it for the cluster's and open NodePorts in it."
+  }
+  assert {
+    condition     = aws_security_group_rule.public_nodes_from_the_vpc.type == "ingress" && aws_security_group_rule.public_nodes_from_the_vpc.cidr_blocks == tolist(["10.0.0.0/16"])
+    error_message = "the public nodes admit the VPC — the control plane and the other nodes — and nothing from the internet."
+  }
+  assert {
+    condition     = aws_security_group_rule.public_nodes_to_anywhere.type == "egress" && aws_security_group_rule.public_nodes_to_anywhere.cidr_blocks == tolist(["0.0.0.0/0"])
+    error_message = "the public nodes' reason to exist is the internet, through the Internet Gateway."
+  }
+  assert {
+    condition     = aws_security_group_rule.cluster_from_public_nodes.type == "ingress" && aws_security_group_rule.cluster_from_public_nodes.protocol == "-1" && aws_security_group_rule.cluster_from_public_nodes.cidr_blocks == null && length([for r in [aws_security_group_rule.public_nodes_from_the_vpc, aws_security_group_rule.public_nodes_to_anywhere, aws_security_group_rule.cluster_from_public_nodes] : r]) == 3
+    error_message = "the cluster security group must admit the public nodes, by group, or they cannot join."
+  }
+  assert {
+    condition     = output.vpc_cidr == "10.0.0.0/16"
+    error_message = "the VPC's CIDR is what Cilium masquerades outside of."
+  }
+}

@@ -81,6 +81,8 @@ module "socle" {
   cluster_network = {
     api_endpoint = module.foundations.cluster_endpoint
     service_cidr = module.foundations.service_cidr
+    # The VPC's: pods take their addresses from it, Cilium masquerades the rest.
+    pod_cidr = module.foundations.vpc_cidr
   }
 
   # The EKS-managed add-ons, after the network: the Pod Identity Agent

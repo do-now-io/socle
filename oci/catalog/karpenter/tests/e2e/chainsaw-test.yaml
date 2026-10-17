@@ -17,7 +17,7 @@
 #    this test writes the inputs directly — the seam). The controller
 #    Available under Pod Security restricted, never on a node it manages;
 #    the whole valuesFrom order; the EC2NodeClass and the NodePool as the
-#    inputs say, the client's node_pool included, the EC2NodeClass
+#    inputs say, the client's pools included, the EC2NodeClasses
 #    reconciled by the controller against floci's EC2; then off, in the
 #    order that lets Karpenter remove its nodes — the NodePool and the
 #    EC2NodeClass go before the controller, their finalizers released by
@@ -79,7 +79,8 @@ spec:
   description: >-
     The controller's role, its queue and its rules through Crossplane, the
     workload withheld until they are Ready; then the controller and the
-    default EC2NodeClass and NodePool against floci, removed nodes first.
+    private and public EC2NodeClasses and NodePools against floci, removed
+    nodes first.
   timeouts:
     assert: 5m
     error: 3m
@@ -722,17 +723,24 @@ spec:
                   modules:
                     karpenter:
                       enabled: true
-                      # The client's own NodePool shape, from the first
+                      # The client's own NodePools' shape, from the first
                       # apply: Flux applies a *Class before the rest and
                       # waits for it to be Ready, and floci's EC2NodeClass
                       # never is (no tagged subnet), so a later change of
-                      # node_pool would wait on it here — not on AWS.
-                      node_pool:
+                      # pool would wait on it here — not on AWS.
+                      private_pool:
                         capacity_types: [on-demand]
                         architectures: [arm64, amd64]
                         cpu: 8
                         memory: 32Gi
                         consolidate_after: 5m
+                        ami: al2023@latest
+                      public_pool:
+                        capacity_types: [spot]
+                        architectures: [arm64]
+                        cpu: 4
+                        memory: 16Gi
+                        consolidate_after: 2m
                         ami: al2023@latest
                       values:
                         controller:
@@ -952,7 +960,7 @@ spec:
             selector: app=helm-controller
             tail: 40
     # The nodes step: the EC2NodeClass and the NodePool as the inputs say —
-    # the client's node_pool, written when the module was turned on — every
+    # the client's pools, written when the module was turned on — every
     # selector on what the foundations tag. The controller reconciles
     # the EC2NodeClass against floci's EC2 — its subnet and security-group
     # conditions are set, False here: floci's VPC carries no cluster tag —
@@ -976,7 +984,7 @@ spec:
               apiVersion: karpenter.k8s.aws/v1
               kind: EC2NodeClass
               metadata:
-                name: default
+                name: private
               spec:
                 instanceProfile: (join('', [$values.cluster, '-bootstrap-node']))
                 amiSelectorTerms:
@@ -999,13 +1007,35 @@ spec:
                   - reason: SubnetsNotFound
         - assert:
             resource:
+              apiVersion: karpenter.k8s.aws/v1
+              kind: EC2NodeClass
+              metadata:
+                name: public
+              spec:
+                instanceProfile: (join('', [$values.cluster, '-bootstrap-node']))
+                (subnetSelectorTerms[0].tags):
+                  kubernetes.io/cluster/socle-e2e-catalog: owned
+                  kubernetes.io/role/elb: '1'
+                securityGroupSelectorTerms:
+                  - name: (join('', [$values.cluster, '-public-nodes']))
+                associatePublicIPAddress: true
+                (contains(userData, '--node-labels=node.kubernetes.io/exclude-from-external-load-balancers=true')): true
+                metadataOptions:
+                  httpTokens: required
+                  httpPutResponseHopLimit: 1
+        - assert:
+            resource:
               apiVersion: karpenter.sh/v1
               kind: NodePool
               metadata:
-                name: default
+                name: private
               spec:
                 template:
+                  metadata:
+                    labels:
+                      socle.do-now.io/node-pool: private
                   spec:
+                    (length(taints || `[]`)): 0
                     (requirements[?key == 'karpenter.sh/capacity-type'] || `[]`):
                       - values: [on-demand]
                     (requirements[?key == 'kubernetes.io/arch'] || `[]`):
@@ -1018,6 +1048,32 @@ spec:
                 disruption:
                   consolidationPolicy: WhenEmptyOrUnderutilized
                   consolidateAfter: 5m
+        - assert:
+            resource:
+              apiVersion: karpenter.sh/v1
+              kind: NodePool
+              metadata:
+                name: public
+              spec:
+                template:
+                  metadata:
+                    labels:
+                      socle.do-now.io/node-pool: public
+                  spec:
+                    nodeClassRef:
+                      name: public
+                    (requirements[?key == 'karpenter.sh/capacity-type'] || `[]`):
+                      - values: [spot]
+                    (requirements[?key == 'kubernetes.io/arch'] || `[]`):
+                      - values: [arm64]
+                    (taints[?key == 'socle.do-now.io/node-pool'] || `[]`):
+                      - value: public
+                        effect: NoSchedule
+                limits:
+                  cpu: '4'
+                  memory: 16Gi
+                disruption:
+                  consolidateAfter: 2m
       catch:
         - describe:
             apiVersion: kustomize.toolkit.fluxcd.io/v1
@@ -1027,11 +1083,9 @@ spec:
         - describe:
             apiVersion: karpenter.k8s.aws/v1
             kind: EC2NodeClass
-            name: default
         - describe:
             apiVersion: karpenter.sh/v1
             kind: NodePool
-            name: default
         - podLogs:
             namespace: karpenter
             tail: 40
@@ -1068,7 +1122,14 @@ spec:
                     karpenter:
                       enabled: false
                       values: {}
-                      node_pool:
+                      private_pool:
+                        capacity_types: [spot, on-demand]
+                        architectures: [arm64, amd64]
+                        cpu: 32
+                        memory: 128Gi
+                        consolidate_after: 1m
+                        ami: al2023@latest
+                      public_pool:
                         capacity_types: [spot, on-demand]
                         architectures: [arm64, amd64]
                         cpu: 32
@@ -1079,14 +1140,10 @@ spec:
             resource:
               apiVersion: karpenter.k8s.aws/v1
               kind: EC2NodeClass
-              metadata:
-                name: default
         - error:
             resource:
               apiVersion: karpenter.sh/v1
               kind: NodePool
-              metadata:
-                name: default
         - error:
             resource:
               apiVersion: v1
@@ -1125,7 +1182,6 @@ spec:
         - describe:
             apiVersion: karpenter.k8s.aws/v1
             kind: EC2NodeClass
-            name: default
         - podLogs:
             namespace: flux-system
             selector: app.kubernetes.io/name=flux-operator
@@ -1133,11 +1189,14 @@ spec:
 ---
 # The proof floci cannot give: run by hand on the aws sandbox, against the
 # module as the sandbox's root turned it on (docs/catalog/karpenter.md,
-# Measured). A Deployment that fits nowhere on the bootstrap group — it asks
-# for a Karpenter node — gets one: launched, registered, Cilium's startup
-# taint gone (its agent runs there), the pods Running; scaled to zero, the
-# node is consolidated away. Selected with platform=eks; the floci CI never
-# selects it.
+# Measured). The private pool: a Deployment that fits nowhere on the
+# bootstrap group gets a node — launched, registered, Cilium's startup taint
+# gone (its agent runs there), the pods Running — and, scaled to zero, the
+# node is consolidated away. The public pool: a Job that tolerates it gets a
+# node in a public subnet, with a public IP, labelled by its kubelet out of
+# every load balancer, and reaches the internet from it — the Job completes
+# only if the pod's egress does (AWS-23). Selected with platform=eks; the
+# floci CI never selects it.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -1148,8 +1207,8 @@ metadata:
     platform: eks
 spec:
   description: >-
-    A Deployment that needs a Karpenter node gets one, with Cilium on it;
-    scaled to zero, the node goes.
+    A Deployment gets a private node with Cilium on it, consolidated away at
+    zero; a Job gets a public node and reaches the internet from it.
   timeouts:
     apply: 30s
     assert: 10m
@@ -1158,7 +1217,7 @@ spec:
     cleanup: 5m
     exec: 30s
   steps:
-    - name: the module is Ready, its EC2NodeClass and NodePool too
+    - name: the module is Ready, both EC2NodeClasses and NodePools too
       try:
         - assert:
             resource:
@@ -1175,7 +1234,16 @@ spec:
               apiVersion: karpenter.k8s.aws/v1
               kind: EC2NodeClass
               metadata:
-                name: default
+                name: private
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: karpenter.k8s.aws/v1
+              kind: EC2NodeClass
+              metadata:
+                name: public
               status:
                 (conditions[?type == 'Ready'] || `[]`):
                   - status: 'True'
@@ -1184,7 +1252,16 @@ spec:
               apiVersion: karpenter.sh/v1
               kind: NodePool
               metadata:
-                name: default
+                name: private
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: karpenter.sh/v1
+              kind: NodePool
+              metadata:
+                name: public
               status:
                 (conditions[?type == 'Ready'] || `[]`):
                   - status: 'True'
@@ -1192,11 +1269,10 @@ spec:
         - describe:
             apiVersion: karpenter.k8s.aws/v1
             kind: EC2NodeClass
-            name: default
         - podLogs:
             namespace: karpenter
             tail: 60
-    - name: a Deployment that needs a Karpenter node gets one, with Cilium on it
+    - name: a Deployment that needs a Karpenter node gets a private one, with Cilium on it
       try:
         - apply:
             resource:
@@ -1231,7 +1307,7 @@ spec:
                             - matchExpressions:
                                 - key: karpenter.sh/nodepool
                                   operator: In
-                                  values: [default]
+                                  values: [private]
                     terminationGracePeriodSeconds: 0
                     securityContext:
                       runAsNonRoot: true
@@ -1256,7 +1332,7 @@ spec:
               kind: NodeClaim
               metadata:
                 labels:
-                  karpenter.sh/nodepool: default
+                  karpenter.sh/nodepool: private
               status:
                 (conditions[?type == 'Launched'] || `[]`):
                   - status: 'True'
@@ -1272,10 +1348,12 @@ spec:
               kind: Node
               metadata:
                 labels:
-                  karpenter.sh/nodepool: default
+                  karpenter.sh/nodepool: private
+                  socle.do-now.io/node-pool: private
               spec:
                 (length(taints[?key == 'node.cilium.io/agent-not-ready'] || `[]`)): 0
               status:
+                (length(addresses[?type == 'ExternalIP'] || `[]`)): 0
                 (conditions[?type == 'Ready'] || `[]`):
                   - status: 'True'
         - assert:
@@ -1296,7 +1374,78 @@ spec:
         - podLogs:
             namespace: karpenter
             tail: 60
-    - name: scaled to zero, the node is consolidated away
+    - name: a Job that tolerates the public pool gets a public node, out of every load balancer, and reaches the internet
+      try:
+        - apply:
+            resource:
+              apiVersion: batch/v1
+              kind: Job
+              metadata:
+                name: egress
+                namespace: karpenter-e2e
+              spec:
+                backoffLimit: 3
+                template:
+                  spec:
+                    restartPolicy: Never
+                    nodeSelector:
+                      socle.do-now.io/node-pool: public
+                    tolerations:
+                      - key: socle.do-now.io/node-pool
+                        operator: Equal
+                        value: public
+                        effect: NoSchedule
+                    securityContext:
+                      runAsNonRoot: true
+                      runAsUser: 65532
+                      seccompProfile:
+                        type: RuntimeDefault
+                    containers:
+                      - name: wget
+                        image: public.ecr.aws/docker/library/busybox:1.37
+                        # Completes only if the pod reaches the internet.
+                        command: [wget, -T, '10', -q, -O, /dev/null, https://checkip.amazonaws.com]
+                        securityContext:
+                          allowPrivilegeEscalation: false
+                          capabilities:
+                            drop: [ALL]
+                        resources:
+                          requests:
+                            cpu: '1'
+                            memory: 64Mi
+                            ephemeral-storage: 16Mi
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Node
+              metadata:
+                labels:
+                  karpenter.sh/nodepool: public
+                  socle.do-now.io/node-pool: public
+                  node.kubernetes.io/exclude-from-external-load-balancers: 'true'
+              spec:
+                (taints[?key == 'socle.do-now.io/node-pool'] || `[]`):
+                  - value: public
+              status:
+                (length(addresses[?type == 'ExternalIP'] || `[]`)): 1
+        - assert:
+            resource:
+              apiVersion: batch/v1
+              kind: Job
+              metadata:
+                name: egress
+                namespace: karpenter-e2e
+              status:
+                succeeded: 1
+      catch:
+        - describe:
+            apiVersion: karpenter.sh/v1
+            kind: NodeClaim
+        - podLogs:
+            namespace: karpenter-e2e
+            selector: job-name=egress
+            tail: 20
+    - name: scaled to zero, the nodes are consolidated away
       try:
         - patch:
             resource:
@@ -1307,20 +1456,23 @@ spec:
                 namespace: karpenter-e2e
               spec:
                 replicas: 0
+        - delete:
+            ref:
+              apiVersion: batch/v1
+              kind: Job
+              name: egress
+              namespace: karpenter-e2e
         - error:
             resource:
               apiVersion: karpenter.sh/v1
               kind: NodeClaim
-              metadata:
-                labels:
-                  karpenter.sh/nodepool: default
         - error:
             resource:
               apiVersion: v1
               kind: Node
               metadata:
                 labels:
-                  karpenter.sh/nodepool: default
+                  karpenter.sh/registered: 'true'
       catch:
         - describe:
             apiVersion: karpenter.sh/v1

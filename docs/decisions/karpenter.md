@@ -34,7 +34,7 @@ and a NodePool's.
 
 **Consequences.** The boundary must allow `ec2`, `ssm`, `pricing`, `sqs` and
 `eks`; the aws root warns when one is missing. Its one IAM exception is
-[AWS-20](aws.md#aws-20-the-boundarys-one-iam-exception-the-node-role-passed-to-ec2).
+[AWS-21](aws.md#aws-21-the-boundarys-one-iam-exception-the-node-role-passed-to-ec2).
 `eks:DescribeCluster` stays: AL2023's nodeadm needs the service range, which
 only it gives Karpenter. Zonal shift stays off.
 
@@ -44,12 +44,14 @@ only it gives Karpenter. Zonal shift stays off.
 
 **accepted** · 2026-10-16 · [`oci/catalog/karpenter/nodes/ec2nodeclass.yaml`](../../oci/catalog/karpenter/nodes/ec2nodeclass.yaml), [`opentofu/aws/nodes.tf`](../../opentofu/aws/nodes.tf)
 
-**Decision.** `EC2NodeClass/default` names the instance profile
-`<cluster>-bootstrap-node` (`spec.instanceProfile`), selects the subnets
-tagged `kubernetes.io/cluster/<cluster>: owned` and
+**Decision.** Both EC2NodeClasses name the instance profile
+`<cluster>-bootstrap-node` (`spec.instanceProfile`) and run AL2023 with
+IMDSv2 on one hop and an encrypted gp3 root volume. `private` selects the
+subnets tagged `kubernetes.io/cluster/<cluster>: owned` and
 `kubernetes.io/role/internal-elb: "1"` and the security groups tagged
-`kubernetes.io/cluster/<cluster>: owned`, runs AL2023 with IMDSv2 on one hop
-and an encrypted gp3 root volume.
+`kubernetes.io/cluster/<cluster>: owned`; `public` the subnets tagged
+`kubernetes.io/role/elb: "1"` and the security group `<cluster>-public-nodes`
+([KARPENTER-03](#karpenter-03-two-nodepools-private-and-public-their-shape-typed-per-pool)).
 
 **Context.** The issue asked for no new foundations tag. The foundations tag
 the private subnets for internal load balancers and the cluster; EKS tags the
@@ -68,32 +70,43 @@ the NodePool waits on a Ready EC2NodeClass, which floci's never is.
 
 **Sources.** [Karpenter NodeClasses](https://karpenter.sh/docs/concepts/nodeclasses/) · [EKS cluster security group](https://docs.aws.amazon.com/eks/latest/userguide/sec-group-reqs.html) · [AWS-17](aws.md#aws-17-a-bootstrap-node-group-of-two-spot-nodes).
 
-## KARPENTER-03: One default NodePool, its shape typed in `node_pool`
+## KARPENTER-03: Two NodePools, private and public, their shape typed per pool
 
-**accepted** · 2026-10-16 · [`oci/catalog/karpenter/nodes/nodepool.yaml`](../../oci/catalog/karpenter/nodes/nodepool.yaml), [`opentofu/bootstrap/catalog.tf`](../../opentofu/bootstrap/catalog.tf), [`opentofu/bootstrap/variables.tf`](../../opentofu/bootstrap/variables.tf)
+**accepted** · 2026-10-17 · [`oci/catalog/karpenter/nodes/`](../../oci/catalog/karpenter/nodes), [`opentofu/bootstrap/catalog.tf`](../../opentofu/bootstrap/catalog.tf), [`opentofu/bootstrap/variables.tf`](../../opentofu/bootstrap/variables.tf)
 
-**Decision.** The socle renders `NodePool/default`: Spot and on demand,
-arm64 and amd64, families `c`, `m`, `r` of generation 6 and later, 32 vCPU and
-128Gi in all, `WhenEmptyOrUnderutilized` after one minute, nodes expiring
-after 30 days, Cilium's startup taint `node.cilium.io/agent-not-ready`.
-`kube.karpenter.node_pool` types its capacity types, architectures, limits,
-consolidation delay and AMI alias, each validated at plan; any other NodePool
-is the client's to write.
+**Decision.** The socle renders two NodePools, always. `private`, where a
+pod goes by default: the private subnets, egress through the NAT Gateway.
+`public`, tainted `socle.do-now.io/node-pool=public:NoSchedule`: the public
+subnets, a public IP per node, egress through the Internet Gateway, for the
+workloads that tolerate it and select the label `socle.do-now.io/node-pool`.
+Each: Spot and on demand, arm64 and amd64, families `c`, `m`, `r` of
+generation 6 and later, 32 vCPU and 128Gi in all, `WhenEmptyOrUnderutilized`
+after one minute, nodes expiring after 30 days, Cilium's startup taint
+`node.cilium.io/agent-not-ready`. `kube.karpenter.private_pool` and
+`public_pool` type each one's capacity types, architectures, limits,
+consolidation delay and AMI alias, validated at plan; any other NodePool is
+the client's to write.
 
 **Context.** The issue asked for Spot and Graviton first, like the bootstrap
 group, limits, a consolidation policy, and whether `values` or a typed
-attribute carries it. The NodePool is not a chart value: `values` cannot
+attribute carries it; the NodePool is not a chart value, `values` cannot
 reach it. Karpenter launches the cheapest offering that fits, so allowing
 both capacity types and both architectures is Spot and Graviton first.
-Cilium's agent removes its startup taint once it runs, which keeps pods off a
-node without a network.
+Hugo asked (2026-10-17) for a public pool beside the private one: a NAT
+Gateway bills every gigabyte it processes, so a workload heavy in network
+traffic is cheaper on a node that leaves through the Internet Gateway, and
+the rest stays private, where nothing reaches it from the internet. Tainted,
+so that nothing lands public without asking.
 
 **Consequences.** An x86-only image needs a `nodeSelector` on
 `kubernetes.io/arch`. A limit reached leaves pods Pending, with an alert
 (`KarpenterNodePoolNearLimit`). `al2023@latest` moves nodes onto each new
-AMI by drift; a client pins one with `al2023@v<date>`.
+AMI by drift; a client pins one with `al2023@v<date>`. A public node takes
+nothing from the internet ([AWS-23](aws.md#aws-23-public-nodes-their-own-security-group-and-cilium-masquerading-out-of-the-vpc)),
+and its pods leave with its public IP, not the NAT Gateway's: a third party
+that allow-lists the NAT Gateway does not see them.
 
-**Sources.** [Karpenter NodePools](https://karpenter.sh/docs/concepts/nodepools/) · [Cilium, Karpenter's startup taint](https://docs.cilium.io/en/stable/installation/taints/) · #53.
+**Sources.** [Karpenter NodePools](https://karpenter.sh/docs/concepts/nodepools/) · [Cilium, Karpenter's startup taint](https://docs.cilium.io/en/stable/installation/taints/) · [NAT Gateway pricing](https://aws.amazon.com/vpc/pricing/) · #53.
 
 ## KARPENTER-04: The nodes go before the controller
 

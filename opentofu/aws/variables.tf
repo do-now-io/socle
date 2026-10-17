@@ -81,7 +81,7 @@ variable "public_subnet_ids" {
 }
 
 variable "vpc_cidr" {
-  description = "CIDR for the VPC when this module creates it. Arbitrary default (not a research decision) — a /16 large enough for any socle estate."
+  description = "CIDR for the VPC when this module creates it. Arbitrary default (not a research decision) — a /16 large enough for any socle estate. With create_vpc = false, set it to the existing VPC's primary CIDR: pods take their addresses from it, and Cilium masquerades only what leaves it (vpc_cidr output)."
   type        = string
   default     = "10.0.0.0/16"
   nullable    = false

@@ -24,6 +24,7 @@ sidebar:
 - **The NLBs' TLS policy is AWS's default**; the socle sets none.
 - **Elastic IPs**: one per AZ per cluster, 5 per region by default ([Prerequisites](prerequisites.md#quotas)).
 - **Capacity for workloads comes from [karpenter](../../catalog/karpenter.md)**, off by default: without it everything runs on the two bootstrap Spot nodes. Its launch of a node, Cilium on it and consolidation are proven on the sandbox only: floci launches no EC2 node.
+- **What leaves the VPC leaves with a node's address**: Cilium masquerades it, so the NAT Gateway and the flow logs see nodes, not pods; pods on the public pool leave with their node's public IP ([AWS-23](../../decisions/aws.md#aws-23-public-nodes-their-own-security-group-and-cilium-masquerading-out-of-the-vpc)).
 
 ## What the socle does not offer here yet
 

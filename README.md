@@ -163,7 +163,7 @@ The stack's design: [Observability](docs/architecture/observability.md).
 | Module | What it does | Version | Default | Clouds | Notes |
 | --- | --- | --- | :---: | --- | --- |
 | [`keda`](docs/catalog/keda.md) | Event-driven autoscaling, down to zero | 2.21.0 | off | All | |
-| [`karpenter`](docs/catalog/karpenter.md) | Nodes for your workloads, launched for what is Pending, Spot and Graviton first, removed when empty | 1.15.0 | off | AWS | Needs `crossplane`; GKE Autopilot provisions its own nodes |
+| [`karpenter`](docs/catalog/karpenter.md) | Nodes for your workloads, launched for what is Pending, Spot and Graviton first, removed when empty; a private pool, and a public one for traffic-heavy workloads (no NAT Gateway) | 1.15.0 | off | AWS | Needs `crossplane`; GKE Autopilot provisions its own nodes |
 
 ### Backup
 

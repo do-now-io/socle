@@ -347,18 +347,30 @@ locals {
     # interruption queue, and ec2, ssm, pricing, sqs and eks in the
     # foundations' crossplane.allowed_services. Its nodes run as the
     # bootstrap nodes' role, through the instance profile the foundations
-    # create for it. node_pool is the one NodePool the socle renders,
-    # `default`: the capacity_types (spot, on-demand) and architectures
-    # (arm64, amd64) it may launch — Karpenter launches the cheapest that
-    # fits, so Spot and Graviton first, as for the bootstrap group — cpu and
-    # memory the ceiling of all its nodes together, consolidate_after how
-    # long a node stays empty or under-used before it goes, and ami the
-    # EC2NodeClass alias (al2023@latest follows each new AMI; al2023@v<date>
-    # pins one). A client writes more NodePools himself. values and
-    # values_secret as every module; credentials are refused in values.
+    # create for it. Two NodePools, always: private_pool, where a pod goes by
+    # default, in the private subnets, its egress through the NAT Gateway;
+    # public_pool, tainted socle.do-now.io/node-pool=public, for the
+    # workloads costly in network traffic that tolerate it, in the public
+    # subnets with a public IP, their egress through the Internet Gateway.
+    # Each: the capacity_types (spot, on-demand) and architectures (arm64,
+    # amd64) it may launch — Karpenter launches the cheapest that fits, so
+    # Spot and Graviton first, as for the bootstrap group — cpu and memory
+    # the ceiling of all its nodes together, consolidate_after how long a
+    # node stays empty or under-used before it goes, and ami the EC2NodeClass
+    # alias (al2023@latest follows each new AMI; al2023@v<date> pins one). A
+    # client writes more NodePools himself. values and values_secret as every
+    # module; credentials are refused in values.
     karpenter = {
       enabled = false
-      node_pool = {
+      private_pool = {
+        capacity_types    = ["spot", "on-demand"]
+        architectures     = ["arm64", "amd64"]
+        cpu               = 32
+        memory            = "128Gi"
+        consolidate_after = "1m"
+        ami               = "al2023@latest"
+      }
+      public_pool = {
         capacity_types    = ["spot", "on-demand"]
         architectures     = ["arm64", "amd64"]
         cpu               = 32
