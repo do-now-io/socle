@@ -1,0 +1,77 @@
+# How a node of the public NodePool is launched: the bootstrap nodes' twin
+# (opentofu/aws/nodes.tf) in the public subnets, with a public IP, its egress
+# through the Internet Gateway — no NAT Gateway to pay for the traffic — and
+# Cilium masquerading its pods' egress to that IP (AWS-23). Every selector reads what the foundations already
+# lay down — no new tag (docs/catalog/karpenter.md, KARPENTER-02). The
+# module's patches replace `socle` with the cluster's name, and the alias and
+# the tags with the cluster's.
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: public
+spec:
+  # The bootstrap nodes' role, through the instance profile the foundations
+  # create for it: the same kubelet, ECR and Cilium ENI rights, and the access
+  # entry EKS made for that role, so the node joins. A profile named rather
+  # than a role: Karpenter then creates none, and needs no IAM write.
+  instanceProfile: socle-bootstrap-node
+  # AL2023, the bootstrap nodes' family; the alias follows each new AMI
+  # (Karpenter drifts the nodes onto it) unless the client pins a version.
+  amiSelectorTerms:
+    - alias: al2023@latest
+  # The public subnets: tagged for the cluster and for internet-facing load
+  # balancers by the foundations, as EKS's own controllers read them.
+  subnetSelectorTerms:
+    - tags:
+        kubernetes.io/cluster/socle: owned
+        kubernetes.io/role/elb: "1"
+  # The public nodes' own security group, which the foundations create: the
+  # VPC in, nothing from the internet. Not the
+  # cluster security group, which EKS's load balancer controller opens to
+  # 0.0.0.0/0 on every NodePort it serves (opentofu/aws/nodes.tf).
+  securityGroupSelectorTerms:
+    - name: socle-public-nodes
+  # The subnet assigns none: the node asks for its own public IP.
+  associatePublicIPAddress: true
+  # Labelled by its own kubelet when it registers, so that no load balancer
+  # ever targets it, not even in the seconds before Karpenter labels it —
+  # that window was enough, on the sandbox, for the controller to open a
+  # NodePort to the internet in its security group. Karpenter keeps
+  # kubernetes.io labels off the kubelet's flags; nodeadm takes this
+  # NodeConfig beside Karpenter's.
+  userData: |
+    MIME-Version: 1.0
+    Content-Type: multipart/mixed; boundary="BOUNDARY"
+
+    --BOUNDARY
+    Content-Type: application/node.eks.aws
+
+    apiVersion: node.eks.aws/v1alpha1
+    kind: NodeConfig
+    spec:
+      kubelet:
+        flags:
+          - --node-labels=node.kubernetes.io/exclude-from-external-load-balancers=true
+
+    --BOUNDARY--
+  # Instance metadata on the node only, IMDSv2 only, as on the bootstrap
+  # nodes: a pod that is not hostNetwork cannot borrow the node's role.
+  metadataOptions:
+    httpEndpoint: enabled
+    httpProtocolIPv6: disabled
+    httpTokens: required
+    httpPutResponseHopLimit: 1
+  # An encrypted gp3 root volume, as on the bootstrap nodes, larger: workload
+  # images live here.
+  blockDeviceMappings:
+    - deviceName: /dev/xvda
+      ebs:
+        volumeSize: 40Gi
+        volumeType: gp3
+        encrypted: true
+        deleteOnTermination: true
+  # The foundations' tags; Karpenter adds the cluster's, its own, and Name,
+  # the node's.
+  tags:
+    owner: platform
+    environment: dev

@@ -1,0 +1,52 @@
+# How a node of the private NodePool is launched: the bootstrap nodes' twin
+# (opentofu/aws/nodes.tf), in the private subnets, its egress through the
+# NAT Gateway. Every selector reads what the foundations already
+# lay down — no new tag (docs/catalog/karpenter.md, KARPENTER-02). The
+# module's patches replace `socle` with the cluster's name, and the alias and
+# the tags with the cluster's.
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: private
+spec:
+  # The bootstrap nodes' role, through the instance profile the foundations
+  # create for it: the same kubelet, ECR and Cilium ENI rights, and the access
+  # entry EKS made for that role, so the node joins. A profile named rather
+  # than a role: Karpenter then creates none, and needs no IAM write.
+  instanceProfile: socle-bootstrap-node
+  # AL2023, the bootstrap nodes' family; the alias follows each new AMI
+  # (Karpenter drifts the nodes onto it) unless the client pins a version.
+  amiSelectorTerms:
+    - alias: al2023@latest
+  # The private subnets: tagged for the cluster and for internal load
+  # balancers by the foundations, as EKS's own controllers read them.
+  subnetSelectorTerms:
+    - tags:
+        kubernetes.io/cluster/socle: owned
+        kubernetes.io/role/internal-elb: "1"
+  # The cluster security group, the bootstrap nodes' one: EKS creates it and
+  # tags it for the cluster; nothing else in the VPC carries that tag.
+  securityGroupSelectorTerms:
+    - tags:
+        kubernetes.io/cluster/socle: owned
+  # Instance metadata on the node only, IMDSv2 only, as on the bootstrap
+  # nodes: a pod that is not hostNetwork cannot borrow the node's role.
+  metadataOptions:
+    httpEndpoint: enabled
+    httpProtocolIPv6: disabled
+    httpTokens: required
+    httpPutResponseHopLimit: 1
+  # An encrypted gp3 root volume, as on the bootstrap nodes, larger: workload
+  # images live here.
+  blockDeviceMappings:
+    - deviceName: /dev/xvda
+      ebs:
+        volumeSize: 40Gi
+        volumeType: gp3
+        encrypted: true
+        deleteOnTermination: true
+  # The foundations' tags; Karpenter adds the cluster's, its own, and Name,
+  # the node's.
+  tags:
+    owner: platform
+    environment: dev

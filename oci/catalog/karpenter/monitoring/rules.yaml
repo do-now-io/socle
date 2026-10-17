@@ -1,0 +1,67 @@
+# karpenter's own alert rules: awesome-prometheus-alerts has no Karpenter
+# section. On the metrics Karpenter 1.15.0 exposes, names from its reference
+# (website/content/en/preview/reference/metrics.md at v1.15.0).
+# Checked in CI with vmalert -dryRun (.github/scripts/check-rules.sh).
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: socle-karpenter
+spec:
+  groups:
+    - name: socle-karpenter
+      rules:
+        # An EC2NodeClass that does not resolve — no AMI, subnet, security
+        # group or instance profile found, or one Karpenter may not use —
+        # launches nothing: its NodePools stay not Ready, and pods Pending.
+        - alert: KarpenterNodeClassNotReady
+          expr: >-
+            max by (name) (operator_ec2nodeclass_status_condition_count{type="Ready", status="False"}) > 0
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: >-
+              The EC2NodeClass {{ $labels.name }} is not Ready: Karpenter launches no node from it
+              (kubectl describe ec2nodeclass {{ $labels.name }}).
+        - alert: KarpenterNodePoolNotReady
+          expr: >-
+            max by (name) (operator_nodepool_status_condition_count{type="Ready", status="False"}) > 0
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: >-
+              The NodePool {{ $labels.name }} is not Ready: Karpenter launches no node from it.
+        # The NodePool's limits are its ceiling: at it, the next pod that
+        # needs a node stays Pending.
+        - alert: KarpenterNodePoolNearLimit
+          expr: >-
+            max by (nodepool, resource_type) (karpenter_nodepools_usage{resource_type=~"cpu|memory"})
+            / max by (nodepool, resource_type) (karpenter_nodepools_limit{resource_type=~"cpu|memory"})
+            > 0.9
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              The NodePool {{ $labels.nodepool }} uses {{ $value | humanizePercentage }} of its {{ $labels.resource_type }}
+              limit: raise kube.karpenter.node_pool or new pods will stay Pending.
+        - alert: KarpenterCloudProviderErrors
+          expr: >-
+            sum by (method, error) (rate(karpenter_cloudprovider_errors_total{error!="NodeClaimNotFoundError"}[5m])) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              Karpenter's {{ $labels.method }} calls to EC2 fail ({{ $labels.error }}): nodes may not launch or go.
+        - alert: KarpenterUnschedulablePods
+          expr: >-
+            max(karpenter_scheduler_unschedulable_pods_count) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              {{ $value }} pods fit on no node Karpenter may launch: a requirement no NodePool offers, or a
+              NodePool at its limit.

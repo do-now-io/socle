@@ -156,13 +156,14 @@ The stack's design: [Observability](docs/architecture/observability.md).
 
 | Module | What it does | Version | Default | Clouds | Notes |
 | --- | --- | --- | :---: | --- | --- |
-| [`crossplane`](docs/catalog/crossplane.md) | Lets each module declare its own cloud IAM | 2.4.2 | off | All | Needed by `velero`, and on AWS and GCP by `external_dns`, `keda` (`services`), `external_secrets` and `argocd_image_updater` (`repositories`) for their own access; on GCP no Google service account |
+| [`crossplane`](docs/catalog/crossplane.md) | Lets each module declare its own cloud IAM | 2.4.2 | off | All | Needed by `velero` and `karpenter`, and on AWS and GCP by `external_dns`, `keda` (`services`), `external_secrets` and `argocd_image_updater` (`repositories`) for their own access; on GCP no Google service account |
 
 ### Autoscaling
 
 | Module | What it does | Version | Default | Clouds | Notes |
 | --- | --- | --- | :---: | --- | --- |
 | [`keda`](docs/catalog/keda.md) | Event-driven autoscaling, down to zero | 2.21.0 | off | All | |
+| [`karpenter`](docs/catalog/karpenter.md) | Nodes for your workloads, launched for what is Pending, Spot and Graviton first, removed when empty; a private pool, and a public one for traffic-heavy workloads (no NAT Gateway) | 1.15.0 | off | AWS | Needs `crossplane`; GKE Autopilot provisions its own nodes |
 
 ### Backup
 
@@ -191,7 +192,8 @@ the minor.
 - The foundations modules exist for all four clouds. The single-apply root
   exists for AWS and GCP, so far.
 - On GCP every catalog module that runs on AWS runs too, metrics-server
-  aside (GKE serves its own), each cloud-backed one with its own access
+  and karpenter aside (GKE serves its own metrics API, and Autopilot
+  provisions its own nodes), each cloud-backed one with its own access
   through Crossplane and no Google service account. Its proof is a GKE
   Autopilot sandbox, by hand: floci-gcp has no Cloud DNS and no Workload
   Identity, so CI renders and plans GCP but runs no GKE e2e. One socle

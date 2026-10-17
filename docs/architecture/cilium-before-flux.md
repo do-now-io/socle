@@ -60,10 +60,15 @@ follows `cilium.gateway_api`, the class being the catalog's.
 <details>
 <summary>Under the hood</summary>
 
-**AWS.** `eni.enabled: true`: ENI IPAM, native routing, masquerade off; pods
-carry VPC addresses and leave through the NAT Gateway. `kubeProxyReplacement:
-true`, with `k8sServiceHost`/`Port` from the foundations' `cluster_endpoint`.
-The operator creates ENIs from the bootstrap nodes' role.
+**AWS.** `eni.enabled: true`: ENI IPAM, native routing; pods carry VPC
+addresses. What leaves the VPC is masqueraded to the node's primary address
+(`ipv4NativeRoutingCIDR` the foundations' `vpc_cidr`, through `ens+`): a
+pod's secondary address never crosses an Internet Gateway, which a node of
+Karpenter's public pool leaves through
+([AWS-23](../decisions/aws.md#aws-23-public-nodes-their-own-security-group-and-cilium-masquerading-out-of-the-vpc)).
+`kubeProxyReplacement: true`, with `k8sServiceHost`/`Port` from the
+foundations' `cluster_endpoint`. The operator creates ENIs from the bootstrap
+nodes' role.
 
 **Azure.** `aksbyocni.enabled: true`: cluster-pool IPAM over VXLAN, with
 masquerade. The pool is the foundations' `pod_cidr` (`10.244.0.0/16`), since

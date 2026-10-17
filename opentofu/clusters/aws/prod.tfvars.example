@@ -106,6 +106,17 @@ kube = {
   # must also be in aws.crossplane.allowed_services above. Leave it out for
   # cron, Prometheus, Kafka, RabbitMQ or Redis triggers: no cloud role needed.
   # keda = { enabled = true, services = ["sqs"] }
+  # Nodes for the workloads: Karpenter launches what a Pending pod needs,
+  # Spot and Graviton first, and removes what is empty or under-used — in a
+  # private pool by default, or a public one for workloads costly in network
+  # traffic (no NAT Gateway on their egress) that tolerate it
+  # (docs/catalog/karpenter.md). Needs kube.crossplane on and ec2, ssm,
+  # pricing, sqs and eks in aws.crossplane.allowed_services above.
+  # karpenter = {
+  #   enabled      = true
+  #   private_pool = { cpu = 64, memory = "256Gi" }
+  #   public_pool  = { cpu = 16, memory = "64Gi" }
+  # }
 }
 
 # Cilium is installed before Flux with these defaults; list only what

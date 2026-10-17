@@ -81,7 +81,7 @@ variable "public_subnet_ids" {
 }
 
 variable "vpc_cidr" {
-  description = "CIDR for the VPC when this module creates it. Arbitrary default (not a research decision) — a /16 large enough for any socle estate."
+  description = "CIDR for the VPC when this module creates it. Arbitrary default (not a research decision) — a /16 large enough for any socle estate. With create_vpc = false, set it to the existing VPC's primary CIDR: pods take their addresses from it, and Cilium masquerades only what leaves it (vpc_cidr output)."
   type        = string
   default     = "10.0.0.0/16"
   nullable    = false
@@ -340,7 +340,10 @@ variable "crossplane" {
     this module writes. allowed_services is that boundary: the AWS services
     (IAM action prefixes, such as route53 or s3) any module's role may be
     granted. Empty grants nothing; iam, sts, organizations, account, sso and
-    identitystore are refused. Which resources of those services a module
+    identitystore are refused. With ec2 in the list, and only then, the
+    boundary also lets a role pass the bootstrap nodes' role to EC2 and read
+    instance profiles — what Karpenter's controller needs to launch nodes —
+    and nothing else of IAM. Which resources of those services a module
     reaches is its own role's policy. Null, the default, creates nothing. The
     client root passes the boundary's ARN into kube.crossplane.
   EOT

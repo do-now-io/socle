@@ -371,3 +371,101 @@ Delivering to S3 instead was set aside: the flow logs would leave CloudWatch
 Logs Insights, and the control plane has no S3 destination.
 
 **Sources.** [VPC Flow Logs troubleshooting](https://docs.aws.amazon.com/vpc/latest/userguide/flow-logs-troubleshooting.html#flow-logs-troubleshooting-no-log-group) · [IAM role for flow logs](https://docs.aws.amazon.com/vpc/latest/userguide/flow-logs-iam-role.html) · [Delete a flow log](https://docs.aws.amazon.com/vpc/latest/userguide/working-with-flow-logs.html#delete-flow-log) · [EKS control plane logs](https://docs.aws.amazon.com/eks/latest/userguide/control-plane-logs.html) · [AmazonEKSServiceRolePolicy](https://docs.aws.amazon.com/aws-managed-policy/latest/reference/AmazonEKSServiceRolePolicy.html) · #98.
+
+## AWS-21: The boundary's one IAM exception: the node role, passed to EC2
+
+**accepted** · 2026-10-16 · [`opentofu/aws/iam.tf`](../../opentofu/aws/iam.tf), [`opentofu/aws/nodes.tf`](../../opentofu/aws/nodes.tf)
+
+**Decision.** The bootstrap nodes' role gets an instance profile of the same
+name, `<cluster>-bootstrap-node`, unconditionally: the identity of every node
+of the cluster, the bootstrap group's and Karpenter's. When
+`crossplane.allowed_services` names `ec2`, and only then, the boundary allows
+`iam:PassRole` on that role with `iam:PassedToService = ec2.amazonaws.com`,
+and `iam:GetInstanceProfile` and `iam:ListInstanceProfiles`; `iam:*` stays
+denied on every other resource.
+
+**Context.** Karpenter's controller launches instances with an instance
+profile, which EC2 refuses unless the caller may pass its role; its
+controller is a Crossplane-made role under the boundary
+([SOCLE-04](socle.md#socle-04-each-module-owns-its-cloud-access-the-foundations-never-change)),
+and the boundary denied all of `iam` ([AWS-18](#aws-18-crossplanes-identity-and-its-permissions-boundary-in-the-foundations)).
+AWS's own setup gives Karpenter a node role and lets it create and tag
+instance profiles itself. Weighed: a scoped exception in the boundary; a
+second node role made by the foundations for Karpenter; the node role,
+profile and access entry made by Crossplane, which would need
+`CreateInstanceProfile`, PassRole to EC2 of any role it makes and
+`eks:CreateAccessEntry`, and a boundary allowing what nodes do to every
+module. Karpenter's nodes need exactly the bootstrap nodes' rights — kubelet,
+ECR pull, Cilium's ENI calls — and EKS already made the `EC2_LINUX` access
+entry for that role. With `spec.instanceProfile` set, Karpenter creates no
+profile and only reads it (`GetInstanceProfile` to validate,
+`ListInstanceProfiles` for its garbage collection).
+
+**Consequences.** A module role allowed `ec2` may launch instances as the
+nodes' role and nothing more: no other role to pass, no profile to create or
+change. No role is made by the foundations for a module, and nothing in
+them names Karpenter: the exception follows `ec2`, a reviewed word in the
+client's tfvars. Karpenter's nodes and the bootstrap nodes share one
+identity, so Cilium's operator works wherever it lands. Without `ec2`, the
+boundary is the one AWS-18 describes.
+
+**Sources.** [Karpenter 1.15.0 getting started, CloudFormation](https://github.com/aws/karpenter-provider-aws/blob/v1.15.0/website/content/en/preview/getting-started/getting-started-with-karpenter/cloudformation.yaml) · [Karpenter `EC2NodeClass.spec.instanceProfile`](https://karpenter.sh/docs/concepts/nodeclasses/#specinstanceprofile) · [IAM PassRole](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use_passrole.html) · [EKS access entries for nodes](https://docs.aws.amazon.com/eks/latest/userguide/creating-access-entries.html) · [karpenter module](../catalog/karpenter.md).
+
+## AWS-22: Crossplane manages queues and EventBridge rules under the cluster's prefix
+
+**accepted** · 2026-10-16 · [`opentofu/aws/iam.tf`](../../opentofu/aws/iam.tf)
+
+**Decision.** With `crossplane` set, Crossplane's role may create, configure,
+tag and delete SQS queues `<cluster>-*` and EventBridge rules
+`<cluster>-*` on the default bus, with their targets, in the cluster's
+region; never read or send a message.
+
+**Context.** A module's resources beside its role are Crossplane's to make, as
+Velero's bucket is ([AWS-18](#aws-18-crossplanes-identity-and-its-permissions-boundary-in-the-foundations)):
+Karpenter's interruption queue and the rules that fill it.
+
+**Consequences.** Unlike a bucket, a queue may be deleted: it holds notices
+minutes old. The providers `provider-aws-sqs` and
+`provider-aws-cloudwatchevents` run on every aws cluster with Crossplane on.
+
+**Sources.** [Karpenter interruption handling](https://karpenter.sh/docs/concepts/disruption/#interruption) · [SQS actions](https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazonsqs.html) · [EventBridge actions](https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazoneventbridge.html).
+
+## AWS-23: Public nodes: their own security group, and Cilium masquerading out of the VPC
+
+**accepted** · 2026-10-17 · [`opentofu/aws/nodes.tf`](../../opentofu/aws/nodes.tf), [`opentofu/bootstrap/cilium.tf`](../../opentofu/bootstrap/cilium.tf), [`oci/catalog/karpenter/nodes/ec2nodeclass-public.yaml`](../../oci/catalog/karpenter/nodes/ec2nodeclass-public.yaml)
+
+**Decision.** The foundations create the security group
+`<cluster>-public-nodes`: in from the VPC's CIDR — the control plane's
+ENIs and every node — out to anywhere; the cluster security group admits it
+back (on an emulated EKS that reports no cluster security group, floci, that
+rule lands on the group itself). Not
+tagged for the cluster. Karpenter's public nodes run in it alone, and their
+kubelet registers them labelled
+`node.kubernetes.io/exclude-from-external-load-balancers`. On aws Cilium
+masquerades what leaves the VPC to the node's primary address
+(`enableIPv4Masquerade`, `ipv4NativeRoutingCIDR` the VPC's CIDR,
+`egressMasqueradeInterfaces: ens+`), on every node.
+
+**Context.** Measured on the sandbox, 2026-10-17, with a public NodePool:
+a pod's address is an ENI's secondary one, which the Internet Gateway never
+translates, so a pod on a public node reached nothing outside the VPC until
+Cilium masqueraded it; Cilium refuses masquerading in ENI mode without
+`egressMasqueradeInterfaces` (the agents crashed). EKS's in-tree load
+balancer controller opened a Service's NodePort to `0.0.0.0/0` in the
+security group of every node it targets: on the cluster security group, the
+public node's NodePort answered from the internet. With their own group and
+the exclusion label set by Karpenter, the controller still targeted a new
+node in the seconds before the label arrived, opened the NodePort in that
+group, and never closed it; Karpenter keeps `kubernetes.io` labels off the
+kubelet's flags, so the label goes in an AL2023 `NodeConfig`, which the
+kubelet may set (`node.kubernetes.io/` is a kubelet label domain). With
+both, a public node was never a target and its NodePort stayed closed.
+
+**Consequences.** A Gateway's traffic reaches pods on public nodes through
+the private nodes. Pods on private nodes leave with their node's address too,
+so the NAT Gateway and the flow logs show nodes, not pods, for what leaves
+the VPC; inside it nothing changes. With `create_vpc = false`, `vpc_cidr`
+must be the VPC's primary CIDR. The primary interface is `ens5` on AL2023 on
+Nitro; another AMI family would need its name.
+
+**Sources.** [Cilium ENI mode, masquerading](https://docs.cilium.io/en/stable/network/concepts/ipam/eni/) · [cloud-provider-aws, `findSecurityGroupForInstance`](https://github.com/kubernetes/cloud-provider-aws/blob/master/pkg/providers/v1/aws.go) · [Well-known label `node.kubernetes.io/exclude-from-external-load-balancers`](https://kubernetes.io/docs/reference/labels-annotations-taints/#node-kubernetes-io-exclude-from-external-load-balancers) · [AL2023 NodeConfig](https://awslabs.github.io/amazon-eks-ami/nodeadm/) · #53.

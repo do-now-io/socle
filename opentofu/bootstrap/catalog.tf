@@ -340,6 +340,47 @@ locals {
       values        = {}
       values_secret = ""
     }
+    # Karpenter: the autoscaler that owns every node but the bootstrap group's
+    # (docs/catalog/karpenter.md). aws only — GKE Autopilot provisions its
+    # own nodes, and Karpenter has no provider there (catalog_clouds below).
+    # Off by default: it needs Crossplane, which makes its role and its
+    # interruption queue, and ec2, ssm, pricing, sqs and eks in the
+    # foundations' crossplane.allowed_services. Its nodes run as the
+    # bootstrap nodes' role, through the instance profile the foundations
+    # create for it. Two NodePools, always: private_pool, where a pod goes by
+    # default, in the private subnets, its egress through the NAT Gateway;
+    # public_pool, tainted socle.do-now.io/node-pool=public, for the
+    # workloads costly in network traffic that tolerate it, in the public
+    # subnets with a public IP, their egress through the Internet Gateway.
+    # Each: the capacity_types (spot, on-demand) and architectures (arm64,
+    # amd64) it may launch — Karpenter launches the cheapest that fits, so
+    # Spot and Graviton first, as for the bootstrap group — cpu and memory
+    # the ceiling of all its nodes together, consolidate_after how long a
+    # node stays empty or under-used before it goes, and ami the EC2NodeClass
+    # alias (al2023@latest follows each new AMI; al2023@v<date> pins one). A
+    # client writes more NodePools himself. values and values_secret as every
+    # module; credentials are refused in values.
+    karpenter = {
+      enabled = false
+      private_pool = {
+        capacity_types    = ["spot", "on-demand"]
+        architectures     = ["arm64", "amd64"]
+        cpu               = 32
+        memory            = "128Gi"
+        consolidate_after = "1m"
+        ami               = "al2023@latest"
+      }
+      public_pool = {
+        capacity_types    = ["spot", "on-demand"]
+        architectures     = ["arm64", "amd64"]
+        cpu               = 32
+        memory            = "128Gi"
+        consolidate_after = "1m"
+        ami               = "al2023@latest"
+      }
+      values        = {}
+      values_secret = ""
+    }
   }
 
   # Which clouds a module exists on. Absent = every cloud. A module listed
@@ -351,6 +392,7 @@ locals {
   # var.kube refuses at plan a module this map does not offer on var.cloud.
   catalog_clouds = {
     gateway_api    = ["aws", "azure", "gcp", "scaleway"]
+    karpenter      = ["aws"]
     metrics_server = ["aws"]
     velero         = ["aws", "gcp"]
   }

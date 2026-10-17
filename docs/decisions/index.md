@@ -37,7 +37,7 @@ section gives its **status**, **date** and implementing code, then the
 
 [argocd](argocd.md) · [crossplane](crossplane.md) ·
 [external-dns](external-dns.md) · [external-secrets](external-secrets.md) ·
-[gateway-api](gateway-api.md) · [keda](keda.md) ·
+[gateway-api](gateway-api.md) · [karpenter](karpenter.md) · [keda](keda.md) ·
 [kyverno](kyverno.md) · [kyverno-policies](kyverno-policies.md) ·
 [metrics-server](metrics-server.md) · [monitoring](monitoring.md) ·
 [otel-agent](otel-agent.md) · [otel-gateway](otel-gateway.md) ·

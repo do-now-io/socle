@@ -381,6 +381,16 @@ run "aws_installs_cilium_and_coredns_before_flux" {
     condition     = yamldecode(helm_release.cilium[0].values[0]).eni.enabled == true
     error_message = "aws must run Cilium in ENI mode: pods carry VPC addresses, as the foundations' network design assumes."
   }
+  # AWS-23: a pod on a public node reaches the internet only masqueraded to
+  # its node's primary address; inside the VPC nothing is masqueraded.
+  assert {
+    condition = (
+      yamldecode(helm_release.cilium[0].values[0]).enableIPv4Masquerade == true
+      && yamldecode(helm_release.cilium[0].values[0]).ipv4NativeRoutingCIDR == "10.244.0.0/16"
+      && yamldecode(helm_release.cilium[0].values[0]).egressMasqueradeInterfaces == "ens+"
+    )
+    error_message = "on aws Cilium masquerades what leaves the VPC (pod_cidr), through the primary interface: ENI mode refuses masquerading without egressMasqueradeInterfaces."
+  }
   assert {
     condition     = yamldecode(helm_release.cilium[0].values[0]).kubeProxyReplacement == true && yamldecode(helm_release.cilium[0].values[0]).k8sServiceHost == "ABCDEF.gr7.eu-west-3.eks.amazonaws.com" && yamldecode(helm_release.cilium[0].values[0]).k8sServicePort == 443
     error_message = "with no kube-proxy, Cilium must replace it and reach the API server by the host the foundations output, port 443."
@@ -1659,5 +1669,52 @@ run "flux_version_takes_an_exact_version" {
   assert {
     condition     = yamldecode(helm_release.instance.values[0]).instance.distribution.version == "2.8.1"
     error_message = "an exact flux_version must reach the FluxInstance as written."
+  }
+}
+
+# --- karpenter — docs/catalog/karpenter.md ---
+
+run "karpenter_is_off_by_default_with_a_private_and_a_public_pool" {
+  command = plan
+
+  assert {
+    condition     = output.inputs.modules.karpenter.enabled == false && output.inputs.modules.karpenter.values == {} && output.inputs.modules.karpenter.values_secret == ""
+    error_message = "karpenter must be off by default: it needs Crossplane and services the client allows."
+  }
+  assert {
+    condition = alltrue([for p in [output.inputs.modules.karpenter.private_pool, output.inputs.modules.karpenter.public_pool] :
+      p.capacity_types == ["spot", "on-demand"] && p.architectures == ["arm64", "amd64"] && p.cpu == 32
+      && p.memory == "128Gi" && p.consolidate_after == "1m" && p.ami == "al2023@latest"
+    ])
+    error_message = "both NodePools: Spot and on demand, Graviton and x86, 32 vCPU and 128Gi in all, consolidated after a minute, on the latest AL2023 (docs/catalog/karpenter.md)."
+  }
+}
+
+run "karpenter_pools_keep_their_defaults_beside_what_the_client_writes" {
+  command = plan
+  variables {
+    region = "eu-west-3"
+    kube = {
+      crossplane = { enabled = true }
+      karpenter = {
+        enabled      = true
+        private_pool = { capacity_types = ["on-demand"], cpu = 8 }
+        public_pool  = { cpu = 4 }
+        values       = { logLevel = "debug" }
+      }
+    }
+  }
+
+  assert {
+    condition     = output.inputs.modules.karpenter.enabled && output.inputs.modules.karpenter.private_pool.capacity_types == ["on-demand"] && output.inputs.modules.karpenter.private_pool.cpu == 8 && output.inputs.modules.karpenter.public_pool.cpu == 4
+    error_message = "what the client writes in either pool must reach the inputs."
+  }
+  assert {
+    condition     = output.inputs.modules.karpenter.private_pool.architectures == ["arm64", "amd64"] && output.inputs.modules.karpenter.public_pool.capacity_types == ["spot", "on-demand"] && output.inputs.modules.karpenter.public_pool.memory == "128Gi"
+    error_message = "a key of a pool the client leaves out keeps its default."
+  }
+  assert {
+    condition     = output.inputs.modules.karpenter.values.logLevel == "debug"
+    error_message = "values must flow through untouched."
   }
 }

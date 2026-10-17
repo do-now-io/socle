@@ -52,7 +52,8 @@ Autopilot bills Pod requests, not nodes. US dollars, us-central1 list prices,
 - **Built**: the foundations module and the
   [`opentofu/clusters/gcp`](../../../opentofu/clusters/gcp/README.md) root;
   on gcp the catalog offers every module but `metrics_server` (GKE serves
-  `metrics.k8s.io` itself), with Crossplane's Cloud Platform and Storage
+  `metrics.k8s.io` itself) and `karpenter` (Autopilot provisions its own
+  nodes, [KARPENTER-05](../../decisions/karpenter.md#karpenter-05-aws-only-gke-autopilot-is-its-own-node-autoscaler)), with Crossplane's Cloud Platform and Storage
   providers, the shared Gateways, Velero and `kube.keda.services = ["pubsub"]`.
 - **Proven**: in CI, a plan against floci-gcp, which runs no Compute Engine
   API; on a real GKE Autopilot sandbox project (2026-10-07, PR #84), the

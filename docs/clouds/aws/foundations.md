@@ -31,7 +31,9 @@ module together with the bootstrap.
 | Control-plane logs off: CloudWatch bills them by the gigabyte. `cluster_log_types = ["audit", "authenticator"]` when your audit asks for the API server's record | default |
 | Two Spot Graviton bootstrap nodes, untainted, not autoscaled | default |
 | Bootstrap nodes on AL2023, IMDSv2 hop limit 1, encrypted gp3, private subnets | enforced |
-| Crossplane's role and permissions boundary, only when `crossplane` is set | default |
+| An instance profile for the bootstrap nodes' role, the identity Karpenter's nodes run as | enforced |
+| A security group for Karpenter's public nodes: the VPC in, nothing from the internet | enforced |
+| Crossplane's role and permissions boundary, only when `crossplane` is set; with `ec2` allowed, the boundary lets a role pass the nodes' role to EC2, nothing else of IAM | default |
 
 <details>
 <summary>Under the hood</summary>
@@ -70,8 +72,11 @@ unavailable at a time), `crossplane = null`.
 - **Workload identities other than Crossplane's**: each catalog module
   declares its own;
   the CSI drivers' roles are the bootstrap's.
-- **Fargate and Karpenter**: Karpenter is to be a catalog module
-  ([#53](https://github.com/do-now-io/socle/issues/53)).
+- **Fargate and Karpenter**: no Fargate; Karpenter is the
+  [karpenter](../../catalog/karpenter.md) catalog module. The foundations
+  give the bootstrap nodes' role an instance profile, which its nodes run
+  as, and nothing else of it
+  ([AWS-21](../../decisions/aws.md#aws-21-the-boundarys-one-iam-exception-the-node-role-passed-to-ec2)).
 - **GuardDuty**.
 - **A DynamoDB endpoint, a region variable, any credential as input.**
 

@@ -1070,6 +1070,84 @@ variable "kube" {
     )
     error_message = "kube.metrics_server.values must not set --kubelet-insecure-tls: it disables verification of kubelet certificates, so metrics-server would present its credentials to anyone impersonating a kubelet. The socle owns the nodes, and a certificate that does not validate is a socle bug to fix, not a client's to work around."
   }
+
+  # --- karpenter — docs/catalog/karpenter.md ---------------------------------
+
+  # Its role and its interruption queue are Crossplane managed resources: with
+  # Crossplane off it would install a controller that can launch nothing.
+  validation {
+    condition     = !can(keys(var.kube)) || !try(var.kube.karpenter.enabled, false) || try(var.kube.crossplane.enabled, false) == true
+    error_message = "kube.karpenter needs kube.crossplane.enabled = true: its IAM role, Pod Identity association and interruption queue are Crossplane managed resources (docs/catalog/karpenter.md). Turn Crossplane on, and allow ec2, ssm, pricing, sqs and eks in the foundations' aws.crossplane.allowed_services."
+  }
+
+  validation {
+    condition     = !can(keys(var.kube)) || !try(var.kube.karpenter.enabled, false) || var.region != ""
+    error_message = "kube.karpenter needs the cluster's region: its queue, its EventBridge rules and its Pod Identity association are regional. Pass region to the bootstrap module (the aws root wires var.aws.region)."
+  }
+
+  # The same rules for both NodePools, private_pool and public_pool.
+  validation {
+    condition = alltrue([for p in ["private_pool", "public_pool"] : !can(var.kube.karpenter[p].capacity_types) || try(
+      length(tolist(var.kube.karpenter[p].capacity_types)) > 0
+      && length(distinct(tolist(var.kube.karpenter[p].capacity_types))) == length(tolist(var.kube.karpenter[p].capacity_types))
+      && alltrue([for c in tolist(var.kube.karpenter[p].capacity_types) : contains(["spot", "on-demand"], c)]),
+      false
+    )])
+    error_message = "kube.karpenter.private_pool.capacity_types and public_pool.capacity_types must list spot, on-demand or both, each once."
+  }
+
+  validation {
+    condition = alltrue([for p in ["private_pool", "public_pool"] : !can(var.kube.karpenter[p].architectures) || try(
+      length(tolist(var.kube.karpenter[p].architectures)) > 0
+      && length(distinct(tolist(var.kube.karpenter[p].architectures))) == length(tolist(var.kube.karpenter[p].architectures))
+      && alltrue([for a in tolist(var.kube.karpenter[p].architectures) : contains(["arm64", "amd64"], a)]),
+      false
+    )])
+    error_message = "kube.karpenter.private_pool.architectures and public_pool.architectures must list arm64, amd64 or both, each once: the values of kubernetes.io/arch."
+  }
+
+  validation {
+    condition     = alltrue([for p in ["private_pool", "public_pool"] : !can(var.kube.karpenter[p].cpu) || try(var.kube.karpenter[p].cpu >= 1 && floor(var.kube.karpenter[p].cpu) == var.kube.karpenter[p].cpu, false)])
+    error_message = "kube.karpenter.private_pool.cpu and public_pool.cpu must be a whole number of vCPU, at least 1: the ceiling of all the NodePool's nodes together."
+  }
+
+  validation {
+    condition     = alltrue([for p in ["private_pool", "public_pool"] : !can(var.kube.karpenter[p].memory) || try(can(regex("^[1-9][0-9]*(Mi|Gi|Ti)$", var.kube.karpenter[p].memory)), false)])
+    error_message = "kube.karpenter.private_pool.memory and public_pool.memory must be a Kubernetes quantity in Mi, Gi or Ti, such as 128Gi: the ceiling of all the NodePool's nodes together."
+  }
+
+  validation {
+    condition     = alltrue([for p in ["private_pool", "public_pool"] : !can(var.kube.karpenter[p].consolidate_after) || try(can(regex("^([0-9]+h)?([0-9]+m)?([0-9]+s)?$", var.kube.karpenter[p].consolidate_after)) && var.kube.karpenter[p].consolidate_after != "", false)])
+    error_message = "kube.karpenter.private_pool.consolidate_after and public_pool.consolidate_after must be a duration in hours, minutes and seconds, such as 1m or 1h30m."
+  }
+
+  # AL2023 only: the bootstrap nodes' AMI family, the one whose nodeadm
+  # Karpenter configures for this cluster, Cilium is proven on, and the
+  # public EC2NodeClass's NodeConfig is written for.
+  validation {
+    condition     = alltrue([for p in ["private_pool", "public_pool"] : !can(var.kube.karpenter[p].ami) || try(can(regex("^al2023@(latest|v[0-9]{8})$", var.kube.karpenter[p].ami)), false)])
+    error_message = "kube.karpenter.private_pool.ami and public_pool.ami must be an AL2023 alias, al2023@latest or al2023@v<YYYYMMDD> such as al2023@v20261001: the bootstrap nodes' AMI family."
+  }
+
+  # values is free-form, minus credentials: the controller takes its AWS
+  # access from Pod Identity, and an access key in controller.env would land
+  # in the state and in a ConfigMap. Its name says it whatever the case.
+  validation {
+    condition = (
+      !can(var.kube.karpenter.values)
+      || !can(keys(var.kube.karpenter.values))
+      || alltrue([
+        for e in try(tolist(var.kube.karpenter.values.controller.env), []) :
+        !(can(e.value) && can(regex("(?i)(secret|password|passwd|token|credential|api_?key|access_?key|private_?key)", try(e.name, ""))))
+      ])
+    )
+    error_message = "kube.karpenter.values must not carry secrets: a controller.env entry with a literal value named like a password, token, secret, credential or key is refused. Its AWS access is its Pod Identity role; anything else goes in a Secret named in kube.karpenter.values_secret."
+  }
+
+  validation {
+    condition     = !can(var.kube.karpenter.values_secret) || try(var.kube.karpenter.values_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.kube.karpenter.values_secret)), true)
+    error_message = "kube.karpenter.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -1234,9 +1312,10 @@ variable "cluster_network" {
     outputs, never from the client: `api_endpoint`, the API server as EKS
     returns it (https://host) or AKS does (a bare FQDN), for kube-proxy
     replacement; `service_cidr`, the service range, whose `.10` is CoreDNS's
-    address on aws; `pod_cidr`, Cilium's pool on azure, where the VNet holds
-    nodes only. Required wherever the socle installs Cilium, ignored
-    elsewhere.
+    address on aws; `pod_cidr`, where pods take their addresses: on aws the
+    VPC's CIDR (ENI IPAM), outside which Cilium masquerades, on azure
+    Cilium's pool, the VNet holding nodes only. Required wherever the socle
+    installs Cilium, ignored elsewhere.
   EOT
   type = object({
     api_endpoint = string
@@ -1253,6 +1332,11 @@ variable "cluster_network" {
   validation {
     condition     = !(local.cilium_installed && var.cloud == "aws") || try(var.cluster_network.service_cidr != null, false)
     error_message = "cluster_network.service_cidr is required on aws: CoreDNS takes the .10 address of the service range, the one every node's kubelet is told to use."
+  }
+
+  validation {
+    condition     = !(local.cilium_installed && var.cloud == "aws") || try(can(cidrhost(var.cluster_network.pod_cidr, 0)), false)
+    error_message = "cluster_network.pod_cidr is required on aws: the VPC's CIDR, which pods take their addresses from and outside which Cilium masquerades. Pass the foundations' vpc_cidr output (the aws root wires it)."
   }
 
   validation {

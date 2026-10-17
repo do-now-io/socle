@@ -78,6 +78,7 @@ Each in the module's `monitoring/` folder, present only while the module and
 | `crossplane` | 2 | the socle: managed resources not Ready, not Synced |
 | `external_dns` | 2 | the socle: no successful sync for an hour, source or registry errors |
 | `external_secrets` | 2 | the socle: an ExternalSecret not Ready, a store not Ready |
+| `karpenter` | 5 | the socle: an EC2NodeClass or a NodePool not Ready, a NodePool near its limits, EC2 calls failing, pods no NodePool can place |
 | `keda` | 3 | the chart's example (scaler errors), and the socle: ScaledObject and ScaledJob errors |
 | `kyverno` | 3 | the chart's examples: admission latency, policy execution latency |
 | `reloader` | 1 | the socle: a reload that failed |
