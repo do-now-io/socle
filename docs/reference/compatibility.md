@@ -85,3 +85,15 @@ From each `oci/catalog/<module>/resourceset.yaml`. Offered is not proven: CI app
 
 Chart versions in the templates, `cilium.tf`, `eks_addons.tf` and
 `operator_version` move by hand: Renovate does not read them.
+
+What Renovate does with a bump, once its box is ticked on the Dependency
+Dashboard (#62):
+
+- **Patch, minor, digest**: the PR merges by itself through GitHub's own
+  auto-merge, so only once the `protect-main` ruleset is satisfied.
+- **Major**: never by itself. The `needs-design-note` label asks for the
+  module's page to say what changes (#61, M3).
+- **Anything under `oci/` or `opentofu/`** waits three days after its
+  upstream release, and is a `fix(deps)` commit: it ships to clients, so the
+  CHANGELOG shows it. The CI's own tooling, under `.github/`, is
+  `chore(ci)`.

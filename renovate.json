@@ -5,6 +5,7 @@
     ":dependencyDashboard"
   ],
   "dependencyDashboardApproval": true,
+  "semanticCommits": "enabled",
   "timezone": "Europe/Paris",
   "schedule": ["before 6am on monday"],
   "labels": ["dependencies"],
@@ -26,9 +27,34 @@
       "groupName": "docs-site"
     },
     {
-      "description": "Automerge patch, pin and digest updates once required checks pass",
-      "matchUpdateTypes": ["patch", "pin", "pinDigest", "digest"],
-      "automerge": true
+      "description": "Automerge patch, minor, pin and digest updates once the required checks pass — through GitHub's own auto-merge, so the protect-main ruleset decides (#61, M3)",
+      "matchUpdateTypes": ["patch", "minor", "pin", "pinDigest", "digest"],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true
+    },
+    {
+      "description": "A major never merges by itself: it waits for its design note (docs/catalog/<module>.md) and, after 1.0.0, its migration (#61, M3)",
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "addLabels": ["needs-design-note"]
+    },
+    {
+      "description": "What ships in the artifact or the modules waits three days after its upstream release: retracted releases happen",
+      "matchFileNames": ["oci/**", "opentofu/**"],
+      "minimumReleaseAge": "3 days"
+    },
+    {
+      "description": "What ships in the artifact or the modules is a fix(deps): a client reads it in the CHANGELOG, where release-please hides a chore",
+      "matchFileNames": ["oci/**", "opentofu/**"],
+      "semanticCommitType": "fix",
+      "semanticCommitScope": "deps"
+    },
+    {
+      "description": "The CI's own tooling (actions, emulators, linters) is a chore(ci): nothing a client runs changes",
+      "matchFileNames": [".github/**"],
+      "semanticCommitType": "chore",
+      "semanticCommitScope": "ci"
     }
   ]
 }
