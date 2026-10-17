@@ -133,7 +133,9 @@ jobs:
     name: root (${{ matrix.cloud }})
     runs-on: ubuntu-24.04
     needs: discover
-    timeout-minutes: 20
+    # Velero, the longest, took 17 to 20 minutes on a loaded runner and was
+    # cut off in its final destroy (run 39026635301): room, not a target.
+    timeout-minutes: 30
     permissions:
       contents: read
       checks: write
@@ -279,7 +281,9 @@ jobs:
     name: ${{ matrix.module }} (${{ matrix.cloud }})
     runs-on: ubuntu-24.04
     needs: discover
-    timeout-minutes: 20
+    # Velero, the longest, took 17 to 20 minutes on a loaded runner and was
+    # cut off in its final destroy (run 39026635301): room, not a target.
+    timeout-minutes: 30
     permissions:
       contents: read
       checks: write
