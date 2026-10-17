@@ -91,3 +91,15 @@ clouds' patches, the Gateway API commit, the rule and dashboard sources,
 `cilium.tf`, `operator_version`, and the CI tools. A chart's `# appVersion`
 comment is not Renovate's to write: pr-static fails while it is not the
 pinned chart's, and names the value (`.github/scripts/check-app-versions.py`).
+
+What Renovate does with a bump, once its box is ticked on the Dependency
+Dashboard (#62):
+
+- **Patch, minor, digest**: the PR merges by itself through GitHub's own
+  auto-merge, so only once the `protect-main` ruleset is satisfied.
+- **Major**: never by itself. The `needs-design-note` label asks for the
+  module's page to say what changes (#61, M3).
+- **Anything under `oci/` or `opentofu/`** waits three days after its
+  upstream release, and is a `fix(deps)` commit: it ships to clients, so the
+  CHANGELOG shows it. The CI's own tooling, under `.github/`, is
+  `chore(ci)`.
