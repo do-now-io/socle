@@ -77,6 +77,11 @@ jobs:
       - name: Every catalog module has its page, and the dependency graph holds
         run: |
           .github/scripts/check-catalog-pages.sh | tee -a "$GITHUB_STEP_SUMMARY"
+      # #61, M2: a new validation lands with the case that trips it, an output
+      # with an assertion that reads it, a catalog module with its runs.
+      - name: Every validation tripped, every output asserted
+        run: |
+          .github/scripts/check-test-coverage.py | tee -a "$GITHUB_STEP_SUMMARY"
       # The operator refuses a VMRule that does not load: a socle rule that
       # would never fire (docs/catalog/monitoring.md). The version is the one
       # the monitoring module's chart runs.
@@ -116,6 +121,19 @@ jobs:
         # applies: held to the same fmt, validate and tflint as the modules.
         # Not to terraform-docs or tofu test — no client reads or copies them.
         run: tofu fmt -check -diff -recursive opentofu/ .github/e2e/
+      # A provider bump (Renovate's, #61 M3) must come with its lock: a
+      # committed lock that no longer satisfies versions.tf fails here rather
+      # than on a client's first init. Before validate, whose init would
+      # rewrite the lock and hide the drift.
+      - name: Every committed lock file satisfies its versions.tf
+        if: steps.detect.outputs.found == 'true'
+        run: |
+          for lock in $(git ls-files '*.terraform.lock.hcl'); do
+            dir="$(dirname "$lock")"
+            (cd "$dir" && tofu init -backend=false -input=false -lockfile=readonly > /dev/null) \
+              || { echo "::error file=$lock::$lock does not satisfy $dir's required_providers: run tofu init -upgrade there"; exit 1; }
+            echo "lock \`$lock\` ✅" >> "$GITHUB_STEP_SUMMARY"
+          done
       - name: tofu validate (every root module)
         if: steps.detect.outputs.found == 'true'
         run: |
@@ -133,14 +151,21 @@ jobs:
       - name: tofu test (every root module that has tests)
         if: steps.detect.outputs.found == 'true'
         run: |
+          # Every module runs, red or green, and the summary names each failing
+          # run with its assertion's message: OpenTofu has no JUnit output
+          # (opentofu/opentofu#2501), so its JSON is turned into a table.
+          failed=0
           for dir in opentofu/*/ opentofu/clusters/*/; do
             [ -n "$(ls "${dir}"*.tf 2>/dev/null)" ] || continue
             if compgen -G "${dir}tests/*.tftest.hcl" > /dev/null; then
               echo "==> ${dir}"
-              (cd "${dir}" && tofu test)
-              echo "tofu test \`${dir}\` ✅" >> "$GITHUB_STEP_SUMMARY"
+              status=0
+              (cd "${dir}" && tofu test -json-into="$RUNNER_TEMP/tofu-test.json") || status=$?
+              .github/scripts/tofu-test-summary.py "${dir}" "$RUNNER_TEMP/tofu-test.json" >> "$GITHUB_STEP_SUMMARY"
+              [ "$status" = 0 ] || failed=$((failed + 1))
             fi
           done
+          [ "$failed" = 0 ] || { echo "::error::tofu test failed in $failed module(s): see the summary"; exit 1; }
       - name: terraform-docs is current (every module that generates docs)
         if: steps.detect.outputs.found == 'true'
         run: |
