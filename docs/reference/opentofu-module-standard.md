@@ -39,7 +39,18 @@ Every foundations module, and the bootstrap module, passes this checklist.
 ## 4. Tests
 
 - [ ] **Unit: `tofu test`**, no Go: validations, defaults, conditional logic. *Verify:* `tofu test` passes.
-- [ ] **Every `validation` has a test that trips it.** *Verify:* review.
+- [ ] **Every `validation` has a test that trips it**: a run whose `expect_failures` names the variable.
+      *Verify:* `.github/scripts/check-test-coverage.py`, gated in `pr-static.yaml`.
+- [ ] **Every output is read by an assertion** (`output.<name>`). What a plan leaves unknown is
+      asserted in `tests/contract.tftest.hcl`, applied against mocked providers: presence and wiring,
+      never a placeholder's format. *Verify:* the same script.
+- [ ] **A root's tests plan its two modules together**, offline, and prove what it derives
+      (`opentofu/clusters/<cloud>/tests`); a value only an apply knows comes from `override_module`
+      on the foundations. *Verify:* the same script (a root without tests fails it).
+- [ ] **bootstrap: every catalog module names a run** in `tests/defaults.tftest.hcl` and in
+      `tests/validations.tftest.hcl`. *Verify:* the same script.
+- [ ] **A committed lock file satisfies `versions.tf`** (`tofu init -lockfile=readonly`).
+      *Verify:* `pr-static.yaml`.
 - [ ] **Integration: a plan against an emulator** (`integration.yaml`: floci, floci-gcp, floci-az;
       Scaleway offline; Azure `continue-on-error`). *Verify:* green, or the summary says why.
 - [ ] **Convergence: an apply on an emulator's k3s** (`e2e.yaml`), ending in `tofu destroy`; AWS on floci, GCP on floci-gcp (the bootstrap module on a bare cluster: the GCP root's DNS endpoint is not emulated).

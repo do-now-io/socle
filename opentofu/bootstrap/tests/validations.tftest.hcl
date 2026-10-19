@@ -89,6 +89,12 @@ run "kube_refuses_enabled_that_is_not_a_bool" {
   expect_failures = [var.kube]
 }
 
+run "hello_refuses_a_message_that_is_not_a_string" {
+  command = plan
+  variables { kube = { hello = { message = ["hello"] } } }
+  expect_failures = [var.kube]
+}
+
 run "kube_refuses_an_attribute_of_the_wrong_type" {
   command = plan
   variables { kube = { hello = { replicas = "three" } } }

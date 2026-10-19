@@ -33,9 +33,7 @@ metadata:
   name: karpenter-health
   labels:
     phase: health
-    # aws only: no other overlay deploys the module, so elsewhere there is no
-    # ResourceSet to be Ready.
-    cloud: aws
+    cloud: any
     platform: any
 spec:
   description: Off by default, the ResourceSet is Ready and renders nothing.
