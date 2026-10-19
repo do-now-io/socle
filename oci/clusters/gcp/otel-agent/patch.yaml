@@ -55,7 +55,7 @@
           # containerd never writes to — and Autopilot refuses the whole pod
           # for it. So the preset is off here and the one volume it needs,
           # /var/log/pods read-only, is mounted below; its file_log receiver is
-          # written out as chart 0.173.1 writes it. Still no checkpoints:
+          # written out as chart 0.176.0 writes it. Still no checkpoints:
           # nothing is written anywhere.
           presets:
             logsCollection:

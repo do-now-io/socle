@@ -91,7 +91,7 @@ kube = {
       }
     }
 
-    # Any value of the victoria-metrics-k8s-stack chart 0.95.2; yours win.
+    # Any value of the victoria-metrics-k8s-stack chart 0.96.0; yours win.
     # Numeric flags as strings: Helm renders a million as 1e+06.
     values = {
       vmsingle = { spec = { extraArgs = { "storage.maxHourlySeries" = "300000" } } }
@@ -171,10 +171,10 @@ kube = {
 <details>
 <summary>Under the hood</summary>
 
-**Installed**: chart `victoria-metrics-k8s-stack` 0.95.2 from
+**Installed**: chart `victoria-metrics-k8s-stack` 0.96.0 from
 `oci://ghcr.io/victoriametrics/helm-charts`, release `monitoring` in the
 `monitoring` namespace: the VictoriaMetrics operator v0.75.0, and through its
-objects VictoriaMetrics v1.153.0, VictoriaLogs v1.53.0, VictoriaTraces
+objects VictoriaMetrics v1.154.0, VictoriaLogs v1.53.0, VictoriaTraces
 v0.10.0, vmagent, vmalert, Alertmanager v0.34.0, kube-state-metrics 2.20.0,
 node-exporter 1.12.1 and Grafana 13.2.3. Services, in-cluster only, no
 authentication: `vmsingle-monitoring:8428`, `vlsingle-monitoring:9428`,
@@ -203,7 +203,7 @@ applications push over OTLP reads as upstream dashboards expect;
 guard counts one series once per label order (measured, 2026-10-07);
 `-vmalert.proxyURL` with alerting on, so Grafana lists the rules; the
 `cluster` label on every series; the rules' sources pinned to
-kube-prometheus v0.19.0, VictoriaMetrics v1.153.0, operator v0.75.0,
+kube-prometheus v0.19.0, VictoriaMetrics v1.154.0, operator v0.75.0,
 VictoriaLogs v1.53.0 and VictoriaTraces v0.10.0; Alertmanager's
 configuration from `receivers` and `route`, with the Watchdog's route and
 the `null` route for `info` prepended; the operator's CRDs kept on
@@ -220,7 +220,7 @@ Your `values` are merged over these. On gcp, from
 raw.githubusercontent.com and grafana.com.
 
 **Measured** on k3s, 2026-10-12, with the cluster scraped and every part
-on: 211 rules loaded and healthy, 158 of them alerting; 38,000 series on an
+on: 211 rules loaded and healthy (209 since the chart 0.96.0), 158 of them alerting; 38,000 series on an
 empty two-node cluster (55,000 before the kubelet's API server and etcd
 families were dropped); VictoriaMetrics 53m / 355Mi, vmagent 20m / 141Mi,
 vmalert 11m / 59Mi, Grafana 22m / 517Mi with the stack's 40 dashboards.

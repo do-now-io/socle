@@ -83,7 +83,7 @@ spec:
             mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
             operation: copy
           ref:
-            tag: 2.11.0  # appVersion v2.11.0
+            tag: 2.13.0  # appVersion v2.13.0
         ---
         # The socle's defaults. Everything the client may override through values.
         apiVersion: v1

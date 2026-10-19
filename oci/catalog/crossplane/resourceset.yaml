@@ -132,7 +132,7 @@ spec:
           chart:
             spec:
               chart: crossplane
-              version: 2.4.2  # appVersion v2.4.2
+              version: 2.4.2  # appVersion 2.4.2
               sourceRef:
                 kind: HelmRepository
                 name: crossplane-stable

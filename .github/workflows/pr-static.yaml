@@ -49,7 +49,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: reviewdog/action-actionlint@d290e336d5a743810aef4404f757dc862276d2ae # v1.73.4
+      - uses: reviewdog/action-actionlint@419a49378266e892f40c773b4f2fc6de9aa87499 # v1.80.4
         with:
           fail_level: error
       - name: Summary
@@ -87,7 +87,8 @@ jobs:
       # the monitoring module's chart runs.
       - name: Every alerting rule the socle ships loads in vmalert
         env:
-          VMALERT_VERSION: v1.153.0
+          # renovate: datasource=github-releases depName=VictoriaMetrics/VictoriaMetrics
+          VMALERT_VERSION: v1.154.0
         run: |
           base="https://github.com/VictoriaMetrics/VictoriaMetrics/releases/download/${VMALERT_VERSION}"
           curl -sfL "${base}/vmutils-linux-amd64-${VMALERT_VERSION}.tar.gz" | tar xz -C "$RUNNER_TEMP" vmalert-prod
@@ -169,7 +170,7 @@ jobs:
       - name: terraform-docs is current (every module that generates docs)
         if: steps.detect.outputs.found == 'true'
         run: |
-          image=quay.io/terraform-docs/terraform-docs:0.20.0@sha256:37329e2dc2518e7f719a986a3954b10771c3fe000f50f83fd4d98d489df2eae2
+          image=quay.io/terraform-docs/terraform-docs:0.24.0-amd64@sha256:16990b28302390f7c4ae398b371a46762b6b3eb8534e75eeee8185caa8029b8c
           for cfg in opentofu/*/.terraform-docs.yml opentofu/*/examples/*/.terraform-docs.yml opentofu/clusters/*/.terraform-docs.yml; do
             [ -f "${cfg}" ] || continue
             dir="$(dirname "${cfg}")"
@@ -177,7 +178,7 @@ jobs:
             docker run --rm -w /w -v "${PWD}/${dir}:/w" "${image}" markdown . -c .terraform-docs.yml --output-check
             echo "terraform-docs \`${dir}\` ✅" >> "$GITHUB_STEP_SUMMARY"
           done
-      - uses: terraform-linters/setup-tflint@6e1e0642c0289bd619021bf6b34e3c08ed1e005a # v6.3.0
+      - uses: terraform-linters/setup-tflint@6ffdbaa3be476b3431f7275c26966ef32ff60337 # v6.3.2
         if: steps.detect.outputs.found == 'true'
       # `tflint --init` fetches the AWS ruleset from GitHub releases; anonymous
       # calls share one rate limit per runner IP and get 403 on a busy day.
@@ -216,8 +217,9 @@ jobs:
         if: steps.detect.outputs.found == 'true'
         env:
           # The charts job's flux-operator, so the repository runs one.
-          FLUX_OPERATOR_VERSION: 0.60.0
-          FLUX_OPERATOR_SHA256: dd7d504bf02117fc8625ef7e71fe757473a9d69cc1d6369586d0e3ae19e40e01
+          # renovate: datasource=github-releases depName=controlplaneio-fluxcd/flux-operator extractVersion=^v(?<version>.+)$
+          FLUX_OPERATOR_VERSION: 0.61.0
+          FLUX_OPERATOR_SHA256: 5720a6b38e48f950dd97cb06f692695700e0239b28503e1926cc28cf8310145c
           CRD_SCHEMAS_SHA256: c062892eeac621948567464ae7688fcafa75c693bdfb170534cb221a56a194d8
         run: |
           # Both archives to a file first, checked, then unpacked: a pipe into
@@ -242,11 +244,13 @@ jobs:
       - name: Install yq and helm
         if: steps.detect.outputs.found == 'true'
         env:
-          YQ_VERSION: 4.47.2
-          YQ_SHA256: 1bb99e1019e23de33c7e6afc23e93dad72aad6cf2cb03c797f068ea79814ddb0
+          # renovate: datasource=github-releases depName=mikefarah/yq extractVersion=^v(?<version>.+)$
+          YQ_VERSION: 4.54.1
+          YQ_SHA256: 8e34fc298390875de416e6a4afcb8cabeceb25d9aa8506c1a2f9353cf702ea5f
           # The charts job's helm, so the repository runs one.
-          HELM_VERSION: 4.2.4
-          HELM_SHA256: c306b46f719b0a4da32d0f78ee21bf90ce8d602f15b22ab753f0674d1670a7f3
+          # renovate: datasource=github-releases depName=helm/helm extractVersion=^v(?<version>.+)$
+          HELM_VERSION: 4.3.1
+          HELM_SHA256: 0403a88ae20913d11b10a2467b50087721fea7581736da6b9d3992f5357fe54b
         run: |
           # Pinned rather than the runner image's, which move with the image:
           # the child-resource extraction, the CRD schemas and the requests
@@ -260,6 +264,11 @@ jobs:
           echo "${HELM_SHA256}  /tmp/helm.tgz" | sha256sum -c -
           sudo tar xzf /tmp/helm.tgz -C /usr/local/bin --strip-components 1 linux-amd64/helm
           helm version
+      - name: Every appVersion comment is its chart's
+        if: steps.detect.outputs.found == 'true'
+        # Renovate bumps a chart's tag or version, not the `# appVersion`
+        # comment beside it: this names the value the comment should carry.
+        run: python3 .github/scripts/check-app-versions.py
       - name: Render the catalog and the bootstrap envelope
         if: steps.detect.outputs.found == 'true'
         run: |
@@ -367,7 +376,7 @@ jobs:
         if: steps.detect.outputs.found == 'true'
         run: |
           docker run --rm -v "${PWD}/rendered:/work/rendered" -v "${PWD}/schemas:/work/schemas" -w /work \
-            ghcr.io/yannh/kubeconform:v0.7.0@sha256:85dbef6b4b312b99133decc9c6fc9495e9fc5f92293d4ff3b7e1b30f5611823c \
+            ghcr.io/yannh/kubeconform:v0.8.0@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e \
             -strict -summary \
             -schema-location default \
             -schema-location 'schemas/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
@@ -386,7 +395,7 @@ jobs:
           # manifests: skipped here, run by e2e.yaml. A cloud's patch.yaml is a
           # JSON 6902 patch, rendered applied in the step above.
           docker run --rm -v "${PWD}:/work" -w /work \
-            ghcr.io/yannh/kubeconform:v0.7.0@sha256:85dbef6b4b312b99133decc9c6fc9495e9fc5f92293d4ff3b7e1b30f5611823c \
+            ghcr.io/yannh/kubeconform:v0.8.0@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e \
             -strict -summary \
             -schema-location default \
             -schema-location 'schemas/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
@@ -475,14 +484,18 @@ jobs:
     name: Helm charts — schemas, helm-unittest, kubeconform, Kyverno
     runs-on: ubuntu-24.04
     env:
-      HELM_VERSION: 4.2.4
-      HELM_SHA256: c306b46f719b0a4da32d0f78ee21bf90ce8d602f15b22ab753f0674d1670a7f3
+      # renovate: datasource=github-releases depName=helm/helm extractVersion=^v(?<version>.+)$
+      HELM_VERSION: 4.3.1
+      HELM_SHA256: 0403a88ae20913d11b10a2467b50087721fea7581736da6b9d3992f5357fe54b
+      # renovate: datasource=github-releases depName=helm-unittest/helm-unittest extractVersion=^v(?<version>.+)$
       HELM_UNITTEST_VERSION: 1.2.1
       # The version kyverno_policies' engine runs (oci/catalog/kyverno).
+      # renovate: datasource=github-releases depName=kyverno/kyverno extractVersion=^v(?<version>.+)$
       KYVERNO_VERSION: 1.19.1
       KYVERNO_SHA256: b38228f367fc0fdc2b08f4c83ea50ac5f16c60ff8d62d76a66157c33c47b70ae
-      FLUX_OPERATOR_VERSION: 0.60.0
-      FLUX_OPERATOR_SHA256: dd7d504bf02117fc8625ef7e71fe757473a9d69cc1d6369586d0e3ae19e40e01
+      # renovate: datasource=github-releases depName=controlplaneio-fluxcd/flux-operator extractVersion=^v(?<version>.+)$
+      FLUX_OPERATOR_VERSION: 0.61.0
+      FLUX_OPERATOR_SHA256: 5720a6b38e48f950dd97cb06f692695700e0239b28503e1926cc28cf8310145c
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -519,7 +532,7 @@ jobs:
             done
           done
           docker run --rm -v "${PWD}/rendered:/work/rendered" -w /work \
-            ghcr.io/yannh/kubeconform:v0.7.0@sha256:85dbef6b4b312b99133decc9c6fc9495e9fc5f92293d4ff3b7e1b30f5611823c \
+            ghcr.io/yannh/kubeconform:v0.8.0@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e \
             -strict -summary \
             -schema-location default \
             -schema-location \
@@ -574,7 +587,7 @@ jobs:
         with:
           # Pinned above the action's default (v0.70.0), whose GKE adapter
           # panics on a grouped root's null labels (opentofu/clusters/gcp).
-          version: v0.75.0
+          version: v0.76.0
           scan-type: config
           scan-ref: .
           # Ignores for YAML manifests, which take no inline #trivy:ignore.
@@ -584,14 +597,14 @@ jobs:
           exit-code: '0'
       - name: Upload SARIF to code scanning
         if: env.CAN_UPLOAD == 'true'
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           sarif_file: trivy-results.sarif
       - name: Gate on HIGH/CRITICAL (fork PRs only — no code scanning there)
         if: env.CAN_UPLOAD != 'true'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          version: v0.75.0
+          version: v0.76.0
           scan-type: config
           scan-ref: .
           trivyignores: .trivyignore.yaml
@@ -601,7 +614,7 @@ jobs:
       - name: Trivy secret scan (always gates — a leaked secret is never a finding to triage)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          version: v0.75.0
+          version: v0.76.0
           scan-type: fs
           scan-ref: .
           scanners: secret

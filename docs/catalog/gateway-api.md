@@ -35,7 +35,7 @@ Then `kubectl -n gateway-system get gateway` lists `public` and `private`, each 
 | `gateways` | `true` | The two shared Gateways. `false` keeps the CRDs and the class; existing Gateways go with their load balancers. |
 
 The module has no chart, so no `values` and no `values_secret`. The CRDs are
-[Gateway API v1.6.1](https://gateway-api.sigs.k8s.io/).
+[Gateway API v1.6.3](https://gateway-api.sigs.k8s.io/).
 
 ### Every setting
 
@@ -80,8 +80,8 @@ kube = {
 <details>
 <summary>Under the hood</summary>
 
-**Installed**: no chart. Gateway API v1.6.1's `config/crd/standard`, pinned to
-commit `8bb74df`, through `GitRepository/gateway-api` in `flux-system`; then
+**Installed**: no chart. Gateway API v1.6.3's `config/crd/standard`, pinned to
+commit `c083613`, through `GitRepository/gateway-api` in `flux-system`; then
 `GatewayClass/cilium`; then `Gateway/public` and `Gateway/private` in
 `gateway-system` (and on azure and gcp `HTTPRoute/https-redirect`). On gcp
 only the Gateways and the redirect: gcp's patch removes the CRD step,

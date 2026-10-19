@@ -78,7 +78,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
           fetch-tags: true
-      - uses: fluxcd/flux2/action@dd233c4fadef306a62b7893204f8e3817fecc2b2 # v2.9.5
+      - uses: fluxcd/flux2/action@b9c17924adb533d3617ec7de97a7b0f4acc07b39 # v2.9.6
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
       - uses: imjasonh/setup-crane@feee3b6bb0d4c68370f256a4502498c9227e5c6b # v0.7
       - name: Log in to GHCR
@@ -180,7 +180,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d # v2.0.1
+      - uses: oras-project/setup-oras@005458ad77f1c8facd38a094e4af2e69e5607ff4 # v2.0.2
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
       # Only oras can set an artifactType, which is what OpenTofu looks for.
       - name: Log in to GHCR
@@ -286,7 +286,7 @@ jobs:
       sha: ${{ steps.rp.outputs.sha }}
       html_url: ${{ steps.rp.outputs.html_url }}
     steps:
-      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         id: app
         if: vars.RELEASE_APP_ID != ''
         with:
@@ -331,8 +331,9 @@ jobs:
       packages: write
       id-token: write
     env:
-      HELM_VERSION: 4.2.4
-      HELM_SHA256: c306b46f719b0a4da32d0f78ee21bf90ce8d602f15b22ab753f0674d1670a7f3
+      # renovate: datasource=github-releases depName=helm/helm extractVersion=^v(?<version>.+)$
+      HELM_VERSION: 4.3.1
+      HELM_SHA256: 0403a88ae20913d11b10a2467b50087721fea7581736da6b9d3992f5357fe54b
     steps:
       - name: Name the packages after this repository
         run: |

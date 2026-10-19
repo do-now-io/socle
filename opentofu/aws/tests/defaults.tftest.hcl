@@ -41,7 +41,7 @@ variables {
 
   create_vpc = true
 
-  kubernetes_version                   = "1.34"
+  kubernetes_version                   = "1.37"
   cluster_endpoint_public_access_cidrs = ["203.0.113.0/32"]
 }
 

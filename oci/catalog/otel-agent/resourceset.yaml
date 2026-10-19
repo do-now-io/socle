@@ -61,7 +61,7 @@ spec:
             mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
             operation: copy
           ref:
-            tag: 0.173.1  # appVersion 0.160.0
+            tag: 0.176.0  # appVersion 0.162.0
         ---
         # The socle's own chart values, as a document rather than the HelmRelease's
         # spec.values: helm-controller merges valuesFrom in order and then

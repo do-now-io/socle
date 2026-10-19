@@ -8,7 +8,7 @@ aws = {
   environment                          = "dev"
   availability_zones                   = ["eu-west-3a", "eu-west-3b"]
   cluster_endpoint_public_access_cidrs = ["203.0.113.0/32"]
-  kubernetes_version                   = "1.34"
+  kubernetes_version                   = "1.37"
 }
 
 kube = {

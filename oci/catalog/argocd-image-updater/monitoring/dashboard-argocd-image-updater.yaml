@@ -1,4 +1,4 @@
-# From https://raw.githubusercontent.com/argoproj-labs/argocd-image-updater/v1.3.0/config/example-grafana-dashboard.json, as it is: written by .github/scripts/upstream-monitoring.sh,
+# From https://raw.githubusercontent.com/argoproj-labs/argocd-image-updater/v1.3.1/config/example-grafana-dashboard.json, as it is: written by .github/scripts/upstream-monitoring.sh,
 # checked against the source in CI. Do not edit; bump the source.
 apiVersion: v1
 kind: ConfigMap
