@@ -43,8 +43,8 @@
 
 locals {
   # Chart versions.
-  cilium_chart_version  = "1.20.2"
-  coredns_chart_version = "1.47.1"
+  cilium_chart_version  = "1.20.3"
+  coredns_chart_version = "1.49.0"
 
   # The client's surface, and its schema — the same convention as the
   # catalog: the defaults ARE the attribute names a client may set.

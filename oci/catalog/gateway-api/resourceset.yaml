@@ -50,10 +50,10 @@ spec:
           interval: 24h
           url: https://github.com/kubernetes-sigs/gateway-api
           ref:
-            # v1.6.1 — the Gateway API release Cilium 1.20 documents. The commit
+            # v1.6.3 — the Gateway API release Cilium 1.20 documents. The commit
             # is the pin; the branch only keeps the clone to one branch.
             branch: release-1.6
-            commit: 8bb74df00e56ec8f944d48c25e6c1c9c2f6848e3
+            commit: c0836133e24073fcdcdbb1713aba3cc73a89d0b5
           sparseCheckout:
             - config/crd/standard
         ---

@@ -89,7 +89,7 @@ module "socle" {
     cluster_name       = "acme-prod"
     owner              = "platform"
     environment        = "prod"
-    kubernetes_version = "1.34"
+    kubernetes_version = "1.37"
     availability_zones = ["eu-west-3a", "eu-west-3b", "eu-west-3c"]
     cluster_endpoint_public_access_cidrs = ["203.0.113.0/24"]
     gateway_certificate = { domain = "acme.example" }
@@ -122,8 +122,8 @@ The version is the upstream application's, pinned in the module.
 
 | Module | What it does | Version | Default | Clouds | Notes |
 | --- | --- | --- | :---: | --- | --- |
-| [`argocd`](docs/catalog/argocd.md) | GitOps for your applications. Flux runs the socle, and ArgoCD runs your apps | 3.5.3 | on | All | |
-| [`argocd_image_updater`](docs/catalog/argocd-image-updater.md) | New image tags in your registry reach your applications, without a commit | 1.3.0 | off | All | Needs `argocd`; with `repositories`, `crossplane` for its read-only access: an ECR role on AWS, an Artifact Registry reader binding on GCP |
+| [`argocd`](docs/catalog/argocd.md) | GitOps for your applications. Flux runs the socle, and ArgoCD runs your apps | 3.5.5 | on | All | |
+| [`argocd_image_updater`](docs/catalog/argocd-image-updater.md) | New image tags in your registry reach your applications, without a commit | 1.3.1 | off | All | Needs `argocd`; with `repositories`, `crossplane` for its read-only access: an ECR role on AWS, an Artifact Registry reader binding on GCP |
 
 ### Monitoring
 
@@ -131,7 +131,7 @@ The stack's design: [Observability](docs/architecture/observability.md).
 
 | Module | What it does | Version | Default | Clouds | Notes |
 | --- | --- | --- | :---: | --- | --- |
-| [`monitoring`](docs/catalog/monitoring.md) | The stack in one release: metrics, logs and traces storage, the cluster scraped, Grafana, and kube-prometheus-stack's alert rules | 0.95.2 | on | All | Traces and alerting off by default |
+| [`monitoring`](docs/catalog/monitoring.md) | The stack in one release: metrics, logs and traces storage, the cluster scraped, Grafana, and kube-prometheus-stack's alert rules | 0.96.0 | on | All | Traces and alerting off by default |
 | [`otel_agent`](docs/catalog/otel-agent.md) | Node-level OpenTelemetry collector: container logs | 0.160.0 | on | All | Runs while monitoring's logs are on |
 | [`otel_gateway`](docs/catalog/otel-gateway.md) | Cluster-level collector: your applications' OTLP and the Kubernetes events | 0.160.0 | on | All | |
 | [`metrics_server`](docs/catalog/metrics-server.md) | The resource metrics API behind `kubectl top` and CPU or memory autoscaling | 0.9.0 | on | AWS | GKE, AKS and Kapsule ship their own |
@@ -142,15 +142,15 @@ The stack's design: [Observability](docs/architecture/observability.md).
 | --- | --- | --- | :---: | --- | --- |
 | [`kyverno`](docs/catalog/kyverno.md) | The Kyverno admission engine, with no policy | 1.19.1 | off | All | Its webhooks never see the socle's namespaces |
 | [`kyverno_policies`](docs/catalog/kyverno-policies.md) | Pod Security Standards, requests required, no `latest` tag, a registry allow-list, all in Audit; `enforce` makes a policy a native refusal | 1.19.1 | off | All | Needs `kyverno`; judges your applications, never the socle |
-| [`external_secrets`](docs/catalog/external-secrets.md) | Kubernetes Secrets read from the cloud's secret manager, kept in step when they rotate | 2.11.0 | off | All | With `crossplane`: read-only access on a secret-name prefix — its own role on AWS, a conditional binding on GCP — and the `secret-manager` store |
+| [`external_secrets`](docs/catalog/external-secrets.md) | Kubernetes Secrets read from the cloud's secret manager, kept in step when they rotate | 2.13.0 | off | All | With `crossplane`: read-only access on a secret-name prefix — its own role on AWS, a conditional binding on GCP — and the `secret-manager` store |
 | [`reloader`](docs/catalog/reloader.md) | Rolls a workload when a ConfigMap or Secret it reads changes | 1.4.22 | off | All | Opt-in per workload, by annotation |
 
 ### Networking and exposure
 
 | Module | What it does | Version | Default | Clouds | Notes |
 | --- | --- | --- | :---: | --- | --- |
-| [`gateway_api`](docs/catalog/gateway-api.md) | Gateway API CRDs and the shared `public` and `private` Gateways | 1.6.1 | on | All | On GCP the CRDs and the controller are GKE's: the module creates the shared Gateways on Google's load balancers |
-| [`external_dns`](docs/catalog/external-dns.md) | Publishes routes into the cloud's DNS zone | 0.22.0 | off | All | Turned on for you on AWS and GCP once a certificate is set and Crossplane can give it access |
+| [`gateway_api`](docs/catalog/gateway-api.md) | Gateway API CRDs and the shared `public` and `private` Gateways | 1.6.3 | on | All | On GCP the CRDs and the controller are GKE's: the module creates the shared Gateways on Google's load balancers |
+| [`external_dns`](docs/catalog/external-dns.md) | Publishes routes into the cloud's DNS zone | 0.23.0 | off | All | Turned on for you on AWS and GCP once a certificate is set and Crossplane can give it access |
 
 ### Cloud resources
 

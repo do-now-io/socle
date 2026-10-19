@@ -251,7 +251,7 @@ spec:
           chart:
             spec:
               chart: velero
-              version: 12.2.0  # appVersion 1.18.2
+              version: 12.2.1  # appVersion 1.18.2
               sourceRef:
                 kind: HelmRepository
                 name: vmware-tanzu

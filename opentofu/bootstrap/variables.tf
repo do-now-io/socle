@@ -1198,7 +1198,7 @@ variable "cilium" {
 
   # values is free-form on purpose, minus one rule: no private key. A
   # helm_release's values land in the OpenTofu state. These are the chart's
-  # (1.20.2) paths that take key material inline; each has a Secret-by-name
+  # (1.20.3) paths that take key material inline; each has a Secret-by-name
   # alternative: `existingSecret` beside every Hubble TLS block, a `cilium-ca`
   # Secret created before the apply (or `*.tls.auto.method = certmanager`),
   # and clustermesh.config.enabled = false with the client's own
@@ -1478,7 +1478,7 @@ variable "cosign_identity" {
 variable "operator_version" {
   description = "Chart version of flux-operator, which is also the operator's own version. Pinned exactly: the operator is pre-1.0 and its minors are not a stable contract."
   type        = string
-  default     = "0.60.0"
+  default     = "0.61.0"
   nullable    = false
 
   validation {

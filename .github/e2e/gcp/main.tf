@@ -22,7 +22,7 @@
 terraform {
   required_version = ">= 1.13"
   required_providers {
-    google = { source = "hashicorp/google", version = ">= 7.0, < 8.0" }
+    google = { source = "hashicorp/google", version = ">= 8.0, < 9.0" }
     helm   = { source = "hashicorp/helm", version = ">= 3.0, < 4.0" }
     # The bootstrap module declares it for its EKS add-ons, count = 0 here.
     aws = { source = "hashicorp/aws", version = ">= 6.0, < 7.0" }

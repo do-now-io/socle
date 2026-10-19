@@ -36,10 +36,10 @@
 
 locals {
   eks_addon_versions = {
-    pod_identity_agent  = "v1.4.0-eksbuild.2"
-    ebs_csi             = "v1.66.0-eksbuild.1"
-    efs_csi             = "v3.4.2-eksbuild.1"
-    snapshot_controller = "v8.5.0-eksbuild.3"
+    pod_identity_agent  = "v1.4.0-eksbuild.4"
+    ebs_csi             = "v1.67.0-eksbuild.1"
+    efs_csi             = "v3.5.1-eksbuild.1"
+    snapshot_controller = "v8.6.0-eksbuild.10"
   }
 
   # The client's surface, and its schema — the defaults ARE the attribute

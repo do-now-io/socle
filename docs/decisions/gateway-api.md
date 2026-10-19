@@ -15,7 +15,7 @@ else (GATEWAY-API-05). GATEWAY-API-02 supersedes the exposure decisions in [aws]
 **accepted** · 2026-09-24 · [`oci/catalog/gateway-api/resourceset.yaml`](../../oci/catalog/gateway-api/resourceset.yaml), [`oci/catalog/gateway-api/cilium/operator-restart.yaml`](../../oci/catalog/gateway-api/cilium/operator-restart.yaml)
 
 **Decision.** A Flux `GitRepository` on `kubernetes-sigs/gateway-api` pinned
-to v1.6.1 (`8bb74df`), sparse to `config/crd/standard`, applied with
+to v1.6.3 (`c083613`), sparse to `config/crd/standard`, applied with
 `deletionPolicy: Orphan`. Where the socle's Cilium serves Gateway API, a
 second `Kustomization` creates the `cilium` GatewayClass and restarts the
 Cilium operator once.

@@ -47,7 +47,7 @@ kube = {
     gateway       = "private" # the route's shared Gateway: "private", "public" or ""
     ha            = false     # true: redis-ha and two replicas (needs 3 nodes)
 
-    # Any value of the argo-cd chart 10.9.2; yours win over the socle's.
+    # Any value of the argo-cd chart 10.10.5; yours win over the socle's.
     values = {
       configs = {
         cm   = { "timeout.reconciliation" = "300s" }
@@ -81,7 +81,7 @@ kube = {
 <details>
 <summary>Under the hood</summary>
 
-**Installed**: chart `argo-cd` 10.9.2 (ArgoCD v3.5.3) from
+**Installed**: chart `argo-cd` 10.10.5 (ArgoCD v3.5.5) from
 `oci://ghcr.io/argoproj/argo-helm/argo-cd`, in the `argocd` namespace. With a
 `domain`, a `gateway` and the shared Gateways, a child `ResourceSet/argocd-route`
 holds `HTTPRoute/argocd-server`, which waits for its Gateway to be `Accepted`.

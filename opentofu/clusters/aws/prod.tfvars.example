@@ -14,7 +14,7 @@ aws = {
   owner        = "platform"
   environment  = "prod"
   # Kubernetes minor to run; the foundations module has no default for it.
-  kubernetes_version = "1.34"
+  kubernetes_version = "1.37"
   availability_zones = ["eu-west-3a", "eu-west-3b", "eu-west-3c"]
 
   # No good default exists for who may reach the API endpoint.

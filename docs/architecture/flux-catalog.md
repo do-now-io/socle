@@ -31,7 +31,7 @@ and the operator joins them: no client repository, no templating in OpenTofu.
 | 1 | `cilium` | aws, azure | the cluster has no CNI ([Cilium before Flux](cilium-before-flux.md)) |
 | 2 | `coredns` | aws | removing the VPC CNI removed CoreDNS too |
 | 3 | EKS add-ons: Pod Identity Agent, snapshot controller, EBS CSI, EFS CSI (off by default) | aws | the agent must run before any module asks for an identity |
-| 4 | `flux-operator` | every cloud | pinned exactly (`operator_version`, 0.60.0) |
+| 4 | `flux-operator` | every cloud | pinned exactly (`operator_version`, 0.61.0) |
 | 5 | `flux-instance` | every cloud | the controllers, **no `sync` block**, built from the operator's embedded distribution ([SOCLE-33](../decisions/socle.md#socle-33-flux-comes-from-the-operators-embedded-distribution)) |
 | 6 | `socle` | every cloud | the envelope, two objects below |
 

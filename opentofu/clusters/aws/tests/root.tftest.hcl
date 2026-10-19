@@ -44,7 +44,7 @@ variables {
     cluster_name                         = "socle-test"
     owner                                = "platform"
     environment                          = "prod"
-    kubernetes_version                   = "1.34"
+    kubernetes_version                   = "1.37"
     availability_zones                   = ["eu-west-3a", "eu-west-3b"]
     cluster_endpoint_public_access_cidrs = ["203.0.113.0/32"]
   }
@@ -82,7 +82,7 @@ run "the_endpoint_is_the_foundations" {
       cluster_name                         = "socle-test"
       owner                                = "platform"
       environment                          = "prod"
-      kubernetes_version                   = "1.34"
+      kubernetes_version                   = "1.37"
       availability_zones                   = ["eu-west-3a", "eu-west-3b"]
       cluster_endpoint_public_access_cidrs = ["203.0.113.0/32"]
       create_vpc                           = false
@@ -138,7 +138,7 @@ run "the_boundary_is_added_and_the_clients_keys_kept" {
       cluster_name                         = "socle-test"
       owner                                = "platform"
       environment                          = "prod"
-      kubernetes_version                   = "1.34"
+      kubernetes_version                   = "1.37"
       availability_zones                   = ["eu-west-3a", "eu-west-3b"]
       cluster_endpoint_public_access_cidrs = ["203.0.113.0/32"]
       crossplane                           = { allowed_services = ["route53"] }
@@ -174,7 +174,7 @@ run "a_boundary_the_client_wrote_wins" {
       cluster_name                         = "socle-test"
       owner                                = "platform"
       environment                          = "prod"
-      kubernetes_version                   = "1.34"
+      kubernetes_version                   = "1.37"
       availability_zones                   = ["eu-west-3a", "eu-west-3b"]
       cluster_endpoint_public_access_cidrs = ["203.0.113.0/32"]
       crossplane                           = {}
@@ -197,7 +197,7 @@ run "external_dns_follows_the_certificate" {
       cluster_name                         = "socle-test"
       owner                                = "platform"
       environment                          = "prod"
-      kubernetes_version                   = "1.34"
+      kubernetes_version                   = "1.37"
       availability_zones                   = ["eu-west-3a", "eu-west-3b"]
       cluster_endpoint_public_access_cidrs = ["203.0.113.0/32"]
       crossplane                           = { allowed_services = ["route53"] }
@@ -221,7 +221,7 @@ run "external_dns_stays_off_without_route53" {
       cluster_name                         = "socle-test"
       owner                                = "platform"
       environment                          = "prod"
-      kubernetes_version                   = "1.34"
+      kubernetes_version                   = "1.37"
       availability_zones                   = ["eu-west-3a", "eu-west-3b"]
       cluster_endpoint_public_access_cidrs = ["203.0.113.0/32"]
       crossplane                           = { allowed_services = ["sqs"] }

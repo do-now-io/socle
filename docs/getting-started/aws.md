@@ -48,7 +48,7 @@ module "socle" {
     cluster_name       = "acme-prod"
     owner              = "platform"
     environment        = "prod"
-    kubernetes_version = "1.34"
+    kubernetes_version = "1.37"
     availability_zones = ["eu-west-3a", "eu-west-3b"]
 
     # The public IP of the machine that applies, and your admins'.
@@ -63,7 +63,7 @@ output "cluster_name" {
 
 - `socle_version` is the only line an [upgrade](../guides/upgrade.md) touches:
   it moves the module source and the Flux artifact together.
-- `kubernetes_version` has no default: `1.34` is what CI applies; pick a
+- `kubernetes_version` has no default: `1.37` is what CI applies; pick a
   minor in EKS standard support.
 - `availability_zones` takes at least two; each adds a NAT Gateway.
 
