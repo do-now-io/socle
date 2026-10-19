@@ -584,3 +584,30 @@ operator ships. A Flux CVE patch reaches clusters through an operator bump
 and a socle release, not on its own.
 
 **Sources.** flux-operator v0.60.0 `docs/api/v1/fluxinstance.md` (Distribution artifact) · flux-instance chart 0.60.0 `values.yaml` (`instance.distribution.artifact`).
+
+## SOCLE-34: gcp's e2e on floci-gcp, the real root only where the emulator applies it
+
+**accepted** · 2026-10-16 · [`.github/workflows/e2e.yaml`](../../.github/workflows/e2e.yaml), [`.github/e2e/gcp/main.tf`](../../.github/e2e/gcp/main.tf), [`.github/actions/e2e-cluster/action.yaml`](../../.github/actions/e2e-cluster/action.yaml)
+
+**Decision.** gcp gets the e2e aws has, on floci-gcp: one job per module the
+gcp overlay offers and a `root (gcp)` job, on `.github/e2e/gcp`, a GKE
+cluster plus the real bootstrap module. A cloud's `root` job applies the
+real `opentofu/clusters/<cloud>` only where `.github/e2e/<cloud>/floci.tfvars`
+says it applies on the emulator; otherwise it applies the fixture root with
+every module's `health` tests. Every job runs both emulators as service
+containers; the action picks its cloud's by port.
+
+**Context.** floci-gcp 0.11.0 backs a GKE cluster with a real k3s and takes
+any bearer token. The gcp root's helm provider reaches GKE's DNS endpoint
+through `gke-gcloud-auth-plugin` and the system trust store; floci-gcp
+serves `localhost:<port>` behind k3s's own CA, and no Cloud Router, NAT or
+Certificate Manager.
+
+**Consequences.** The gcp overlay renders and converges on every artifact,
+and every module's `cloud: any` tests run on gcp too. Not proven on gcp by
+CI: the foundations' apply (integration and `tofu test` only), Autopilot,
+Workload Identity Federation, the GKE Gateways, Cloud DNS — the
+`platform: gke` tests, run on the sandbox. Renovate reads both emulator
+images; the idle one costs each job a few seconds.
+
+**Sources.** [CONTRIBUTING, Testing](../contributing.md#testing) · #61.

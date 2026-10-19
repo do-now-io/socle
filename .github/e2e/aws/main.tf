@@ -53,14 +53,24 @@ resource "aws_eks_cluster" "e2e" {
   role_arn = "arn:aws:iam::000000000000:role/eks-role"
   vpc_config { subnet_ids = [aws_subnet.e2e.id] }
 }
+# floci 2.1.0 refuses an EKS token after 60 s, while the token says it is
+# good for 14 minutes: client-go keeps it that long, and a helm release that
+# takes longer than a minute got "Unauthorized" mid-install (monitoring and
+# kyverno-policies, runs of 2026-10-16 and 17). The token is the CLI's own;
+# only the expiry it announces is brought to 45 s, so client-go runs the
+# plugin again before floci refuses it. Goes with floci 2.2+, which accepts
+# the token its full 15 minutes (#119).
 provider "helm" {
   kubernetes = {
     host                   = aws_eks_cluster.e2e.endpoint
     cluster_ca_certificate = base64decode(aws_eks_cluster.e2e.certificate_authority[0].data)
     exec = {
       api_version = "client.authentication.k8s.io/v1beta1"
-      command     = "aws"
-      args        = ["eks", "get-token", "--cluster-name", aws_eks_cluster.e2e.name, "--region", "eu-west-3"]
+      command     = "sh"
+      args = ["-c", join(" ", [
+        "aws eks get-token --cluster-name ${aws_eks_cluster.e2e.name} --region eu-west-3",
+        "| jq -c '.status.expirationTimestamp = (now + 45 | todate)'",
+      ])]
     }
   }
 }
