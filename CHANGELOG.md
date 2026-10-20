@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.2.0](https://github.com/do-now-io/socle/compare/0.1.0...0.2.0) (2026-10-20)
+
+
+### Features
+
+* **aws:** the nodes' role as an instance profile, the boundary's one IAM exception, queues and rules for Crossplane ([8314f6b](https://github.com/do-now-io/socle/commit/8314f6b7b8223abc0e5c5033d25aaef30e08a01b))
+* **bootstrap:** a default encrypted gp3 StorageClass on EKS, the EBS CSI driver scoped to its cluster ([437b735](https://github.com/do-now-io/socle/commit/437b73571e0fff738e6d0c3b604222d6dd53bdad)), closes [#95](https://github.com/do-now-io/socle/issues/95)
+* **bootstrap:** argocd_image_updater in the catalog schema, its refusals and their tests ([c166443](https://github.com/do-now-io/socle/commit/c1664437fe646661967f308ef6f220cdc6188ee7))
+* **catalog:** one monitoring module, and each module's own monitoring — kube-prometheus-stack's alerts on victoria-metrics-k8s-stack, awesome-prometheus-alerts' rules and the projects' dashboards per module ([3fde803](https://github.com/do-now-io/socle/commit/3fde80399308374ad508cc46208702f96f244d13))
+* **catalog:** the argocd-image-updater template — its own namespace watching argocd, an ECR role scoped to the repositories named ([0486b0e](https://github.com/do-now-io/socle/commit/0486b0e78f1f9c9b4a73fb584a637ed32d37e9da))
+* **catalog:** the karpenter module — nodes for the workloads on aws, its role and interruption queue through Crossplane ([c31e1a5](https://github.com/do-now-io/socle/commit/c31e1a5d2e0637dae380d782987787578cedf317))
+* **charts:** both values schemas written from one set of definitions — cronjob's, and webapp's unchanged ([b5f05a4](https://github.com/do-now-io/socle/commit/b5f05a4123a6924bdc7d4325b31aabb6c13223b2))
+* **charts:** cronjob's values contract — the schedule and the Job's limits, webapp's shared blocks in the same shape ([9397bae](https://github.com/do-now-io/socle/commit/9397bae887d8f6a661831befcafeaa02afb696ed))
+* **charts:** socle-lib — the pod, the container and the restricted profile written once, with the objects both charts create ([2069353](https://github.com/do-now-io/socle/commit/206935372226b55d375711fae8c1f53d32dc41eb))
+* **charts:** webapp's and cronjob's templates, thin over socle-lib — every helm-unittest suite green, every render valid under kubeconform and the restricted profile ([1a22ab4](https://github.com/do-now-io/socle/commit/1a22ab45ff85d27a1dea4b8799e036dd9faad310))
+* **charts:** webapp's values contract — every key documented, required keys left empty, Kubernetes' own forms copied as is ([a47eecf](https://github.com/do-now-io/socle/commit/a47eecfdb5827dfa1d0d013389a290b3097e5090))
+* **charts:** webapp's values schema — required keys, every key typed, unknown keys refused, the restricted profile not loosenable ([e99cfd1](https://github.com/do-now-io/socle/commit/e99cfd19cc77bdd2eff79972fce7d3e80944cc4c))
+* **karpenter:** a public node pool beside the private one — egress through the Internet Gateway, nothing in from the internet ([7a24b3f](https://github.com/do-now-io/socle/commit/7a24b3fe227c3febaa4ae98bfd7a108f7445af0b))
+* **site:** catalog.json, the graph's after edges per cloud, and the bricks filtered by cloud with the chart each module pins ([8814790](https://github.com/do-now-io/socle/commit/8814790d330f1a503218db84b3f28f03ce9e864d))
+* the socle on GCP — GKE Autopilot at parity with AWS ([8372143](https://github.com/do-now-io/socle/commit/8372143471f1913faa2957974a0fb3ff94b0b9a2))
+
+
+### Bug Fixes
+
+* **aws:** a destroy leaves no log group behind — the flow logs' role cannot recreate its group, the control-plane group outlives EKS's last delivery ([bae9dac](https://github.com/do-now-io/socle/commit/bae9dac8659882b4d542bf9b6c2af2ceb446f1ca)), closes [#98](https://github.com/do-now-io/socle/issues/98)
+* **bootstrap:** Flux built from the operator's embedded distribution, the health check inside Helm's timeout, cosign_identity anchored, owner a label value, flux_version as its message says ([48bc39a](https://github.com/do-now-io/socle/commit/48bc39ab8d65371038990c06ad57123d41986636))
+* **catalog:** argocd-image-updater on the site and in the root job — the Argo mark, no destroyed phase ([84e2478](https://github.com/do-now-io/socle/commit/84e24789c37113cddd080f8918c247b0786ba729))
+* **catalog:** argocd-image-updater passes yamllint — lines under 140, registries.conf quoted as one JMESPath key ([060ac45](https://github.com/do-now-io/socle/commit/060ac45b76eea86b489a7ef3c92b70a8ad98f660))
+* **catalog:** argocd-image-updater's role reads image config blobs — newest-build needs ecr:GetDownloadUrlForLayer ([d273b68](https://github.com/do-now-io/socle/commit/d273b68bab2c73694c4d427e1be55082f5298001))
+* **catalog:** kyverno-policies waits for kyverno's ResourceSet — it requires the engine, so the top-level dependsOn says so ([fb47f9c](https://github.com/do-now-io/socle/commit/fb47f9c2f73092a9bbbcfaf17e651117dfcd5bd5))
+* **catalog:** on aws, a module's workload waits for a pod that has its Pod Identity credentials, not for the association being Ready ([408cd9b](https://github.com/do-now-io/socle/commit/408cd9b09856fb1395cb9c72319fe8666b27e5e9)), closes [#97](https://github.com/do-now-io/socle/issues/97)
+* **catalog:** the Pod Identity check reads an optional &lt;module&gt;-aws Secret, the way round the injection an AWS-compatible endpoint needs ([78ec831](https://github.com/do-now-io/socle/commit/78ec831a14d2e37cbe83498028370b8a8eaa857c)), closes [#97](https://github.com/do-now-io/socle/issues/97)
+* **charts:** the values schemas take a null tag or digest as unset, and the keys Helm adds for the library and globals ([b0cce22](https://github.com/do-now-io/socle/commit/b0cce2244a40f1c3d2581db2757d936a919e3c5e))
+* **karpenter:** its health test runs on aws only, the one cloud that deploys the module ([14ddb4d](https://github.com/do-now-io/socle/commit/14ddb4d4bd7ee9f356d9caeb66ad465f0116b41c))
+* **opentofu:** OpenTofu 1.13 or later everywhere — below it, anonymous tofu init of the public modules gets a 403 from ghcr ([83f0598](https://github.com/do-now-io/socle/commit/83f05988d3c3fa2b981ef39c5543b3255b5e1b98)), closes [#89](https://github.com/do-now-io/socle/issues/89)
+* **site:** the banner names the last release when it predates the site — 0.1.0 was tagged before site/ existed ([0db70e7](https://github.com/do-now-io/socle/commit/0db70e7ed834be606eda59cc541bf3a46d2fa19d))
+
 ## 0.1.0 (2026-10-08)
 
 
