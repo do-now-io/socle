@@ -21,5 +21,9 @@ spec:
         metadata:
           labels:
             {{- include "socle-lib.labels" . | nindent 12 }}
+          {{- with $v.podAnnotations }}
+          annotations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
         spec:
           {{- include "socle-lib.podSpec" (dict "root" . "pod" (printf "restartPolicy: %s" $v.restartPolicy)) | nindent 10 }}

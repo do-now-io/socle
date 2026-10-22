@@ -436,6 +436,23 @@ tests:
       - notExists:
           path: metadata.annotations
 
+  - it: renders no pod annotation by default
+    asserts:
+      - notExists:
+          path: spec.jobTemplate.spec.template.metadata.annotations
+
+  - it: copies the pod annotations onto the Job's pod
+    set:
+      podAnnotations:
+        cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.template.metadata.annotations
+          value:
+            cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
+      - notExists:
+          path: metadata.annotations
+
   # Everything on: the CronJob still holds together.
   - it: renders with every value set
     values:

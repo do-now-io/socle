@@ -123,6 +123,14 @@ definitions = {
         "annotations": {"type": "object", "additionalProperties": {"type": "string"}},
     }),
     "nodeSelector": {"type": "object", "additionalProperties": {"type": "string"}},
+    # Copied as is onto the pods, but for the annotations that would loosen the
+    # restricted profile the pods always run: AppArmor's, which
+    # restrict-apparmor-profiles judges, and the legacy seccomp ones.
+    "podAnnotations": {
+        "type": "object",
+        "propertyNames": {"not": {"pattern": "^(container\\.apparmor\\.security\\.beta\\.kubernetes\\.io|seccomp\\.security\\.alpha\\.kubernetes\\.io)/"}},
+        "additionalProperties": {"type": "string"},
+    },
     "tolerations": arr({"type": "object"}),
     "affinity": {"type": "object"},
     "stringList": arr({"type": "string"}),
@@ -245,6 +253,7 @@ CRONJOB = {
     "backoffLimit": {"type": "integer", "minimum": 0},
     "activeDeadlineSeconds": {"type": "integer", "minimum": 1},
     "restartPolicy": {"enum": ["Never", "OnFailure"]},
+    "podAnnotations": ref("podAnnotations"),
     **SHARED,
 }
 

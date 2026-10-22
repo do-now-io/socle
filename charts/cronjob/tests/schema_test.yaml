@@ -412,3 +412,29 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: "additional properties 'reloader'"
+
+  # podAnnotations never loosen the restricted profile.
+  - it: refuses an AppArmor pod annotation
+    set:
+      podAnnotations:
+        container.apparmor.security.beta.kubernetes.io/main: unconfined
+    asserts:
+      # Helm's validator names the key, not always its path, for propertyNames.
+      - failedTemplate:
+          errorPattern: "invalid propertyName 'container.apparmor"
+
+  - it: refuses a legacy seccomp pod annotation
+    set:
+      podAnnotations:
+        seccomp.security.alpha.kubernetes.io/pod: unconfined
+    asserts:
+      - failedTemplate:
+          errorPattern: "invalid propertyName 'seccomp.security"
+
+  - it: refuses a pod annotation that is not text
+    set:
+      podAnnotations:
+        cluster-autoscaler.kubernetes.io/safe-to-evict: false
+    asserts:
+      - failedTemplate:
+          errorPattern: "/podAnnotations"

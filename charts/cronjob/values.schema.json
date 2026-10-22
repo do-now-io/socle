@@ -55,6 +55,9 @@
         "OnFailure"
       ]
     },
+    "podAnnotations": {
+      "$ref": "#/definitions/podAnnotations"
+    },
     "image": {
       "$ref": "#/definitions/image"
     },
@@ -631,6 +634,17 @@
     },
     "nodeSelector": {
       "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "podAnnotations": {
+      "type": "object",
+      "propertyNames": {
+        "not": {
+          "pattern": "^(container\\.apparmor\\.security\\.beta\\.kubernetes\\.io|seccomp\\.security\\.alpha\\.kubernetes\\.io)/"
+        }
+      },
       "additionalProperties": {
         "type": "string"
       }
