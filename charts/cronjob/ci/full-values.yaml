@@ -79,6 +79,8 @@ externalSecrets:
 persistence:
   - name: data
     size: 1Gi
+podAnnotations:
+  cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
 serviceAccount:
   automountServiceAccountToken: true
   annotations:

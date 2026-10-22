@@ -41,6 +41,7 @@ keys are [webapp](webapp.md#the-values)'s. The task's own:
 | `backoffLimit` | `0` | a failed run is not replayed unless you decide to |
 | `activeDeadlineSeconds` | required | without it, a task that hangs runs forever |
 | `restartPolicy` | `Never` | a failure stays visible, with its pod |
+| `podAnnotations` | `{}` | on every Job's pod; AppArmor and legacy seccomp ones refused |
 
 ## Good to know
 
@@ -51,6 +52,11 @@ keys are [webapp](webapp.md#the-values)'s. The task's own:
   it ([webapp](webapp.md#good-to-know)).
 - **No Reloader**: every run starts a new pod, which reads the ConfigMaps and
   Secrets as they are.
+- **On GKE Autopilot, a long task** asks not to be evicted while the
+  autoscaler packs pods onto fewer nodes:
+  `podAnnotations: { cluster-autoscaler.kubernetes.io/safe-to-evict: "false" }`
+  makes its pod an extended-duration pod, for up to seven days. Not on spot
+  nodes, which stay preemptible.
 - **A disk in `persistence`** is attached by one Job's pod at a time:
   `concurrencyPolicy: Forbid` keeps it so.
 

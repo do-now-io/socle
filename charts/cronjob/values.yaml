@@ -284,6 +284,16 @@ externalSecrets: []
 #     size: 10Gi
 persistence: []
 
+# Annotations on the pod of every Job, copied as is: how some platforms are
+# told how to treat a pod. None by default. The AppArmor and legacy seccomp
+# annotations are refused: they would loosen the restricted profile the pod
+# always runs.
+# Example, GKE Autopilot: a long task the autoscaler must not evict to pack
+# pods onto fewer nodes, an extended-duration pod (up to seven days; not on
+# spot nodes, which stay preemptible).
+#   cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
+podAnnotations: {}
+
 # The application's own ServiceAccount, named <release>: the identity its
 # pods run as, to which rights in the cluster or in the cloud are granted.
 serviceAccount:
