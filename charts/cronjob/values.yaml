@@ -63,6 +63,9 @@ image:
   # Example: my-app
   repository:
   # The version to run: any tag but latest. Refused if digest is set too.
+  # It may carry its digest, <tag>@sha256:<64 hex>, which pins it: what Argo CD
+  # Image Updater's digest strategy writes here. latest stays refused, with a
+  # digest too.
   # Example: 1.0.0
   tag:
   # The image's digest, which pins one exact image: unlike a tag, nobody can

@@ -59,6 +59,38 @@ tests:
       - failedTemplate:
           errorPattern: "/image/tag"
 
+  - it: refuses the latest tag, even with its digest
+    set:
+      image:
+        tag: latest@sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+    asserts:
+      - failedTemplate:
+          errorPattern: "/image/tag"
+
+  - it: refuses a tag whose digest is not sha256
+    set:
+      image:
+        tag: uat@md5:abc
+    asserts:
+      - failedTemplate:
+          errorPattern: "/image/tag"
+
+  - it: refuses a tag whose digest is cut short
+    set:
+      image:
+        tag: uat@sha256:9f86d081884c7d659a2feaa0c55ad015
+    asserts:
+      - failedTemplate:
+          errorPattern: "/image/tag"
+
+  - it: refuses a tag with an empty digest
+    set:
+      image:
+        tag: uat@
+    asserts:
+      - failedTemplate:
+          errorPattern: "/image/tag"
+
   - it: refuses a tag and a digest together
     set:
       image:

@@ -139,6 +139,24 @@ kube = {
         - RespectIgnoreDifferences=true
   ```
 
+- **The `digest` strategy with the socle's charts** follows a tag you push
+  again (`uat`): Image Updater writes `image.tag` as
+  `uat@sha256:<digest>`, which [webapp](../charts/webapp.md) and
+  [cronjob](../charts/cronjob.md) render as is, pinned. Target `image.tag`
+  only, never a `name`: the charts have no `image.name` key and refuse a key
+  they do not know, so the `Application` would stop rendering.
+
+  ```yaml
+  - imageName: 123456789012.dkr.ecr.eu-west-3.amazonaws.com/crm-api:uat
+    commonUpdateSettings:
+      updateStrategy: digest
+    manifestTargets:
+      helm:
+        tag: image.tag
+  ```
+
+  `latest` cannot be followed this way: the charts refuse it, with a digest
+  too.
 - **Overrides outlive the module.** Turned off, an `Application` stays on its
   last override, whatever Git says, until you remove it:
   `argocd app unset crm-api-uat1 --parameter image.tag`.

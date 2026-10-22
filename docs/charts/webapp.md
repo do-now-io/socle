@@ -114,6 +114,14 @@ spec:
 - **A PodDisruptionBudget** renders only from two guaranteed pods
   (`replicas`, or `autoscaling.minReplicas`): with one, it would protect
   nothing or block every node drain.
+- **A tag can carry its digest**: `tag: uat@sha256:<64 hex>` renders
+  `<registry>/<repository>:uat@sha256:…`, which the node pulls by the
+  digest: the tag says which build, the digest pins it. It is what Argo CD
+  Image Updater's `digest` strategy writes in `image.tag`, to follow a tag
+  you push again
+  ([argocd-image-updater](../catalog/argocd-image-updater.md#good-to-know)).
+  `latest` stays refused, with a digest too: follow a tag that names an
+  environment (`uat`) instead.
 - **Per cloud, gcp**: the shared Gateways are on GKE's own classes, so GKE's
   load balancer checks `/` on the serving port, not the pod's probes. An
   application that answers only on another path needs a `HealthCheckPolicy`,
