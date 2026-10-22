@@ -46,6 +46,9 @@ keys are [webapp](webapp.md#the-values)'s. The task's own:
 
 - **Deploy it as webapp**: the same ArgoCD Application, `chart: cronjob`
   ([webapp](webapp.md#deploy-it-with-argocd)).
+- **The image as webapp's**: a `tag` may carry its digest,
+  `uat@sha256:<64 hex>`, as Argo CD Image Updater's `digest` strategy writes
+  it ([webapp](webapp.md#good-to-know)).
 - **No Reloader**: every run starts a new pod, which reads the ConfigMaps and
   Secrets as they are.
 - **A disk in `persistence`** is attached by one Job's pod at a time:

@@ -1,4 +1,8 @@
-{{/* The image, fully qualified: registry/repository:tag, or @digest. */}}
+{{/*
+The image, fully qualified: registry/repository:tag, or @digest. A tag that
+carries its digest (uat@sha256:…) is written as is: the runtime pulls by the
+digest.
+*/}}
 {{- define "socle-lib.image" -}}
 {{- $i := .Values.image -}}
 {{- if $i.tag -}}

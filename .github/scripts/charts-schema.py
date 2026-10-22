@@ -42,8 +42,12 @@ definitions = {
         "repository": {"type": "string",
                        "pattern": "^[a-z0-9]+([._-][a-z0-9]+)*(/[a-z0-9]+([._-][a-z0-9]+)*)*$"},
         # null is unset: a values file can drop the tag another one set, for a digest.
-        "tag": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$",
-                "not": {"const": "latest"}},
+        # A tag may carry its digest, <tag>@sha256:<hex>: what Argo CD Image
+        # Updater's digest strategy writes into image.tag. latest stays refused,
+        # with or without one.
+        "tag": {"type": ["string", "null"],
+                "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}(@sha256:[a-f0-9]{64})?$",
+                "not": {"type": "string", "pattern": "^latest(@|$)"}},
         "digest": {"type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$"},
         "pullPolicy": {"enum": ["Always", "IfNotPresent", "Never"]},
         "imagePullSecrets": arr(obj({"name": {"type": "string", "minLength": 1}}, ["name"])),

@@ -2,7 +2,9 @@
 image:
   registry: ghcr.io/acme
   repository: shop
-  tag: 1.2.3
+  # A tag carrying its digest, as Argo CD Image Updater's digest strategy
+  # writes it.
+  tag: 1.2.3@sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
   pullPolicy: IfNotPresent
   imagePullSecrets:
     - name: regcred

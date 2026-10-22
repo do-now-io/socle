@@ -203,6 +203,16 @@ tests:
           path: spec.template.spec.containers[0].image
           value: ghcr.io/acme/shop@sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
 
+  # What Argo CD Image Updater's digest strategy writes: the tag, pinned.
+  - it: renders a tag that carries its digest as is
+    set:
+      image:
+        tag: uat@sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/acme/shop:uat@sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+
   - it: sets the pull policy and the pull secrets
     set:
       image:
@@ -612,7 +622,7 @@ tests:
           of: Deployment
       - equal:
           path: spec.template.spec.containers[0].image
-          value: ghcr.io/acme/shop:1.2.3
+          value: ghcr.io/acme/shop:1.2.3@sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
       - notExists:
           path: spec.replicas
       - equal:
