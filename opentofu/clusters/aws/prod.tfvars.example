@@ -2,7 +2,7 @@
 #   tofu init && tofu apply -var-file=prod.tfvars
 
 # The only line an upgrade touches.
-socle_version = "0.1.0" # x-release-please-version
+socle_version = "0.2.0" # x-release-please-version
 
 # Only when Flux pulls the artifact from a private mirror: the pull secret
 # created outside OpenTofu (docs/guides/private-registry.md).
