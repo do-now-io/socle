@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/do-now-io/socle/compare/0.2.0...0.2.1) (2026-10-27)
+
+
+### Bug Fixes
+
+* **ci:** cosign logs in to GHCR before signing the charts ([5282dc8](https://github.com/do-now-io/socle/commit/5282dc8929a76890c9a67a11e5977b1733cb25e1))
+
 ## [0.2.0](https://github.com/do-now-io/socle/compare/0.1.0...0.2.0) (2026-10-27)
 
 

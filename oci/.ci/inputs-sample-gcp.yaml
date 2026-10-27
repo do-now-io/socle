@@ -20,7 +20,7 @@
     projectNumber: "320449067541"
   socle:
     url: oci://x/y
-    version: 0.2.0 # x-release-please-version
+    version: 0.2.1 # x-release-please-version
   modules:
     gateway_api:
       enabled: true

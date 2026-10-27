@@ -1,11 +1,11 @@
 apiVersion: v2
 name: webapp
 # Equals VERSION, like socle-lib's.
-version: 0.2.0 # x-release-please-version
+version: 0.2.1 # x-release-please-version
 type: application
 description: >-
   A web application that runs continuously and serves HTTP, deployed with the socle's conventions and compliant with its Kyverno policies.
 dependencies:
   - name: socle-lib
-    version: 0.2.0 # x-release-please-version
+    version: 0.2.1 # x-release-please-version
     repository: file://../socle-lib

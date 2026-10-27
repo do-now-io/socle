@@ -40,7 +40,7 @@ terraform {
 }
 
 locals {
-  socle_version = "0.2.0" # x-release-please-version
+  socle_version = "0.2.1" # x-release-please-version
 }
 
 module "socle" {
@@ -77,7 +77,7 @@ terraform {
 }
 
 locals {
-  socle_version = "0.2.0" # x-release-please-version
+  socle_version = "0.2.1" # x-release-please-version
 }
 
 module "socle" {
