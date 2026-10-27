@@ -2,7 +2,7 @@ apiVersion: v2
 name: socle-lib
 # Equals VERSION: webapp and cronjob depend on this exact version, and bundle
 # it when they are packaged.
-version: 0.2.0 # x-release-please-version
+version: 0.2.1 # x-release-please-version
 type: library
 description: >-
   The blocks webapp and cronjob share, written once: names and labels, the pod
