@@ -355,6 +355,10 @@ jobs:
           echo "${HELM_SHA256}  /tmp/helm.tgz" | sha256sum -c -
           sudo tar xzf /tmp/helm.tgz -C /usr/local/bin --strip-components 1 linux-amd64/helm
           printf '%s' "$TOKEN" | helm registry login "$REGISTRY" -u "$GITHUB_ACTOR" --password-stdin
+          # Helm keeps its login to itself (~/.config/helm/registry); cosign
+          # reads Docker's config, and without it pushes the signature
+          # anonymously: UNAUTHORIZED, after the chart is already pushed.
+          printf '%s' "$TOKEN" | cosign login "$REGISTRY" -u "$GITHUB_ACTOR" --password-stdin
       - name: Package, push, sign and verify each chart
         env:
           RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
