@@ -124,6 +124,7 @@ The version is the upstream application's, pinned in the module.
 | --- | --- | --- | :---: | --- | --- |
 | [`argocd`](docs/catalog/argocd.md) | GitOps for your applications. Flux runs the socle, and ArgoCD runs your apps | 3.5.5 | on | All | |
 | [`argocd_image_updater`](docs/catalog/argocd-image-updater.md) | New image tags in your registry reach your applications, without a commit | 1.3.1 | off | All | Needs `argocd`; with `repositories`, `crossplane` for its read-only access: an ECR role on AWS, an Artifact Registry reader binding on GCP |
+| [`gitops`](docs/catalog/gitops.md) | Flux applies your repository's entry point, your root Applications; ArgoCD reads the repository with the same read-only key | — | off | All | Needs `argocd`; the deploy key in `gitops_ssh_key`, or a public `https://` repository |
 
 ### Monitoring
 

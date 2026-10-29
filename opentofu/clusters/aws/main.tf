@@ -68,6 +68,7 @@ module "socle" {
   owner        = var.aws.owner
 
   kube                 = local.kube
+  gitops_ssh_key       = var.gitops_ssh_key
   region               = var.aws.region
   socle_version        = var.socle_version
   cosign_identity      = var.cosign_identity

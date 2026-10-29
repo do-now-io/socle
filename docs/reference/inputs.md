@@ -28,7 +28,7 @@ Sources: [`catalog.tf`](../../opentofu/bootstrap/catalog.tf) (the schema),
 
 ### The catalog schema
 
-Every module but `gateway_api` and `hello` also takes `values` (`{}`, any
+Every module but `gateway_api`, `gitops` and `hello` also takes `values` (`{}`, any
 chart value, yours winning) and `values_secret` (`""`, a Secret in the
 module's namespace with a `values.yaml` key, merged last); not repeated below.
 An attribute whose default is a block (`monitoring.logs`…) is merged one
@@ -56,6 +56,12 @@ level deep: a key written alone keeps its siblings at their default.
 | `argocd_image_updater` | `enabled` | `false` | Argo CD Image Updater, watching `argocd`; refused while `argocd` is off |
 | `argocd_image_updater` | `repositories` | `[]` | aws: the ECR repositories of the cluster's account and region its own read-only role may read, globs allowed, never `*` alone; needs `ecr` in `aws.crossplane.allowed_services`. gcp: `LOCATION/REPOSITORY` in the cluster's project, read through `roles/artifactregistry.reader` on the whole project, which must be in `gcp.crossplane.allowed_roles`; one registry entry per location named. Both need `crossplane` on. `[]`: no role, no registry entry |
 | `argocd_image_updater` | `registries` | `[]` | the client's other registries, as Image Updater's `registries.conf` writes them, after the socle's ECR or Artifact Registry entries; `credentials` a `secret:`, `pullsecret:`, `env:` or `ext:` reference. `config.registries` is refused in `values` |
+| `gitops` | `enabled` | `false` | Flux applies one path of the client's repository — their ArgoCD Applications — and ArgoCD gets its repository Secret; refused while `argocd` is off |
+| `gitops` | `url` | `""` | `ssh://<user>@<host>/<path>`, read with the bootstrap's `gitops_ssh_key` (a read-only deploy key), or `https://<host>/<path>` for a public repository, with no key; required when enabled |
+| `gitops` | `ref` | `"main"` | a branch, or a full reference (`refs/tags/v1.2.0`) |
+| `gitops` | `path` | `""` | what Flux applies, relative to the repository root, no `..`; empty is the root |
+| `gitops` | `known_hosts` | `""` | the SSH host's keys as `ssh-keyscan` prints them, also given to ArgoCD; empty means GitHub's published keys, refused for another host |
+| `gitops` | `ignore` | `[]` | the client's drift-ignore rules for the path's `Kustomization`, as Flux writes them (`{ paths = [JSON pointers], target = { group, version, kind, name, namespace, labelSelector, annotationSelector } }`), after the socle's own, which keeps the `helm.parameters` of every Application |
 | `monitoring` | `enabled` | `true` | the victoria-metrics-k8s-stack chart as one release: the operator, VictoriaMetrics, vmagent scraping the cluster, kube-state-metrics, node-exporter, and the parts below |
 | `monitoring` | `metrics` | `{ retention = "15d", storage_size = "20Gi" }` | VictoriaMetrics single-node. `retention`: whole hours, days, weeks or years (`15d`, `4w`, `1y`), at least a day; `storage_size`: the claim on the default StorageClass, in `Gi` or `Ti`, `""` for an `emptyDir` |
 | `monitoring` | `logs` | `{ enabled = true, retention = "7d", storage_size = "20Gi" }` | VictoriaLogs single-node, the same shape; off also stops `otel_agent` |

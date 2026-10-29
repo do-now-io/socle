@@ -1,0 +1,8 @@
+# The entry point the gitops module's e2e points Flux at: this repository,
+# over https, at the branch under test (docs/catalog/gitops.md). What a
+# client keeps at their path — here one root Application — applied by the
+# Kustomization gitops once ArgoCD, and so the Application CRD, is Ready.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - application.yaml

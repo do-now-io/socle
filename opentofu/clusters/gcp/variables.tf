@@ -61,6 +61,14 @@ variable "kube" {
   default     = {}
 }
 
+variable "gitops_ssh_key" {
+  description = "The private half of the read-only deploy key on the repository kube.gitops.url names, when that url is ssh://; empty otherwise. Sensitive, and stored in the state: read-only, on that one repository only (docs/catalog/gitops.md)."
+  type        = string
+  default     = ""
+  nullable    = false
+  sensitive   = true
+}
+
 variable "cosign_identity" {
   description = "Override of the signature identity the cluster trusts. Null keeps the bootstrap module's default, the release workflow on main. Set it only on a dev cluster testing a branch build."
   type = object({

@@ -99,6 +99,14 @@ spec:
             # TLS terminates in front of ArgoCD, at the shared Gateway or its
             # load balancer, so the server speaks plain HTTP in-cluster.
             server.insecure: true
+          << if and inputs.modules.gitops.enabled inputs.modules.gitops.known_hosts >>
+          # The SSH host of the gitops module's repository, when it is not
+          # one the chart already knows (GitHub, GitLab, Bitbucket, Azure
+          # DevOps): ArgoCD reads the repository with the same key as Flux,
+          # and must trust the same host keys (docs/catalog/gitops.md).
+          ssh:
+            extraHosts: << inputs.modules.gitops.known_hosts | toJson >>
+          << end >>
         << if inputs.modules.argocd.ha >>
         # HA as the chart documents it without autoscaling: the Redis HA
         # subchart (three sentinels behind haproxy) and two replicas of every

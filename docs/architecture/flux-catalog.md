@@ -33,7 +33,7 @@ and the operator joins them: no client repository, no templating in OpenTofu.
 | 3 | EKS add-ons: Pod Identity Agent, snapshot controller, EBS CSI, EFS CSI (off by default) | aws | the agent must run before any module asks for an identity |
 | 4 | `flux-operator` | every cloud | pinned exactly (`operator_version`, 0.61.0) |
 | 5 | `flux-instance` | every cloud | the controllers, **no `sync` block**, built from the operator's embedded distribution ([SOCLE-33](../decisions/socle.md#socle-33-flux-comes-from-the-operators-embedded-distribution)) |
-| 6 | `socle` | every cloud | the envelope, two objects below |
+| 6 | `socle` | every cloud | the envelope, the objects below |
 
 - **`ResourceSetInputProvider` `flux-system/socle`**: your configuration, as
   OpenTofu validated and normalised it. Every module reads this one provider.
@@ -41,12 +41,17 @@ and the operator joins them: no client repository, no templating in OpenTofu.
   `socle` (URL, tag, optional pull secret, cosign `verify`) and the
   `Kustomization` `socle` on `./clusters/<cloud>`. It is Ready only when
   every module is: that, not a green apply, is convergence.
+- **`Secret` `flux-system/socle-gitops`**, only while `kube.gitops` is on:
+  the read-only deploy key of your repository and its known hosts, which
+  Flux fetches your entry point with and the `gitops` module copies to
+  ArgoCD ([gitops](../catalog/gitops.md)).
 
 <details>
 <summary>Under the hood</summary>
 
 The envelope is a local chart, [`manifests/`](../../opentofu/bootstrap/manifests/),
-whose only Helm expression is `toYaml .Values.inputs`; the `<< >>` delimiters
+whose Helm expressions only carry values through (`toYaml .Values.inputs`,
+and the gitops Secret's fields); the `<< >>` delimiters
 are the operator's. `socle-root` uses `resourcesTemplate`, a raw string,
 because the optional `secretRef` adds or drops a whole key. The `socle`
 Kustomization has `prune: true`, `wait: true` and `deletionPolicy:

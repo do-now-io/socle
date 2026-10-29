@@ -159,6 +159,7 @@ No resources.
 | <a name="input_artifact_pull_secret"></a> [artifact\_pull\_secret](#input\_artifact\_pull\_secret) | Name of an existing dockerconfigjson Secret in flux-system for a private registry. Empty for a public one; the Secret is created outside OpenTofu. | `string` | `""` | no |
 | <a name="input_artifact_url"></a> [artifact\_url](#input\_artifact\_url) | Override of the OCI repository the artifact is pulled from, for a mirror. Null keeps the socle registry. | `string` | `null` | no |
 | <a name="input_cosign_identity"></a> [cosign\_identity](#input\_cosign\_identity) | Override of the signature identity the cluster trusts. Null keeps the bootstrap module's default, the release workflow on main. Set it only on a dev cluster testing a branch build. | <pre>object({<br/>    issuer  = string<br/>    subject = string<br/>  })</pre> | `null` | no |
+| <a name="input_gitops_ssh_key"></a> [gitops\_ssh\_key](#input\_gitops\_ssh\_key) | The private half of the read-only deploy key on the repository kube.gitops.url names, when that url is ssh://; empty otherwise. Sensitive, and stored in the state: read-only, on that one repository only (docs/catalog/gitops.md). | `string` | `""` | no |
 | <a name="input_kube"></a> [kube](#input\_kube) | Catalog modules and their values, as { <module> = { <attribute> = <value> } }. Only what differs from the defaults; validated against the catalog by the bootstrap module. | `any` | `{}` | no |
 
 ## Outputs

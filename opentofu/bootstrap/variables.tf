@@ -459,6 +459,96 @@ variable "kube" {
     error_message = "kube.argocd_image_updater.values_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
   }
 
+  # --- gitops — docs/catalog/gitops.md --------------------------------------
+  # Flux applies the client's Applications, whose CRD is ArgoCD's, and the
+  # repository Secret lives in argocd's namespace: its ResourceSet waits on
+  # argocd's, which would never render them.
+  validation {
+    condition     = !can(keys(var.kube)) || !try(var.kube.gitops.enabled, false) || try(var.kube.argocd.enabled, true)
+    error_message = "kube.gitops needs ArgoCD: set kube.argocd.enabled = true, or turn both off in the same change."
+  }
+
+  validation {
+    condition     = !can(keys(var.kube)) || !try(var.kube.gitops.enabled, false) || try(var.kube.gitops.url != "", false)
+    error_message = "kube.gitops: url must name the repository when the module is enabled, such as ssh://git@github.com/acme/platform."
+  }
+
+  # Flux reads ssh:// and https:// URLs, not the scp-like git@host:org/repo.
+  # An https URL carrying a user or a token would put that credential in the
+  # inputs, in clear: refused, the key goes through gitops_ssh_key.
+  validation {
+    condition = !can(var.kube.gitops.url) || try(
+      var.kube.gitops.url == ""
+      || can(regex("^ssh://[A-Za-z0-9._-]+@[A-Za-z0-9.-]+(:[0-9]+)?/[^@\\s]+$", var.kube.gitops.url))
+      || can(regex("^https://[A-Za-z0-9.-]+(:[0-9]+)?/[^@\\s]+$", var.kube.gitops.url)),
+      true
+    )
+    error_message = "kube.gitops.url must be ssh://<user>@<host>/<path>, such as ssh://git@github.com/acme/platform (not the scp-like git@github.com:acme/platform), or https://<host>/<path> for a public repository, without a user or a token in it."
+  }
+
+  validation {
+    condition = !can(var.kube.gitops.ref) || try(
+      can(regex("^[A-Za-z0-9._/-]+$", var.kube.gitops.ref))
+      && !strcontains(var.kube.gitops.ref, "..")
+      && !startswith(var.kube.gitops.ref, "/")
+      && !endswith(var.kube.gitops.ref, "/")
+      && !endswith(var.kube.gitops.ref, ".lock"),
+      true
+    )
+    error_message = "kube.gitops.ref must be a branch, such as main, or a full reference, such as refs/tags/v1.2.0: letters, digits, '.', '_', '-' and '/'."
+  }
+
+  validation {
+    condition = !can(var.kube.gitops.path) || try(
+      can(regex("^[A-Za-z0-9._/-]*$", var.kube.gitops.path))
+      && !startswith(var.kube.gitops.path, "/")
+      && !contains(split("/", var.kube.gitops.path), ".."),
+      true
+    )
+    error_message = "kube.gitops.path must be relative to the repository root, such as apps/acme-prod, without '..': letters, digits, '.', '_', '-' and '/'. Empty is the root."
+  }
+
+  # GitHub's keys are pinned in main.tf; any other host's the client gives,
+  # as ssh-keyscan prints them. Fetching them at reconcile time would trust
+  # whoever answers first.
+  validation {
+    condition = !can(var.kube.gitops.url) || try(
+      !startswith(var.kube.gitops.url, "ssh://")
+      || try(var.kube.gitops.known_hosts, "") != ""
+      || regex("^ssh://[^@]+@([^/:]+)", var.kube.gitops.url)[0] == "github.com",
+      true
+    )
+    error_message = "kube.gitops.known_hosts is required for an SSH host other than github.com: give the host's keys as ssh-keyscan prints them, one per line."
+  }
+
+  validation {
+    condition = !can(var.kube.gitops.known_hosts) || try(alltrue([
+      for l in split("\n", trimspace(var.kube.gitops.known_hosts)) :
+      can(regex("^\\S+ (ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\\.com|sk-ecdsa-sha2-nistp256@openssh\\.com) [A-Za-z0-9+/]+=*$", trimspace(l)))
+      if trimspace(l) != "" && !startswith(trimspace(l), "#")
+    ]) && (var.kube.gitops.known_hosts == "" || startswith(try(var.kube.gitops.url, ""), "ssh://")), true)
+    error_message = "kube.gitops.known_hosts must hold lines of '<host> <key type> <base64 key>', as ssh-keyscan prints them, and only with an ssh:// url."
+  }
+
+  # Flux's IgnoreRule: paths are RFC 6901 JSON pointers, at least one; the
+  # target selector takes Flux's keys only. A typo in a key would otherwise
+  # be dropped by the CRD's pruning and the rule would match every object.
+  validation {
+    condition = !can(var.kube.gitops.ignore) || try(alltrue([
+      for r in var.kube.gitops.ignore :
+      can(keys(r))
+      && length(setsubtract(keys(r), ["paths", "target"])) == 0
+      && length(r.paths) > 0
+      && alltrue([for x in r.paths : can(regex("^(/([^~/]|~[01])*)+$", x))])
+      && (!contains(keys(r), "target") || (
+        can(keys(r.target))
+        && length(setsubtract(keys(r.target), ["group", "version", "kind", "name", "namespace", "labelSelector", "annotationSelector"])) == 0
+        && alltrue([for v in values(r.target) : can(regex("^.+$", v))])
+      ))
+    ]), false)
+    error_message = "kube.gitops.ignore: each rule is { paths = [JSON pointers such as \"/spec/replicas\"], target = { group, version, kind, name, namespace, labelSelector, annotationSelector } }, with at least one path and string target values; target is optional and matches every object of the path when absent."
+  }
+
   # --- otel_agent — docs/catalog/otel-agent.md -----------------------------
   # values is free-form on purpose, minus one rule: no secret material. The
   # collector takes credentials in its own config — an authenticator
@@ -1438,6 +1528,30 @@ variable "artifact_pull_secret" {
   validation {
     condition     = var.artifact_pull_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$", var.artifact_pull_secret))
     error_message = "artifact_pull_secret must be empty or a valid Kubernetes Secret name (lowercase RFC 1123 subdomain)."
+  }
+}
+
+variable "gitops_ssh_key" {
+  description = "The private half of a read-only deploy key on the repository kube.gitops.url names, when that url is ssh://: Flux fetches the client's entry point with it, and ArgoCD's repository Secret carries it too. Empty otherwise. It goes through the state, which is why it must be read-only and attached to that one repository (docs/decisions/socle.md, SOCLE-36). Its own variable rather than an attribute of kube: kube reaches the plan and the cluster in clear."
+  type        = string
+  default     = ""
+  nullable    = false
+  sensitive   = true
+
+  # The messages never quote the key: a sensitive value is refused there.
+  validation {
+    condition     = var.gitops_ssh_key == "" || can(regex("^-----BEGIN (OPENSSH|RSA|EC) PRIVATE KEY-----\n", trimspace(var.gitops_ssh_key)))
+    error_message = "gitops_ssh_key must be an unencrypted private key in OpenSSH or PEM form, as ssh-keygen -t ed25519 -N '' writes it."
+  }
+
+  validation {
+    condition     = var.gitops_ssh_key != "" || !try(var.kube.gitops.enabled, false) || !startswith(try(var.kube.gitops.url, ""), "ssh://")
+    error_message = "kube.gitops.url is ssh:// but gitops_ssh_key is empty: give the private half of the repository's read-only deploy key."
+  }
+
+  validation {
+    condition     = var.gitops_ssh_key == "" || startswith(try(var.kube.gitops.url, ""), "ssh://")
+    error_message = "gitops_ssh_key is set but kube.gitops.url is not ssh://: an https:// url is read without a key, and a key with no SSH repository would sit in the state for nothing."
   }
 }
 

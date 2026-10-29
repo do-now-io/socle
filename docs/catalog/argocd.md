@@ -73,8 +73,11 @@ kube = {
   the state.
 - **Your `values` win over the attributes**: `server.replicas` over `ha`,
   `configs.cm.url` over `domain`.
-- **The socle ships no Application.** Add yours through ArgoCD, or the
-  chart's `extraObjects`.
+- **The socle ships no Application.** Turn on [gitops](gitops.md): Flux
+  applies your root Applications from your repository, and ArgoCD gets its
+  repository Secret, with no step by hand. Not through the chart's
+  `extraObjects`: on a fresh install the `Application` CRD does not exist
+  yet, and the release fails.
 - **Upgrades**: the chart moves with `socle_version`. A chart major may
   rename keys you set in `values`.
 

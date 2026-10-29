@@ -73,6 +73,18 @@
         config:
           log.level: debug
       values_secret: argocd-image-updater-values
+    gitops:
+      enabled: true
+      url: ssh://git@git.acme.example/platform/infra
+      ref: main
+      path: apps/acme-prod
+      known_hosts: git.acme.example ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+      ignore:
+        - paths: [/spec/replicas]
+          target:
+            group: apps
+            kind: Deployment
+            name: web
     monitoring:
       enabled: true
       metrics:

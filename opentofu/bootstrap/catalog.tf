@@ -139,6 +139,30 @@ locals {
       values        = {}
       values_secret = ""
     }
+    # The client's entry point (docs/catalog/gitops.md): Flux applies path of
+    # the client's repository url at ref — their ArgoCD Applications and
+    # cluster-wide objects — and ArgoCD gets a repository Secret for the same
+    # url, so those Applications read it with no other bootstrap step. Off
+    # by default, and refused while argocd is off. url is ssh://, read with
+    # the deploy key in var.gitops_ssh_key, never here (SOCLE-36), or
+    # https:// for a public repository and no key. ref is a branch, or a
+    # full reference (refs/tags/v1.2.0). path is relative to the repository
+    # root, "" for the root itself. known_hosts is the SSH host's keys, as
+    # ssh-keyscan prints them: empty means GitHub's published keys, pinned
+    # in main.tf, and is refused for any other host. ignore is the client's
+    # own drift-ignore rules for the Kustomization, as Flux writes them
+    # ({ paths = [JSON pointers], target = { group, version, kind, name,
+    # namespace, labelSelector, annotationSelector } }), after the socle's,
+    # which keeps the helm parameters Image Updater writes on every
+    # Application (GITOPS-05). No chart: no values, no values_secret.
+    gitops = {
+      enabled     = false
+      url         = ""
+      ref         = "main"
+      path        = ""
+      known_hosts = ""
+      ignore      = []
+    }
     # The monitoring stack (docs/architecture/observability.md), the
     # official victoria-metrics-k8s-stack chart as one release: the
     # VictoriaMetrics operator, vmagent scraping the cluster (kubelets,

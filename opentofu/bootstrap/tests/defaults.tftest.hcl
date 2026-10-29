@@ -309,6 +309,126 @@ run "external_dns_values_pass_through_and_a_credential_by_reference_is_allowed" 
   }
 }
 
+# --- gitops — docs/catalog/gitops.md ---------------------------------------
+# The key is built with format() so that no private key header sits in the
+# repository for a secret scanner to flag; its body is base64 of "not-a-key".
+
+run "gitops_is_off_by_default_and_the_envelope_carries_no_key" {
+  command = plan
+
+  assert {
+    condition     = output.inputs.modules.gitops.enabled == false && output.inputs.modules.gitops.ref == "main"
+    error_message = "gitops must be off by default, on the main branch once on."
+  }
+  assert {
+    condition     = yamldecode(helm_release.socle.values[0]).gitops.enabled == false
+    error_message = "off, the envelope must render no gitops Secret."
+  }
+  assert {
+    condition     = length(helm_release.socle.set_sensitive) == 0
+    error_message = "off, no key may reach the release."
+  }
+}
+
+run "gitops_on_github_over_ssh_pins_githubs_keys_and_keeps_the_key_out_of_the_inputs" {
+  command = plan
+  variables {
+    kube           = { gitops = { enabled = true, url = "ssh://git@github.com/acme/platform", path = "apps/socle-test" } }
+    gitops_ssh_key = format("-----BEGIN %s-----\nbm90LWEta2V5\n-----END %s-----\n", "OPENSSH PRIVATE KEY", "OPENSSH PRIVATE KEY")
+  }
+
+  assert {
+    condition = (
+      output.inputs.modules.gitops.url == "ssh://git@github.com/acme/platform"
+      && output.inputs.modules.gitops.path == "apps/socle-test"
+      && output.inputs.modules.gitops.known_hosts == ""
+    )
+    error_message = "the module's attributes must reach the inputs as written."
+  }
+  assert {
+    condition     = !strcontains(helm_release.socle.values[0], "PRIVATE KEY") && !strcontains(helm_release.socle.values[0], "bm90LWEta2V5")
+    error_message = "the key must never reach the release's values: they are the inputs, a custom resource in clear, and the plan's diff."
+  }
+  assert {
+    condition = (
+      yamldecode(helm_release.socle.values[0]).gitops.ssh == true
+      && strcontains(yamldecode(helm_release.socle.values[0]).gitops.knownHosts, "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl")
+      && length(split("\n", yamldecode(helm_release.socle.values[0]).gitops.knownHosts)) == 3
+    )
+    error_message = "with no known_hosts, a github.com url must trust GitHub's three published keys."
+  }
+  assert {
+    condition = (
+      length(helm_release.socle.set_sensitive) == 1
+      && one(helm_release.socle.set_sensitive).name == "gitopsSshKey"
+      && base64decode(one(helm_release.socle.set_sensitive).value) == format("-----BEGIN %s-----\nbm90LWEta2V5\n-----END %s-----\n", "OPENSSH PRIVATE KEY", "OPENSSH PRIVATE KEY")
+    )
+    error_message = "the key must reach the envelope through set_sensitive, base64-encoded, and nowhere else."
+  }
+}
+
+run "gitops_on_another_ssh_host_uses_the_clients_known_hosts" {
+  command = plan
+  variables {
+    kube = { gitops = {
+      enabled     = true
+      url         = "ssh://git@gitlab.acme.example:2222/platform/infra"
+      ref         = "refs/tags/v1.4.0"
+      known_hosts = "[gitlab.acme.example]:2222 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
+    } }
+    gitops_ssh_key = format("-----BEGIN %s-----\nbm90LWEta2V5\n-----END %s-----\n", "OPENSSH PRIVATE KEY", "OPENSSH PRIVATE KEY")
+  }
+
+  assert {
+    condition     = yamldecode(helm_release.socle.values[0]).gitops.knownHosts == "[gitlab.acme.example]:2222 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
+    error_message = "the client's known_hosts must replace GitHub's, not add to them."
+  }
+  assert {
+    condition     = output.inputs.modules.gitops.ref == "refs/tags/v1.4.0"
+    error_message = "a full reference must reach the template as written."
+  }
+}
+
+run "gitops_ignore_rules_reach_the_inputs_as_written" {
+  command = plan
+  variables {
+    kube = { gitops = {
+      enabled = true
+      url     = "https://github.com/acme/platform"
+      ignore = [
+        { paths = ["/spec/replicas"], target = { group = "apps", kind = "Deployment", name = "web" } },
+        { paths = ["/metadata/annotations/external-dns.alpha.kubernetes.io~1hostname"] },
+      ]
+    } }
+  }
+
+  assert {
+    condition = (
+      length(output.inputs.modules.gitops.ignore) == 2
+      && output.inputs.modules.gitops.ignore[0].target.name == "web"
+      && output.inputs.modules.gitops.ignore[1].paths[0] == "/metadata/annotations/external-dns.alpha.kubernetes.io~1hostname"
+    )
+    error_message = "the client's ignore rules must reach the template as written, the socle's rule being the template's own."
+  }
+}
+
+run "gitops_on_a_public_https_repository_needs_no_key" {
+  command = plan
+  variables {
+    kube = { gitops = { enabled = true, url = "https://github.com/acme/platform" } }
+  }
+
+  assert {
+    condition = (
+      yamldecode(helm_release.socle.values[0]).gitops.enabled == true
+      && yamldecode(helm_release.socle.values[0]).gitops.ssh == false
+      && yamldecode(helm_release.socle.values[0]).gitops.knownHosts == ""
+      && length(helm_release.socle.set_sensitive) == 0
+    )
+    error_message = "an https:// url must render the Secret with no key and no known_hosts."
+  }
+}
+
 run "keda_is_off_by_default_with_no_cloud_role" {
   command = plan
 

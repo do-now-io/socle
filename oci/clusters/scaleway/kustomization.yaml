@@ -13,6 +13,7 @@ resources:
   - ../../catalog/external-dns/resourceset.yaml
   - ../../catalog/argocd/resourceset.yaml
   - ../../catalog/argocd-image-updater/resourceset.yaml
+  - ../../catalog/gitops/resourceset.yaml
   - ../../catalog/monitoring/resourceset.yaml
   - ../../catalog/otel-agent/resourceset.yaml
   - ../../catalog/otel-gateway/resourceset.yaml

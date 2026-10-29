@@ -1,0 +1,4 @@
+# What the bootstrap passes, at rest: the envelope renders its gitops Secret
+# only when main.tf says the module is on (local.gitops).
+gitops:
+  enabled: false

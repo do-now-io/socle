@@ -48,6 +48,14 @@ variable "kube" {
   default     = {}
 }
 
+variable "gitops_ssh_key" {
+  description = "The private half of the read-only deploy key on the repository kube.gitops.url names, when that url is ssh://; empty otherwise. Sensitive, and stored in the state: read-only, on that one repository only (docs/catalog/gitops.md)."
+  type        = string
+  default     = ""
+  nullable    = false
+  sensitive   = true
+}
+
 variable "cilium" {
   description = "The socle's Cilium, installed before Flux because EKS is created with no CNI: { enabled = true, hubble = false, gateway_api = true, values = {} }, every key optional. values is any Cilium chart value, the client's winning; private keys are refused, name a Secret instead. Validated by the bootstrap module. enabled = false is for a cluster that brings its own CNI and DNS — the e2e test double, never a real EKS."
   type        = any
