@@ -162,6 +162,10 @@ kube = {
   and four of `node.rules`) and its dashboards (`node-exporter-full`, `nodes`,
   `node-rsrc-use`, `node-cluster-rsrc-use`, `nodes-aix`, `nodes-darwin`).
   Autopilot collects the nodes' metrics itself, into Cloud Monitoring.
+- **On gcp, `KubeCPUOvercommit` and `KubeMemoryOvercommit` are off**: they
+  compare the pods' requests with the nodes there are, less the largest;
+  Autopilot sizes nodes to the pods and adds them on demand, so they would
+  fire on a healthy cluster.
 - **Past 300,000 new series in an hour, new series are dropped** with a log
   line, and `RowsRejectedOnIngestion` fires. A fresh GKE Autopilot install
   writes about 57,000 series a scrape on seven nodes, and some 4,000 new ones
@@ -242,7 +246,8 @@ operator's config-reloaders and the chart's hooks included, no limits
 ([MONITORING-13](../decisions/monitoring.md#monitoring-13-requests-on-every-container-disk-included-on-every-cloud)).
 Your `values` are merged over these. On gcp, from
 `oci/clusters/gcp/monitoring/patch.yaml`: node-exporter off with the rules
-and dashboards that read it alone, and the `HealthCheckPolicy` above
+and dashboards that read it alone, the overcommit alerts off, and the
+`HealthCheckPolicy` above
 ([MONITORING-14](../decisions/monitoring.md#monitoring-14-on-gcp-no-node-exporter-and-grafana-health-checked-on-apihealth)).
 
 **Cloud access**: none; the data is on the claims; egress to
