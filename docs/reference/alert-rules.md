@@ -103,4 +103,5 @@ Each in the module's `monitoring/` folder, present only while the module and
 | Upstream alert | Why |
 | --- | --- |
 | `TargetDown` (`general.rules`) | A ratio per job that counts the targets of a node going away until the node is gone: with Autopilot or Karpenter replacing nodes, one dying node after another kept a job past 10 % down. The socle's `socle-targets` replaces it |
+| `KubeCPUOvercommit`, `KubeMemoryOvercommit` (`kubernetes-resources`), on gcp only | Whether the pods' requests survive losing the largest node: GKE Autopilot sizes nodes to the pods and adds them on demand, so both fire on a healthy cluster |
 | `TooManyScrapeErrors` (`vmagent`) | Every failed scrape cluster-wide, a dying node's included, with no label to tell them apart; what it means, `TargetDown` says per job |

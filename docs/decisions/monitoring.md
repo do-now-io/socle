@@ -488,3 +488,27 @@ upstream comes back, and `RecordingRulesNoData` says so.
 (VictoriaMetrics/helm-charts, `hack/sync-job`); kube-prometheus v0.19.0's
 `kubePrometheus-prometheusRule.yaml` and dashboard definitions.
 
+## MONITORING-19: On gcp, no overcommit alert
+
+**accepted** · 2026-10-29 · [`oci/clusters/gcp/monitoring/patch.yaml`](../../oci/clusters/gcp/monitoring/patch.yaml)
+
+**Context.** kube-prometheus' `KubeCPUOvercommit` and `KubeMemoryOvercommit`
+fire when the pods' requests exceed the allocatable of the nodes there
+are, less the largest: the cluster could not reschedule its pods after
+losing a node. Every gcp cluster of the socle is GKE Autopilot, which sizes
+nodes to the pods and adds them on demand: the requests fill what runs, and
+a lost node is replaced. `KubeMemoryOvercommit` went pending on a fresh,
+healthy install (#129).
+
+**Decision.** gcp's cloud values turn both off (`defaultRules.rules`). The
+other clouds keep them: their node groups have a fixed ceiling, which is
+what these alerts guard.
+
+**Consequences.** On gcp, capacity is Autopilot's to provide; a pod that
+cannot be placed shows as `KubePodNotReady` or `KubeContainerWaiting`. A
+cluster that autoscales on another cloud (Karpenter on aws) has the same
+false positive and mutes them with a route of its own.
+
+**Sources.** #129; kube-prometheus v0.19.0 `kubernetes-resources`;
+[Autopilot overview](https://cloud.google.com/kubernetes-engine/docs/concepts/autopilot-overview).
+

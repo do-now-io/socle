@@ -1,5 +1,7 @@
 # The monitoring module on gcp: no node-exporter, which GKE Autopilot refuses,
-# and Grafana health-checked where GKE's load balancer can see it healthy
+# nor the rules and dashboards that read it alone; no overcommit alert, which
+# Autopilot's nodes added on demand make meaningless; and Grafana
+# health-checked where GKE's load balancer can see it healthy
 # (docs/catalog/monitoring.md, Per cloud).
 - op: test
   path: /spec/steps/1/name
@@ -39,6 +41,16 @@
           # rule reads kube-state-metrics and stays. The sync job skips a
           # rule by its record name.
           defaultRules:
+            # Requests against the allocatable of the nodes there are, less
+            # the largest: whether the cluster survives losing a node. On
+            # Autopilot, which every gcp cluster of the socle is, nodes are
+            # sized to the pods and added on demand, so the sum is past it as
+            # soon as the pods fill what runs, and losing a node means another.
+            rules:
+              KubeCPUOvercommit:
+                enabled: false
+              KubeMemoryOvercommit:
+                enabled: false
             groups:
               kube-prometheus-node-recording.rules:
                 enabled: false
