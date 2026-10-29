@@ -6,15 +6,18 @@
 #            shows (monitoring.sh): vmagent scraping each source the stack's
 #            rules read — kube-state-metrics, cAdvisor, the collectors and
 #            Flux by annotation, node-exporter where the cloud runs it
-#            (monitoring-node-exporter) — an application's OTLP
-#            metric and log through the gateway, a container's line and the
-#            Kubernetes events through the agent, and Grafana serving the
-#            stack's datasources and dashboards.
+#            (monitoring-node-exporter) — the kubelet's series without the
+#            node's labels, an annotated pod scraped once whatever its init
+#            containers and sidecars, a pod the cloud manages not at all,
+#            an application's OTLP metric and log through the gateway, a
+#            container's line and the Kubernetes events through the agent,
+#            and Grafana serving the stack's datasources and dashboards.
 #   module   values over the socle, values_secret over both; retention live;
 #            traces on, a span found by its id, off; alerting on, with a
 #            receiver and the watchdog both pointed at podinfo's /echo (the
 #            hello module): every rule loaded and healthy, the socle's VMRules
-#            applied, the Watchdog delivered, a broken VMRule refused alone;
+#            applied, its TargetDown in place of upstream's, the Watchdog
+#            delivered, a broken VMRule refused alone;
 #            logs off takes the agent with them; off garbage-collects all of
 #            it, keeps the CRDs, and leaves the collectors on nop; on again.
 apiVersion: chainsaw.kyverno.io/v1alpha1
@@ -185,6 +188,10 @@ spec:
               eventually 180 has_series 'kube_pod_info{job="kube-state-metrics"}'
               eventually 120 has_series 'container_cpu_usage_seconds_total{job="kubelet", metrics_path="/metrics/cadvisor"}'
               eventually 120 has_series 'kubelet_running_pods{job="kubelet"}'
+              # The kubelet's series carry node, not every label of the node:
+              # GKE's 40 and more made VictoriaMetrics refuse them all.
+              eventually 120 has_series 'up{job="kubelet", metrics_path="/metrics", node!=""}' || exit 1
+              ! has_series 'up{job="kubelet", kubernetes_io_os!=""}' || exit 1
               eventually 120 has_series 'otelcol_process_uptime{job="opentelemetry-collector", namespace="otel-gateway"}'
               eventually 120 has_series 'flux_resource_info{kind="Kustomization"}'
               scrape_targets
@@ -208,6 +215,88 @@ spec:
             tail: 40
         - podLogs:
             namespace: otel-agent
+            tail: 40
+    # The annotated pods' job: a pod with an init container and a sidecar
+    # that declares no port is one target, and vmagent logs no duplicate (on
+    # GKE, anetd and node-local-dns logged one every cycle); a pod the cloud
+    # manages, marked as GKE marks its own, is not scraped at all.
+    - name: an annotated pod is scraped once, a pod the cloud manages not at all
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                name: socle-e2e-scrape
+                namespace: hello
+                annotations:
+                  prometheus.io/scrape: "true"
+                  prometheus.io/port: "9898"
+              spec:
+                terminationGracePeriodSeconds: 1
+                initContainers:
+                  - name: init
+                    image: ghcr.io/stefanprodan/podinfo:6.15.0
+                    command: [sh, -c, "true"]
+                    resources:
+                      requests: {cpu: 10m, memory: 16Mi, ephemeral-storage: 32Mi}
+                containers:
+                  - name: podinfo
+                    image: ghcr.io/stefanprodan/podinfo:6.15.0
+                    ports:
+                      - containerPort: 9898
+                    resources:
+                      requests: {cpu: 10m, memory: 32Mi, ephemeral-storage: 32Mi}
+                  - name: sidecar
+                    image: ghcr.io/stefanprodan/podinfo:6.15.0
+                    command: [sh, -c, "sleep 3600"]
+                    resources:
+                      requests: {cpu: 10m, memory: 16Mi, ephemeral-storage: 32Mi}
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                name: socle-e2e-managed
+                namespace: hello
+                annotations:
+                  prometheus.io/scrape: "true"
+                  prometheus.io/port: "9898"
+                  components.gke.io/component-name: socle-e2e
+              spec:
+                terminationGracePeriodSeconds: 1
+                containers:
+                  - name: podinfo
+                    image: ghcr.io/stefanprodan/podinfo:6.15.0
+                    ports:
+                      - containerPort: 9898
+                    resources:
+                      requests: {cpu: 10m, memory: 32Mi, ephemeral-storage: 32Mi}
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                name: socle-e2e-managed
+                namespace: hello
+              status:
+                phase: Running
+        - script:
+            content: |
+              . ./monitoring.sh
+              eventually 120 scraped_once hello socle-e2e-scrape || exit 1
+              not_scraped hello socle-e2e-managed || exit 1
+              n="$(vmagent_errors scraper.go)"
+              echo "vmagent errors from its scraper: $n"
+              [ "$n" = 0 ]
+      catch:
+        - describe:
+            apiVersion: v1
+            kind: Pod
+            namespace: hello
+        - podLogs:
+            namespace: monitoring
+            selector: app.kubernetes.io/name=vmagent
             tail: 40
     # What a person opening Grafana sees: the stack's datasources, the
     # stack's dashboards, and a collected metric through its proxy.
@@ -444,7 +533,7 @@ spec:
                 template:
                   spec:
                     (containers[?name == 'vmsingle'] | [0].args || `[]`):
-                      (contains(@, '-storage.maxHourlySeries=100000')): true
+                      (contains(@, '-storage.maxHourlySeries=300000')): true
       catch:
         - describe:
             apiVersion: helm.toolkit.fluxcd.io/v2
@@ -834,8 +923,14 @@ spec:
               eventually 180 has_group kubernetes-apps
               eventually 60 has_group kube-state-metrics
               eventually 60 has_group socle-flux
+              eventually 60 has_group socle-targets
               eventually 60 has_group opentelemetry-collector
               echo "rule groups: $(rule_groups | tr '\n' ' ')"
+              # The socle's node-aware TargetDown replaces upstream's, and
+              # TooManyScrapeErrors is off.
+              echo "TargetDown in: $(alert_groups TargetDown)"
+              [ "$(alert_groups TargetDown)" = socle-targets ] || exit 1
+              [ -z "$(alert_groups TooManyScrapeErrors)" ] || exit 1
               eventually 180 rules_healthy 150
               eventually 120 firing Watchdog
               eventually 180 delivered

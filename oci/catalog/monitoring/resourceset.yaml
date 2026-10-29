@@ -158,9 +158,14 @@ spec:
                   opentelemetry.usePrometheusNaming: "true"
                   # The cardinality guard: past this many new series in an hour,
                   # new series are dropped with a log line instead of filling
-                  # memory and disk. A string: Helm renders a number from a
-                  # million up as 1e+06, which the flag refuses.
-                  storage.maxHourlySeries: "100000"
+                  # memory and disk. 300 000: a fresh GKE Autopilot install
+                  # writes about 57 000 series a scrape and replaces its nodes
+                  # every few minutes while it settles, each new node about
+                  # 4 000 new series — past 100 000 within the hour (measured,
+                  # docs/decisions/monitoring.md, MONITORING-16). A string:
+                  # Helm renders a number from a million up as 1e+06, which the
+                  # flag refuses.
+                  storage.maxHourlySeries: "300000"
                   # The guard counts a series by its labels in the order they
                   # arrive; sorted first, a series counts once (measured,
                   # docs/catalog/monitoring.md).
@@ -198,6 +203,18 @@ spec:
                 # clusters in one on-call tell where they come from.
                 externalLabels:
                   cluster: << inputs.cluster.name | quote >>
+                extraArgs:
+                  # A pod whose containers yield the same target after the
+                  # relabelling below is scraped once all the same; vmagent
+                  # logs every other one as an error, every cycle, and
+                  # TooManyErrorLogs fires. The labels carry the namespace and
+                  # the pod, so a duplicate can only be the same pod again.
+                  promscrape.suppressDuplicateScrapeTargetErrors: "true"
+                  # A failed scrape is up == 0 and the target's last error on
+                  # /targets already; logged too, every node Autopilot or
+                  # Karpenter takes away is a burst of warnings, and TooManyLogs
+                  # fires. TargetDown says it, node-aware (rules/targets.yaml).
+                  promscrape.suppressScrapeErrors: "true"
                 # Every running pod annotated prometheus.io/scrape: "true", on the
                 # port and path its annotations name: how Cilium, Flux and the
                 # collectors expose their metrics when no ServiceMonitor exists.
@@ -212,12 +229,27 @@ spec:
                       - source_labels: [__meta_kubernetes_pod_phase]
                         action: drop
                         regex: Pending|Succeeded|Failed|Unknown
+                      # Not the pods the cloud manages: theirs to watch, and not
+                      # always reachable. GKE marks its own with this annotation
+                      # (kube-dns, whose annotated port refuses connections on
+                      # Autopilot; anetd and node-local-dns on the host network,
+                      # gone with every node Autopilot replaces). Measured on
+                      # a fresh Autopilot install: a permanent TargetDown, and 9 400
+                      # samples a scrape, new series with every node.
+                      - source_labels: [__meta_kubernetes_pod_annotation_components_gke_io_component_name]
+                        action: drop
+                        regex: .+
+                      # An init container serves nothing once the pod runs.
+                      - source_labels: [__meta_kubernetes_pod_container_init]
+                        action: drop
+                        regex: "true"
                       # One target per pod: discovery yields one per declared
-                      # container port, and once rewritten to the annotated port
-                      # they are identical — vmagent logs each duplicate as an
-                      # error, every cycle (TooManyErrorLogs, measured on
-                      # socle-dev). So the annotated port must be one the pod
-                      # declares, when it declares any.
+                      # container port, and one per container that declares
+                      # none; once rewritten to the annotated port they are
+                      # identical. So the annotated port must be one the pod
+                      # declares, when it declares any; a pod with sidecars that
+                      # declare none still yields them, scraped once (the flag
+                      # above).
                       - action: keep_if_equal
                         if: '{__meta_kubernetes_pod_container_port_number!="", __meta_kubernetes_pod_annotation_prometheus_io_port!=""}'
                         source_labels: [__meta_kubernetes_pod_container_port_number, __meta_kubernetes_pod_annotation_prometheus_io_port]
@@ -289,8 +321,61 @@ spec:
               vmScrapes:
                 resources:
                   enabled: false
+                # cAdvisor, less what kube-prometheus-stack drops by default
+                # (its kubelet.serviceMonitor.cAdvisorMetricRelabelings, chart 92.14.1):
+                # per-container figures no rule or dashboard reads, network
+                # counters of the CNI's own interfaces, and cgroups that are no
+                # pod. Half of each node's series (measured on GKE Autopilot,
+                # 4 750 to 2 277). The list replaces vmScrape's below for this
+                # scrape, so it ends with the same label drops; the cgroup drop
+                # reads id, so it comes before them.
+                cadvisor:
+                  spec:
+                    metricRelabelConfigs:
+                      - action: drop
+                        source_labels: [__name__]
+                        regex: container_cpu_(cfs_throttled_seconds_total|load_average_10s|system_seconds_total|user_seconds_total)
+                      - action: drop
+                        source_labels: [__name__]
+                        regex: container_fs_(io_current|io_time_seconds_total|io_time_weighted_seconds_total|reads_merged_total)
+                      - action: drop
+                        source_labels: [__name__]
+                        regex: container_fs_(sector_reads_total|sector_writes_total|writes_merged_total)
+                      - action: drop
+                        source_labels: [__name__]
+                        regex: container_memory_mapped_file
+                      - action: drop
+                        source_labels: [__name__]
+                        regex: container_(file_descriptors|tasks_state|threads_max)
+                      - action: drop
+                        source_labels: [__name__, scope]
+                        regex: container_memory_failures_total;hierarchy
+                      - action: drop
+                        source_labels: [__name__, interface]
+                        regex: container_network_.*;(cali|cilium|cni|lxc|nodelocaldns|tunl).*
+                      - action: drop
+                        source_labels: [__name__]
+                        regex: container_spec.*
+                      - action: drop
+                        source_labels: [id, pod]
+                        regex: .+;
+                      - action: labeldrop
+                        regex: (uid)
+                      - action: labeldrop
+                        regex: (id|name)
               vmScrape:
                 spec:
+                  # The chart's, without its labelmap of every node label onto
+                  # every series: GKE puts 40 and more on a node, VictoriaMetrics
+                  # refuses a series past 40 labels, and no kubelet or cAdvisor
+                  # series was stored — KubeletDown, critical, on a healthy
+                  # cluster (measured on GKE Autopilot). The operator adds
+                  # node itself, which is what the rules join on.
+                  relabelConfigs:
+                    - sourceLabels: [__metrics_path__]
+                      targetLabel: metrics_path
+                    - targetLabel: job
+                      replacement: kubelet
                   metricRelabelConfigs:
                     - action: labeldrop
                       regex: (uid)
@@ -546,6 +631,17 @@ spec:
                   url: https://raw.githubusercontent.com/VictoriaMetrics/VictoriaTraces/v0.10.0/deployment/docker/rules/alerts-health.yml
               groups:
                 kube-apiserver-availability.rules:
+                  enabled: false
+              # Replaced by the socle's rules/targets.yaml: TargetDown there
+              # leaves out the targets of a node going away, which this one
+              # counts until the node is gone — and Autopilot or Karpenter
+              # replace nodes all day. TooManyScrapeErrors counts every failed
+              # scrape cluster-wide, a dying node's included, with no label
+              # to tell them apart: what it means is TargetDown's.
+              rules:
+                TargetDown:
+                  enabled: false
+                TooManyScrapeErrors:
                   enabled: false
             # The dashboards, the stack's own, fetched by the same job as
             # ConfigMaps Grafana's sidecar loads.

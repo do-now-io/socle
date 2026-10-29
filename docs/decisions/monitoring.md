@@ -138,7 +138,7 @@ VictoriaMetrics v1.153.0.
 
 ## MONITORING-06: A cardinality guard of 100 000 new series an hour, labels sorted
 
-**accepted** · 2026-10-12 · [`oci/catalog/monitoring/resourceset.yaml`](../../oci/catalog/monitoring/resourceset.yaml)
+**superseded by [MONITORING-16](#monitoring-16-a-cardinality-guard-of-300-000-new-series-an-hour)** · 2026-10-12, superseded 2026-10-29 · [`oci/catalog/monitoring/resourceset.yaml`](../../oci/catalog/monitoring/resourceset.yaml)
 
 **Decision.** `-storage.maxHourlySeries=100000` with `-sortLabels`,
 overridable through `values`. Restates VICTORIA-METRICS-03 of 0.1.
@@ -366,3 +366,95 @@ check](https://cloud.google.com/kubernetes-engine/docs/how-to/configure-gateway-
 the chart 0.95.2's `defaultRules` and `defaultDashboards`, keyed on
 `prometheus-node-exporter.enabled`; Grafana's 502 behind the GKE Gateway,
 sandbox, PR #84.
+
+## MONITORING-15: What the platform runs is not scraped, and a node's labels stay on the node
+
+**accepted** · 2026-10-29 · [`oci/catalog/monitoring/resourceset.yaml`](../../oci/catalog/monitoring/resourceset.yaml)
+
+**Context.** A fresh 0.2.1 install on GKE Autopilot
+(#129) fired warnings and a critical alert on a healthy cluster. The
+`kubernetes-pods` job scraped GKE's own pods: kube-dns, annotated on a port
+that refuses connections on Autopilot (a permanent `TargetDown`); anetd and
+node-local-dns on the host network, gone with every node Autopilot replaces,
+and whose portless sidecars and init containers each yielded the same
+target, which vmagent logged as an error every cycle (`TooManyErrorLogs`).
+They wrote 9,400 of the install's 91,000 samples a scrape, as new series
+with every node. The chart's kubelet scrape maps
+every node label onto every kubelet and cAdvisor series; GKE puts 40 and
+more on a node, VictoriaMetrics refuses a series past 40 labels, and not one
+was stored: `KubeletDown`, critical, and `RowsRejectedOnIngestion`.
+
+**Decision.** The `kubernetes-pods` job drops the pods GKE marks as its own
+(`components.gke.io/component-name`) and every init container; vmagent runs
+with `-promscrape.suppressDuplicateScrapeTargetErrors`, since a pod's
+portless sidecars still yield its one target again, and with
+`-promscrape.suppressScrapeErrors`, since a failed scrape is already
+`up == 0` and its error on `/targets`. The kubelet scrapes carry
+`metrics_path`, `job` and the operator's `node`, not the node's labels. The
+cAdvisor scrape drops what kube-prometheus-stack drops by default. The rule
+is written once, in the catalog, rather than in gcp's patch: the job is one
+string, which a cloud's values could only replace whole, and the
+annotation is GKE's alone, so it drops nothing elsewhere.
+
+**Consequences.** Nothing GKE manages appears in VictoriaMetrics; a client
+who wants one writes a `VMPodScrape`. No dashboard or rule of the stack
+reads a node label off a kubelet series: they join on `node`. cAdvisor's
+series per node halve (4,750 to 2,277 measured on Autopilot).
+
+**Sources.** #129; a fresh GKE Autopilot install, 2026-10-29: vmagent's
+targets and logs, vmsingle's `vm_rows_ignored_total` (3.1 million rows
+`too_many_labels`), the discovered labels of every annotated pod replayed
+through the new relabelling (no duplicate, the same 13 pods outside
+`kube-system`); kube-prometheus-stack 92.14.1's
+`kubelet.serviceMonitor.cAdvisorMetricRelabelings`; VictoriaMetrics
+v1.154.0's vmagent flags.
+
+## MONITORING-16: A cardinality guard of 300 000 new series an hour
+
+**accepted** · 2026-10-29 · [`oci/catalog/monitoring/resourceset.yaml`](../../oci/catalog/monitoring/resourceset.yaml)
+
+**Decision.** `-storage.maxHourlySeries=300000`, with `-sortLabels` as
+before, overridable through `values`.
+
+**Context.** On a fresh Autopilot install vmsingle hit 100 000 within the
+hour and dropped new series (`hourly_limit_exceeded`, 439,000 rows an
+hour): Autopilot created and removed 13 nodes in the first 40 minutes,
+each new node about 4,000 new kubelet and cAdvisor series, on top of some
+57,000 a scrape once MONITORING-15 leaves out what nothing reads.
+
+**Consequences.** Three times the steady state of that install, still a
+guard against a label explosion rather than a budget. The stack's rules
+alert as it nears.
+
+**Sources.** a fresh GKE Autopilot install, 2026-10-29: vmagent's samples per target,
+vmsingle's TSDB status.
+
+## MONITORING-17: A target on a node going away is not down
+
+**accepted** · 2026-10-29 · [`oci/catalog/monitoring/rules/targets.yaml`](../../oci/catalog/monitoring/rules/targets.yaml), [`oci/catalog/monitoring/resourceset.yaml`](../../oci/catalog/monitoring/resourceset.yaml)
+
+**Context.** kube-prometheus' `TargetDown` is a ratio of down targets per
+job, over 10 % for 10 minutes. A node Autopilot or Karpenter removes is
+cordoned, then its kubelet and host-network pods time out until it is
+deleted, and its pods are listed a little longer still. Each target was
+down 2.5 to 3 minutes, but with a node leaving every few minutes a job
+stayed past 10 %. `TooManyScrapeErrors` counts every failed scrape
+cluster-wide, with no label to tell a dying node's from a real failure.
+
+**Decision.** Upstream's `TargetDown` and `TooManyScrapeErrors` are off
+(`defaultRules.rules`). The socle's `TargetDown`, group `socle-targets`,
+is upstream's with the same threshold, `for` and annotations, less the
+targets whose node is cordoned, not `Ready`, or no longer known to
+kube-state-metrics; targets with no node label count as upstream counts
+them.
+
+**Consequences.** A node rotation pages no one; a target down on a healthy
+node does, as before. Replayed over four hours of a fresh Autopilot install, the
+host-network targets of dying nodes were down 132 times at 30-second
+steps, and the socle's expression counts none of them. A real failure that
+cordons its node first is missed by this rule; the node's own alerts
+(`KubeNodeNotReady`, `KubeNodeUnreachable`) still cover it.
+
+**Sources.** kube-prometheus v0.19.0 `general.rules`; a fresh GKE Autopilot install,
+2026-10-29: `up` of anetd and node-local-dns against kube-state-metrics'
+node series.

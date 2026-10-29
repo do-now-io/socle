@@ -81,7 +81,7 @@ StorageClass.
 <summary>Under the hood</summary>
 
 The operator creates each backend's Deployment and claim. VictoriaMetrics
-caps new series per hour (`-storage.maxHourlySeries`, 100 000) and keeps
+caps new series per hour (`-storage.maxHourlySeries`, 300 000) and keeps
 Prometheus metric names for OTLP (`-opentelemetry.usePrometheusNaming`).
 
 </details>

@@ -26,7 +26,7 @@ kube = {
     }
   }
   # The same for the monitoring stack, each on a key the socle itself sets:
-  # a flag of VictoriaMetrics (-storage.maxHourlySeries, 100000 in the
+  # a flag of VictoriaMetrics (-storage.maxHourlySeries, 300000 in the
   # socle's document) and a memory request of each collector, Grafana and
   # VictoriaLogs. Applied here as a client would; proven on the fixture root
   # by each module's tests/e2e, through a patch of the same inputs.
