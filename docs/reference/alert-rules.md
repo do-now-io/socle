@@ -36,7 +36,7 @@ kube-state-metrics, node-exporter, the kubelets and cAdvisor.
 | `node-network` | 1 | a network interface flapping |
 | `kube-state-metrics` | 4 | kube-state-metrics' own list and watch errors, shards |
 | `alertmanager.rules` | 9 | Alertmanager failing to reload or to send |
-| `general.rules` | 3 | `Watchdog`, `InfoInhibitor`, `TargetDown` |
+| `general.rules` | 2 | `Watchdog`, `InfoInhibitor`; its `TargetDown` is replaced by the socle's |
 
 Recording rules feed them and Grafana's dashboards: `k8s.rules.*`,
 `node-exporter.rules`, `node.rules`, `kubelet.rules`,
@@ -53,7 +53,7 @@ VictoriaTraces v0.10.0, for the stack itself.
 | --- | --- | --- |
 | `vmsingle` | 11 | disk running out, churn, slow inserts, the series guard |
 | `vm-health` | 12 | restarts, errors, too many logs, memory |
-| `vmagent` | 16 | scrape and remote-write failures, dropped samples |
+| `vmagent` | 15 | remote-write failures, dropped samples; `TooManyScrapeErrors` off |
 | `vmalert` | 12 | rules failing to evaluate or to reload, notifications failing |
 | `vmoperator` | 3 | the operator's reconcile errors |
 | VictoriaLogs' groups | | with `logs` on: VictoriaLogs' health and ingestion |
@@ -67,6 +67,7 @@ metric, checked with `vmalert -dryRun` in CI.
 | Group | Alerts | Ships in | Watches |
 | --- | --- | --- | --- |
 | `socle-flux` | 4 | `oci/catalog/monitoring/rules/flux.yaml` | Kustomizations, HelmReleases and sources not `Ready`, from awesome-prometheus-alerts; catalog modules (ResourceSets) not `Ready` |
+| `socle-targets` | 1 | `oci/catalog/monitoring/rules/targets.yaml` | `TargetDown`, kube-prometheus' less the targets of a node that is cordoned, not `Ready` or already deleted |
 | `opentelemetry-collector` | 13 | `oci/catalog/otel-gateway/rules/opentelemetry-collector.yaml` | both collectors down, out of memory, refusing or failing to send, their queues full; awesome-prometheus-alerts as written |
 
 ## The modules'
@@ -95,3 +96,8 @@ Each in the module's `monitoring/` folder, present only while the module and
 | `kube-apiserver-availability.rules` | Recording rules over the API server's metrics, which are not scraped |
 | `prometheus`, `prometheus-operator`, `config-reloaders` | No Prometheus, no prometheus-operator |
 | `windows` | No Windows nodes |
+
+| Upstream alert | Why |
+| --- | --- |
+| `TargetDown` (`general.rules`) | A ratio per job that counts the targets of a node going away until the node is gone: with Autopilot or Karpenter replacing nodes, one dying node after another kept a job past 10 % down. The socle's `socle-targets` replaces it |
+| `TooManyScrapeErrors` (`vmagent`) | Every failed scrape cluster-wide, a dying node's included, with no label to tell them apart; what it means, `TargetDown` says per job |

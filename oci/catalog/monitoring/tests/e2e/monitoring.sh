@@ -31,6 +31,35 @@ import sys, json
 r = json.load(sys.stdin)["data"]["result"]
 print("scraped jobs: " + " ".join(sorted("%s=%s" % (m["metric"].get("job", "?"), m["value"][1]) for m in r)))'
 }
+vmagent() { kubectl get --raw "$(proxy vmagent-monitoring:8429)$1"; }
+# pod_targets <namespace> <pod>: the active targets vmagent scrapes for the
+# pod, as "<count> <how many up>", each printed for the record.
+pod_targets() {
+  vmagent '/api/v1/targets?state=active' | python3 -c '
+import sys, json
+ts = [t for t in json.load(sys.stdin)["data"]["activeTargets"]
+      if t["labels"].get("namespace") == sys.argv[1] and t["labels"].get("pod") == sys.argv[2]]
+print("%s/%s: %s" % (sys.argv[1], sys.argv[2], " ".join(t["scrapeUrl"] + "=" + t["health"] for t in ts) or "not scraped"), file=sys.stderr)
+print(len(ts), sum(t["health"] == "up" for t in ts))' "$1" "$2"
+}
+scraped_once() { [ "$(pod_targets "$1" "$2")" = "1 1" ]; }
+not_scraped() { [ "$(pod_targets "$1" "$2")" = "0 0" ]; }
+# vmagent_errors <file>: how many errors vmagent logged from that source file
+# of its scraper since it started.
+vmagent_errors() {
+  vmagent /metrics | python3 -c '
+import sys
+n = sum(float(l.rsplit(None, 1)[1]) for l in sys.stdin
+        if l.startswith("vm_log_messages_total{") and "level=\"error\"" in l
+        and "location=\"VictoriaMetrics/lib/promscrape/" + sys.argv[1] + ":" in l)
+print(int(n))' "$1"
+}
+# alert_groups <alertname>: the rule groups that hold an alert of that name.
+alert_groups() {
+  vmalert /api/v1/rules | python3 -c '
+import sys, json
+print(" ".join(sorted(g["name"] for g in json.load(sys.stdin)["data"]["groups"] if any(r["name"] == sys.argv[1] for r in g["rules"]))))' "$1"
+}
 # post_otlp_metric <name> <value>: one gauge point, a minute old so an instant
 # query sees it past -search.latencyOffset, as OTLP/JSON to the gateway, from
 # podinfo's own curl (the hello module): the API server's service proxy sends

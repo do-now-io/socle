@@ -1,0 +1,47 @@
+# kube-prometheus' TargetDown (general.rules, v0.19.0), its threshold, its
+# for and its annotations, with one change: a target on a node that is
+# cordoned, not Ready, or already deleted is not counted down. Autopilot and
+# Karpenter replace nodes all day; a node going away is cordoned, then its
+# kubelet and its host-network pods stop answering until the node is deleted,
+# and its pods are listed a little longer still. Upstream's rule, a ratio per
+# job, saw one such node after another as a job 14 % down for longer than its
+# 10 minutes (measured on a fresh GKE Autopilot install: 13 nodes in 40
+# minutes, each target down 2.5 to 3 minutes; over 4 hours this expression
+# counts none of them). A target with no node label, a Service's, is counted
+# as upstream does. The upstream rule is turned off in the chart's values
+# (defaultRules.rules.TargetDown), and with it TooManyScrapeErrors, which
+# counts the same failures cluster-wide.
+# Checked in CI with vmalert -dryRun (.github/scripts/check-rules.sh).
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: targets
+spec:
+  groups:
+    - name: socle-targets
+      rules:
+        - alert: TargetDown
+          expr: >-
+            100 * (
+              count by (cluster, job, namespace, service) (
+                up == 0
+                unless on (cluster, node) (
+                  kube_node_spec_unschedulable{job="kube-state-metrics"} == 1
+                  or on (cluster, node)
+                  kube_node_status_condition{job="kube-state-metrics", condition="Ready", status="true"} == 0
+                )
+                unless on (cluster, node) (
+                  up{node!=""} unless on (cluster, node) kube_node_info{job="kube-state-metrics"}
+                )
+              )
+              / count by (cluster, job, namespace, service) (up)
+            ) > 10
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            description: >-
+              {{ printf "%.4g" $value }}% of the {{ $labels.job }}/{{ $labels.service }}
+              targets in {{ $labels.namespace }} namespace are down.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/general/targetdown
+            summary: One or more targets are unreachable.

@@ -94,7 +94,7 @@ kube = {
     # Any value of the victoria-metrics-k8s-stack chart 0.96.0; yours win.
     # Numeric flags as strings: Helm renders a million as 1e+06.
     values = {
-      vmsingle = { spec = { extraArgs = { "storage.maxHourlySeries" = "300000" } } }
+      vmsingle = { spec = { extraArgs = { "storage.maxHourlySeries" = "1000000" } } }
       grafana  = { persistence = { enabled = true, size = "5Gi" } }
     }
 
@@ -119,6 +119,10 @@ kube = {
 - **Write your own rules as `VMRule`s**, in any namespace: vmalert reads them
   all. One that does not parse is refused when you apply it, and the others
   keep firing.
+- **Create `receivers_secret` before turning alerting on.** Alertmanager
+  does not start without it, and until it exists the VictoriaMetrics
+  operator retries every minute and a half: `ReconcileErrors` and
+  `LogErrors` fire, delivered once Alertmanager is up.
 - **Point the watchdog at a dead man's switch** (Healthchecks.io, your
   on-call platform's heartbeat) that tolerates about 10 minutes between
   pings. If the stack or its node dies, the pings stop and the service
@@ -132,7 +136,19 @@ kube = {
   `prometheus.io/port`, `path` and `scheme` saying where; its `job` is the
   pod's `app.kubernetes.io/name`, else its `app` label, else `kubernetes-pods`. A pod that declares container ports must
   declare the annotated one: it is scraped once, on that port, and not at
-  all if the port is missing.
+  all if the port is missing. Init containers are never scraped.
+- **The pods the cloud manages are not scraped**, annotated or not: GKE's,
+  which carry `components.gke.io/component-name` (kube-dns, anetd,
+  node-local-dns), are Google's to watch, and on Autopilot some refuse
+  vmagent or leave with every node it replaces. Scrape one yourself with a
+  `VMPodScrape` if you need it.
+- **A target on a node going away is not down.** Autopilot and Karpenter
+  replace nodes all day; the socle's `TargetDown` leaves out the targets of
+  a node that is cordoned, not `Ready` or already deleted, and upstream's
+  `TooManyScrapeErrors`, which cannot tell them apart, is off
+  ([alert rules](../reference/alert-rules.md)). A failed scrape is not
+  logged either: it is `up == 0`, and its last error is on vmagent's
+  `/targets` page.
 - **`storage_size` grows, never shrinks**, and only where the StorageClass
   allows expansion. To or from `""` replaces the volume: the data is lost.
   With `""` the data lives in an `emptyDir`, and VictoriaMetrics, VictoriaLogs
@@ -143,8 +159,10 @@ kube = {
 - **On gcp there is no node-exporter**: GKE Autopilot refuses its host
   network, host PID and `hostPath`, so its rules and its dashboard are off
   too. Autopilot collects the nodes' metrics itself, into Cloud Monitoring.
-- **Past 100,000 new series in an hour, new series are dropped** with a log
-  line. Raise `storage.maxHourlySeries` under `vmsingle.spec.extraArgs` in
+- **Past 300,000 new series in an hour, new series are dropped** with a log
+  line, and `RowsRejectedOnIngestion` fires. A fresh GKE Autopilot install
+  writes about 57,000 series a scrape on seven nodes, and some 4,000 new ones
+  with each node it adds, which it does every few minutes while it settles. Raise `storage.maxHourlySeries` under `vmsingle.spec.extraArgs` in
   `values` if you need to.
 - **Log in to Grafana as `admin`** with the chart's random password:
   `kubectl -n monitoring get secret grafana -o jsonpath='{.data.admin-password}' | base64 -d`.
@@ -190,17 +208,25 @@ to `/login`.
 
 **What vmagent scrapes**, every 30 s: the kubelets and their cAdvisor,
 kube-state-metrics, node-exporter (not on gcp), the stack itself, and every annotated pod
-(the collectors, Flux, Cilium). Not the control plane: the cloud's, its
+(the collectors, Flux, Cilium) but those the cloud manages. Not the control plane: the cloud's, its
 rule groups off. The kubelet's API server and etcd families are dropped at
 the scrape (on k3s they ride the kubelet's endpoint). Not the kubelet's
-`/metrics/resource`: cAdvisor's figures again, which nothing reads. Nothing
+`/metrics/resource`: cAdvisor's figures again, which nothing reads. Of
+cAdvisor, what kube-prometheus-stack drops by default: per-container
+figures nothing reads, the CNI's interfaces, cgroups that are no pod. The
+kubelet's and cAdvisor's series carry `node`, not the node's labels: GKE
+puts more than 40 on a node, past what VictoriaMetrics stores. Nothing
 is collected twice: the OpenTelemetry collectors push no metric of the
 cluster's, and their own telemetry is scraped once, here.
 
 **What the socle sets**: `-opentelemetry.usePrometheusNaming`, so what
 applications push over OTLP reads as upstream dashboards expect;
-`-storage.maxHourlySeries=100000` with `-sortLabels`, without which the
+`-storage.maxHourlySeries=300000` with `-sortLabels`, without which the
 guard counts one series once per label order (measured, 2026-10-07);
+vmagent's `-promscrape.suppressDuplicateScrapeTargetErrors` and
+`-promscrape.suppressScrapeErrors`;
+the socle's `TargetDown` in place of upstream's, and `TooManyScrapeErrors`
+off;
 `-vmalert.proxyURL` with alerting on, so Grafana lists the rules; the
 `cluster` label on every series; the rules' sources pinned to
 kube-prometheus v0.19.0, VictoriaMetrics v1.154.0, operator v0.75.0,
@@ -224,5 +250,9 @@ on: 211 rules loaded and healthy (209 since the chart 0.96.0), 158 of them alert
 empty two-node cluster (55,000 before the kubelet's API server and etcd
 families were dropped); VictoriaMetrics 53m / 355Mi, vmagent 20m / 141Mi,
 vmalert 11m / 59Mi, Grafana 22m / 517Mi with the stack's 40 dashboards.
+On GKE Autopilot, 2026-10-29, a fresh install on seven nodes: 91,000
+samples a scrape, about 57,000 once GKE's pods, the node labels and
+cAdvisor's unread figures are left out; 13 nodes created and removed in its
+first 40 minutes.
 
 </details>
