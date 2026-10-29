@@ -42,7 +42,10 @@ Recording rules feed them and Grafana's dashboards: `k8s.rules.*`,
 `node-exporter.rules`, `node.rules`, `kubelet.rules`,
 `kube-prometheus-node-recording.rules`. The chart turns
 `kube-prometheus-general.rules` (`count:up1`, `count:up0`) off since 0.96.0;
-no dashboard reads them.
+no dashboard reads them. On gcp, which runs no node-exporter,
+`kube-prometheus-node-recording.rules` and the four `node.rules` that read
+it are off too: they would record nothing, and `RecordingRulesNoData` would
+fire for each.
 
 ## From VictoriaMetrics
 

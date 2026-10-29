@@ -411,6 +411,30 @@ spec:
               metadata:
                 name: monitoring-prometheus-node-exporter
                 namespace: monitoring
+        # Nor what reads node-exporter alone: its recording rules, which
+        # would record nothing and fire RecordingRulesNoData, and its
+        # dashboards, which would stay empty.
+        - error:
+            resource:
+              apiVersion: operator.victoriametrics.com/v1beta1
+              kind: VMRule
+              metadata:
+                name: monitoring-rule-kube-prometheus-node-recording-rules
+                namespace: monitoring
+        - error:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: monitoring-dashboard-nodes
+                namespace: monitoring
+        - error:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: monitoring-dashboard-node-rsrc-use
+                namespace: monitoring
       catch:
         - describe:
             apiVersion: helm.toolkit.fluxcd.io/v2

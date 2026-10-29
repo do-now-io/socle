@@ -32,6 +32,40 @@
           # Monitoring, not into this VictoriaMetrics.
           prometheus-node-exporter:
             enabled: false
+          # What the chart leaves on although it reads node-exporter alone:
+          # recording rules of the kubernetes source, which then record
+          # nothing, and RecordingRulesNoData fires for each, for good. A whole
+          # group, and four rules of node.rules, whose node_namespace_pod
+          # rule reads kube-state-metrics and stays. The sync job skips a
+          # rule by its record name.
+          defaultRules:
+            groups:
+              kube-prometheus-node-recording.rules:
+                enabled: false
+              node.rules:
+                rules:
+                  node:node_num_cpu:sum:
+                    enabled: false
+                  :node_memory_MemAvailable_bytes:sum:
+                    enabled: false
+                  node:node_cpu_utilization:ratio_rate5m:
+                    enabled: false
+                  cluster:node_cpu:ratio_rate5m:
+                    enabled: false
+          # And kube-prometheus' dashboards drawn from node-exporter alone,
+          # which would stay empty: the nodes' USE method, and the per-OS ones.
+          defaultDashboards:
+            dashboards:
+              nodes:
+                enabled: false
+              node-rsrc-use:
+                enabled: false
+              node-cluster-rsrc-use:
+                enabled: false
+              nodes-aix:
+                enabled: false
+              nodes-darwin:
+                enabled: false
 - op: add
   path: /spec/steps/-
   value:
