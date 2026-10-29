@@ -458,3 +458,33 @@ cordons its node first is missed by this rule; the node's own alerts
 **Sources.** kube-prometheus v0.19.0 `general.rules`; a fresh GKE Autopilot install,
 2026-10-29: `up` of anetd and node-local-dns against kube-state-metrics'
 node series.
+
+## MONITORING-18: On gcp, no rule or dashboard that reads node-exporter alone
+
+**accepted** · 2026-10-29 · [`oci/clusters/gcp/monitoring/patch.yaml`](../../oci/clusters/gcp/monitoring/patch.yaml)
+
+**Context.** [MONITORING-14](#monitoring-14-on-gcp-no-node-exporter-and-grafana-health-checked-on-apihealth)
+turns node-exporter off on gcp, and the chart follows with node-exporter's
+own rule groups and its `node-exporter-full` dashboard. It does not with the
+recording rules of the `kubernetes` source built on node-exporter's
+metrics: `kube-prometheus-node-recording.rules` and four rules of
+`node.rules`. On GKE Autopilot they recorded nothing, and vmalert's
+`RecordingRulesNoData` fired for each of them, for good (#129). Nor with
+kube-prometheus' node dashboards, which stayed empty.
+
+**Decision.** gcp's cloud values turn off
+`kube-prometheus-node-recording.rules`, the four node-exporter rules of
+`node.rules` by their record names, and the dashboards `nodes`,
+`node-rsrc-use`, `node-cluster-rsrc-use`, `nodes-aix` and `nodes-darwin`.
+`node.rules` itself stays: its `node_namespace_pod:kube_pod_info:` reads
+kube-state-metrics, and other rules join on it.
+
+**Consequences.** No recording rule without data on gcp, nothing in
+Grafana that can only be empty. The chart's sync job skips a rule by its
+alert or record name and a dashboard by its file name; a rule renamed
+upstream comes back, and `RecordingRulesNoData` says so.
+
+**Sources.** #129; the sync job's `rules.go` and `dashboards.go`
+(VictoriaMetrics/helm-charts, `hack/sync-job`); kube-prometheus v0.19.0's
+`kubePrometheus-prometheusRule.yaml` and dashboard definitions.
+
