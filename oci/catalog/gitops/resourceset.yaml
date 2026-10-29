@@ -1,0 +1,131 @@
+# The gitops module: the client's entry point. Flux lays the base up to it;
+# ArgoCD ships what it declares (docs/decisions/socle.md, SOCLE-36).
+# docs/catalog/gitops.md is the module's page, docs/decisions/gitops.md its
+# decisions; the rules of docs/reference/catalog-module-standard.md apply:
+# inputsFrom the one provider, the reconcile toggle on EACH resource, values
+# tested never presence.
+#
+# Three objects, the same on every cloud:
+# - the GitRepository gitops on kube.gitops.url at ref, authenticated with
+#   flux-system/socle-gitops — the Secret the bootstrap's envelope renders
+#   from gitops_ssh_key, never an input (GITOPS-01);
+# - the Kustomization gitops on path, prune on, deletionPolicy Orphan:
+#   removing an object from the path deletes it, turning the module off
+#   deletes nothing of the client's (GITOPS-02);
+# - ArgoCD's repository Secret for the same url, a copy of socle-gitops
+#   (copyFrom replaces its whole data, hence the ArgoCD keys in the source),
+#   so the client's Applications read their repository with no other step.
+#
+# No namespace of its own: the source and the Kustomization are Flux's, in
+# flux-system; the repository Secret is ArgoCD's, in argocd. No chart, so no
+# values, no values_secret.
+#
+# The dependsOn on argocd's ResourceSet: the path holds Applications, whose
+# CRD the argo-cd chart installs, and argocd is the namespace of the
+# repository Secret. OpenTofu refuses gitops on with argocd off.
+#
+# wait: false. The ResourceSet is Ready once its three objects are applied;
+# whether the client's repository is reachable and its path applies is the
+# Kustomization gitops's own status, not the socle's: a typo in the client's
+# repository must not turn socle-root red (GITOPS-03).
+apiVersion: fluxcd.controlplane.io/v1
+kind: ResourceSet
+metadata:
+  name: gitops
+  namespace: flux-system
+spec:
+  inputsFrom:
+    - apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSetInputProvider
+      name: socle
+  dependsOn:
+    - apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSet
+      name: argocd
+      namespace: flux-system
+      ready: true
+  wait: false
+  resourcesTemplate: |
+    << $g := inputs.modules.gitops ->>
+    # ArgoCD reads a repository's credentials from any Secret of its
+    # namespace labelled secret-type repository whose url matches the
+    # Application's repoURL. The operator fills its data from socle-gitops
+    # on every reconciliation, and at once on a change (the source is
+    # watched). A disabled object is dropped before the copy: off, the
+    # missing source is never read.
+    apiVersion: v1
+    kind: Secret
+    metadata:
+      name: socle-gitops-repository
+      namespace: argocd
+      labels:
+        argocd.argoproj.io/secret-type: repository
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if $g.enabled >>enabled<< else >>disabled<< end >>
+        fluxcd.controlplane.io/copyFrom: flux-system/socle-gitops
+    type: Opaque
+    ---
+    apiVersion: source.toolkit.fluxcd.io/v1
+    kind: GitRepository
+    metadata:
+      name: gitops
+      namespace: flux-system
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if $g.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 1m
+      timeout: 60s
+      url: << $g.url | quote >>
+      # ref.name takes a full reference; a bare branch is refs/heads/<ref>.
+      ref:
+        name: << if hasPrefix "refs/" $g.ref >><< $g.ref | quote >><< else >><< printf "refs/heads/%s" $g.ref | quote >><< end >>
+      secretRef:
+        name: socle-gitops
+    ---
+    apiVersion: kustomize.toolkit.fluxcd.io/v1
+    kind: Kustomization
+    metadata:
+      name: gitops
+      namespace: flux-system
+      annotations:
+        fluxcd.controlplane.io/reconcile: << if $g.enabled >>enabled<< else >>disabled<< end >>
+    spec:
+      interval: 10m
+      retryInterval: 1m
+      timeout: 5m
+      sourceRef:
+        kind: GitRepository
+        name: gitops
+      path: << printf "./%s" $g.path | quote >>
+      # An object removed from the path leaves the cluster: an Application
+      # removed goes, and ArgoCD's finalizer on it, when the client set one,
+      # deletes what it deployed.
+      prune: true
+      # Turning the module off, or the socle's uninstall, deletes this
+      # Kustomization; Orphan keeps what it applied. With prune's default
+      # (MirrorPrune) it would delete every Application of the path, and
+      # with their finalizers every workload of the client.
+      deletionPolicy: Orphan
+      # ArgoCD Image Updater's write-back argocd writes helm.parameters of
+      # the Applications this path holds (GITOPS-05). spec.sources is an
+      # atomic list in the Application CRD: without this rule Flux
+      # re-applies it whole and erases those parameters at every
+      # reconciliation. An ignored path is left out of drift detection and,
+      # Flux being its only Apply manager, adopted from the cluster into the
+      # payload, so the rest of the sources keeps following Git. Pointers
+      # take no wildcard: sources 0 to 4, each a no-op where absent on both
+      # sides. The client's own rules, kube.gitops.ignore, follow.
+      ignore:
+        - paths:
+            - /spec/source/helm/parameters
+            - /spec/sources/0/helm/parameters
+            - /spec/sources/1/helm/parameters
+            - /spec/sources/2/helm/parameters
+            - /spec/sources/3/helm/parameters
+            - /spec/sources/4/helm/parameters
+          target:
+            group: argoproj.io
+            kind: Application
+        << range $g.ignore >>
+        - << toJson . >>
+        << end >>

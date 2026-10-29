@@ -35,3 +35,12 @@ inputs:
     shared: true
     namespace: gateway-system
     certificateArn: arn:aws:acm:eu-west-3:123456789012:certificate/00000000-0000-0000-0000-000000000000
+# The gitops Secret's ssh branch (templates/gitops.yaml), rendered in CI: a
+# known_hosts line and a key placeholder that is no key — base64 of
+# "not-a-key", which is what gitopsSshKey carries, already encoded.
+gitops:
+  enabled: true
+  url: ssh://git@git.acme.example/platform/infra
+  ssh: true
+  knownHosts: git.acme.example ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+gitopsSshKey: bm90LWEta2V5

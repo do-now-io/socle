@@ -1,0 +1,6 @@
+# Bindings for this module's tests, on top of what the job sets (tag, cloud,
+# cluster, floci_ip, and branch, the branch the run was pushed to): the
+# repository Flux reads in the e2e — this one, public, over https, so no key
+# enters CI — and the entry point in it.
+url: https://github.com/do-now-io/socle
+path: oci/catalog/gitops/tests/e2e/entry

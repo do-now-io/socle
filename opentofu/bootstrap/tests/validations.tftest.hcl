@@ -1347,6 +1347,176 @@ run "kube_refuses_kyverno_policies_values_secret_that_is_not_a_secret_name" {
   expect_failures = [var.kube]
 }
 
+# --- gitops — docs/catalog/gitops.md ---------------------------------------
+# Each run is one configuration that plans — on, a GitHub ssh:// url, a key —
+# changed in one place. The key is built with format() so that no private
+# key header sits in the repository for a secret scanner to flag: its body
+# is base64 of "not-a-key".
+
+run "gitops_refuses_to_run_without_argocd" {
+  command = plan
+  variables {
+    kube = {
+      argocd = { enabled = false }
+      gitops = { enabled = true, url = "ssh://git@github.com/acme/platform" }
+    }
+    gitops_ssh_key = format("-----BEGIN %s-----\nbm90LWEta2V5\n-----END %s-----\n", "OPENSSH PRIVATE KEY", "OPENSSH PRIVATE KEY")
+  }
+  expect_failures = [var.kube]
+}
+
+run "gitops_refuses_to_run_without_a_url" {
+  command = plan
+  variables {
+    kube = { gitops = { enabled = true } }
+  }
+  expect_failures = [var.kube]
+}
+
+# Flux reads ssh:// only; the scp-like form is what GitHub's clone button shows.
+run "gitops_refuses_an_scp_like_url" {
+  command = plan
+  variables {
+    kube = { gitops = { enabled = true, url = "git@github.com:acme/platform.git" } }
+  }
+  expect_failures = [var.kube]
+}
+
+run "gitops_refuses_a_token_in_an_https_url" {
+  command = plan
+  variables {
+    kube = { gitops = { enabled = true, url = "https://x-access-token:ghp_abc@github.com/acme/platform" } }
+  }
+  expect_failures = [var.kube]
+}
+
+run "gitops_refuses_a_ref_that_is_not_one" {
+  command = plan
+  variables {
+    kube = { gitops = { enabled = true, url = "https://github.com/acme/platform", ref = "main..dev" } }
+  }
+  expect_failures = [var.kube]
+}
+
+run "gitops_refuses_a_path_out_of_the_repository" {
+  command = plan
+  variables {
+    kube = { gitops = { enabled = true, url = "https://github.com/acme/platform", path = "apps/../../etc" } }
+  }
+  expect_failures = [var.kube]
+}
+
+run "gitops_refuses_another_ssh_host_without_its_keys" {
+  command = plan
+  variables {
+    kube           = { gitops = { enabled = true, url = "ssh://git@gitlab.acme.example/platform/infra" } }
+    gitops_ssh_key = format("-----BEGIN %s-----\nbm90LWEta2V5\n-----END %s-----\n", "OPENSSH PRIVATE KEY", "OPENSSH PRIVATE KEY")
+  }
+  expect_failures = [var.kube]
+}
+
+run "gitops_refuses_known_hosts_that_are_not_ssh_keyscan_lines" {
+  command = plan
+  variables {
+    kube = { gitops = {
+      enabled     = true
+      url         = "ssh://git@gitlab.acme.example/platform/infra"
+      known_hosts = "gitlab.acme.example"
+    } }
+    gitops_ssh_key = format("-----BEGIN %s-----\nbm90LWEta2V5\n-----END %s-----\n", "OPENSSH PRIVATE KEY", "OPENSSH PRIVATE KEY")
+  }
+  expect_failures = [var.kube]
+}
+
+run "gitops_refuses_known_hosts_with_an_https_url" {
+  command = plan
+  variables {
+    kube = { gitops = {
+      enabled     = true
+      url         = "https://github.com/acme/platform"
+      known_hosts = "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
+    } }
+  }
+  expect_failures = [var.kube]
+}
+
+run "gitops_ignore_refuses_a_path_that_is_not_a_json_pointer" {
+  command = plan
+  variables {
+    kube = { gitops = {
+      enabled = true
+      url     = "https://github.com/acme/platform"
+      ignore  = [{ paths = ["spec.replicas"], target = { kind = "Deployment" } }]
+    } }
+  }
+  expect_failures = [var.kube]
+}
+
+run "gitops_ignore_refuses_a_rule_with_no_path" {
+  command = plan
+  variables {
+    kube = { gitops = {
+      enabled = true
+      url     = "https://github.com/acme/platform"
+      ignore  = [{ paths = [], target = { kind = "Deployment" } }]
+    } }
+  }
+  expect_failures = [var.kube]
+}
+
+# A misspelt selector key would be pruned by the CRD, and the rule would
+# then match every object of the path.
+run "gitops_ignore_refuses_a_target_key_flux_does_not_have" {
+  command = plan
+  variables {
+    kube = { gitops = {
+      enabled = true
+      url     = "https://github.com/acme/platform"
+      ignore  = [{ paths = ["/spec/replicas"], target = { kinds = "Deployment" } }]
+    } }
+  }
+  expect_failures = [var.kube]
+}
+
+run "gitops_ignore_refuses_a_rule_key_flux_does_not_have" {
+  command = plan
+  variables {
+    kube = { gitops = {
+      enabled = true
+      url     = "https://github.com/acme/platform"
+      ignore  = [{ path = ["/spec/replicas"] }]
+    } }
+  }
+  expect_failures = [var.kube]
+}
+
+# A public key, or a path to the key file, instead of the key.
+run "gitops_ssh_key_refuses_what_is_not_a_private_key" {
+  command = plan
+  variables {
+    kube           = { gitops = { enabled = true, url = "ssh://git@github.com/acme/platform" } }
+    gitops_ssh_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl acme"
+  }
+  expect_failures = [var.gitops_ssh_key]
+}
+
+run "gitops_ssh_key_is_required_with_an_ssh_url" {
+  command = plan
+  variables {
+    kube = { gitops = { enabled = true, url = "ssh://git@github.com/acme/platform" } }
+  }
+  expect_failures = [var.gitops_ssh_key]
+}
+
+run "gitops_ssh_key_is_refused_with_an_https_url" {
+  command = plan
+  variables {
+    kube           = { gitops = { enabled = true, url = "https://github.com/acme/platform" } }
+    gitops_ssh_key = format("-----BEGIN %s-----\nbm90LWEta2V5\n-----END %s-----\n", "OPENSSH PRIVATE KEY", "OPENSSH PRIVATE KEY")
+  }
+  expect_failures = [var.gitops_ssh_key]
+}
+
 # --- reloader — docs/catalog/reloader.md -----------------------------------
 
 run "reloader_refuses_auto_reload_all" {

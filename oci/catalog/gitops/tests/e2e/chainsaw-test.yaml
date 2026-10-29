@@ -1,0 +1,383 @@
+# The gitops module's proof (docs/catalog/gitops.md). Off by default, so
+# `health` proves the disabled shape only. The `module` phase, on this
+# repository over https at the branch under test — public, so no key
+# enters CI; the ssh:// branch of the envelope's Secret is rendered and
+# kubeconformed by pr-static, and proven on a real cluster:
+#   on        the source Secret as the envelope renders it; the GitRepository
+#             fetches the branch, the Kustomization applies the entry path
+#             once ArgoCD is Ready, and the root Application it holds is in
+#             argocd; ArgoCD's repository Secret is a labelled copy of the
+#             source;
+#   ignore    helm parameters another manager writes on the multi-source
+#             Application survive a forced reconciliation (GITOPS-05);
+#   rotation  a change to the source Secret reaches the copy;
+#   off       Flux's objects and the copy garbage-collected, the Application
+#             orphaned, not deleted (GITOPS-02).
+# Everything is in the cluster: no `script`.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: gitops-health
+  labels:
+    phase: health
+    cloud: any
+    platform: any
+spec:
+  description: Off by default, the ResourceSet is Ready and renders nothing.
+  timeouts:
+    assert: 3m
+    error: 1m
+  steps:
+    - name: the ResourceSet is Ready with nothing in its inventory
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: gitops
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (length(inventory.entries || `[]`)): 0
+        - error:
+            resource:
+              apiVersion: source.toolkit.fluxcd.io/v1
+              kind: GitRepository
+              metadata:
+                name: gitops
+                namespace: flux-system
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: gitops
+---
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: gitops-module
+  labels:
+    phase: module
+    cloud: any
+    platform: any
+spec:
+  description: >-
+    On, Flux applies the entry path after ArgoCD and ArgoCD gets a copy of
+    the repository Secret; a change to the source reaches the copy; off
+    removes Flux's objects and keeps the Applications.
+  timeouts:
+    apply: 30s
+    assert: 3m
+    error: 2m
+    delete: 1m
+    cleanup: 1m
+  steps:
+    - name: enabled = true fetches the branch and applies the entry path
+      try:
+        # What the envelope renders from kube.gitops with an https:// url
+        # (opentofu/bootstrap/manifests/templates/gitops.yaml): no key, no
+        # known_hosts. A Chainsaw patch of the inputs does not go through
+        # OpenTofu, so the test lays it down itself.
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: socle-gitops
+                namespace: flux-system
+                labels:
+                  reconcile.fluxcd.io/watch: Enabled
+              type: Opaque
+              stringData:
+                type: git
+                url: ($values.url)
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    gitops:
+                      enabled: true
+                      url: ($values.url)
+                      ref: ($values.branch)
+                      path: ($values.path)
+                      known_hosts: ''
+        - assert:
+            resource:
+              apiVersion: source.toolkit.fluxcd.io/v1
+              kind: GitRepository
+              metadata:
+                name: gitops
+                namespace: flux-system
+              spec:
+                url: ($values.url)
+                ref:
+                  name: (join('', ['refs/heads/', $values.branch]))
+                secretRef:
+                  name: socle-gitops
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: kustomize.toolkit.fluxcd.io/v1
+              kind: Kustomization
+              metadata:
+                name: gitops
+                namespace: flux-system
+              spec:
+                path: (join('', ['./', $values.path]))
+                prune: true
+                deletionPolicy: Orphan
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        # The root Application, applied by Flux: the CRD was there first.
+        - assert:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Application
+              metadata:
+                name: gitops-e2e
+                namespace: argocd
+                labels:
+                  kustomize.toolkit.fluxcd.io/name: gitops
+                  kustomize.toolkit.fluxcd.io/namespace: flux-system
+        # ArgoCD's repository Secret: labelled for ArgoCD, its data the
+        # source's.
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: socle-gitops-repository
+                namespace: argocd
+                labels:
+                  argocd.argoproj.io/secret-type: repository
+              (base64_decode(data.type)): git
+              (base64_decode(data.url)): ($values.url)
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: gitops
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: gitops
+        - describe:
+            apiVersion: source.toolkit.fluxcd.io/v1
+            kind: GitRepository
+            namespace: flux-system
+            name: gitops
+        - describe:
+            apiVersion: kustomize.toolkit.fluxcd.io/v1
+            kind: Kustomization
+            namespace: flux-system
+            name: gitops
+        - podLogs:
+            namespace: flux-system
+            selector: app.kubernetes.io/name=flux-operator
+            tail: 40
+    # What ArgoCD Image Updater's write-back argocd does: a merge patch of
+    # the chart source's helm.parameters, by another field manager, which
+    # takes the whole atomic spec.sources. A forced reconciliation then
+    # re-applies the path; the module's ignore rule keeps the parameters
+    # (GITOPS-05), where Flux alone would erase them.
+    - name: helm parameters written by another manager survive a reconciliation
+      try:
+        - assert:
+            resource:
+              apiVersion: kustomize.toolkit.fluxcd.io/v1
+              kind: Kustomization
+              metadata:
+                name: gitops
+                namespace: flux-system
+              spec:
+                (ignore[?target.kind == 'Application'] | [0].paths):
+                  - /spec/source/helm/parameters
+                  - /spec/sources/0/helm/parameters
+                  - /spec/sources/1/helm/parameters
+                  - /spec/sources/2/helm/parameters
+                  - /spec/sources/3/helm/parameters
+                  - /spec/sources/4/helm/parameters
+        - patch:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Application
+              metadata:
+                name: gitops-e2e
+                namespace: argocd
+              spec:
+                sources:
+                  - repoURL: https://github.com/do-now-io/socle
+                    targetRevision: main
+                    path: charts/webapp
+                    helm:
+                      valueFiles:
+                        - $values/charts/webapp/ci/e2e-values.yaml
+                      parameters:
+                        - name: image.tag
+                          value: e2e-written-by-image-updater
+                  - repoURL: https://github.com/do-now-io/socle
+                    targetRevision: main
+                    ref: values
+        - patch:
+            resource:
+              apiVersion: kustomize.toolkit.fluxcd.io/v1
+              kind: Kustomization
+              metadata:
+                name: gitops
+                namespace: flux-system
+                annotations:
+                  reconcile.fluxcd.io/requestedAt: gitops-e2e-parameters
+        - assert:
+            resource:
+              apiVersion: kustomize.toolkit.fluxcd.io/v1
+              kind: Kustomization
+              metadata:
+                name: gitops
+                namespace: flux-system
+              status:
+                lastHandledReconcileAt: gitops-e2e-parameters
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+        - assert:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Application
+              metadata:
+                name: gitops-e2e
+                namespace: argocd
+              spec:
+                (sources[0].helm.parameters[?name == 'image.tag'] | [0].value): e2e-written-by-image-updater
+                (sources[0].helm.valueFiles): ['$values/charts/webapp/ci/e2e-values.yaml']
+      catch:
+        - describe:
+            apiVersion: kustomize.toolkit.fluxcd.io/v1
+            kind: Kustomization
+            namespace: flux-system
+            name: gitops
+        - get:
+            apiVersion: argoproj.io/v1alpha1
+            kind: Application
+            namespace: argocd
+            name: gitops-e2e
+            format: yaml
+    # A rotated key is a new gitops_ssh_key and an apply: the envelope
+    # rewrites the source, and the copy follows. Here a key ArgoCD reads
+    # and Flux ignores, its display name.
+    - name: a change to the source Secret reaches ArgoCD's copy
+      try:
+        - patch:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: socle-gitops
+                namespace: flux-system
+              stringData:
+                name: socle-e2e
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: socle-gitops-repository
+                namespace: argocd
+              (base64_decode(data.name)): socle-e2e
+      catch:
+        - describe:
+            apiVersion: v1
+            kind: Secret
+            namespace: argocd
+            name: socle-gitops-repository
+    - name: enabled = false removes Flux's objects and keeps the Application
+      try:
+        - patch:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSetInputProvider
+              metadata:
+                name: socle
+                namespace: flux-system
+              spec:
+                defaultValues:
+                  modules:
+                    gitops:
+                      enabled: false
+                      url: ''
+                      ref: main
+                      path: ''
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: ResourceSet
+              metadata:
+                name: gitops
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] || `[]`):
+                  - status: 'True'
+                (length(inventory.entries || `[]`)): 0
+        - error:
+            resource:
+              apiVersion: kustomize.toolkit.fluxcd.io/v1
+              kind: Kustomization
+              metadata:
+                name: gitops
+                namespace: flux-system
+        - error:
+            resource:
+              apiVersion: source.toolkit.fluxcd.io/v1
+              kind: GitRepository
+              metadata:
+                name: gitops
+                namespace: flux-system
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: socle-gitops-repository
+                namespace: argocd
+        # Orphaned: still there, no longer Flux's.
+        - assert:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Application
+              metadata:
+                name: gitops-e2e
+                namespace: argocd
+        - delete:
+            ref:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Application
+              name: gitops-e2e
+              namespace: argocd
+      catch:
+        - describe:
+            apiVersion: fluxcd.controlplane.io/v1
+            kind: ResourceSet
+            namespace: flux-system
+            name: gitops
+        - describe:
+            apiVersion: argoproj.io/v1alpha1
+            kind: Application
+            namespace: argocd
+            name: gitops-e2e

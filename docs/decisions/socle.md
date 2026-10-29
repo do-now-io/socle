@@ -13,7 +13,7 @@ first; [the architecture overview](../architecture/overview.md) explains the par
 
 ## SOCLE-01: OpenTofu ships the inputs, the Flux Operator renders them
 
-**accepted** · 2026-09-23 · [`opentofu/bootstrap/main.tf`](../../opentofu/bootstrap/main.tf), [`opentofu/bootstrap/manifests/templates/inputs.yaml`](../../opentofu/bootstrap/manifests/templates/inputs.yaml), [`oci/catalog/`](../../oci/catalog/)
+**accepted**, its context on a client Git repository **superseded by [SOCLE-36](#socle-36-flux-applies-the-clients-entry-point-argocd-ships-the-applications)** · 2026-09-23, superseded 2026-10-29 · [`opentofu/bootstrap/main.tf`](../../opentofu/bootstrap/main.tf), [`opentofu/bootstrap/manifests/templates/inputs.yaml`](../../opentofu/bootstrap/manifests/templates/inputs.yaml), [`oci/catalog/`](../../oci/catalog/)
 
 **Decision.** OpenTofu holds the inputs (cloud, cluster, socle version,
 `kube`); the signed OCI artifact holds the templates (one `ResourceSet` per
@@ -638,3 +638,57 @@ sandbox. Making the job binding before 1.0.0, or adding migration scripts,
 is a new decision.
 
 **Sources.** [CONTRIBUTING, Testing](../contributing.md#testing) · #61.
+
+## SOCLE-36: Flux applies the client's entry point, ArgoCD ships the applications
+
+**accepted** · 2026-10-29 · [`oci/catalog/gitops/resourceset.yaml`](../../oci/catalog/gitops/resourceset.yaml), [`opentofu/bootstrap/main.tf`](../../opentofu/bootstrap/main.tf) (`local.gitops`, `set_sensitive`), [`opentofu/bootstrap/manifests/templates/gitops.yaml`](../../opentofu/bootstrap/manifests/templates/gitops.yaml), [`opentofu/bootstrap/variables.tf`](../../opentofu/bootstrap/variables.tf) (`gitops_ssh_key`, the `kube.gitops` rules)
+
+**Context.** The socle ships no ArgoCD `Application`, so a client gives
+ArgoCD a root one of their own (app-of-apps). It cannot come from the
+argo-cd chart's `extraObjects`: on a fresh install the chart's CRDs are in
+the same release, the `Application` is refused (`no matches for kind
+Application`) and the `HelmRelease` ends `InstallFailed` (a client cluster on
+GKE, 0.2.1). So the client keeps the root `Application` and ArgoCD's
+repository Secret in their repository and applies both by hand, again on
+every recreated cluster; and ArgoCD, which should only ship applications,
+holds the cluster's entry point. SOCLE-01's context refused a client Git
+repository as "a channel and a write-scoped token per client". Flux only
+reads: what it needs is a read-only deploy key, which grants read on the
+one repository it is attached to, nothing else — anyone who can read the
+OpenTofu state, or the repository if the client keeps the key there, gains
+nothing they could not already read. The alternative weighed was a Secret
+the client creates and names (`secret = "<name>"`): the state stays clean,
+but the manual step this decision removes comes back on every new cluster.
+
+**Decision.** An optional `gitops` module, off by default: Flux lays the
+base up to the client's entry point, ArgoCD ships the client's applications.
+`kube.gitops = { enabled, url, ref, path, known_hosts }` renders a
+`GitRepository` and a `Kustomization` on `path`, after ArgoCD is Ready, and
+ArgoCD's repository Secret for the same `url`. The key is its own variable,
+`gitops_ssh_key`, `sensitive`, and goes through the state: it must be a
+read-only deploy key on that one repository, which the socle documents and
+cannot check. It is not an attribute of `kube`, as #131 proposed: the aws
+and gcp roots rebuild `kube` through `jsonencode`, so one sensitive value
+there marks all of it, and the plan would hide every module's diff. It
+reaches the cluster through the envelope's `set_sensitive`, as one `Secret`
+in `flux-system`, which the module copies into `argocd`; never through the
+inputs, which are a custom resource in clear. An `https://` url reads a
+public repository with no key. Flux still never syncs anything else from
+the client's repository: one repository, one ref, one path, read only.
+
+**Consequences.** `tofu apply` is the whole bootstrap, a recreated cluster
+included; the one manual step, once per repository, is adding the public
+key as a read-only deploy key. The key is in the state and in Helm's
+release Secret in `flux-system`: whoever reads either reads the repository.
+A write-enabled key given by mistake would let them push; the page says
+read-only first, and GitHub shows the key's access next to it. The path is
+applied with kustomize-controller's own rights, cluster-admin: whoever can
+merge into it administers the cluster, as through ArgoCD today. The
+`Kustomization` is orphaned, not pruned, when the module goes off
+(GITOPS-02), so turning it off never deletes an `Application`. ArgoCD Image
+Updater's `write-back argocd` writes `spec.source(s).helm.parameters` of
+Applications Flux now applies; server-side apply should leave fields
+absent from the manifest to their writer, which a real cluster must
+confirm before this is relied on (#131).
+
+**Sources.** #131 · Flux `GitRepository` v1 (`ref.name`, SSH `identity` and `known_hosts`), `Kustomization` v1 (`prune`, `deletionPolicy`) · flux-operator v0.61.0 `internal/copier/resources.go` (`copyFrom`) · ArgoCD 3.5 declarative setup, repositories · GitHub, "About deploy keys" · [gitops decisions](gitops.md).

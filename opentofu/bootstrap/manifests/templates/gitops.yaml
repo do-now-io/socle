@@ -1,0 +1,29 @@
+{{- if .Values.gitops.enabled }}
+# The one credential of kube.gitops, while it is on: what Flux's
+# GitRepository reads (identity, known_hosts), and what the gitops module
+# copies into argocd as ArgoCD's repository Secret (type, url,
+# sshPrivateKey) — copyFrom replaces the whole data of the copy, so both
+# readers' keys live here (docs/catalog/gitops.md). With an https:// url,
+# no key and no known_hosts: a public repository is read anonymously.
+# Labelled for the operator to watch: a rotated key reaches the copy at
+# once, not at the next interval.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: socle-gitops
+  namespace: flux-system
+  labels:
+    reconcile.fluxcd.io/watch: Enabled
+type: Opaque
+stringData:
+  type: git
+  url: {{ .Values.gitops.url | quote }}
+  {{- if .Values.gitops.ssh }}
+  known_hosts: {{ .Values.gitops.knownHosts | toJson }}
+{{- end }}
+{{- if .Values.gitops.ssh }}
+data:
+  identity: {{ required "gitopsSshKey" .Values.gitopsSshKey }}
+  sshPrivateKey: {{ .Values.gitopsSshKey }}
+{{- end }}
+{{- end }}

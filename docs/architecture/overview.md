@@ -17,6 +17,7 @@ main.tf ──▶ tofu apply ──▶ foundations: network, cluster, nodes, ide
                                                      │
 ghcr.io/do-now-io/socle/flux-modules ───verified pull──▶ Flux ──▶ clusters/<cloud>
                                                                   └▶ one ResourceSet per module
+your repository, one path (kube.gitops) ──read-only key──▶ Flux ──▶ your Applications ──▶ ArgoCD
 ```
 
 ## The layers
@@ -32,7 +33,13 @@ ghcr.io/do-now-io/socle/flux-modules ───verified pull──▶ Flux ──
 
 - **Your configuration lives in your Git, as OpenTofu**: `socle_version`,
   `<cloud> = {…}`, `kube = {…}` (and `cilium`, `coredns`, `eks_addons` where
-  they apply). Flux never syncs from your repository.
+  they apply). The socle itself never comes from your repository.
+- **Flux lays the base up to your entry point; ArgoCD ships your
+  applications.** With the [gitops](../catalog/gitops.md) module on, Flux
+  applies one path of one repository at one ref — your ArgoCD Applications
+  and cluster-wide objects — read with a read-only deploy key, and ArgoCD
+  reads the same repository with the same key. Off by default: then ArgoCD
+  holds no Application until you give it one.
 - **OpenTofu ships inputs only**, through `helm_release` as an applier; the
   Flux Operator templates
   ([The Flux catalog](flux-catalog.md)).

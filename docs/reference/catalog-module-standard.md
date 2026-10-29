@@ -83,8 +83,8 @@ waits for an idle release (`Ready`, `Released`, no `Reconciling`).
 <details>
 <summary>Under the hood</summary>
 
-Bindings: `tag`, `cloud`, `cluster`, `floci_ip` (and `resourceset` for the
-generic suite); `tests/e2e/values.yaml` adds others through `--values`. After
+Bindings: `tag`, `cloud`, `cluster`, `floci_ip` (`branch`, the branch the run
+was pushed to, in the `module` phase; `resourceset` for the generic suite); `tests/e2e/values.yaml` adds others through `--values`. After
 the module's tests the job sets `kube.<module>.enabled = false` (the
 `disabled` suite asserts nothing rendered), restores the defaults, re-runs
 `root` and `health`, requires an empty `tofu plan -detailed-exitcode`, then

@@ -5,7 +5,8 @@
 # garbage-collects. Three Helm releases, in order: the operator, a
 # FluxInstance with no sync block, and an envelope of two literal objects — a
 # ResourceSetInputProvider carrying the client's config and a ResourceSet
-# carrying the root source with its cosign verification. Helm is the applier,
+# carrying the root source with its cosign verification — plus, while
+# kube.gitops is on, the Secret of the client's repository. Helm is the applier,
 # never the templater: docs/architecture/flux-catalog.md#what-opentofu-deposits.
 #
 # On aws and azure two more releases precede the operator — Cilium and (aws)
@@ -64,6 +65,33 @@ locals {
       : local.gateway_class_name == "cilium" && (var.cloud != "aws" || local.gateway_certificate_arn != "")
     )
   )
+
+  # The keys github.com serves, as GitHub publishes them
+  # (https://api.github.com/meta, ssh_keys; docs.github.com, "GitHub's SSH
+  # key fingerprints"), read 2026-10-29. Pinned rather than fetched: a
+  # known_hosts fetched at reconcile time trusts whoever answers. GitHub
+  # rotated its RSA key once (2023-03-24); a rotation is a release here.
+  github_known_hosts = join("\n", [
+    "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl",
+    "github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=",
+    "github.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshcLrqPEiiphnt+VTTvDP6mHBL9j1aNUkY4Ue1gvwnGLVlOhGeYrnZaMgRK6+PKCUXaDbC7qtbW8gIkhL7aGCsOr/C56SJMy/BCZfxd1nWzAOxSDPgVsmerOBYfNqltV9/hWCqBywINIR+5dIg6JTJ72pcEpEjcYgXkE2YEFXV1JHnsKgbLWNlhScqb2UmyRkQyytRLtL+38TGxkxCflmO+5Z8CSSNY7GidjMIZ7Q4zMjA2n1nGrlTDkzwDCsw+wqFPGQA179cnfGWOWRVruj16z6XyvxvjJwbz0wQZ75XK5tKSb7FNyeIEs4TT4jk+S4dhPeAUC5y+bDYirYgM4GC7uEnztnZyaVWQ7B381AK4Qdrwt51ZqExKbQpTUNn+EjqoTwvqNj4kqx5QUCI0ThS/YkOxJCXmPUWZbhjpCg56i+2aB6CmK2JGhn57K5mj0MNdBXA4/WnwH6XoPWJzK5Nyu2zB3nAZp+S5hpQs+p1vN1/wsjk=",
+  ])
+
+  # What the envelope's socle-gitops Secret holds besides the key: the one
+  # Secret both Flux (identity, known_hosts) and, copied into argocd,
+  # ArgoCD (type, url, sshPrivateKey) read — docs/catalog/gitops.md. The
+  # key itself goes through set_sensitive below, never these values: in
+  # them, it would mark the whole values document sensitive and hide every
+  # input's diff from the plan.
+  gitops = {
+    enabled = local.modules.gitops.enabled
+    url     = local.modules.gitops.url
+    ssh     = startswith(local.modules.gitops.url, "ssh://")
+    knownHosts = (
+      local.modules.gitops.known_hosts != "" ? local.modules.gitops.known_hosts
+      : startswith(local.modules.gitops.url, "ssh://") ? local.github_known_hosts : ""
+    )
+  }
 
   common_labels = {
     "app.kubernetes.io/part-of"   = "socle"
@@ -239,7 +267,18 @@ resource "helm_release" "socle" {
 
   values = [yamlencode({
     inputs = local.inputs
+    gitops = local.gitops
   })]
+
+  # Base64 so that no character of the key is read by Helm's --set parser
+  # (a comma would split it); the template writes it to data as is. Only
+  # while the module is on with an ssh:// url: off, the key leaves the
+  # release and the Secret goes.
+  set_sensitive = local.gitops.enabled && local.gitops.ssh ? [{
+    name  = "gitopsSshKey"
+    value = base64encode(var.gitops_ssh_key)
+    type  = "string"
+  }] : []
 
   lifecycle {
     # With repositories set, the socle writes the entry of the registry of

@@ -371,6 +371,8 @@ jobs:
             --selector "phase=health, cloud in ($CLOUD, any), platform in (floci, any)" \
             --set "tag=$TAG" --set "cloud=$CLOUD" --set "cluster=$CLUSTER" --set "floci_ip=$FLOCI_IP" \
             --report-format JUNIT-STEP --report-name health --report-path "$RUNNER_TEMP/reports"
+      # branch: the branch this run was pushed to, which a module may read
+      # from this repository at (the gitops module's entry point).
       - name: The module proves itself
         run: |
           values=()
@@ -378,6 +380,7 @@ jobs:
           chainsaw test "$TESTS" "${values[@]}" \
             --selector "phase=module, cloud in ($CLOUD, any), platform in (floci, any)" \
             --set "tag=$TAG" --set "cloud=$CLOUD" --set "cluster=$CLUSTER" --set "floci_ip=$FLOCI_IP" \
+            --set "branch=$GITHUB_REF_NAME" \
             --report-format JUNIT-STEP --report-name module --report-path "$RUNNER_TEMP/reports"
       # The one mutation that goes through OpenTofu, so the client's path —
       # kube → validated inputs → the envelope's Helm upgrade → the operator

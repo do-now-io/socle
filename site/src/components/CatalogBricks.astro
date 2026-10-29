@@ -36,7 +36,7 @@ const marks: Record<string, string> = {
   // metrics-server is a kubernetes-sigs project.
   'metrics-server': kubernetes,
 };
-const monogram: Record<string, string> = { 'external-dns': 'DNS', 'external-secrets': 'ES', karpenter: 'K', reloader: 'R', velero: 'V', hello: 'H' };
+const monogram: Record<string, string> = { 'external-dns': 'DNS', gitops: 'Git', 'external-secrets': 'ES', karpenter: 'K', reloader: 'R', velero: 'V', hello: 'H' };
 const categories = ['gitops', 'networking', 'security', 'secrets', 'autoscaling', 'observability', 'backup', 'platform'];
 const bricks = [...modules].sort(
   (a, b) => categories.indexOf(a.category) - categories.indexOf(b.category) || a.page.localeCompare(b.page),

@@ -1,0 +1,27 @@
+# A root Application as a client writes one for a chart
+# with values from Git: multi-source, the chart first and the values second
+# — the layout whose atomic spec.sources Flux would re-apply whole over
+# Image Updater's helm.parameters without the module's ignore rule
+# (GITOPS-05). No sync policy: the e2e proves what Flux does with it, not
+# what ArgoCD deploys. No resources-finalizer: the test deletes it last, and
+# nothing of it must outlive ArgoCD.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gitops-e2e
+  namespace: argocd
+spec:
+  project: default
+  sources:
+    - repoURL: https://github.com/do-now-io/socle
+      targetRevision: main
+      path: charts/webapp
+      helm:
+        valueFiles:
+          - $values/charts/webapp/ci/e2e-values.yaml
+    - repoURL: https://github.com/do-now-io/socle
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: gitops-e2e
